@@ -802,6 +802,7 @@ crontab -l
 
 ✅ Cron Format Refresher
 
+```
 # ┌──────── minute (0–59)
 # │ ┌────── hour (0–23)
 # │ │ ┌──── day of month (1–31)
@@ -809,7 +810,7 @@ crontab -l
 # │ │ │ │ ┌─ weekday (0–7; 0 or 7 = Sunday)
 # │ │ │ │ │
 # * * * * *  command
-
+```
 
 ---
 
