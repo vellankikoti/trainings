@@ -800,6 +800,183 @@ crontab -l
 # crontab -r
 ```
 
+✅ Cron Format Refresher
+
+# ┌──────── minute (0–59)
+# │ ┌────── hour (0–23)
+# │ │ ┌──── day of month (1–31)
+# │ │ │ ┌── month (1–12)
+# │ │ │ │ ┌─ weekday (0–7; 0 or 7 = Sunday)
+# │ │ │ │ │
+# * * * * *  command
+
+
+---
+
+⭐ DAILY & MULTI-DAILY SCHEDULES
+
+Every day at 1:15 AM
+
+15 1 * * * /path/to/script.sh
+
+Every day at 6:45 PM
+
+45 18 * * * /path/to/script.sh
+
+Every 2 hours
+
+0 */2 * * * /path/to/script.sh
+
+Every 10 minutes
+
+*/10 * * * * /path/to/script.sh
+
+Every day at 00:00 (midnight)
+
+0 0 * * * /path/to/script.sh
+
+
+---
+
+⭐ WEEKDAY–BASED SCHEDULES
+
+Every Monday at 8 AM
+
+0 8 * * 1 /path/to/monday.sh
+
+Every Tuesday at 11:30 PM
+
+30 23 * * 2 /path/to/tuesday.sh
+
+Every Wednesday at noon
+
+0 12 * * 3 /path/to/wednesday.sh
+
+Every Thursday at 4:20 PM
+
+20 16 * * 4 /path/to/thursday.sh
+
+Every Friday at 3 AM
+
+0 3 * * 5 /path/to/friday.sh
+
+Every Saturday at 9:15 AM
+
+15 9 * * 6 /path/to/saturday.sh
+
+Every Sunday at 7 PM
+
+0 19 * * 0 /path/to/sunday.sh
+
+
+---
+
+⭐ MULTIPLE WEEKDAYS
+
+Every weekday (Mon–Fri) at 7 AM
+
+0 7 * * 1-5 /path/to/workday.sh
+
+Every weekend at 10:30 AM
+
+30 10 * * 6,0 /path/to/weekend.sh
+
+Every Tuesday & Thursday at 6:00 AM
+
+0 6 * * 2,4 /path/to/tu-th.sh
+
+
+---
+
+⭐ MONTHLY & SPECIFIC DAY SCHEDULES
+
+On the 1st day of each month at midnight
+
+0 0 1 * * /path/to/monthly.sh
+
+On the 15th of each month at 8:30 AM
+
+30 8 15 * * /path/to/midmonth.sh
+
+On the last day of the month at 11 PM
+
+(cron can't natively do “last day”, so use 28–31 trick)
+
+0 23 28-31 * * [ "$(date +\%d -d tomorrow)" = "01" ] && /path/to/lastday.sh
+
+
+---
+
+⭐ YEARLY-LIKE EXAMPLES (BY MONTH)
+
+January 1st at 00:01
+
+1 0 1 1 * /path/to/newyear.sh
+
+Every quarter on day 1 at 02:00
+
+(Jan, Apr, Jul, Oct)
+
+0 2 1 1,4,7,10 * /path/to/quarter.sh
+
+
+---
+
+⭐ ODD/FUN SCHEDULES YOU MIGHT ACTUALLY USE
+
+Run every 5 minutes on weekdays only
+
+*/5 * * * 1-5 /path/to/script.sh
+
+Run every Monday, Wednesday & Friday at 4:40 PM
+
+40 16 * * 1,3,5 /path/to/script.sh
+
+Run every 3rd hour only at night (from 7 PM to 7 AM)
+
+0 19-7/3 * * * /path/to/nightscript.sh
+
+Run at 2:22 AM on even-numbered days
+
+22 2 */2 * * /path/to/even.sh
+
+Run at 3:33 AM on odd-numbered days
+
+33 3 1-31/2 * * /path/to/odd.sh
+
+
+---
+
+⭐ ADVANCED BUT EASY-TO-REMEMBER PATTERNS
+
+Run every 30 minutes between 9 AM and 5 PM
+
+*/30 9-17 * * * /path/to/script.sh
+
+Run every 15 minutes only on Mondays
+
+*/15 * * * 1 /path/to/mon.sh
+
+Every hour between 6 AM and 6 PM on Sat/Sun
+
+0 6-18 * * 6,0 /path/to/weekendday.sh
+
+
+---
+
+⭐ FULL WEEK SPREAD EXAMPLE SET
+
+(One job per day — great for learning weekday numbers)
+
+0 6 * * 1 /scripts/mon.sh     # Monday
+0 6 * * 2 /scripts/tue.sh     # Tuesday
+0 6 * * 3 /scripts/wed.sh     # Wednesday
+0 6 * * 4 /scripts/thu.sh     # Thursday
+0 6 * * 5 /scripts/fri.sh     # Friday
+0 6 * * 6 /scripts/sat.sh     # Saturday
+0 6 * * 0 /scripts/sun.sh     # Sunday
+
+
 ---
 
 ## Chapter 16: File Search & Text Processing
