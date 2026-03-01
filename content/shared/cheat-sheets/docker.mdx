@@ -1,0 +1,247 @@
+---
+title: "Docker Cheat Sheet"
+description: "Essential Docker commands and patterns for containers, images, volumes, networking, and Compose."
+module: "docker"
+tags: ["docker", "containers", "images", "compose", "cheat-sheet"]
+---
+
+# Docker Cheat Sheet
+
+## Container Lifecycle
+
+| Command | Description |
+|---------|-------------|
+| `docker run <image>` | Create and start a container |
+| `docker run -d <image>` | Run in detached mode (background) |
+| `docker run -it <image> bash` | Run interactively with terminal |
+| `docker run --name my-app <image>` | Run with a custom name |
+| `docker run -p 8080:80 <image>` | Map host port 8080 to container port 80 |
+| `docker run -v data:/app/data <image>` | Mount a named volume |
+| `docker run --rm <image>` | Auto-remove container on exit |
+| `docker run -e KEY=value <image>` | Set environment variable |
+| `docker run --restart=unless-stopped <image>` | Auto-restart on failure |
+| `docker start <container>` | Start a stopped container |
+| `docker stop <container>` | Stop a running container (SIGTERM) |
+| `docker restart <container>` | Restart a container |
+| `docker kill <container>` | Force kill (SIGKILL) |
+| `docker rm <container>` | Remove a stopped container |
+| `docker rm -f <container>` | Force remove (even if running) |
+
+## Container Inspection
+
+| Command | Description |
+|---------|-------------|
+| `docker ps` | List running containers |
+| `docker ps -a` | List all containers (including stopped) |
+| `docker logs <container>` | View container logs |
+| `docker logs -f <container>` | Follow log output in real-time |
+| `docker logs --tail 100 <container>` | Show last 100 lines |
+| `docker exec -it <container> bash` | Open shell in running container |
+| `docker exec <container> <cmd>` | Run command in container |
+| `docker inspect <container>` | View detailed container info (JSON) |
+| `docker stats` | Real-time resource usage for all containers |
+| `docker top <container>` | Show running processes |
+| `docker diff <container>` | Show filesystem changes |
+| `docker cp <container>:/path ./local` | Copy file from container |
+
+## Image Management
+
+| Command | Description |
+|---------|-------------|
+| `docker build -t name:tag .` | Build image from Dockerfile |
+| `docker build -t name:tag -f Dockerfile.prod .` | Build with specific Dockerfile |
+| `docker pull <image>` | Download image from registry |
+| `docker push <image>` | Upload image to registry |
+| `docker images` | List local images |
+| `docker image ls` | List local images (alternative) |
+| `docker tag source:tag target:tag` | Create new tag for image |
+| `docker rmi <image>` | Remove an image |
+| `docker image prune` | Remove dangling images |
+| `docker image prune -a` | Remove all unused images |
+| `docker history <image>` | Show image layer history |
+| `docker inspect <image>` | View image metadata |
+| `docker save <image> > file.tar` | Export image to tar |
+| `docker load < file.tar` | Import image from tar |
+
+## Dockerfile Instructions
+
+| Instruction | Description |
+|------------|-------------|
+| `FROM image:tag` | Base image for the build |
+| `RUN command` | Execute command during build |
+| `COPY src dest` | Copy files from build context |
+| `ADD src dest` | Copy files (supports URLs, auto-extract tar) |
+| `WORKDIR /path` | Set working directory |
+| `ENV KEY=value` | Set environment variable |
+| `EXPOSE port` | Document exposed port |
+| `CMD ["exec", "args"]` | Default command (overridable) |
+| `ENTRYPOINT ["exec"]` | Main executable (use CMD for default args) |
+| `USER username` | Set runtime user |
+| `VOLUME ["/data"]` | Create mount point |
+| `ARG NAME=default` | Build-time variable |
+| `HEALTHCHECK CMD curl -f http://localhost/` | Container health check |
+| `.dockerignore` | Exclude files from build context |
+
+## Multi-Stage Build Pattern
+
+```dockerfile
+# Build stage
+FROM node:20 AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Production stage
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+CMD ["node", "dist/server.js"]
+```
+
+## Volumes
+
+| Command | Description |
+|---------|-------------|
+| `docker volume create <name>` | Create a named volume |
+| `docker volume ls` | List all volumes |
+| `docker volume inspect <name>` | View volume details |
+| `docker volume rm <name>` | Remove a volume |
+| `docker volume prune` | Remove all unused volumes |
+| `-v name:/container/path` | Mount named volume |
+| `-v /host/path:/container/path` | Bind mount |
+| `-v /host/path:/container/path:ro` | Read-only bind mount |
+| `--tmpfs /path` | Memory-only mount |
+
+## Networking
+
+| Command | Description |
+|---------|-------------|
+| `docker network create <name>` | Create custom network |
+| `docker network ls` | List all networks |
+| `docker network inspect <name>` | View network details |
+| `docker network connect <net> <container>` | Attach container to network |
+| `docker network disconnect <net> <container>` | Detach from network |
+| `docker network rm <name>` | Remove a network |
+| `docker network prune` | Remove unused networks |
+
+### Network Types
+
+| Type | Use Case |
+|------|----------|
+| `bridge` | Default, single-host container communication |
+| `host` | Share host network stack (no isolation) |
+| `none` | No networking |
+| `overlay` | Multi-host (Swarm) |
+| `macvlan` | Direct LAN connection |
+
+## Docker Compose
+
+| Command | Description |
+|---------|-------------|
+| `docker compose up` | Start all services |
+| `docker compose up -d` | Start in background |
+| `docker compose up --build` | Rebuild images then start |
+| `docker compose down` | Stop and remove containers/networks |
+| `docker compose down -v` | Also remove volumes |
+| `docker compose ps` | List running services |
+| `docker compose logs -f` | Follow logs for all services |
+| `docker compose exec <svc> bash` | Shell into a service |
+| `docker compose build` | Build all images |
+| `docker compose pull` | Pull all images |
+| `docker compose restart <svc>` | Restart a service |
+| `docker compose stop` | Stop all services |
+
+### Compose File Template
+
+```yaml
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  db:
+    image: postgres:16
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: secret
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db_data:
+```
+
+## System Cleanup
+
+| Command | Description |
+|---------|-------------|
+| `docker system df` | Show disk usage |
+| `docker system prune` | Remove unused data |
+| `docker system prune -a --volumes` | Remove ALL unused data |
+| `docker container prune` | Remove stopped containers |
+| `docker image prune -a` | Remove unused images |
+| `docker volume prune` | Remove unused volumes |
+| `docker network prune` | Remove unused networks |
+
+## Security Quick Reference
+
+| Practice | Command/Config |
+|----------|---------------|
+| Run as non-root | `USER appuser` in Dockerfile |
+| Read-only filesystem | `--read-only` flag |
+| Drop capabilities | `--cap-drop ALL --cap-add NET_BIND_SERVICE` |
+| Memory limit | `--memory=512m` |
+| CPU limit | `--cpus=1.5` |
+| Scan for vulnerabilities | `docker scout cves <image>` |
+| No new privileges | `--security-opt=no-new-privileges` |
+| Content trust | `DOCKER_CONTENT_TRUST=1` |
+
+## Common Patterns
+
+### Database with Persistence
+```bash
+docker run -d --name postgres \
+  -v pgdata:/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=secret \
+  -p 5432:5432 \
+  --restart unless-stopped \
+  postgres:16
+```
+
+### Reverse Proxy with Nginx
+```bash
+docker run -d --name proxy \
+  -v ./nginx.conf:/etc/nginx/nginx.conf:ro \
+  -p 80:80 -p 443:443 \
+  --restart unless-stopped \
+  nginx:alpine
+```
+
+### Volume Backup
+```bash
+docker run --rm \
+  -v mydata:/source:ro \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/mydata-backup.tar.gz -C /source .
+```

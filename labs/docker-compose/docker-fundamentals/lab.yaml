@@ -1,0 +1,130 @@
+name: docker-fundamentals
+title: "Docker Fundamentals Lab"
+description: "Practice core Docker skills in a Docker-in-Docker environment. Build images, run containers, manage volumes and networks, write Dockerfiles, and use docker compose to orchestrate multi-container applications."
+module: "docker-fundamentals"
+difficulty: beginner-to-intermediate
+duration: 60
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: df-lab-1
+    title: "Run your first container"
+    description: "Pull the 'nginx:alpine' image and run it as a detached container named 'web-test' with port 8080 on the host mapped to port 80 in the container. Verify it is running and responding to HTTP requests."
+    hints:
+      - "Use 'docker run -d --name web-test -p 8080:80 nginx:alpine'"
+      - "Verify with 'docker ps' and 'curl http://localhost:8080'"
+    validation:
+      type: command
+      command: "docker ps --filter name=web-test --format '{{.Names}}' | grep -q web-test && curl -s -o /dev/null -w '%{http_code}' http://localhost:8080 | grep -q 200 && echo 'pass'"
+      expected_output: "pass"
+
+  - id: df-lab-2
+    title: "Explore container lifecycle"
+    description: "Stop the 'web-test' container, start it again, view its logs, and then remove it. Create a new container named 'alpine-shell' from the 'alpine:3.19' image that runs interactively with the 'echo container-lifecycle-complete' command and then exits."
+    hints:
+      - "Use 'docker stop web-test', 'docker start web-test', 'docker logs web-test'"
+      - "Remove with 'docker rm -f web-test'"
+      - "Run: docker run --name alpine-shell alpine:3.19 echo container-lifecycle-complete"
+    validation:
+      type: command
+      command: "docker ps -a --filter name=alpine-shell --format '{{.Names}}' | grep -q alpine-shell && docker logs alpine-shell 2>/dev/null | grep -q 'container-lifecycle-complete' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: df-lab-3
+    title: "Write a basic Dockerfile"
+    description: "Create a directory /workspace/myapp and write a Dockerfile inside it. The Dockerfile should use 'node:20-alpine' as the base image, set the working directory to /app, create a file called app.js containing 'console.log(\"hello-docker\")', and set CMD to run 'node app.js'. Build the image as 'myapp:v1'."
+    hints:
+      - "Create the Dockerfile: FROM node:20-alpine, WORKDIR /app, RUN echo 'console.log(\"hello-docker\")' > app.js, CMD [\"node\", \"app.js\"]"
+      - "Build with: docker build -t myapp:v1 /workspace/myapp"
+      - "Test with: docker run --rm myapp:v1"
+    validation:
+      type: command
+      command: "test -f /workspace/myapp/Dockerfile && docker image inspect myapp:v1 >/dev/null 2>&1 && docker run --rm myapp:v1 2>/dev/null | grep -q 'hello-docker' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: df-lab-4
+    title: "Multi-stage Docker build"
+    description: "Create /workspace/multi-stage/Dockerfile that uses a multi-stage build. Stage 1 ('builder'): use 'golang:1.22-alpine' to compile a Go program that prints 'multi-stage-success'. Stage 2: use 'alpine:3.19' and copy only the compiled binary from the builder stage. Build as 'multi-app:v1'. The final image should be under 15MB."
+    hints:
+      - "Stage 1: FROM golang:1.22-alpine AS builder; WORKDIR /build; RUN echo 'package main; import \"fmt\"; func main(){fmt.Println(\"multi-stage-success\")}' > main.go; RUN CGO_ENABLED=0 go build -o app main.go"
+      - "Stage 2: FROM alpine:3.19; COPY --from=builder /build/app /app; CMD [\"/app\"]"
+      - "Build: docker build -t multi-app:v1 /workspace/multi-stage"
+    validation:
+      type: command
+      command: "docker run --rm multi-app:v1 2>/dev/null | grep -q 'multi-stage-success' && size=$(docker image inspect multi-app:v1 --format '{{.Size}}') && [ \"$size\" -lt 15000000 ] && echo 'pass'"
+      expected_output: "pass"
+
+  - id: df-lab-5
+    title: "Work with Docker volumes"
+    description: "Create a named volume called 'app-data'. Run a container using 'alpine:3.19' that mounts this volume at /data and writes the text 'persistent-data-works' to /data/test.txt. Then run a second container that mounts the same volume and reads the file to prove data persists across containers."
+    hints:
+      - "Create volume: docker volume create app-data"
+      - "Write data: docker run --rm -v app-data:/data alpine:3.19 sh -c \"echo 'persistent-data-works' > /data/test.txt\""
+      - "Read data: docker run --rm -v app-data:/data alpine:3.19 cat /data/test.txt"
+    validation:
+      type: command
+      command: "docker volume inspect app-data >/dev/null 2>&1 && docker run --rm -v app-data:/data alpine:3.19 cat /data/test.txt 2>/dev/null | grep -q 'persistent-data-works' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: df-lab-6
+    title: "Docker networking basics"
+    description: "Create a custom bridge network called 'lab-network'. Run an nginx container named 'web-server' on this network. Run a second container named 'web-client' on the same network and use it to curl 'http://web-server' to verify DNS-based service discovery works. Save the curl output to /workspace/network-test.txt."
+    hints:
+      - "Create network: docker network create lab-network"
+      - "Run server: docker run -d --name web-server --network lab-network nginx:alpine"
+      - "Test from client: docker run --rm --name web-client --network lab-network alpine:3.19 sh -c 'apk add --no-cache curl >/dev/null 2>&1 && curl -s http://web-server'"
+    validation:
+      type: command
+      command: "docker network inspect lab-network >/dev/null 2>&1 && docker ps --filter name=web-server -q | grep -q . && docker run --rm --network lab-network alpine:3.19 sh -c 'apk add --no-cache curl >/dev/null 2>&1 && curl -s http://web-server' 2>/dev/null | grep -qi 'nginx\\|welcome' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: df-lab-7
+    title: "Docker Compose application"
+    description: "Create /workspace/compose-app/docker-compose.yml that defines two services: (1) 'web' using nginx:alpine exposed on port 3000:80, and (2) 'api' using python:3.11-alpine that runs a simple HTTP server on port 5000. Both services should be on a shared network called 'app-net'. Start the application with 'docker compose up -d' from /workspace/compose-app."
+    hints:
+      - "Define services with 'web' and 'api' in the compose file"
+      - "For the api service, use command: python3 -c \"from http.server import HTTPServer, BaseHTTPRequestHandler; HTTPServer(('0.0.0.0', 5000), BaseHTTPRequestHandler).serve_forever()\""
+      - "Start with: cd /workspace/compose-app && docker compose up -d"
+    validation:
+      type: command
+      command: "test -f /workspace/compose-app/docker-compose.yml && cd /workspace/compose-app && docker compose ps --format '{{.Name}}' 2>/dev/null | wc -l | awk '$1 >= 2 {print \"pass\"}'"
+      expected_output: "pass"
+
+  - id: df-lab-8
+    title: "Environment variables and configuration"
+    description: "Create /workspace/env-app/Dockerfile based on 'alpine:3.19'. The image should have a default ENV variable APP_ENV=development and an ENTRYPOINT script that prints 'Environment: <APP_ENV>'. Build as 'env-app:v1'. Then run the container once with the default value and once with APP_ENV=production, saving each output to /workspace/env-dev.txt and /workspace/env-prod.txt respectively."
+    hints:
+      - "In the Dockerfile: ENV APP_ENV=development and CMD sh -c 'echo Environment: $APP_ENV'"
+      - "Default run: docker run --rm env-app:v1 > /workspace/env-dev.txt"
+      - "Override: docker run --rm -e APP_ENV=production env-app:v1 > /workspace/env-prod.txt"
+    validation:
+      type: command
+      command: "grep -q 'Environment: development' /workspace/env-dev.txt 2>/dev/null && grep -q 'Environment: production' /workspace/env-prod.txt 2>/dev/null && echo 'pass'"
+      expected_output: "pass"
+
+  - id: df-lab-9
+    title: "Container health checks"
+    description: "Create /workspace/healthcheck-app/Dockerfile based on 'nginx:alpine'. Add a HEALTHCHECK instruction that curls http://localhost every 10 seconds with a 5-second timeout and 3 retries. Build as 'health-app:v1'. Run it as a container named 'health-test'. Wait for the container to become healthy and verify its health status."
+    hints:
+      - "HEALTHCHECK --interval=10s --timeout=5s --retries=3 CMD curl -f http://localhost || exit 1"
+      - "Build and run: docker build -t health-app:v1 /workspace/healthcheck-app && docker run -d --name health-test health-app:v1"
+      - "Check status: docker inspect --format '{{.State.Health.Status}}' health-test"
+    validation:
+      type: command
+      command: "test -f /workspace/healthcheck-app/Dockerfile && docker inspect --format '{{.State.Health.Status}}' health-test 2>/dev/null | grep -q 'healthy' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: df-lab-10
+    title: "Production-ready Compose configuration"
+    description: "Create /workspace/production-app/docker-compose.yml with a production-ready setup: (1) an nginx reverse proxy on port 80 with restart:always, (2) a Python app backend with resource limits (cpus: '0.5', memory: 256M), a healthcheck, and restart:unless-stopped, (3) a Redis cache with a named volume for persistence. All services on a custom network. Include proper depends_on with health conditions. Start the stack."
+    hints:
+      - "Use deploy.resources.limits for resource constraints"
+      - "Add healthcheck to the Python app: test: ['CMD', 'python3', '-c', 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000\")']"
+      - "Redis volume: volumes: - redis-data:/data"
+    validation:
+      type: command
+      command: "test -f /workspace/production-app/docker-compose.yml && cd /workspace/production-app && docker compose ps --format '{{.Name}}' 2>/dev/null | wc -l | awk '$1 >= 3 {print \"pass\"}'"
+      expected_output: "pass"

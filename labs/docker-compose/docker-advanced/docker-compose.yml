@@ -1,0 +1,101 @@
+version: "3.8"
+
+# =============================================================================
+# Docker Advanced Lab — Docker-in-Docker with Extended Tooling
+# =============================================================================
+# This lab provides an advanced Docker-in-Docker environment with additional
+# tools for image analysis, security scanning, and multi-platform builds.
+#
+# Usage:
+#   docker compose up -d
+#   docker exec -it docker-advanced-lab bash
+#
+# Services:
+#   lab  — Docker CLI workspace with dive, trivy, and buildx
+#   dind — Docker-in-Docker daemon (privileged)
+#
+# Pre-installed tools:
+#   - Docker CLI + compose plugin
+#   - dive        — Docker image layer analysis
+#   - trivy       — Container image vulnerability scanner
+#   - buildx      — Multi-platform build support (via BuildKit)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # DinD — Docker-in-Docker Daemon
+  # ---------------------------------------------------------------------------
+  # Runs the Docker daemon with BuildKit enabled for advanced build features.
+  # ---------------------------------------------------------------------------
+  dind:
+    image: docker:27-dind
+    container_name: docker-advanced-dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+      - DOCKER_BUILDKIT=1
+    networks:
+      - docker-lab
+    volumes:
+      - dind-storage:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Lab — Student Workspace (Extended Tooling)
+  # ---------------------------------------------------------------------------
+  # Docker CLI container with additional tools for advanced Docker workflows:
+  # dive for layer analysis, trivy for vulnerability scanning, and buildx
+  # for multi-platform builds.
+  # ---------------------------------------------------------------------------
+  lab:
+    image: docker:27-cli
+    container_name: docker-advanced-lab
+    command: >
+      sh -c "
+        apk add --no-cache bash curl jq vim git tar gzip >/dev/null 2>&1 &&
+
+        echo 'Installing dive...' &&
+        DIVE_VERSION=0.12.0 &&
+        curl -sL https://github.com/wagoodman/dive/releases/download/v$${DIVE_VERSION}/dive_$${DIVE_VERSION}_linux_amd64.tar.gz | tar xz -C /usr/local/bin dive &&
+
+        echo 'Installing trivy...' &&
+        TRIVY_VERSION=0.58.0 &&
+        curl -sL https://github.com/aquasecurity/trivy/releases/download/v$${TRIVY_VERSION}/trivy_$${TRIVY_VERSION}_Linux-64bit.tar.gz | tar xz -C /usr/local/bin trivy &&
+
+        echo 'Setting up buildx...' &&
+        mkdir -p /root/.docker/cli-plugins &&
+        docker buildx create --name multibuilder --use 2>/dev/null || true &&
+
+        mkdir -p /workspace &&
+        echo '========================================' &&
+        echo '  Docker Advanced Lab Ready.' &&
+        echo '  Tools: docker, compose, dive, trivy, buildx' &&
+        echo '========================================' &&
+        /bin/bash
+      "
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    environment:
+      - DOCKER_HOST=tcp://docker-advanced-dind:2375
+      - DOCKER_BUILDKIT=1
+      - TERM=xterm-256color
+    depends_on:
+      dind:
+        condition: service_healthy
+    networks:
+      - docker-lab
+    volumes:
+      - workspace:/workspace
+
+networks:
+  docker-lab:
+    driver: bridge
+
+volumes:
+  dind-storage:
+  workspace:
