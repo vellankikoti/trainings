@@ -1,0 +1,1534 @@
+---
+title: "Advanced Docker Compose Patterns"
+description: "Master advanced Docker Compose patterns including YAML anchors and extensions for DRY configurations, profiles for environment-specific services, multi-file overrides, healthcheck-based dependencies, Compose Watch for development, and resource management."
+order: 5
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - "docker-fundamentals/11-docker-compose"
+  - "docker-fundamentals/12-environment-variables"
+objectives:
+  - Use YAML anchors and Compose extensions (x- prefix) to eliminate configuration duplication
+  - Configure Compose profiles to selectively start services for different environments
+  - Merge multiple Compose files for environment-specific overrides
+  - Implement depends_on with healthcheck conditions for reliable startup ordering
+  - Set up Compose Watch for automatic code synchronization during development
+  - Configure resource limits and deploy options in Compose
+tags:
+  - docker
+  - compose
+  - yaml
+  - profiles
+  - development
+  - advanced
+---
+
+<Callout type="story" title="The Story">
+Your team's `docker-compose.yml` started as a clean 40-line file for three services. Six months later, it has grown into a 600-line monster. The development, staging, and production configurations are tangled together with commented-out sections and `# TODO: fix this for prod` notes scattered throughout. A new developer joins the team, runs `docker compose up`, and accidentally starts the production payment processor in test mode because someone forgot to comment out a line. After that incident, the tech lead says, "We need to fix this properly." Over the next sprint, you restructure the Compose configuration using extensions, profiles, multi-file overrides, and proper healthchecks. The result: a clean base file with environment-specific overlays, profile-controlled service sets, and zero chance of accidentally running the wrong configuration.
+</Callout>
+
+## YAML Anchors and Extensions for DRY Configs
+
+Docker Compose files are YAML, and YAML has built-in features for reducing duplication. Combined with Compose's `x-` extension fields, you can eliminate copy-pasted configurations entirely.
+
+### YAML Anchors and Aliases
+
+YAML anchors (`&name`) define a reusable block. Aliases (`*name`) reference that block. The merge key (`<<:`) merges an anchored mapping into the current mapping.
+
+```yaml
+# WITHOUT anchors - lots of duplication
+services:
+  api:
+    image: myapp/api:latest
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  worker:
+    image: myapp/worker:latest
+    restart: unless-stopped        # Duplicated
+    logging:                       # Duplicated
+      driver: json-file            # Duplicated
+      options:                     # Duplicated
+        max-size: "10m"            # Duplicated
+        max-file: "3"              # Duplicated
+    deploy:                        # Duplicated
+      resources:                   # Duplicated
+        limits:                    # Duplicated
+          cpus: "1.0"              # Duplicated
+          memory: 512M             # Duplicated
+
+  scheduler:
+    image: myapp/scheduler:latest
+    restart: unless-stopped        # Duplicated again
+    logging:                       # Duplicated again
+      driver: json-file            # ...you get the idea
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+```
+
+```yaml
+# WITH anchors - DRY configuration
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-deploy: &default-deploy
+  resources:
+    limits:
+      cpus: "1.0"
+      memory: 512M
+
+x-common: &common-config
+  restart: unless-stopped
+  logging: *default-logging
+  deploy: *default-deploy
+
+services:
+  api:
+    <<: *common-config
+    image: myapp/api:latest
+
+  worker:
+    <<: *common-config
+    image: myapp/worker:latest
+
+  scheduler:
+    <<: *common-config
+    image: myapp/scheduler:latest
+```
+
+The `x-` prefix tells Docker Compose to ignore these top-level keys. They exist solely as anchor definitions.
+
+<Callout type="info" title="YAML Anchor Limitations">
+YAML anchors work at the YAML parsing level, before Compose processes the file. They support only simple merging -- you cannot use anchors to add items to a list (arrays) or deeply merge nested mappings. For example, merging two `environment` lists does not concatenate them; the alias replaces the entire key. For complex merging needs, use multiple Compose files instead.
+</Callout>
+
+### Compose Extensions (x- prefix) in Detail
+
+```yaml
+# Extensions can hold any reusable configuration
+x-env-common: &env-common
+  LOG_LEVEL: info
+  TZ: UTC
+  NODE_ENV: production
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+
+x-backend-service: &backend-service
+  restart: unless-stopped
+  logging: *default-logging
+  networks:
+    - backend
+  deploy: *default-deploy
+
+services:
+  user-service:
+    <<: *backend-service
+    image: myapp/user-service:latest
+    environment:
+      <<: *env-common
+      SERVICE_NAME: user-service
+      DB_HOST: postgres
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+
+  order-service:
+    <<: *backend-service
+    image: myapp/order-service:latest
+    environment:
+      <<: *env-common
+      SERVICE_NAME: order-service
+      DB_HOST: postgres
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+```
+
+### Advanced Anchor Patterns
+
+```yaml
+# Pattern: Overriding specific values from anchors
+x-base-service: &base
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "0.5"
+        memory: 256M
+
+services:
+  # Use defaults
+  lightweight-service:
+    <<: *base
+    image: myapp/light:latest
+
+  # Override memory limit but keep everything else
+  heavy-service:
+    <<: *base
+    image: myapp/heavy:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"       # Must repeat cpus since deploy is replaced entirely
+          memory: 2G        # Override memory
+
+  # The <<: merge is SHALLOW -- nested objects are replaced, not merged
+  # This means you must repeat the full 'deploy' block if you change any part of it
+```
+
+<Callout type="warning" title="Shallow Merge Behavior">
+The YAML merge key `<<:` performs a shallow merge. If you override any key that contains nested objects, you must provide the complete nested structure. For example, overriding `deploy.resources.limits.memory` requires you to also specify `deploy.resources.limits.cpus` because the entire `deploy` key is replaced. This is a YAML limitation, not a Compose limitation.
+</Callout>
+
+## Compose Profiles for Environment-Specific Services
+
+Profiles let you tag services so they only start when explicitly activated. This replaces the pattern of commenting out services or maintaining separate Compose files for different scenarios.
+
+### Defining Profiles
+
+```yaml
+services:
+  # Core services - always start (no profile assigned)
+  api:
+    image: myapp/api:latest
+    ports:
+      - "8080:8080"
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:16
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  # Development tools - only start with "dev" profile
+  pgadmin:
+    image: dpage/pgadmin4
+    profiles: ["dev"]
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@local.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+    networks:
+      - app-network
+
+  mailhog:
+    image: mailhog/mailhog
+    profiles: ["dev"]
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - app-network
+
+  # Debugging tools
+  debug-shell:
+    image: nicolaka/netshoot
+    profiles: ["debug"]
+    stdin_open: true
+    tty: true
+    networks:
+      - app-network
+
+  # Monitoring - only in staging and production
+  prometheus:
+    image: prom/prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - app-network
+
+  grafana:
+    image: grafana/grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+
+  # Testing
+  test-runner:
+    image: myapp/test-runner:latest
+    profiles: ["test"]
+    depends_on:
+      - api
+      - postgres
+    networks:
+      - app-network
+
+volumes:
+  pg-data:
+
+networks:
+  app-network:
+```
+
+### Using Profiles
+
+```bash
+# Start only core services (no profiles)
+docker compose up -d
+# Starts: api, postgres
+
+# Start core + development tools
+docker compose --profile dev up -d
+# Starts: api, postgres, pgadmin, mailhog
+
+# Start core + monitoring
+docker compose --profile monitoring up -d
+# Starts: api, postgres, prometheus, grafana
+
+# Start core + dev + monitoring
+docker compose --profile dev --profile monitoring up -d
+# Starts: api, postgres, pgadmin, mailhog, prometheus, grafana
+
+# Run tests (starts dependencies automatically)
+docker compose --profile test up -d
+# Starts: api, postgres, test-runner
+
+# Start a specific profiled service (also activates its profile)
+docker compose up -d pgadmin
+# Starts: pgadmin (and its dependencies)
+
+# Using COMPOSE_PROFILES environment variable
+export COMPOSE_PROFILES=dev,monitoring
+docker compose up -d
+# Equivalent to --profile dev --profile monitoring
+```
+
+### Multiple Profiles Per Service
+
+```yaml
+services:
+  # Log aggregator needed in both dev and monitoring
+  loki:
+    image: grafana/loki
+    profiles: ["dev", "monitoring"]
+    ports:
+      - "3100:3100"
+
+  # Load tester needed in test and staging
+  k6:
+    image: grafana/k6
+    profiles: ["test", "staging"]
+    volumes:
+      - ./load-tests:/scripts
+```
+
+<Callout type="tip" title="Profile Strategy">
+A good profile strategy: leave core services without profiles (they always start), use `dev` for development tools (admin UIs, mock services, debug containers), `monitoring` for observability stack (Prometheus, Grafana, Loki), `test` for test runners and fixtures, and `debug` for network debugging tools. Document your profiles in a README so new developers know what is available.
+</Callout>
+
+## Multiple Compose Files: Override Pattern
+
+The multi-file pattern is the most powerful way to manage environment-specific configurations. Files are merged in order, with later files overriding earlier ones.
+
+### File Structure
+
+```
+project/
+├── docker-compose.yml              # Base configuration
+├── docker-compose.override.yml     # Local dev overrides (auto-loaded)
+├── docker-compose.staging.yml      # Staging overrides
+├── docker-compose.prod.yml         # Production overrides
+├── docker-compose.test.yml         # Test overrides
+└── .env                            # Default environment variables
+```
+
+### Base Configuration (docker-compose.yml)
+
+```yaml
+# docker-compose.yml - Base configuration shared by all environments
+services:
+  api:
+    image: myapp/api:${APP_VERSION:-latest}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-myapp}
+      POSTGRES_USER: ${DB_USER:-appuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-appuser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  worker:
+    image: myapp/worker:${APP_VERSION:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
+volumes:
+  pg-data:
+
+networks:
+  app-network:
+```
+
+### Development Override (docker-compose.override.yml)
+
+```yaml
+# docker-compose.override.yml - Automatically loaded for local development
+# No need to specify -f flag, Compose loads this by default
+
+services:
+  api:
+    build:
+      context: ./services/api
+      target: development
+    ports:
+      - "8080:8080"
+      - "9229:9229"            # Node.js debugger port
+    volumes:
+      - ./services/api/src:/app/src  # Hot reload
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      DB_HOST: postgres
+      REDIS_HOST: redis
+
+  postgres:
+    ports:
+      - "5432:5432"             # Expose for local tools
+    environment:
+      POSTGRES_PASSWORD: devpassword
+
+  redis:
+    ports:
+      - "6379:6379"             # Expose for local tools
+
+  worker:
+    build:
+      context: ./services/worker
+      target: development
+    volumes:
+      - ./services/worker/src:/app/src
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+
+  # Dev-only services
+  pgadmin:
+    image: dpage/pgadmin4
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@local.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+    networks:
+      - app-network
+```
+
+### Production Override (docker-compose.prod.yml)
+
+```yaml
+# docker-compose.prod.yml - Production configuration
+services:
+  api:
+    # No build section -- uses pre-built image
+    # No source code volumes -- image contains the code
+    # No debug ports
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: warn
+      DB_HOST: postgres
+      REDIS_HOST: redis
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  postgres:
+    # No exposed ports in production
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}  # From secrets/env
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+
+  redis:
+    # No exposed ports in production
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+
+  worker:
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: warn
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+volumes:
+  pg-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/postgres
+      o: bind
+```
+
+### Using Multiple Compose Files
+
+```bash
+# Development (uses docker-compose.yml + docker-compose.override.yml automatically)
+docker compose up -d
+
+# Staging (base + staging override, skips the auto-loaded override.yml)
+docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+
+# Production
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# See the merged result without starting anything
+docker compose -f docker-compose.yml -f docker-compose.prod.yml config
+
+# Run tests with test configuration
+docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm test-runner
+```
+
+<Callout type="info" title="Merge Behavior">
+When merging multiple Compose files: scalar values (strings, numbers) are replaced by the later file. Mappings (objects) are recursively merged. Sequences (arrays like `ports` or `volumes`) are replaced entirely, not appended. This means if the base file defines `ports: ["8080:8080"]` and the override defines `ports: ["80:8080"]`, the result is `ports: ["80:8080"]` only.
+</Callout>
+
+### COMPOSE_FILE Environment Variable
+
+```bash
+# Instead of typing -f flags every time, set COMPOSE_FILE
+# Separator is : on Linux/macOS, ; on Windows
+
+# Staging
+export COMPOSE_FILE=docker-compose.yml:docker-compose.staging.yml
+docker compose up -d
+
+# Production
+export COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+docker compose up -d
+
+# Put it in .env for automatic loading
+echo "COMPOSE_FILE=docker-compose.yml:docker-compose.staging.yml" >> .env
+```
+
+## Depends_on with Healthcheck Conditions
+
+The basic `depends_on` only waits for a container to start, not for the service inside it to be ready. With healthcheck conditions, Compose waits for the service to actually be healthy before starting dependent services.
+
+### The Problem Without Health Conditions
+
+```
+Without healthcheck conditions:
+
+Timeline:
+────────────────────────────────────────────────────►
+  postgres starts                 api starts
+  (container running)             (container running)
+  │                               │
+  │ PostgreSQL initializing...    │ Connection to postgres...
+  │ Creating databases...         │ ECONNREFUSED!
+  │ Loading extensions...         │ ECONNREFUSED!
+  │ Ready to accept connections   │ ECONNREFUSED!
+  │                               │ Crash! Exit code 1
+  └───────── 12 seconds ─────────►│
+                                  └── Only 3 seconds after start
+
+The container started, but the DATABASE was not ready.
+depends_on without health conditions only ensures container start.
+```
+
+### Health Conditions in Depends_on
+
+```yaml
+services:
+  api:
+    image: myapp/api:latest
+    depends_on:
+      postgres:
+        condition: service_healthy     # Wait for healthy
+      redis:
+        condition: service_healthy     # Wait for healthy
+      migrations:
+        condition: service_completed_successfully  # Wait for exit 0
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: secret
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s     # Grace period before health checks count
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  migrations:
+    image: myapp/migrations:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["npm", "run", "migrate"]
+    # This is a one-shot container that exits after migrations complete
+```
+
+```
+With healthcheck conditions:
+
+Timeline:
+──────────────────────────────────────────────────────────────►
+  postgres starts
+  │
+  │ Health: starting (start_period)
+  │ Health: unhealthy (pg_isready fails)
+  │ Health: unhealthy
+  │ Health: healthy! ──────► migrations starts
+  │                          │
+  │                          │ Running migrations...
+  │                          │ Done! Exit 0 ──────► api starts
+  │                          │                      │
+  │                          │                      │ Connects to postgres
+  │                          │                      │ SUCCESS!
+  └──────── 12 seconds ──────┴──── 5 seconds ───────┴─── Running
+```
+
+### Healthcheck Examples for Common Services
+
+```yaml
+services:
+  # PostgreSQL
+  postgres:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # MySQL
+  mysql:
+    image: mysql:8
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # Redis
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Elasticsearch
+  elasticsearch:
+    image: elasticsearch:8.12.0
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  # Generic HTTP service
+  api:
+    image: myapp/api:latest
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+```
+
+<Callout type="warning" title="start_period Is Not a Delay">
+The `start_period` option does NOT delay the first health check. Health checks still run during the start period, but failures during this window do not count toward the retry limit. Once the start period ends, failures count normally. Set `start_period` to cover the maximum expected initialization time of the service.
+</Callout>
+
+## Init Containers Pattern in Compose
+
+Docker Compose does not have native init containers like Kubernetes, but you can implement the pattern using `depends_on` with `service_completed_successfully`.
+
+```yaml
+services:
+  # Init container 1: Run database migrations
+  db-migrate:
+    image: myapp/migrations:latest
+    command: ["npm", "run", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://user:pass@postgres:5432/myapp
+    networks:
+      - app-network
+    # No restart -- runs once and exits
+
+  # Init container 2: Seed initial data
+  db-seed:
+    image: myapp/migrations:latest
+    command: ["npm", "run", "seed"]
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://user:pass@postgres:5432/myapp
+    networks:
+      - app-network
+
+  # Init container 3: Wait for external dependencies
+  wait-for-external:
+    image: busybox
+    command: >
+      sh -c "until wget -q -O- http://external-api.mycompany.com/health; do
+        echo 'Waiting for external API...';
+        sleep 5;
+      done;
+      echo 'External API is ready!'"
+
+  # Main application starts only after all init containers succeed
+  api:
+    image: myapp/api:latest
+    depends_on:
+      db-seed:
+        condition: service_completed_successfully
+      wait-for-external:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: pass
+      POSTGRES_USER: user
+      POSTGRES_DB: myapp
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
+
+networks:
+  app-network:
+```
+
+```
+Init Container Startup Sequence:
+
+postgres ──────────────► healthy
+                            │
+db-migrate ─────────────────┼──► runs migrations ──► exit 0
+                            │                           │
+db-seed ────────────────────┼───────────────────────────┼──► seeds data ──► exit 0
+                            │                           │                     │
+wait-for-external ──────────┼──► polls external API ────┼─────────────────────┼──► exit 0
+                            │                           │                     │      │
+api ────────────────────────┼───────────────────────────┼─────────────────────┼──────┼──► starts
+                            │                           │                     │      │
+Time ───────────────────────┴───────────────────────────┴─────────────────────┴──────┴─────►
+```
+
+## Compose Watch for Development
+
+Docker Compose Watch (introduced in Compose 2.22) automatically synchronizes your source code with running containers, providing a hot-reload development experience without manual rebuilds.
+
+### Configuring Compose Watch
+
+```yaml
+services:
+  api:
+    build:
+      context: ./services/api
+      target: development
+    ports:
+      - "8080:8080"
+    develop:
+      watch:
+        # Sync source code changes (hot reload)
+        - action: sync
+          path: ./services/api/src
+          target: /app/src
+          ignore:
+            - "**/*.test.js"
+            - "**/__tests__/"
+
+        # Sync static assets
+        - action: sync
+          path: ./services/api/public
+          target: /app/public
+
+        # Rebuild when dependencies change
+        - action: rebuild
+          path: ./services/api/package.json
+
+        # Rebuild when Dockerfile changes
+        - action: rebuild
+          path: ./services/api/Dockerfile
+
+        # Restart container when config changes
+        - action: sync+restart
+          path: ./services/api/config
+          target: /app/config
+
+  frontend:
+    build:
+      context: ./services/frontend
+      target: development
+    ports:
+      - "3000:3000"
+    develop:
+      watch:
+        # Sync source code (React hot module replacement)
+        - action: sync
+          path: ./services/frontend/src
+          target: /app/src
+
+        # Rebuild on dependency changes
+        - action: rebuild
+          path: ./services/frontend/package.json
+
+        # Rebuild on Vite config changes
+        - action: rebuild
+          path: ./services/frontend/vite.config.ts
+```
+
+### Watch Actions Explained
+
+```
+┌──────────────┬────────────────────────────────────────────────────┐
+│ Action       │ Behavior                                          │
+├──────────────┼────────────────────────────────────────────────────┤
+│ sync         │ Copies changed files into the running container.   │
+│              │ No container restart. Best for source code with    │
+│              │ hot reload (nodemon, React HMR, Flask debug).     │
+├──────────────┼────────────────────────────────────────────────────┤
+│ rebuild      │ Triggers a full image rebuild and container        │
+│              │ recreation. Use for dependency changes             │
+│              │ (package.json, requirements.txt) or Dockerfile     │
+│              │ changes.                                           │
+├──────────────┼────────────────────────────────────────────────────┤
+│ sync+restart │ Syncs files AND restarts the container.            │
+│              │ Use for config files that the application reads    │
+│              │ at startup (not watched for changes at runtime).  │
+└──────────────┴────────────────────────────────────────────────────┘
+```
+
+### Using Compose Watch
+
+```bash
+# Start watch mode
+docker compose watch
+
+# Or start in background and watch
+docker compose up -d
+docker compose watch
+
+# Watch output:
+# ⦿ Watch enabled
+# ✔ api: Context loaded from services/api
+# ✔ frontend: Context loaded from services/frontend
+#
+# [api] syncing ./services/api/src/index.js to /app/src/index.js
+# [frontend] syncing ./services/frontend/src/App.tsx to /app/src/App.tsx
+# [api] rebuild triggered by package.json change
+# [api] rebuilding api...
+# [api] rebuild complete
+```
+
+<Callout type="tip" title="Compose Watch vs Bind Mounts">
+Compose Watch is better than bind mounts for development because: (1) it works with remote Docker hosts (Docker Desktop VM, cloud instances), (2) it supports different actions per path (sync vs rebuild), (3) it handles ignore patterns, and (4) it works consistently across Linux, macOS, and Windows without filesystem permission or performance issues. Use bind mounts only when you need bidirectional sync (container writes back to host).
+</Callout>
+
+## Custom Networks with IPAM Configuration
+
+IPAM (IP Address Management) gives you fine-grained control over network addressing in Compose.
+
+```yaml
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.10.0.0/24
+          gateway: 10.10.0.1
+          ip_range: 10.10.0.128/25
+          aux_addresses:
+            reserved1: 10.10.0.2
+            reserved2: 10.10.0.3
+
+  backend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.20.0.0/24
+          gateway: 10.20.0.1
+
+  data:
+    driver: bridge
+    internal: true              # No external access
+    ipam:
+      config:
+        - subnet: 10.30.0.0/24
+          gateway: 10.30.0.1
+
+services:
+  load-balancer:
+    image: nginx:alpine
+    networks:
+      frontend:
+        ipv4_address: 10.10.0.10
+
+  api:
+    image: myapp/api:latest
+    networks:
+      frontend:
+        ipv4_address: 10.10.0.20
+      backend:
+        ipv4_address: 10.20.0.20
+        aliases:
+          - api-service
+          - gateway
+
+  postgres:
+    image: postgres:16
+    networks:
+      data:
+        ipv4_address: 10.30.0.10
+      backend:                  # Also on backend so api can reach it
+        ipv4_address: 10.20.0.30
+```
+
+```
+Network Architecture:
+
+frontend (10.10.0.0/24)          backend (10.20.0.0/24)
+┌────────────────────┐          ┌────────────────────┐
+│                    │          │                    │
+│  load-balancer     │          │  api               │
+│  10.10.0.10        │          │  10.20.0.20        │
+│                    │          │  aliases:           │
+│  api               │          │   api-service       │
+│  10.10.0.20 ───────┼──────────┤   gateway           │
+│                    │          │                    │
+│  (external access) │          │  postgres           │
+│                    │          │  10.20.0.30         │
+└────────────────────┘          └──────────┬─────────┘
+                                           │
+                                data (10.30.0.0/24) [internal]
+                                ┌──────────┴─────────┐
+                                │                    │
+                                │  postgres           │
+                                │  10.30.0.10         │
+                                │                    │
+                                │  (no external)      │
+                                └────────────────────┘
+```
+
+## Resource Management with Deploy Section
+
+The `deploy` section in Compose controls resource limits, replicas, placement, and restart policies.
+
+```yaml
+services:
+  api:
+    image: myapp/api:latest
+    deploy:
+      # Replicas (only with docker compose up, not Swarm-specific)
+      replicas: 3
+
+      # Resource limits and reservations
+      resources:
+        limits:
+          cpus: "2.0"          # Max 2 CPU cores
+          memory: 1G           # Max 1 GB RAM
+          pids: 100            # Max 100 processes
+        reservations:
+          cpus: "0.25"         # Guarantee 0.25 CPU cores
+          memory: 256M         # Guarantee 256 MB RAM
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+      # Restart policy
+      restart_policy:
+        condition: on-failure  # any | on-failure | none
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+      # Update configuration (rolling updates)
+      update_config:
+        parallelism: 1        # Update 1 container at a time
+        delay: 10s            # Wait 10s between updates
+        failure_action: rollback
+        order: start-first    # Start new before stopping old
+
+      # Rollback configuration
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        order: stop-first
+
+  # GPU-enabled service
+  ml-inference:
+    image: myapp/ml:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu, compute]
+        limits:
+          memory: 8G
+
+  # Memory-constrained worker
+  worker:
+    image: myapp/worker:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+      replicas: 5
+    # OOM behavior
+    mem_swappiness: 0          # Disable swap
+    oom_kill_disable: false    # Allow OOM killer (safer)
+    oom_score_adj: 500         # Higher = more likely to be killed
+```
+
+<Callout type="info" title="Deploy Section Compatibility">
+The `deploy` section was originally designed for Docker Swarm mode. In Docker Compose v2 (the `docker compose` command, not `docker-compose`), most deploy options work with regular `docker compose up`. However, `placement`, `endpoint_mode`, and some other Swarm-specific options are ignored outside Swarm mode. Resource limits (`resources`), replicas, and restart policies work in both modes.
+</Callout>
+
+### Monitoring Resource Usage
+
+```bash
+# Real-time resource usage for all containers
+docker stats
+# CONTAINER ID   NAME    CPU %   MEM USAGE / LIMIT   MEM %   NET I/O   BLOCK I/O
+# a1b2c3d4e5f6   api     12.5%   256MiB / 1GiB       25.0%   1.2MB     500KB
+# f6e5d4c3b2a1   worker  3.2%    128MiB / 256MiB     50.0%   200KB     100KB
+# 1a2b3c4d5e6f   postgres 8.1%  512MiB / 4GiB        12.5%   5.6MB     2.1MB
+
+# Check if resource limits are applied
+docker inspect api --format '{{.HostConfig.Memory}}'
+# 1073741824 (bytes = 1 GiB)
+
+docker inspect api --format '{{.HostConfig.NanoCpus}}'
+# 2000000000 (nano-CPUs = 2.0 CPUs)
+
+# Check for OOM kills
+docker inspect api --format '{{.State.OOMKilled}}'
+# false
+
+# View container events (including OOM kills)
+docker events --filter type=container --filter event=oom
+```
+
+## Complete Production Compose Example
+
+Here is a comprehensive example combining all the patterns:
+
+```yaml
+# docker-compose.yml - Production-ready base configuration
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "25m"
+    max-file: "5"
+    tag: "{{.Name}}"
+
+x-healthcheck: &default-healthcheck
+  interval: 15s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+x-restart: &default-restart
+  restart: unless-stopped
+
+x-backend: &backend-defaults
+  <<: *default-restart
+  logging: *default-logging
+  networks:
+    - backend
+
+services:
+  # ---- Init Containers ----
+  db-migrate:
+    image: ${REGISTRY}/migrations:${VERSION:-latest}
+    command: ["migrate", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+    networks:
+      - backend
+
+  # ---- Core Services ----
+  api:
+    <<: *backend-defaults
+    image: ${REGISTRY}/api:${VERSION:-latest}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: ${NODE_ENV:-production}
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    deploy:
+      replicas: ${API_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    networks:
+      - frontend
+      - backend
+
+  worker:
+    <<: *backend-defaults
+    image: ${REGISTRY}/worker:${VERSION:-latest}
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      REDIS_URL: redis://redis:6379
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---- Data Stores ----
+  postgres:
+    image: postgres:16-alpine
+    <<: *default-restart
+    logging: *default-logging
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    tmpfs:
+      - /tmp:size=256m
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    <<: *default-restart
+    logging: *default-logging
+    command: >
+      redis-server
+      --maxmemory ${REDIS_MAXMEM:-256mb}
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    networks:
+      - backend
+
+  # ---- Profiled Services ----
+  pgadmin:
+    image: dpage/pgadmin4
+    profiles: ["dev"]
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@local.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+    networks:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - frontend
+      - backend
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - frontend
+
+volumes:
+  pg-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
+```
+
+<Exercise title="Build a Compose Config with Profiles and Extensions" difficulty="intermediate" xpReward={35} estimatedMinutes={25}
+  objectives={["Create a DRY Compose configuration using YAML anchors and x- extensions", "Implement profiles for development, monitoring, and testing service groups", "Configure healthchecks with proper conditions for startup ordering", "Verify that profiled services start and stop correctly"]}
+  hints={["Define x- extension blocks at the top of the file for shared configurations", "Use the <<: merge key to inherit from anchor definitions", "Services without profiles always start -- use this for core services", "Test with docker compose --profile dev config to see the merged result"]}
+  validationCriteria={["At least 3 x- extension blocks are defined (logging, healthcheck, common settings)", "YAML anchors eliminate all duplicated configuration blocks", "At least 3 profiles are defined (dev, monitoring, test) with appropriate services", "Core services start without any profile flag", "docker compose --profile dev up starts dev tools alongside core services", "docker compose config shows the fully resolved configuration without errors"]}
+>
+
+Create a Docker Compose configuration for a web application with proper DRY patterns and profiles.
+
+**Application Services:**
+
+| Service | Type | Profiles | Notes |
+|---------|------|----------|-------|
+| api | Core | (none) | Always starts |
+| postgres | Core | (none) | Always starts |
+| redis | Core | (none) | Always starts |
+| worker | Core | (none) | Always starts |
+| pgadmin | Tool | dev | Database admin UI |
+| redis-commander | Tool | dev | Redis admin UI |
+| mailhog | Tool | dev | Email testing |
+| prometheus | Monitoring | monitoring | Metrics collection |
+| grafana | Monitoring | monitoring | Dashboards |
+| test-runner | Testing | test | Integration tests |
+| load-tester | Testing | test | Performance tests |
+
+**Requirements:**
+
+1. **Extensions**: Define `x-logging`, `x-healthcheck`, `x-common-env`, and `x-service-defaults` extension blocks
+2. **Anchors**: Use anchors so no configuration is duplicated
+3. **Profiles**: Group services correctly
+4. **Healthchecks**: All core services must have healthchecks
+5. **Dependencies**: api depends on postgres and redis being healthy; worker depends on api being healthy
+
+**Test your configuration:**
+
+```bash
+# Verify syntax
+docker compose config
+
+# Start core only
+docker compose up -d
+
+# Start with dev tools
+docker compose --profile dev up -d
+
+# Start with monitoring
+docker compose --profile monitoring up -d
+
+# Run tests
+docker compose --profile test run --rm test-runner
+```
+
+</Exercise>
+
+<Exercise title="Implement Multi-File Override Pattern" difficulty="intermediate" xpReward={35} estimatedMinutes={20}
+  objectives={["Create a base Compose file with shared service definitions", "Create environment-specific override files for dev, staging, and production", "Verify that overrides correctly merge with the base configuration", "Use COMPOSE_FILE to simplify multi-file commands"]}
+  hints={["Keep the base file minimal -- only configurations shared across ALL environments", "The override file should add or change only what is different for that environment", "Use docker compose -f base.yml -f override.yml config to preview the merged result", "Remember that array values (ports, volumes) are replaced, not merged"]}
+  validationCriteria={["A base docker-compose.yml defines all services with shared configuration", "docker-compose.override.yml adds dev-specific settings (auto-loaded)", "docker-compose.staging.yml adds staging settings (ports, replicas, resources)", "docker-compose.prod.yml adds production settings (no debug ports, resource limits, logging)", "Merged configurations are correct for each environment (verified with config command)", "Environment-specific .env files exist for each override", "Documentation explains how to use each environment configuration"]}
+>
+
+Implement the multi-file override pattern for a three-environment deployment.
+
+**Base Configuration** (`docker-compose.yml`):
+- All service definitions with image names and network connections
+- Healthchecks for all services
+- Named volumes for persistent data
+
+**Development Override** (`docker-compose.override.yml`):
+- Build from local source (instead of pulling images)
+- Source code bind mounts for hot reload
+- Exposed debug ports (database, debugger)
+- Development environment variables
+- Dev-only services (pgadmin, mailhog)
+
+**Staging Override** (`docker-compose.staging.yml`):
+- Pre-built images from staging registry
+- 2 replicas for API
+- Resource limits (medium)
+- Staging environment variables
+- No debug ports exposed
+
+**Production Override** (`docker-compose.prod.yml`):
+- Pre-built images from production registry
+- 4 replicas for API, 2 for workers
+- Strict resource limits
+- Production logging (JSON, rotation)
+- No ports exposed except the load balancer
+- TLS configuration
+
+**Verification:**
+
+```bash
+# Show what each environment resolves to
+docker compose config                                    # Dev (auto-loads override)
+docker compose -f docker-compose.yml -f docker-compose.staging.yml config  # Staging
+docker compose -f docker-compose.yml -f docker-compose.prod.yml config     # Production
+
+# Verify differences between environments
+diff <(docker compose config) \
+     <(docker compose -f docker-compose.yml -f docker-compose.prod.yml config)
+```
+
+</Exercise>
+
+<MiniProject title="Complete Development-to-Production Compose Pipeline" difficulty="advanced" xpReward={50} estimatedMinutes={35}
+  objectives={["Build a complete Compose-based deployment pipeline from development to production", "Implement all advanced patterns: extensions, profiles, overrides, healthchecks, watch", "Create a developer experience with Compose Watch for hot reloading", "Document the complete workflow for team onboarding"]}
+  hints={["Start with the base compose file and layer overrides on top", "Use Compose Watch in the dev override for the best developer experience", "Init containers handle migrations and seeding", "Create a Makefile or shell scripts as shortcuts for common commands"]}
+  validationCriteria={["Base compose file uses x- extensions and YAML anchors for DRY configuration", "At least 4 profiles exist: dev, test, monitoring, debug", "3 override files exist: development, staging, production", "Compose Watch is configured for the development environment", "Init containers run database migrations before app services start", "All services have proper healthchecks with depends_on conditions", "Resource limits are configured for staging and production", "A Makefile provides shortcuts for all common operations", "A developer onboarding guide explains the setup process", "The complete pipeline can be demonstrated: dev, test, deploy-staging, deploy-prod"]}
+>
+
+Build a complete Docker Compose pipeline that takes a microservices application from development through production.
+
+**Application:**
+
+A task management application with:
+- **API** (Node.js) - REST API
+- **Frontend** (React) - Web UI
+- **Worker** (Python) - Background job processor
+- **PostgreSQL** - Primary database
+- **Redis** - Cache and message queue
+
+**Pipeline Stages:**
+
+1. **Development** (`make dev`):
+   - Build from source
+   - Compose Watch for hot reload
+   - Debug ports exposed
+   - Dev tools available (pgadmin, redis-commander)
+   - Seed data loaded automatically
+
+2. **Testing** (`make test`):
+   - Run integration tests
+   - Run load tests
+   - Generate test coverage report
+
+3. **Staging** (`make deploy-staging`):
+   - Pre-built images
+   - 2 replicas for API
+   - Monitoring enabled
+   - Staging environment variables
+
+4. **Production** (`make deploy-prod`):
+   - Pre-built images from production registry
+   - 4 API replicas, 2 worker replicas
+   - Resource limits enforced
+   - Structured logging
+   - No debug access
+
+**Deliverables:**
+
+1. **Compose Files:**
+   - `docker-compose.yml` (base)
+   - `docker-compose.override.yml` (development)
+   - `docker-compose.staging.yml`
+   - `docker-compose.prod.yml`
+   - `docker-compose.test.yml`
+
+2. **Service Dockerfiles:**
+   - Multi-stage Dockerfiles for api, frontend, and worker
+   - Development and production targets
+
+3. **Makefile** with targets:
+   ```makefile
+   dev:            # Start development environment with watch
+   test:           # Run tests
+   deploy-staging: # Deploy to staging
+   deploy-prod:    # Deploy to production
+   logs:           # View logs
+   clean:          # Stop and remove everything
+   status:         # Show service health
+   ```
+
+4. **Developer Guide:**
+   - Getting started (prerequisites, first run)
+   - Daily workflow (starting services, running tests)
+   - Profile reference (what each profile includes)
+   - Troubleshooting common issues
+
+</MiniProject>
+
+## Key Takeaways
+
+- YAML anchors (`&name`) and merge keys (`<<:`) combined with Compose extensions (`x-` prefix) eliminate configuration duplication, making large Compose files maintainable
+- Compose profiles let you tag services for selective startup, replacing the antipattern of commenting out services or maintaining separate files for different tool sets
+- The multi-file override pattern (`-f base.yml -f override.yml`) is the most powerful approach for environment-specific configuration, with each file layering changes on top of the previous
+- Healthcheck conditions in `depends_on` (`service_healthy`, `service_completed_successfully`) solve the startup ordering problem by waiting for services to actually be ready, not just running
+- Compose Watch provides a superior development experience over bind mounts, with automatic file synchronization, selective rebuilds, and cross-platform compatibility
+- Init containers in Compose use `service_completed_successfully` condition to ensure migrations and setup tasks complete before application services start
+- Resource management with `deploy.resources` sets CPU, memory, and process limits that prevent runaway containers from affecting the host
+- The combination of all these patterns creates a professional Compose setup that works reliably from a developer's laptop through CI/CD to production
+
+## What's Next
+
+You have now mastered the advanced Docker toolkit: optimized builds with BuildKit, private registries for secure image management, sophisticated networking, storage performance tuning, and production-grade Compose configurations. These skills form the foundation for the next major step in your containerization journey: **container orchestration with Kubernetes**. Kubernetes takes the concepts you have learned -- networking, storage, service discovery, resource management -- and scales them across clusters of machines with automated scheduling, self-healing, and rolling deployments.

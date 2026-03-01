@@ -1,0 +1,1422 @@
+---
+title: "Production Architecture Patterns"
+description: "Master proven container architecture patterns including sidecar, ambassador, adapter, and init containers. Implement blue-green and canary deployments, circuit breakers, and zero-downtime database migrations."
+order: 13
+xpReward: 50
+estimatedMinutes: 60
+prerequisites:
+  - 12-docker-api
+objectives:
+  - Implement the sidecar pattern for logging, monitoring, and proxying
+  - Design ambassador and adapter patterns for external service communication
+  - Use init containers for pre-flight checks and database migrations
+  - Build blue-green deployment workflows for zero-downtime releases
+  - Implement canary deployments with traffic splitting using Traefik
+  - Handle zero-downtime database migrations in containerized environments
+tags:
+  - docker
+  - architecture-patterns
+  - sidecar
+  - blue-green
+  - canary
+  - production
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your e-commerce platform is growing fast — 50,000 daily active users and counting. The monolithic application has been broken into 12 microservices, all running in Docker containers. But problems are emerging. The logging is inconsistent across services — some write to stdout, some to files, some to syslog. Deployments cause brief outages because you stop the old container before starting the new one. Last Tuesday, a bad deploy took down the checkout service for 8 minutes, costing the company $40,000 in lost sales. Your architect says it is time to adopt proper container patterns. Today, you will learn the battle-tested patterns that companies like Netflix, Google, and Uber use to run containers in production.
+</Callout>
+
+## The Sidecar Pattern
+
+The sidecar pattern attaches a helper container to your main application container. They share the same network namespace (in a pod) or the same Docker network, and often share volumes. The sidecar enhances or extends the main container's functionality without modifying it.
+
+```
+Sidecar Pattern:
+┌───────────────────────────────────────────────────┐
+│                  Shared Pod / Network               │
+│                                                     │
+│  ┌──────────────────┐    ┌──────────────────────┐  │
+│  │   Main Container  │    │   Sidecar Container  │  │
+│  │                    │    │                      │  │
+│  │   Your App         │◄──▶│   Log Shipper        │  │
+│  │   (auth-service)   │    │   (Fluentd)          │  │
+│  │                    │    │                      │  │
+│  │  Writes logs to   │    │  Reads logs from     │  │
+│  │  /var/log/app/    │    │  /var/log/app/        │  │
+│  │                    │    │  Ships to ELK        │  │
+│  └──────────────────┘    └──────────────────────┘  │
+│           │                        │                │
+│           └────── shared volume ───┘                │
+│                                                     │
+└───────────────────────────────────────────────────┘
+```
+
+### Log Shipping Sidecar
+
+```yaml
+# docker-compose.sidecar-logging.yml
+services:
+  # Main application container
+  auth-service:
+    image: registry.acme.io/platform/auth-service:v2.3.1
+    volumes:
+      - app-logs:/var/log/app
+    environment:
+      LOG_FILE: /var/log/app/auth-service.log
+      LOG_FORMAT: json
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # Sidecar: Log shipper
+  log-shipper:
+    image: fluent/fluentd:v1.16-1
+    volumes:
+      - app-logs:/var/log/app:ro
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+    depends_on:
+      - auth-service
+    networks:
+      - backend
+      - monitoring
+
+  # Sidecar: Metrics exporter
+  metrics-exporter:
+    image: prom/statsd-exporter:v0.26.0
+    ports:
+      - "9102:9102"    # Prometheus scrape endpoint
+    networks:
+      - backend
+      - monitoring
+
+volumes:
+  app-logs:
+
+networks:
+  backend:
+  monitoring:
+```
+
+```conf
+# fluentd/fluent.conf — Fluentd configuration for the log shipper sidecar
+<source>
+  @type tail
+  path /var/log/app/*.log
+  pos_file /var/log/app/fluentd.pos
+  tag app.*
+  <parse>
+    @type json
+    time_key timestamp
+    time_format %Y-%m-%dT%H:%M:%S.%NZ
+  </parse>
+</source>
+
+<filter app.**>
+  @type record_transformer
+  <record>
+    hostname "#{Socket.gethostname}"
+    service auth-service
+    environment production
+  </record>
+</filter>
+
+<match app.**>
+  @type elasticsearch
+  host elasticsearch
+  port 9200
+  index_name auth-service-logs
+  <buffer>
+    @type file
+    path /var/log/fluentd-buffer
+    flush_interval 5s
+    chunk_limit_size 2M
+    retry_max_interval 30
+  </buffer>
+</match>
+```
+
+### Monitoring Sidecar with Nginx Exporter
+
+```yaml
+# docker-compose.sidecar-monitoring.yml
+services:
+  web:
+    image: nginx:1.25-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+    networks:
+      - frontend
+
+  # Sidecar: Exports Nginx metrics for Prometheus
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.1
+    command:
+      - '-nginx.scrape-uri=http://web:80/nginx_status'
+    ports:
+      - "9113:9113"
+    depends_on:
+      - web
+    networks:
+      - frontend
+      - monitoring
+
+networks:
+  frontend:
+  monitoring:
+```
+
+```nginx
+# nginx/nginx.conf — Nginx config with stub_status for the metrics sidecar
+events {
+    worker_connections 1024;
+}
+
+http {
+    server {
+        listen 80;
+
+        location / {
+            root /usr/share/nginx/html;
+        }
+
+        # Expose metrics endpoint for the sidecar
+        location /nginx_status {
+            stub_status on;
+            allow 172.16.0.0/12;  # Docker networks
+            deny all;
+        }
+    }
+}
+```
+
+<Callout type="tip" title="When to Use the Sidecar Pattern">
+Use sidecars when:
+- You need to add logging, monitoring, or security to an application you cannot modify
+- You want to keep concerns separated (app code vs. infrastructure code)
+- The helper functionality needs to share the same lifecycle as the main container
+- Multiple services need the same helper (standardize the sidecar, change the app)
+
+Do NOT use sidecars when:
+- A simple environment variable or mount can solve the problem
+- The overhead of an extra container is not justified for a simple task
+- The sidecar would need to modify the main container's behavior (use an adapter instead)
+</Callout>
+
+## The Ambassador Pattern
+
+The ambassador pattern places a proxy container between your application and external services. Your app talks to `localhost`, and the ambassador handles connection routing, load balancing, and failover to the external service.
+
+```
+Ambassador Pattern:
+┌───────────────────────────────────────────────────────┐
+│                                                        │
+│  ┌───────────────┐         ┌────────────────────┐     │
+│  │  App Container │ ──────▶ │  Ambassador        │     │
+│  │                │  :6379  │  (twemproxy)       │     │
+│  │  Connects to   │         │                    │     │
+│  │  localhost:6379│         │  Routes to:        │     │
+│  │                │         │  ├─ redis-1:6379   │────▶│ Redis Cluster
+│  │                │         │  ├─ redis-2:6379   │────▶│ (External)
+│  │                │         │  └─ redis-3:6379   │────▶│
+│  └───────────────┘         └────────────────────┘     │
+│                                                        │
+│  The app thinks it talks to a single Redis instance.   │
+│  The ambassador handles sharding and failover.         │
+│                                                        │
+└───────────────────────────────────────────────────────┘
+```
+
+### Redis Ambassador with Twemproxy
+
+```yaml
+# docker-compose.ambassador-redis.yml
+services:
+  app:
+    image: registry.acme.io/platform/api-service:v3.1.0
+    environment:
+      REDIS_HOST: redis-ambassador
+      REDIS_PORT: 6379
+    depends_on:
+      - redis-ambassador
+    networks:
+      - app-net
+
+  # Ambassador: Redis proxy that handles sharding
+  redis-ambassador:
+    image: registry.acme.io/platform/twemproxy:latest
+    volumes:
+      - ./twemproxy/nutcracker.yml:/etc/nutcracker.yml:ro
+    ports:
+      - "6379:6379"
+    networks:
+      - app-net
+      - redis-net
+
+  redis-1:
+    image: redis:7-alpine
+    networks:
+      - redis-net
+  redis-2:
+    image: redis:7-alpine
+    networks:
+      - redis-net
+  redis-3:
+    image: redis:7-alpine
+    networks:
+      - redis-net
+
+networks:
+  app-net:
+  redis-net:
+    internal: true
+```
+
+```yaml
+# twemproxy/nutcracker.yml
+redis-cluster:
+  listen: 0.0.0.0:6379
+  hash: fnv1a_64
+  distribution: ketama
+  auto_eject_hosts: true
+  server_retry_timeout: 2000
+  server_failure_limit: 3
+  servers:
+    - redis-1:6379:1
+    - redis-2:6379:1
+    - redis-3:6379:1
+```
+
+### Database Ambassador for Environment Routing
+
+```yaml
+# docker-compose.ambassador-db.yml
+services:
+  app:
+    image: registry.acme.io/platform/api-service:v3.1.0
+    environment:
+      DATABASE_HOST: db-ambassador
+      DATABASE_PORT: 5432
+    depends_on:
+      - db-ambassador
+    networks:
+      - app-net
+
+  # Ambassador: Routes to the right database based on environment
+  db-ambassador:
+    image: haproxy:2.9-alpine
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - app-net
+      - db-net
+
+networks:
+  app-net:
+  db-net:
+    internal: true
+```
+
+```
+# haproxy/haproxy.cfg
+global
+    daemon
+    maxconn 256
+
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client  30s
+    timeout server  30s
+
+frontend postgres_frontend
+    bind *:5432
+    default_backend postgres_primary
+
+backend postgres_primary
+    balance roundrobin
+    option tcp-check
+    server db-primary db-primary:5432 check
+    server db-replica db-replica:5432 check backup
+```
+
+## The Adapter Pattern
+
+The adapter pattern transforms the output of a container to match what downstream systems expect. It normalizes interfaces between components that were not designed to work together.
+
+```
+Adapter Pattern:
+┌──────────────────────────────────────────────────────────┐
+│                                                           │
+│  ┌──────────────────┐    ┌──────────────────────────┐    │
+│  │  Legacy App       │    │  Adapter Container        │    │
+│  │                    │    │                           │    │
+│  │  Outputs:          │───▶│  Converts:                │    │
+│  │  Custom text logs  │    │  Text → JSON              │    │
+│  │  XML metrics       │    │  XML → Prometheus format  │    │
+│  │  Proprietary API   │    │  Custom → REST API        │    │
+│  │                    │    │                           │    │
+│  └──────────────────┘    └──────────────────────────┘    │
+│                                   │                       │
+│                                   ▼                       │
+│                           Prometheus / ELK                 │
+│                           (standard tools)                 │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Prometheus Metrics Adapter
+
+```yaml
+# docker-compose.adapter-metrics.yml
+services:
+  # Legacy app that exposes metrics in a custom format
+  legacy-app:
+    image: registry.acme.io/legacy/payment-processor:v1.8
+    volumes:
+      - metrics-data:/tmp/metrics
+    networks:
+      - app-net
+
+  # Adapter: Converts custom metrics to Prometheus format
+  metrics-adapter:
+    build:
+      context: ./metrics-adapter
+    volumes:
+      - metrics-data:/tmp/metrics:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - app-net
+      - monitoring
+
+volumes:
+  metrics-data:
+
+networks:
+  app-net:
+  monitoring:
+```
+
+```python
+# metrics-adapter/adapter.py
+"""Adapter that converts custom metric format to Prometheus exposition format."""
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
+import re
+
+METRICS_DIR = '/tmp/metrics'
+
+class MetricsHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != '/metrics':
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        metrics = self.convert_metrics()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/plain; version=0.0.4')
+        self.end_headers()
+        self.wfile.write(metrics.encode())
+
+    def convert_metrics(self):
+        """Read custom metrics files and convert to Prometheus format."""
+        output = []
+
+        for filename in os.listdir(METRICS_DIR):
+            if not filename.endswith('.metrics'):
+                continue
+
+            filepath = os.path.join(METRICS_DIR, filename)
+            with open(filepath) as f:
+                for line in f:
+                    # Custom format: "metric_name=value|type|help"
+                    match = re.match(r'(\w+)=([\d.]+)\|(\w+)\|(.+)', line.strip())
+                    if match:
+                        name, value, mtype, help_text = match.groups()
+                        prom_type = {'counter': 'counter', 'gauge': 'gauge',
+                                     'timer': 'histogram'}.get(mtype, 'gauge')
+                        output.append(f'# HELP {name} {help_text}')
+                        output.append(f'# TYPE {name} {prom_type}')
+                        output.append(f'{name} {value}')
+
+        return '\n'.join(output) + '\n'
+
+    def log_message(self, format, *args):
+        pass  # Suppress request logging
+
+if __name__ == '__main__':
+    server = HTTPServer(('0.0.0.0', 9090), MetricsHandler)
+    print('Metrics adapter listening on :9090/metrics')
+    server.serve_forever()
+```
+
+<Callout type="info" title="Pattern Comparison">
+
+| Pattern | Purpose | Data Flow | Example |
+|---------|---------|-----------|---------|
+| **Sidecar** | Extend main container | Main ←→ Sidecar | Log shipper, metrics agent |
+| **Ambassador** | Proxy to external services | Main → Ambassador → External | Redis proxy, DB router |
+| **Adapter** | Normalize output | Main → Adapter → Consumers | Metrics converter, log formatter |
+| **Init** | Pre-flight setup | Init → Main | DB migration, config fetch |
+
+All four patterns attach helper containers to a main application container. The difference is the direction of data flow and the purpose of the helper.
+</Callout>
+
+## The Init Container Pattern
+
+Init containers run before the main application container starts. They handle one-time setup tasks like database migrations, configuration fetching, or dependency checks.
+
+```
+Init Container Pattern:
+┌──────────────────────────────────────────────────────┐
+│                                                       │
+│  Step 1: Init Container runs                          │
+│  ┌────────────────────────┐                          │
+│  │  wait-for-db            │                          │
+│  │  Checks DB is ready    │ ──▶ Exits 0 (success)   │
+│  └────────────────────────┘                          │
+│                                                       │
+│  Step 2: Init Container runs                          │
+│  ┌────────────────────────┐                          │
+│  │  run-migrations         │                          │
+│  │  Applies DB migrations  │ ──▶ Exits 0 (success)   │
+│  └────────────────────────┘                          │
+│                                                       │
+│  Step 3: Main Container starts                        │
+│  ┌────────────────────────┐                          │
+│  │  api-service            │                          │
+│  │  Starts with DB ready  │ ──▶ Runs continuously    │
+│  │  and migrations applied│                          │
+│  └────────────────────────┘                          │
+│                                                       │
+└──────────────────────────────────────────────────────┘
+```
+
+### Init Container with Docker Compose
+
+```yaml
+# docker-compose.init-pattern.yml
+services:
+  # Init container 1: Wait for database to be ready
+  wait-for-db:
+    image: postgres:16-alpine
+    command: >
+      sh -c "
+        echo 'Waiting for database...'
+        until pg_isready -h db -p 5432 -U postgres; do
+          echo '  Database not ready, waiting 2s...'
+          sleep 2
+        done
+        echo 'Database is ready!'
+      "
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+
+  # Init container 2: Run database migrations
+  run-migrations:
+    image: registry.acme.io/platform/api-service:v3.1.0
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment:
+      DATABASE_URL: postgres://postgres:secret@db:5432/appdb
+    depends_on:
+      wait-for-db:
+        condition: service_completed_successfully
+    networks:
+      - backend
+
+  # Init container 3: Seed initial data (if needed)
+  seed-data:
+    image: registry.acme.io/platform/api-service:v3.1.0
+    command: ["python", "manage.py", "seed", "--if-empty"]
+    environment:
+      DATABASE_URL: postgres://postgres:secret@db:5432/appdb
+    depends_on:
+      run-migrations:
+        condition: service_completed_successfully
+    networks:
+      - backend
+
+  # Main application: starts only after all init containers succeed
+  api-service:
+    image: registry.acme.io/platform/api-service:v3.1.0
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://postgres:secret@db:5432/appdb
+    depends_on:
+      seed-data:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - backend
+      - frontend
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: appdb
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+volumes:
+  db-data:
+
+networks:
+  backend:
+    internal: true
+  frontend:
+```
+
+<Callout type="warning" title="condition: service_completed_successfully">
+The `service_completed_successfully` condition in `depends_on` is the key to the init container pattern in Docker Compose. It tells Docker to wait until the dependency container exits with code 0 before starting the dependent service. If the init container fails (non-zero exit), the dependent service will not start. This requires Docker Compose v2.
+</Callout>
+
+## Blue-Green Deployments
+
+Blue-green deployment maintains two identical production environments. At any time, one (blue) serves live traffic while the other (green) is idle or running the new version. Deployment is simply switching the router to point to the other environment.
+
+```
+Blue-Green Deployment:
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│  Before Deploy:                                               │
+│  ┌─────────┐      ┌──────────────┐                           │
+│  │ Traefik  │─────▶│ Blue (v2.3)  │ ◄── Live traffic         │
+│  │ (Router) │      │ Port 8001    │                           │
+│  └─────────┘      └──────────────┘                           │
+│                    ┌──────────────┐                           │
+│                    │ Green (v2.2) │ ◄── Idle (previous)       │
+│                    │ Port 8002    │                           │
+│                    └──────────────┘                           │
+│                                                               │
+│  Deploy v2.4:                                                 │
+│  1. Deploy v2.4 to Green (idle environment)                   │
+│  2. Run health checks and smoke tests on Green                │
+│  3. Switch router: Traefik now points to Green                │
+│  4. Blue becomes idle (still running v2.3 for rollback)       │
+│                                                               │
+│  After Deploy:                                                │
+│  ┌─────────┐      ┌──────────────┐                           │
+│  │ Traefik  │      │ Blue (v2.3)  │ ◄── Idle (rollback)      │
+│  │ (Router) │      │ Port 8001    │                           │
+│  └─────────┘      └──────────────┘                           │
+│       │            ┌──────────────┐                           │
+│       └───────────▶│ Green (v2.4) │ ◄── Live traffic          │
+│                    │ Port 8002    │                           │
+│                    └──────────────┘                           │
+│                                                               │
+│  Rollback: Switch router back to Blue. Instant.               │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Blue-Green with Traefik
+
+```yaml
+# docker-compose.blue-green.yml
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"   # Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic
+    networks:
+      - frontend
+
+  # Blue environment
+  app-blue:
+    image: registry.acme.io/platform/api-service:v2.3.0
+    environment:
+      APP_VERSION: v2.3.0
+      APP_COLOR: blue
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.app-blue.loadbalancer.server.port=8080"
+    networks:
+      - frontend
+      - backend
+
+  # Green environment
+  app-green:
+    image: registry.acme.io/platform/api-service:v2.4.0
+    environment:
+      APP_VERSION: v2.4.0
+      APP_COLOR: green
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.app-green.loadbalancer.server.port=8080"
+    networks:
+      - frontend
+      - backend
+
+networks:
+  frontend:
+  backend:
+    internal: true
+```
+
+```yaml
+# traefik/dynamic/routing.yml
+# Change 'app-blue' to 'app-green' (or vice versa) to switch traffic
+http:
+  routers:
+    app-router:
+      rule: "Host(`app.example.com`)"
+      service: app-blue    # <-- Change this to switch
+      entryPoints:
+        - web
+
+  services:
+    app-blue:
+      loadBalancer:
+        servers:
+          - url: "http://app-blue:8080"
+        healthCheck:
+          path: /healthz
+          interval: "10s"
+
+    app-green:
+      loadBalancer:
+        servers:
+          - url: "http://app-green:8080"
+        healthCheck:
+          path: /healthz
+          interval: "10s"
+```
+
+### Blue-Green Deployment Script
+
+```bash
+#!/bin/bash
+# blue-green-deploy.sh — Zero-downtime blue-green deployment
+set -euo pipefail
+
+NEW_VERSION=${1:?"Usage: blue-green-deploy.sh <version>"}
+COMPOSE_FILE="docker-compose.blue-green.yml"
+ROUTING_FILE="traefik/dynamic/routing.yml"
+
+# Determine which environment is currently live
+CURRENT_LIVE=$(grep 'service:' ${ROUTING_FILE} | awk '{print $2}' | tr -d ' ')
+echo "Current live environment: ${CURRENT_LIVE}"
+
+if [ "${CURRENT_LIVE}" = "app-blue" ]; then
+  DEPLOY_TO="green"
+  DEPLOY_SERVICE="app-green"
+else
+  DEPLOY_TO="blue"
+  DEPLOY_SERVICE="app-blue"
+fi
+
+echo "Deploying ${NEW_VERSION} to ${DEPLOY_TO} environment..."
+
+# Step 1: Update the idle environment with the new version
+echo "[1/5] Pulling new image..."
+docker compose -f ${COMPOSE_FILE} pull ${DEPLOY_SERVICE}
+
+echo "[2/5] Starting ${DEPLOY_SERVICE} with ${NEW_VERSION}..."
+APP_VERSION=${NEW_VERSION} docker compose -f ${COMPOSE_FILE} up -d ${DEPLOY_SERVICE}
+
+# Step 2: Wait for health check
+echo "[3/5] Waiting for health check..."
+for i in $(seq 1 30); do
+  STATUS=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose -f ${COMPOSE_FILE} ps -q ${DEPLOY_SERVICE}) 2>/dev/null || echo "starting")
+  if [ "${STATUS}" = "healthy" ]; then
+    echo "  Health check passed!"
+    break
+  fi
+  if [ $i -eq 30 ]; then
+    echo "  Health check failed after 60 seconds. Aborting."
+    docker compose -f ${COMPOSE_FILE} stop ${DEPLOY_SERVICE}
+    exit 1
+  fi
+  echo "  Status: ${STATUS} (attempt $i/30)"
+  sleep 2
+done
+
+# Step 3: Run smoke tests
+echo "[4/5] Running smoke tests..."
+DEPLOY_PORT=$(docker inspect --format='{{(index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort}}' $(docker compose -f ${COMPOSE_FILE} ps -q ${DEPLOY_SERVICE}) 2>/dev/null || echo "8080")
+if curl -sf "http://localhost:${DEPLOY_PORT:-8080}/healthz" > /dev/null 2>&1; then
+  echo "  Smoke tests passed!"
+else
+  echo "  Smoke tests failed. Check the logs:"
+  docker compose -f ${COMPOSE_FILE} logs --tail=20 ${DEPLOY_SERVICE}
+  exit 1
+fi
+
+# Step 4: Switch traffic
+echo "[5/5] Switching traffic to ${DEPLOY_TO}..."
+sed -i "s/service: app-.*/service: app-${DEPLOY_TO}/" ${ROUTING_FILE}
+echo "  Traffic switched to ${DEPLOY_SERVICE}"
+
+echo ""
+echo "Deployment complete!"
+echo "  Live: ${DEPLOY_TO} (${NEW_VERSION})"
+echo "  Idle: $([ ${DEPLOY_TO} = 'blue' ] && echo 'green' || echo 'blue') (previous version — ready for rollback)"
+echo ""
+echo "To rollback, run:"
+echo "  sed -i 's/service: app-.*/service: app-$([ ${DEPLOY_TO} = 'blue' ] && echo 'green' || echo 'blue')/' ${ROUTING_FILE}"
+```
+
+## Canary Deployments
+
+Canary deployments gradually shift traffic from the old version to the new version. If the new version has problems, only a small percentage of users are affected.
+
+```
+Canary Deployment — Traffic Split:
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│  Phase 1: 10% canary                                          │
+│  ┌─────────┐      ┌──────────────┐                           │
+│  │          │─90%─▶│ Stable v2.3  │ (9 instances)             │
+│  │ Traefik  │      └──────────────┘                           │
+│  │          │      ┌──────────────┐                           │
+│  │          │─10%─▶│ Canary v2.4  │ (1 instance)              │
+│  └─────────┘      └──────────────┘                           │
+│                                                               │
+│  Phase 2: 50% canary (metrics look good)                      │
+│  ┌─────────┐      ┌──────────────┐                           │
+│  │          │─50%─▶│ Stable v2.3  │ (5 instances)             │
+│  │ Traefik  │      └──────────────┘                           │
+│  │          │      ┌──────────────┐                           │
+│  │          │─50%─▶│ Canary v2.4  │ (5 instances)             │
+│  └─────────┘      └──────────────┘                           │
+│                                                               │
+│  Phase 3: 100% promoted                                       │
+│  ┌─────────┐      ┌──────────────┐                           │
+│  │ Traefik  │─100%▶│ New v2.4     │ (10 instances)            │
+│  └─────────┘      └──────────────┘                           │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Canary with Traefik Weighted Round Robin
+
+```yaml
+# docker-compose.canary.yml
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - frontend
+
+  # Stable version: receives most traffic
+  app-stable:
+    image: registry.acme.io/platform/api-service:v2.3.0
+    deploy:
+      replicas: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`app.example.com`)"
+      - "traefik.http.routers.app.entrypoints=web"
+      - "traefik.http.services.app-stable.loadbalancer.server.port=8080"
+      # Weighted routing: 90% of traffic
+      - "traefik.http.services.app.weighted.services.app-stable.weight=90"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - frontend
+
+  # Canary version: receives a small percentage of traffic
+  app-canary:
+    image: registry.acme.io/platform/api-service:v2.4.0
+    deploy:
+      replicas: 1
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.app-canary.loadbalancer.server.port=8080"
+      # Weighted routing: 10% of traffic
+      - "traefik.http.services.app.weighted.services.app-canary.weight=10"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - frontend
+
+networks:
+  frontend:
+```
+
+### Canary Deployment Script
+
+```bash
+#!/bin/bash
+# canary-deploy.sh — Gradual canary deployment with automatic rollback
+set -euo pipefail
+
+NEW_VERSION=${1:?"Usage: canary-deploy.sh <version>"}
+COMPOSE_FILE="docker-compose.canary.yml"
+ERROR_THRESHOLD=5  # Max error rate percentage before rollback
+
+echo "=== Canary Deployment: ${NEW_VERSION} ==="
+
+# Phase 1: Deploy canary with 10% traffic
+echo "[Phase 1] Deploying canary at 10%..."
+# Update the canary image and deploy
+sed -i "s|api-service:v.*|api-service:${NEW_VERSION}|" ${COMPOSE_FILE}
+docker compose -f ${COMPOSE_FILE} up -d app-canary
+
+# Wait for canary to be healthy
+echo "  Waiting for health check..."
+sleep 15
+
+# Monitor for 2 minutes
+echo "  Monitoring canary for 2 minutes..."
+for i in $(seq 1 12); do
+  # Check canary health
+  CANARY_STATUS=$(docker inspect --format='{{.State.Health.Status}}' \
+    $(docker compose -f ${COMPOSE_FILE} ps -q app-canary | head -1) 2>/dev/null || echo "unknown")
+
+  if [ "${CANARY_STATUS}" != "healthy" ]; then
+    echo "  ROLLBACK: Canary health check failed (${CANARY_STATUS})"
+    docker compose -f ${COMPOSE_FILE} stop app-canary
+    exit 1
+  fi
+
+  echo "  Check $i/12: canary healthy"
+  sleep 10
+done
+
+echo "[Phase 1] Canary stable at 10%"
+
+# Phase 2: Increase to 50%
+echo "[Phase 2] Increasing canary to 50%..."
+# Update weights in the Compose file labels
+# In production, use Traefik API or dynamic configuration
+echo "  Scaling canary to 3 replicas, stable to 3..."
+docker compose -f ${COMPOSE_FILE} up -d --scale app-canary=3 --scale app-stable=3
+
+echo "  Monitoring for 5 minutes..."
+sleep 300
+
+# Phase 3: Full promotion
+echo "[Phase 3] Promoting canary to 100%..."
+docker compose -f ${COMPOSE_FILE} up -d --scale app-canary=0
+
+# Update stable service to new version
+echo "  Updating stable service to ${NEW_VERSION}..."
+docker compose -f ${COMPOSE_FILE} up -d --scale app-stable=5
+
+echo ""
+echo "Canary deployment complete!"
+echo "  ${NEW_VERSION} is now serving 100% of traffic"
+```
+
+## Circuit Breaker Pattern
+
+The circuit breaker prevents cascading failures by stopping requests to a failing service.
+
+```
+Circuit Breaker States:
+┌─────────────────────────────────────────────────────┐
+│                                                      │
+│   ┌────────┐  failures > threshold  ┌────────┐     │
+│   │ CLOSED  │──────────────────────▶│  OPEN  │     │
+│   │ (normal)│                       │ (block)│     │
+│   └────────┘                        └────────┘     │
+│       ▲                                  │          │
+│       │                           timeout expires   │
+│       │                                  │          │
+│       │         success           ┌──────▼─────┐   │
+│       └──────────────────────────│ HALF-OPEN   │   │
+│                                  │ (test one)  │   │
+│              failure             └──────┬──────┘   │
+│              ┌───────────────────────────┘          │
+│              ▼                                      │
+│          Back to OPEN                               │
+│                                                      │
+└─────────────────────────────────────────────────────┘
+```
+
+### Circuit Breaker with Traefik
+
+```yaml
+# docker-compose.circuit-breaker.yml
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - frontend
+
+  api:
+    image: registry.acme.io/platform/api-service:v3.1.0
+    deploy:
+      replicas: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.example.com`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.services.api.loadbalancer.server.port=8080"
+      # Circuit breaker: trips when error rate exceeds 50% over 10 requests
+      - "traefik.http.middlewares.api-cb.circuitbreaker.expression=ResponseCodeRatio(500, 600, 0, 600) > 0.50"
+      - "traefik.http.middlewares.api-cb.circuitbreaker.checkperiod=10s"
+      - "traefik.http.middlewares.api-cb.circuitbreaker.fallbackduration=30s"
+      - "traefik.http.middlewares.api-cb.circuitbreaker.recoveryduration=60s"
+      - "traefik.http.routers.api.middlewares=api-cb"
+      # Rate limiting
+      - "traefik.http.middlewares.api-rl.ratelimit.average=100"
+      - "traefik.http.middlewares.api-rl.ratelimit.burst=50"
+      - "traefik.http.middlewares.api-rl.ratelimit.period=1s"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - frontend
+      - backend
+
+networks:
+  frontend:
+  backend:
+    internal: true
+```
+
+<Callout type="tip" title="Choosing a Deployment Strategy">
+
+| Strategy | Downtime | Risk | Rollback Speed | Complexity | Best For |
+|----------|----------|------|----------------|------------|----------|
+| **Recreate** | Yes | High | Slow (redeploy) | Low | Dev/Test environments |
+| **Rolling** | No | Medium | Medium | Medium | Stateless services |
+| **Blue-Green** | No | Low | Instant (switch) | Medium | Critical services |
+| **Canary** | No | Very Low | Fast (stop canary) | High | High-traffic services |
+
+Start with blue-green for most production services. Graduate to canary when you have metrics infrastructure to monitor the canary's health automatically.
+</Callout>
+
+## Zero-Downtime Database Migrations
+
+Database migrations are the hardest part of zero-downtime deployments because you cannot simply swap the database like you can swap application containers.
+
+### The Expand-Contract Pattern
+
+```
+Zero-Downtime Migration — Expand & Contract:
+┌──────────────────────────────────────────────────────────┐
+│                                                           │
+│  Step 1: EXPAND — Add new column (backward compatible)    │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ ALTER TABLE users ADD COLUMN email_new VARCHAR(255); │ │
+│  │ -- Old code still works (ignores new column)        │ │
+│  │ -- New code writes to both columns                   │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                           │
+│  Step 2: MIGRATE — Backfill existing data                 │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ UPDATE users SET email_new = email                   │ │
+│  │   WHERE email_new IS NULL                            │ │
+│  │   LIMIT 1000;  -- Do in batches to avoid locks      │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                           │
+│  Step 3: DEPLOY — New code reads from new column          │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ App v2.4 reads from email_new                       │ │
+│  │ App v2.3 still reads from email (still works!)      │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                           │
+│  Step 4: CONTRACT — Remove old column (after all apps     │
+│  are on v2.4+)                                            │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ ALTER TABLE users DROP COLUMN email;                 │ │
+│  │ ALTER TABLE users RENAME COLUMN email_new TO email;  │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Database Migration as Init Container
+
+```yaml
+# docker-compose.migration.yml
+services:
+  # Migration init container
+  db-migrate:
+    image: registry.acme.io/platform/api-service:v2.4.0
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment:
+      DATABASE_URL: postgres://app:secret@db:5432/appdb
+      MIGRATION_TIMEOUT: "60"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    # This container exits after migration completes
+    restart: "no"
+
+  # Application starts only after migration succeeds
+  api:
+    image: registry.acme.io/platform/api-service:v2.4.0
+    command: ["gunicorn", "main:app", "-b", "0.0.0.0:8080", "-w", "4"]
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://app:secret@db:5432/appdb
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - backend
+      - frontend
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: appdb
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d appdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+volumes:
+  db-data:
+
+networks:
+  backend:
+    internal: true
+  frontend:
+```
+
+<Callout type="warning" title="Migration Safety Rules">
+1. **Never remove a column** that the current running code reads from
+2. **Never rename a column** — instead, add a new column, migrate data, then drop the old one
+3. **Never add NOT NULL constraints** without a default value on an existing column
+4. **Always run migrations in batches** for large tables to avoid long-running locks
+5. **Test migrations against a copy of production data** before running on the real database
+6. **Keep migrations backward compatible** — the old version of your app must still work after the migration runs
+</Callout>
+
+<Exercise
+  title="Implement Sidecar Logging"
+  difficulty="intermediate"
+  xpReward={35}
+  estimatedMinutes={25}
+  objectives={[
+    "Deploy a main application container that writes logs to a shared volume",
+    "Attach a Fluentd sidecar that reads and ships those logs",
+    "Configure log parsing and enrichment in the sidecar",
+    "Verify logs flow from the application through the sidecar to the destination"
+  ]}
+  hints={[
+    "Use a named Docker volume shared between the app and the sidecar",
+    "Configure the app to write structured JSON logs to a file in the shared volume",
+    "Use Fluentd's tail input plugin to read the log file",
+    "Start with stdout output in Fluentd to verify the pipeline before adding Elasticsearch"
+  ]}
+  validationCriteria={`
+Create a sidecar logging setup:
+
+1. \`docker-compose.yml\`:
+\`\`\`yaml
+services:
+  app:
+    image: python:3.12-slim
+    command: >
+      python -c "
+      import json, time, random, sys
+      while True:
+          log = {
+              'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'level': random.choice(['INFO','WARN','ERROR']),
+              'service': 'payment-service',
+              'message': random.choice([
+                  'Processing payment',
+                  'Payment completed',
+                  'Payment failed: timeout',
+                  'Retrying payment'
+              ]),
+              'request_id': f'req-{random.randint(1000,9999)}'
+          }
+          with open('/var/log/app/app.log', 'a') as f:
+              f.write(json.dumps(log) + '\\n')
+          sys.stdout.write(f'Wrote log: {log[\"level\"]}\\n')
+          sys.stdout.flush()
+          time.sleep(2)
+      "
+    volumes:
+      - app-logs:/var/log/app
+
+  log-shipper:
+    image: fluent/fluentd:v1.16-1
+    volumes:
+      - app-logs:/var/log/app:ro
+      - ./fluent.conf:/fluentd/etc/fluent.conf:ro
+    depends_on:
+      - app
+
+volumes:
+  app-logs:
+\`\`\`
+
+2. \`fluent.conf\`:
+\`\`\`
+<source>
+  @type tail
+  path /var/log/app/app.log
+  pos_file /tmp/app.log.pos
+  tag app.payment
+  <parse>
+    @type json
+  </parse>
+</source>
+
+<filter app.**>
+  @type record_transformer
+  <record>
+    hostname "#{Socket.gethostname}"
+    environment "production"
+  </record>
+</filter>
+
+<match app.**>
+  @type stdout
+</match>
+\`\`\`
+
+Verify:
+1. \`docker compose up -d\`
+2. \`docker compose logs -f log-shipper\` — should see enriched JSON logs
+3. Logs should include hostname and environment fields added by the sidecar
+  `}
+/>
+
+<Exercise
+  title="Build Blue-Green Deployment"
+  difficulty="advanced"
+  xpReward={40}
+  estimatedMinutes={30}
+  objectives={[
+    "Set up two parallel environments (blue and green) with a reverse proxy",
+    "Implement traffic switching between environments",
+    "Build health check verification before switching",
+    "Create a rollback mechanism that switches back instantly"
+  ]}
+  hints={[
+    "Use Nginx or Traefik as the reverse proxy to route traffic",
+    "Each environment runs on a different internal port",
+    "The deploy script should verify the new environment is healthy before switching",
+    "Store the current live environment in a file for the rollback script to read"
+  ]}
+  validationCriteria={`
+Create a blue-green deployment:
+
+1. Two app containers running different versions
+2. An Nginx reverse proxy that routes to the active environment
+3. \`deploy.sh\` that:
+   - Deploys new version to the idle environment
+   - Waits for health check
+   - Switches the proxy to the new environment
+   - Prints rollback instructions
+4. \`rollback.sh\` that:
+   - Reads the previous environment from a state file
+   - Switches the proxy back instantly
+
+\`\`\`bash
+# deploy.sh
+#!/bin/bash
+set -euo pipefail
+
+NEW_VERSION=\${1:?"Usage: deploy.sh <version>"}
+STATE_FILE=".deploy-state"
+
+# Read current state
+CURRENT=\$(cat \${STATE_FILE} 2>/dev/null || echo "blue")
+TARGET=\$([ "\${CURRENT}" = "blue" ] && echo "green" || echo "blue")
+
+echo "Deploying \${NEW_VERSION} to \${TARGET}..."
+echo "Current live: \${CURRENT}"
+
+# Update idle environment
+docker compose up -d app-\${TARGET}
+
+# Wait for health
+for i in \$(seq 1 30); do
+  if curl -sf http://localhost:808\$([ "\${TARGET}" = "blue" ] && echo "1" || echo "2")/healthz; then
+    echo "Health check passed!"
+    break
+  fi
+  [ \$i -eq 30 ] && { echo "FAILED"; exit 1; }
+  sleep 2
+done
+
+# Switch traffic
+cp nginx/\${TARGET}.conf nginx/active.conf
+docker compose exec nginx nginx -s reload
+
+# Save state
+echo "\${TARGET}" > \${STATE_FILE}
+echo "Deployed! Live: \${TARGET} (\${NEW_VERSION})"
+\`\`\`
+
+Test:
+1. Start with blue live, green idle
+2. \`./deploy.sh v2.4.0\` — deploys to green, switches traffic
+3. \`curl http://localhost\` — should show v2.4.0
+4. \`./rollback.sh\` — switches back to blue instantly
+  `}
+/>
+
+<MiniProject
+  title="Production Microservices Architecture"
+  difficulty="advanced"
+  xpReward={75}
+  estimatedMinutes={45}
+  objectives={[
+    "Build a multi-service application using sidecar, init, and ambassador patterns",
+    "Implement blue-green deployment for the API service",
+    "Add circuit breaker protection with Traefik",
+    "Handle database migrations as init containers with zero downtime"
+  ]}
+  hints={[
+    "Start with three services: API, database, and cache",
+    "Add a Fluentd sidecar to the API for centralized logging",
+    "Use an init container to run database migrations before the API starts",
+    "Configure Traefik with circuit breaker middleware and weighted routing"
+  ]}
+  validationCriteria={`
+Build a production architecture:
+
+\`\`\`
+Architecture:
+                    ┌──────────┐
+                    │ Traefik  │ (Circuit breaker + routing)
+                    └─────┬────┘
+                          │
+                ┌─────────┴─────────┐
+                │                   │
+          ┌─────▼─────┐       ┌────▼──────┐
+          │ API Blue  │       │ API Green │
+          │ + sidecar │       │ + sidecar │
+          └─────┬─────┘       └────┬──────┘
+                │                   │
+          ┌─────▼───────────────────▼─────┐
+          │        Init: Migrations       │
+          └─────────────┬─────────────────┘
+                        │
+               ┌────────▼────────┐
+               │   PostgreSQL    │
+               └─────────────────┘
+\`\`\`
+
+Files to create:
+1. \`docker-compose.yml\` — Full service stack with all patterns
+2. \`traefik/\` — Traefik configuration with circuit breaker
+3. \`fluentd/\` — Sidecar log shipper configuration
+4. \`deploy.sh\` — Blue-green deployment with health verification
+5. \`rollback.sh\` — Instant rollback script
+
+Requirements:
+- Traefik with circuit breaker (trips at 50% error rate)
+- Blue-green API environments with health checks
+- Fluentd sidecar on each API instance
+- Init container for database migrations
+- Named volumes for database persistence
+- Internal network for backend, exposed network for frontend
+
+Verify:
+1. \`docker compose up -d\` — all services start in order
+2. Init container runs migrations, exits 0
+3. API starts after migrations complete
+4. \`curl http://localhost/api/health\` — returns healthy
+5. \`./deploy.sh v2.0\` — deploys new version with zero downtime
+6. Fluentd sidecar logs show in \`docker compose logs log-shipper\`
+  `}
+/>
+
+## Key Takeaways
+
+- **The sidecar pattern** extends containers without modifying them — use it for logging, monitoring, proxying, and security tasks
+- **The ambassador pattern** proxies external service connections — your app talks to localhost while the ambassador handles routing, sharding, and failover
+- **The adapter pattern** normalizes heterogeneous outputs — essential for integrating legacy systems with modern monitoring and logging infrastructure
+- **Init containers** handle one-time setup before the main application starts — database migrations, config fetching, and dependency checks
+- **Blue-green deployments** maintain two environments and switch traffic instantly — the fastest rollback strategy available
+- **Canary deployments** gradually shift traffic to new versions — the safest approach for high-traffic services
+- **Circuit breakers** prevent cascading failures — configure them in your reverse proxy (Traefik, Envoy) to automatically stop routing to failing services
+- **Zero-downtime database migrations** require the expand-contract pattern — never remove or rename columns that running code depends on
+- **`depends_on` with `service_completed_successfully`** is the key to init containers in Docker Compose
+
+## What's Next
+
+Now that you know how to architect production systems with Docker, the next lesson covers **Troubleshooting Production Issues**. You will learn systematic debugging methodologies for when containers will not start, keep crashing, have networking problems, or suffer performance degradation. Real-world case studies will give you the experience of diagnosing issues that every Docker operator eventually faces.

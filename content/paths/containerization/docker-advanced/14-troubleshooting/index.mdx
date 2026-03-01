@@ -1,0 +1,1338 @@
+---
+title: "Troubleshooting Production Issues"
+description: "Master systematic Docker debugging for production environments. Diagnose container startup failures, crash loops, networking issues, storage problems, and performance degradation with real-world case studies."
+order: 14
+xpReward: 50
+estimatedMinutes: 60
+prerequisites:
+  - 13-production-patterns
+objectives:
+  - Diagnose and fix container startup failures including image pull errors, OCI runtime errors, and entrypoint failures
+  - Troubleshoot crash loops caused by OOM kills, health check failures, and application errors
+  - Resolve networking issues including DNS resolution, port conflicts, and MTU problems
+  - Identify and fix storage issues including volume mount permissions and disk space
+  - Apply a systematic debugging methodology to any Docker problem
+  - Work through real-world case studies that simulate production incidents
+tags:
+  - docker
+  - troubleshooting
+  - debugging
+  - production
+  - networking
+  - performance
+  - devops
+---
+
+<Callout type="story" title="The Story">
+It is 2:47 AM. Your phone buzzes — PagerDuty alert: "Production checkout service DOWN." You grab your laptop and SSH into the production server. `docker ps` shows the checkout container restarting in a loop. The order processing container cannot connect to the database. The nginx container is eating 4 GB of memory. Three different problems, all happening at once. Your team is counting on you to get the system back online. You have 15 minutes before the European morning rush begins. Deep breath. You have a methodology for this.
+</Callout>
+
+## Systematic Debugging Methodology
+
+When a Docker container has problems in production, panic is the enemy. Follow this systematic approach every time.
+
+```
+The Docker Debugging Flowchart:
+┌─────────────────────────────────────────────────────────────┐
+│                                                              │
+│  1. OBSERVE — What is the current state?                     │
+│     docker ps -a                                             │
+│     docker compose ps                                        │
+│     docker stats --no-stream                                 │
+│              │                                               │
+│              ▼                                               │
+│  2. LOGS — What happened before the failure?                 │
+│     docker logs <container> --tail 100                       │
+│     docker logs <container> --since 10m                      │
+│     docker compose logs --tail 50                            │
+│              │                                               │
+│              ▼                                               │
+│  3. INSPECT — What is the container's configuration?         │
+│     docker inspect <container>                               │
+│     docker inspect <container> --format '{{.State}}'         │
+│     docker inspect <container> --format '{{.HostConfig}}'    │
+│              │                                               │
+│              ▼                                               │
+│  4. EXEC — Can we look inside the container?                 │
+│     docker exec -it <container> sh                           │
+│     docker exec <container> cat /etc/resolv.conf             │
+│     docker exec <container> ps aux                           │
+│              │                                               │
+│              ▼                                               │
+│  5. NETWORK — Is connectivity working?                       │
+│     docker network inspect <network>                         │
+│     docker exec <container> ping <other>                     │
+│     docker exec <container> nslookup <service>               │
+│              │                                               │
+│              ▼                                               │
+│  6. STORAGE — Are volumes and mounts correct?                │
+│     docker volume inspect <volume>                           │
+│     docker exec <container> df -h                            │
+│     docker exec <container> ls -la /mount/path               │
+│              │                                               │
+│              ▼                                               │
+│  7. HOST — Is the Docker host healthy?                       │
+│     df -h                                                    │
+│     free -m                                                  │
+│     journalctl -u docker --since "10 minutes ago"            │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+<Callout type="tip" title="The First Three Commands">
+When any Docker problem occurs, always start with these three commands. They tell you the state of everything:
+```bash
+docker ps -a                    # What is running, what is stopped, what is restarting?
+docker logs <container> --tail 50  # What did the container say before it died?
+docker stats --no-stream         # Is anything eating too many resources?
+```
+Ninety percent of issues can be diagnosed from these three commands alone.
+</Callout>
+
+## Container Won't Start
+
+### Image Pull Errors
+
+```bash
+# Symptom: Container stuck in "Created" state, never starts
+docker ps -a
+# CONTAINER ID   IMAGE                    STATUS
+# abc123         registry.acme.io/myapp   Created
+
+# Check events for the error
+docker events --since 5m --filter container=abc123
+# Error response from daemon: pull access denied for registry.acme.io/myapp,
+# repository does not exist or may require 'docker login'
+
+# Diagnosis: Authentication failure or image doesn't exist
+
+# Fix 1: Log in to the registry
+docker login registry.acme.io
+# Username: myuser
+# Password: ****
+# Login Succeeded
+
+# Fix 2: Check the image name and tag
+docker pull registry.acme.io/platform/myapp:v2.3.1
+# Error: manifest for registry.acme.io/platform/myapp:v2.3.1 not found
+
+# The tag doesn't exist. List available tags:
+curl -s "https://registry.acme.io/v2/platform/myapp/tags/list" | jq .
+# { "name": "platform/myapp", "tags": ["v2.3.0", "v2.2.9", "v2.2.8"] }
+# v2.3.1 doesn't exist! It's v2.3.0.
+
+# Fix 3: Check DNS resolution for the registry
+nslookup registry.acme.io
+# If this fails, check /etc/resolv.conf and your DNS server
+
+# Fix 4: Check network connectivity to the registry
+curl -v https://registry.acme.io/v2/
+# If connection times out, check firewall rules and proxy settings
+```
+
+### OCI Runtime Errors
+
+```bash
+# Symptom: Container exits immediately with error 127 or 126
+docker run myapp:latest
+# docker: Error response from daemon: failed to create shim task:
+# OCI runtime create failed: runc create failed: unable to start
+# container process: exec: "/app/start.sh": permission denied
+
+# Diagnosis: The entrypoint or command doesn't have execute permission
+
+# Fix: Check and fix permissions in the Dockerfile
+docker run --rm --entrypoint sh myapp:latest -c "ls -la /app/start.sh"
+# -rw-r--r-- 1 root root 256 Mar 01 10:00 /app/start.sh
+# Missing execute permission!
+
+# Temporary fix:
+docker run --rm --entrypoint sh myapp:latest -c "chmod +x /app/start.sh && /app/start.sh"
+
+# Permanent fix in Dockerfile:
+# RUN chmod +x /app/start.sh
+
+# Another common OCI error:
+docker run myapp:latest
+# exec format error
+
+# Diagnosis: Image built for a different architecture
+docker inspect myapp:latest --format '{{.Architecture}}'
+# arm64
+# But you're running on amd64!
+
+# Fix: Build for the correct platform or use multi-platform images
+docker build --platform linux/amd64 -t myapp:latest .
+```
+
+### Entrypoint and CMD Failures
+
+```bash
+# Symptom: Container starts and immediately exits with code 1
+docker ps -a
+# CONTAINER ID   IMAGE    STATUS                     NAMES
+# abc123         myapp    Exited (1) 2 seconds ago   myapp
+
+# Step 1: Check logs
+docker logs abc123
+# python: can't open file '/app/main.py': [Errno 2] No such file or directory
+
+# Diagnosis: The CMD references a file that doesn't exist in the image
+
+# Step 2: Investigate the image
+docker run --rm --entrypoint sh myapp:latest -c "ls -la /app/"
+# total 4
+# drwxr-xr-x 2 root root 4096 Mar 01 10:00 .
+# File is missing! Check the Dockerfile COPY instruction.
+
+# Step 3: Check the Dockerfile
+# Common mistake: COPY context wrong
+# Wrong: COPY main.py /app/     (if main.py is in src/)
+# Right: COPY src/main.py /app/
+
+# Another common issue: Shell form vs Exec form
+# Shell form (runs through /bin/sh):
+# CMD python main.py
+
+# Exec form (runs directly):
+# CMD ["python", "main.py"]
+
+# If the image doesn't have /bin/sh, shell form will fail:
+docker run --rm myapp:latest
+# /bin/sh: 1: python: not found
+# The Python binary might be at /usr/local/bin/python3
+# Fix: Use exec form with the full path
+# CMD ["/usr/local/bin/python3", "main.py"]
+```
+
+<Callout type="warning" title="Always Check the Exit Code">
+The container exit code tells you a lot:
+
+| Exit Code | Meaning | Common Causes |
+|-----------|---------|---------------|
+| 0 | Success | Container finished normally |
+| 1 | Application error | Unhandled exception, missing file, config error |
+| 126 | Permission denied | Entrypoint not executable |
+| 127 | Command not found | Entrypoint binary doesn't exist |
+| 128+N | Killed by signal N | 137 = OOM killed (SIGKILL=9), 143 = graceful stop (SIGTERM=15) |
+| 255 | Exit status out of range | Application passed invalid exit code |
+
+Check exit code: `docker inspect <container> --format '{{.State.ExitCode}}'`
+</Callout>
+
+## Container Keeps Restarting
+
+### Crash Loops
+
+```bash
+# Symptom: Container keeps restarting, status shows "Restarting (1) N seconds ago"
+docker ps
+# CONTAINER ID   IMAGE    STATUS                          NAMES
+# abc123         myapp    Restarting (1) 5 seconds ago    myapp
+
+# Step 1: Check restart count and timing
+docker inspect abc123 --format '{{.RestartCount}}'
+# 47
+
+docker inspect abc123 --format '{{.State.StartedAt}}'
+# 2026-03-01T02:47:15.123456Z
+
+# Step 2: Check logs from the latest crash
+docker logs abc123 --tail 30
+# Traceback (most recent call last):
+#   File "/app/main.py", line 45, in connect_db
+#     conn = psycopg2.connect(DATABASE_URL)
+# psycopg2.OperationalError: could not connect to server: Connection refused
+#     Is the server running on host "db" and accepting TCP/IP connections on port 5432?
+
+# Diagnosis: App crashes because the database isn't ready yet
+# Fix: Add retry logic and/or use depends_on with health checks
+
+# Step 3: To stop the restart loop and debug:
+docker update --restart=no abc123
+docker stop abc123
+
+# Now start it manually without restart policy:
+docker run --rm -it --entrypoint sh myapp:latest
+# Debug inside the container
+```
+
+### OOM (Out of Memory) Kills
+
+```bash
+# Symptom: Container dies with exit code 137
+docker inspect abc123 --format '{{.State.ExitCode}}'
+# 137
+
+docker inspect abc123 --format '{{.State.OOMKilled}}'
+# true
+
+# Step 1: Check the memory limit
+docker inspect abc123 --format '{{.HostConfig.Memory}}'
+# 268435456 (256 MB)
+
+# Step 2: Check what the container was actually using
+docker stats abc123 --no-stream --format "table {{.MemUsage}}\t{{.MemPerc}}"
+# MEM USAGE / LIMIT     MEM %
+# 254.3MiB / 256MiB     99.33%
+
+# Step 3: Check for memory leaks inside the container
+docker exec abc123 cat /sys/fs/cgroup/memory.current 2>/dev/null || \
+docker exec abc123 cat /sys/fs/cgroup/memory/memory.usage_in_bytes
+# 266338304
+
+# Diagnosis: Container is using more memory than its limit
+
+# Fix 1: Increase the memory limit
+docker update --memory=512m --memory-swap=512m abc123
+
+# Fix 2: In docker-compose.yml
+# services:
+#   myapp:
+#     deploy:
+#       resources:
+#         limits:
+#           memory: 512M
+
+# Fix 3: Fix the memory leak in the application
+# Common causes:
+# - Unbounded caches
+# - Connection pool leaks
+# - Large file processing without streaming
+# - Memory-hungry dependencies (e.g., pandas loading entire CSV into memory)
+
+# To see memory usage over time:
+docker stats abc123
+# Watch the MEM USAGE column — if it grows continuously, you have a leak
+```
+
+### Health Check Failures
+
+```bash
+# Symptom: Container status shows "(unhealthy)"
+docker ps
+# CONTAINER ID   IMAGE    STATUS                   NAMES
+# abc123         myapp    Up 5 min (unhealthy)     myapp
+
+# Step 1: Check health check configuration
+docker inspect abc123 --format '{{json .Config.Healthcheck}}' | jq .
+# {
+#   "Test": ["CMD", "curl", "-f", "http://localhost:8080/healthz"],
+#   "Interval": 15000000000,
+#   "Timeout": 5000000000,
+#   "Retries": 3,
+#   "StartPeriod": 10000000000
+# }
+
+# Step 2: Check health check log (last 5 results)
+docker inspect abc123 --format '{{json .State.Health}}' | jq '.Log[-5:]'
+# [
+#   {
+#     "Start": "2026-03-01T02:50:00.000Z",
+#     "End": "2026-03-01T02:50:05.001Z",
+#     "ExitCode": 7,
+#     "Output": "curl: (7) Failed to connect to localhost port 8080: Connection refused"
+#   },
+#   ...
+# ]
+
+# Step 3: Run the health check manually
+docker exec abc123 curl -f http://localhost:8080/healthz
+# curl: (7) Failed to connect to localhost port 8080: Connection refused
+
+# Diagnosis: The app isn't listening on port 8080
+
+# Check what ports are actually listening:
+docker exec abc123 ss -tlnp
+# State  Recv-Q Send-Q  Local Address:Port  Peer Address:Port Process
+# LISTEN 0      128     0.0.0.0:3000        0.0.0.0:*         python
+
+# Found it! App listens on 3000, health check tries 8080
+# Fix the health check or the app configuration
+
+# Common health check issues:
+# 1. curl not installed in the image (use wget or a custom health script)
+# 2. App takes too long to start (increase start_period)
+# 3. Health endpoint has dependencies that fail (make /healthz simple)
+# 4. Health check runs as root but app runs as non-root user
+```
+
+## Networking Issues
+
+### DNS Resolution Failures
+
+```bash
+# Symptom: Container can't find other containers by name
+docker exec myapp ping db
+# ping: bad address 'db'
+
+# Step 1: Check DNS configuration inside the container
+docker exec myapp cat /etc/resolv.conf
+# nameserver 127.0.0.11
+# options ndots:0
+# This is Docker's embedded DNS server — correct.
+
+# Step 2: Test DNS resolution
+docker exec myapp nslookup db
+# Server:    127.0.0.11
+# Address 1: 127.0.0.11
+# nslookup: can't resolve 'db'
+
+# Step 3: Check if both containers are on the same network
+docker network inspect myapp_default | jq '.Containers | to_entries[] | {name: .value.Name, ip: .value.IPv4Address}'
+# { "name": "myapp", "ip": "172.18.0.3/16" }
+# The 'db' container is NOT on this network!
+
+docker inspect db --format '{{json .NetworkSettings.Networks}}' | jq .
+# { "myapp_backend": { "IPAddress": "172.19.0.2" } }
+# The db container is on 'myapp_backend', not 'myapp_default'!
+
+# Fix: Connect both containers to the same network
+docker network connect myapp_backend myapp
+
+# Or fix in docker-compose.yml:
+# services:
+#   myapp:
+#     networks:
+#       - backend    <-- add this
+#   db:
+#     networks:
+#       - backend
+
+# Step 4: If DNS still fails, check Docker's DNS service
+docker run --rm --network myapp_default alpine nslookup db
+# If this works, the issue is inside your container
+# If this fails, Docker's DNS is broken — restart Docker daemon
+```
+
+### Port Conflicts
+
+```bash
+# Symptom: Container can't start because the port is in use
+docker run -p 8080:80 nginx
+# Error response from daemon: driver failed programming external connectivity:
+# Bind for 0.0.0.0:8080 failed: port is already allocated
+
+# Step 1: Find what's using the port
+sudo lsof -i :8080
+# COMMAND    PID   USER   FD   TYPE DEVICE  NODE NAME
+# docker-pr  1234  root   4u   IPv4 123456  TCP  *:8080 (LISTEN)
+
+# It's another Docker container!
+docker ps --format "table {{.Names}}\t{{.Ports}}" | grep 8080
+# old-nginx   0.0.0.0:8080->80/tcp
+
+# Fix: Stop the old container or use a different port
+docker stop old-nginx
+# Or:
+docker run -p 8081:80 nginx
+
+# Step 2: If lsof shows a non-Docker process:
+sudo lsof -i :8080
+# COMMAND  PID    USER   FD   TYPE DEVICE NODE NAME
+# apache2  5678   root   4u   IPv4 99999  TCP  *:8080 (LISTEN)
+
+# Fix: Stop Apache or change Docker's port mapping
+sudo systemctl stop apache2
+```
+
+### MTU Problems
+
+```bash
+# Symptom: Large HTTP responses fail, small ones work
+# Connection hangs after headers are sent
+# Packets get fragmented and dropped
+
+# Step 1: Check MTU on Docker networks
+docker network inspect bridge --format '{{json .Options}}'
+# {"com.docker.network.bridge.default_bridge":"true","com.docker.network.driver.mtu":"1500"}
+
+# Step 2: Check if the host has a lower MTU (common with VPNs, AWS, etc.)
+ip link show eth0 | grep mtu
+# 3: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9001 ...
+
+# On some cloud providers, the default MTU is different
+# AWS: 9001 (jumbo frames in VPC)
+# GCP: 1460
+# VPN tunnels: often 1400 or lower
+
+# Step 3: Check if packets are being dropped due to MTU
+docker exec myapp ping -s 1472 -M do db
+# PING db (172.18.0.2): 1472 data bytes
+# ping: sendmsg: Message too long
+
+# Reduce packet size until it works:
+docker exec myapp ping -s 1400 -M do db
+# 1408 bytes from 172.18.0.2: seq=0 ttl=64 time=0.123 ms
+
+# Fix: Set the Docker network MTU to match your infrastructure
+docker network create --opt com.docker.network.driver.mtu=1400 mynetwork
+
+# Or in daemon.json:
+# {
+#   "mtu": 1400
+# }
+
+# Or in docker-compose.yml:
+# networks:
+#   backend:
+#     driver_opts:
+#       com.docker.network.driver.mtu: 1400
+```
+
+<Callout type="info" title="Docker Networking Debug Toolkit">
+```bash
+# Install networking tools inside a container for debugging
+docker exec -it myapp sh -c "apk add --no-cache curl bind-tools iputils net-tools"
+
+# Or use a dedicated debug container on the same network
+docker run --rm -it --network myapp_backend nicolaka/netshoot
+
+# netshoot includes: curl, dig, nslookup, ping, traceroute, tcpdump,
+# nmap, iperf, ss, ip, iftop, drill, mtr, and more
+```
+</Callout>
+
+## Storage Issues
+
+### Volume Mount Permission Errors
+
+```bash
+# Symptom: App can't write to its volume
+docker logs myapp
+# PermissionError: [Errno 13] Permission denied: '/data/uploads/image.jpg'
+
+# Step 1: Check the mount and its permissions
+docker exec myapp ls -la /data/
+# drwxr-xr-x 2 root root 4096 Mar 01 10:00 uploads
+
+# Step 2: Check what user the app runs as
+docker exec myapp id
+# uid=1000(appuser) gid=1000(appuser) groups=1000(appuser)
+
+# The volume directory is owned by root, but the app runs as appuser!
+
+# Fix 1: Change ownership in an entrypoint script
+# entrypoint.sh:
+# #!/bin/sh
+# chown -R appuser:appuser /data
+# exec su-exec appuser "$@"
+
+# Fix 2: Use a named volume with correct permissions in the Dockerfile
+# RUN mkdir -p /data/uploads && chown -R appuser:appuser /data
+
+# Fix 3: Set the user in the Docker run command to match the host
+docker run -u "$(id -u):$(id -g)" -v /host/data:/data myapp:latest
+
+# Fix 4: For bind mounts, fix the host directory permissions
+sudo chown -R 1000:1000 /host/data
+```
+
+### Disk Full
+
+```bash
+# Symptom: Containers can't write, builds fail, pulls fail
+docker run alpine echo hello
+# Error response from daemon: failed to create shim task:
+# OCI runtime create failed: ... no space left on device
+
+# Step 1: Check Docker disk usage
+docker system df
+# TYPE           TOTAL    ACTIVE   SIZE      RECLAIMABLE
+# Images         47       12       8.234GB   5.891GB (71%)
+# Containers     23       8        1.456GB   987.6MB (67%)
+# Local Volumes  15       8        12.34GB   4.567GB (37%)
+# Build Cache    0        0        3.456GB   3.456GB (100%)
+
+# Step 2: Check detailed usage
+docker system df -v | head -30
+
+# Step 3: Clean up (in order of safety)
+# Remove stopped containers
+docker container prune -f
+
+# Remove dangling images (untagged)
+docker image prune -f
+
+# Remove unused volumes (careful — data loss!)
+docker volume prune -f
+
+# Remove build cache
+docker builder prune -f
+
+# Nuclear option: remove everything not currently in use
+docker system prune -a --volumes -f
+# WARNING: This removes ALL stopped containers, ALL unused images,
+# ALL unused volumes, and ALL build cache
+
+# Step 4: Check the Docker storage location
+docker info | grep "Docker Root Dir"
+# Docker Root Dir: /var/lib/docker
+
+df -h /var/lib/docker
+# Filesystem      Size  Used Avail Use% Mounted on
+# /dev/sda1       50G   48G  2.0G  96% /
+
+# If /var/lib/docker is full, consider:
+# 1. Moving Docker's storage directory to a larger disk
+# 2. Setting up log rotation (see below)
+# 3. Implementing automated cleanup policies
+```
+
+### Log File Sizes
+
+```bash
+# Docker container logs can grow without bound
+
+# Check log file size for a container
+docker inspect abc123 --format '{{.LogPath}}'
+# /var/lib/docker/containers/abc123.../abc123...-json.log
+
+ls -lh /var/lib/docker/containers/abc123*/abc123*-json.log
+# -rw-r----- 1 root root 4.7G Mar 01 02:00 abc123...-json.log
+# 4.7 GB of logs from one container!
+
+# Fix: Configure log rotation in daemon.json
+# /etc/docker/daemon.json
+# {
+#   "log-driver": "json-file",
+#   "log-opts": {
+#     "max-size": "50m",
+#     "max-file": "3"
+#   }
+# }
+
+# Or per container in docker-compose.yml:
+# services:
+#   myapp:
+#     logging:
+#       driver: json-file
+#       options:
+#         max-size: "50m"
+#         max-file: "3"
+
+# Restart Docker daemon after changing daemon.json
+sudo systemctl restart docker
+```
+
+<Callout type="warning" title="docker system prune --volumes Destroys Data">
+`docker volume prune` removes volumes not attached to any running container. If you have stopped a database container but plan to start it again, its volume will be deleted. Always list volumes first with `docker volume ls` and identify which volumes contain important data before pruning.
+</Callout>
+
+## Performance Degradation
+
+### CPU Throttling
+
+```bash
+# Symptom: Application is slow despite low host CPU usage
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}"
+# NAME        CPU %    MEM %
+# api         189.45%  45.23%
+# worker      98.76%   12.34%
+
+# Step 1: Check CPU limits
+docker inspect api --format '{{.HostConfig.CpuQuota}} / {{.HostConfig.CpuPeriod}}'
+# 200000 / 100000
+# This means 2 CPU cores max
+
+# Step 2: Check if the container is being throttled
+# Read throttling stats from cgroup
+docker exec api cat /sys/fs/cgroup/cpu.stat 2>/dev/null || \
+docker exec api cat /sys/fs/cgroup/cpu/cpu.stat
+# usage_usec 1234567890
+# user_usec 1000000000
+# system_usec 234567890
+# nr_periods 50000
+# nr_throttled 12345        <-- Container was throttled 12,345 times!
+# throttled_usec 67890000   <-- Total throttled time: 67.89 seconds
+
+# If nr_throttled is high, the container needs more CPU or the app needs optimization
+
+# Fix: Increase CPU limit
+docker update --cpus=4 api
+
+# Or set CPU shares for relative priority (default: 1024)
+docker update --cpu-shares=2048 api   # Double the default priority
+```
+
+### Memory Pressure
+
+```bash
+# Symptom: Container is slow, high swap usage
+docker stats --no-stream api
+# NAME  CPU %  MEM USAGE / LIMIT   MEM %   NET I/O    BLOCK I/O
+# api   45%    480MiB / 512MiB     93.75%  1.2GB/800MB 500MB/2GB
+
+# 93% memory usage — approaching the limit
+
+# Step 1: Check if the container is swapping
+docker exec api cat /sys/fs/cgroup/memory.stat 2>/dev/null | grep -E "^(file|anon|swap)"
+# anon 503316480
+# file 8388608
+# swap 134217728    <-- 128 MB of swap! This causes slowness.
+
+# Step 2: Profile memory usage inside the container
+docker exec api ps aux --sort=-%mem | head -5
+# USER  PID  %CPU %MEM    VSZ    RSS  COMMAND
+# app     1  12.3 85.2  2345678  436789 python main.py
+# app    45   2.1  5.3   345678   27234 celery worker
+
+# Step 3: Check for common memory issues
+# Python: object count
+docker exec api python3 -c "
+import gc
+gc.collect()
+print(f'Objects: {len(gc.get_objects())}')
+print(f'Garbage: {len(gc.garbage)}')
+"
+
+# Fix: Increase memory limit or fix the application
+docker update --memory=1g --memory-swap=1g api
+```
+
+### Noisy Neighbors
+
+```bash
+# Symptom: Container is slow but has no resource limits being hit
+# Another container on the same host is consuming too many resources
+
+# Step 1: Check all containers' resource usage
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.BlockIO}}"
+# NAME        CPU %     MEM USAGE / LIMIT     BLOCK I/O
+# api         5.23%     120MiB / 512MiB        10MB / 5MB
+# worker      245.67%   3.8GiB / No limit      50GB / 30GB    <-- NOISY NEIGHBOR!
+# db          12.34%    256MiB / 1GiB          1GB / 500MB
+
+# The worker container has no memory limit and is using 245% CPU and 3.8 GB RAM!
+
+# Fix: Set resource limits on the noisy neighbor
+docker update --cpus=2 --memory=1g worker
+
+# Prevention: Always set resource limits on all production containers
+# docker-compose.yml:
+# services:
+#   worker:
+#     deploy:
+#       resources:
+#         limits:
+#           cpus: '2.0'
+#           memory: 1G
+#         reservations:
+#           cpus: '0.5'
+#           memory: 256M
+```
+
+## Docker Daemon Issues
+
+### Storage Driver Problems
+
+```bash
+# Symptom: Docker commands are slow, builds fail with I/O errors
+
+# Step 1: Check the storage driver
+docker info | grep "Storage Driver"
+# Storage Driver: overlay2
+
+# Step 2: Check for filesystem issues
+docker info | grep -A5 "Storage Driver"
+# Storage Driver: overlay2
+#  Backing Filesystem: xfs
+#  Supports d_type: true       <-- Must be true for overlay2!
+
+# If d_type is false, overlay2 will have problems
+# Fix: Reformat the filesystem with d_type support or switch storage drivers
+
+# Step 3: Check for corruption
+# Stop Docker and run a filesystem check
+sudo systemctl stop docker
+sudo xfs_repair /dev/sda1    # or fsck for ext4
+sudo systemctl start docker
+
+# Step 4: Check Docker directory size and inode usage
+du -sh /var/lib/docker/
+df -i /var/lib/docker/
+# If inode usage is 100%, you've run out of inodes (too many small files)
+# This is common with many layers and containers
+```
+
+### Daemon Crashes
+
+```bash
+# Symptom: Docker daemon is not running
+
+# Step 1: Check daemon status
+sudo systemctl status docker
+# ● docker.service - Docker Application Container Engine
+#    Active: failed (Result: exit-code) since ...
+
+# Step 2: Check daemon logs
+sudo journalctl -u docker --since "30 minutes ago" --no-pager | tail -50
+# level=error msg="failed to start daemon: ... no such file or directory"
+
+# Common causes and fixes:
+
+# Cause 1: Corrupted daemon.json
+sudo cat /etc/docker/daemon.json | python3 -m json.tool
+# If this fails, there's a JSON syntax error
+# Fix: correct the JSON syntax
+
+# Cause 2: Disk full
+df -h /var/lib/docker
+# Fix: free up space (see Disk Full section above)
+
+# Cause 3: Incompatible storage driver change
+# Fix: either revert the storage driver or remove /var/lib/docker (destroys ALL data)
+
+# Cause 4: Permission issues after OS update
+sudo ls -la /var/run/docker.sock
+# Fix:
+sudo systemctl restart docker
+
+# Step 3: Start daemon in debug mode for more info
+sudo dockerd --debug
+# This runs Docker in the foreground with verbose logging
+```
+
+## Real-World Case Studies
+
+### Case Study 1: The Mystery of the Vanishing Database
+
+```
+Scenario:
+- PostgreSQL container running for 6 months
+- One morning: "FATAL: could not open relation mapping file"
+- Database appears empty — all data gone
+
+Investigation:
+$ docker inspect db --format '{{json .Mounts}}' | jq .
+[
+  {
+    "Type": "volume",
+    "Name": "a1b2c3d4e5f6...",      <-- Anonymous volume!
+    "Source": "/var/lib/docker/volumes/a1b2c3d4e5f6.../_data",
+    "Destination": "/var/lib/postgresql/data"
+  }
+]
+
+# Problem: The compose file was recreated and the anonymous volume
+# was not reattached. Docker created a new empty volume.
+
+Root Cause:
+  The docker-compose.yml used an anonymous volume:
+    volumes:
+      - /var/lib/postgresql/data     # Anonymous — no name!
+
+  When `docker compose down` was run (without -v), the volume
+  persisted. But `docker compose up` created a new anonymous volume.
+
+Fix:
+  Always use named volumes:
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  volumes:
+    db-data:          # Named volume — persists across recreations
+
+Recovery:
+  The old data was still in the orphaned anonymous volume.
+  $ docker volume ls | grep -v "VOLUME"
+  local     a1b2c3d4e5f6...    <-- Old data here
+  local     b2c3d4e5f6a1...    <-- New empty volume
+
+  $ docker run --rm -v a1b2c3d4e5f6...:/old-data -v db-data:/new-data alpine \
+      sh -c "cp -a /old-data/* /new-data/"
+```
+
+### Case Study 2: The Container That Worked on Tuesday
+
+```
+Scenario:
+- Node.js API container runs perfectly in dev and staging
+- In production, it crashes every 4 hours with exit code 137 (OOM)
+- Same image, same environment variables
+
+Investigation:
+$ docker inspect api --format '{{.HostConfig.Memory}}'
+268435456  # 256 MB limit
+
+$ docker stats api --no-stream
+NAME  CPU %  MEM USAGE / LIMIT  MEM %
+api   23%    245MiB / 256MiB    95.7%
+
+# Memory is at 95% and climbing!
+# Check the Node.js heap:
+$ docker exec api node -e "console.log(process.memoryUsage())"
+{
+  rss: 257949696,
+  heapTotal: 231735296,
+  heapUsed: 198234567,
+  external: 12345678
+}
+
+Root Cause:
+  Node.js defaults to using up to ~1.5 GB of heap memory. In dev
+  (no memory limit), it was fine. In production, with a 256 MB
+  limit, it hit the ceiling every few hours as connections piled up.
+
+  Additionally, the app had a memory leak: it cached user sessions
+  in an in-memory Map that was never cleaned up.
+
+Fix:
+  1. Set Node.js heap limit to match the container:
+     CMD ["node", "--max-old-space-size=200", "server.js"]
+
+  2. Fixed the session cache to use Redis instead of in-memory Map
+
+  3. Increased container memory limit:
+     deploy:
+       resources:
+         limits:
+           memory: 512M
+```
+
+### Case Study 3: The DNS Timeout Disaster
+
+```
+Scenario:
+- Microservice architecture with 8 services
+- Random 5-second delays on inter-service HTTP calls
+- Only happens ~10% of the time
+
+Investigation:
+$ docker exec api curl -w "time_namelookup: %{time_namelookup}\n
+time_connect: %{time_connect}\ntime_total: %{time_total}\n" \
+  -o /dev/null -s http://auth-service:8080/verify
+
+# Fast response:
+# time_namelookup: 0.002
+# time_connect: 0.003
+# time_total: 0.045
+
+# Slow response (10% of the time):
+# time_namelookup: 5.002     <-- 5 SECONDS for DNS!
+# time_connect: 5.003
+# time_total: 5.048
+
+Root Cause:
+  Docker's embedded DNS server (127.0.0.11) was receiving both
+  A (IPv4) and AAAA (IPv6) queries. IPv6 was not configured,
+  so AAAA queries timed out after 5 seconds.
+
+  The musl libc in Alpine containers sends both queries in
+  parallel, but due to a bug in certain versions, sometimes
+  waits for the AAAA response before using the A response.
+
+Fix:
+  Option 1: Disable IPv6 DNS lookups in the container
+    echo 'options single-request' >> /etc/resolv.conf
+
+  Option 2: Switch from Alpine to Debian-based images
+    FROM python:3.12-slim    # Uses glibc, not musl
+
+  Option 3: Configure ndots in the Docker daemon
+    {
+      "dns-opts": ["single-request-reopen", "ndots:0"]
+    }
+```
+
+### Case Study 4: The Build That Ate the Disk
+
+```
+Scenario:
+- CI/CD server running Docker builds
+- Builds started failing with "no space left on device"
+- 500 GB disk was 100% full
+
+Investigation:
+$ docker system df
+TYPE           TOTAL    ACTIVE   SIZE       RECLAIMABLE
+Images         234      12       45.67GB    38.23GB (83%)
+Containers     567      5        23.45GB    22.89GB (97%)
+Build Cache    0        0        189.34GB   189.34GB (100%)
+
+# 189 GB of build cache!
+
+$ docker system df -v | grep "Build cache" | sort -k4 -h -r | head -10
+# Hundreds of build cache entries, some months old
+
+Root Cause:
+  BuildKit caches every build layer indefinitely. With hundreds
+  of builds per day and no cleanup policy, the cache grew to
+  consume the entire disk.
+
+Fix:
+  1. Immediate: Clear the build cache
+     $ docker builder prune --all -f
+
+  2. Set a cache size limit in daemon.json:
+     {
+       "builder": {
+         "gc": {
+           "enabled": true,
+           "defaultKeepStorage": "20GB",
+           "policy": [
+             {"keepStorage": "20GB", "all": true}
+           ]
+         }
+       }
+     }
+
+  3. Add cleanup to the CI/CD pipeline:
+     # After each build:
+     docker builder prune --keep-storage 20GB -f
+     docker image prune --filter "until=168h" -f
+```
+
+### Case Study 5: The Firewall That Blocked Docker
+
+```
+Scenario:
+- Containers can't reach the internet after a firewall update
+- docker pull times out
+- Containers can talk to each other but not to external services
+
+Investigation:
+$ docker run --rm alpine ping -c 3 8.8.8.8
+# PING 8.8.8.8 (8.8.8.8): 56 data bytes
+# --- 8.8.8.8 ping statistics ---
+# 3 packets transmitted, 0 packets received, 100% packet loss
+
+$ iptables -L DOCKER-USER -n
+# Chain DOCKER-USER (1 references)
+# target  prot opt source     destination
+# DROP    all  --  0.0.0.0/0  0.0.0.0/0       <-- DROPS EVERYTHING!
+
+Root Cause:
+  A firewall hardening script added a DROP rule to the
+  DOCKER-USER chain without understanding that Docker routes
+  container traffic through iptables. The rule blocked all
+  container-to-external traffic.
+
+Fix:
+  # Allow established connections and container-to-internet traffic
+  $ iptables -I DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  $ iptables -I DOCKER-USER -i docker0 -j ACCEPT
+  $ iptables -I DOCKER-USER -i br-+ -j ACCEPT
+
+  # Save the rules
+  $ iptables-save > /etc/iptables/rules.v4
+
+  # Important: NEVER flush Docker's iptables rules
+  # Docker recreates them on restart, but running containers
+  # will lose connectivity until Docker is restarted
+```
+
+<Callout type="tip" title="Build Your Own Debugging Toolkit">
+Create a debugging compose file that you can deploy alongside any stack:
+
+```yaml
+# docker-compose.debug.yml
+services:
+  netshoot:
+    image: nicolaka/netshoot
+    command: sleep infinity
+    networks:
+      - frontend
+      - backend
+    # Use: docker compose -f docker-compose.debug.yml exec netshoot bash
+
+  busybox:
+    image: busybox:latest
+    command: sleep infinity
+    volumes:
+      - /var/lib/docker:/docker-data:ro
+    pid: host
+    # Use for inspecting host processes and Docker data
+```
+</Callout>
+
+<Exercise
+  title="Diagnose a Complex Multi-Container Failure"
+  difficulty="advanced"
+  xpReward={40}
+  estimatedMinutes={30}
+  objectives={[
+    "Apply the systematic debugging methodology to a failing stack",
+    "Identify multiple simultaneous issues across containers",
+    "Use docker logs, inspect, exec, and stats to gather evidence",
+    "Fix all issues and restore the stack to healthy operation"
+  ]}
+  hints={[
+    "Start with docker ps -a and docker compose ps to see the current state",
+    "Check exit codes to understand why containers stopped",
+    "Use docker logs --tail 50 on each failing container",
+    "Check network connectivity between containers with docker exec"
+  ]}
+  validationCriteria={`
+Create a deliberately broken stack and fix it:
+
+1. \`docker-compose.broken.yml\` — A stack with multiple issues:
+\`\`\`yaml
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+    networks:
+      - frontend
+
+  api:
+    image: python:3.12-slim
+    command: python /app/server.py
+    environment:
+      DATABASE_URL: postgres://app:secret@db:5432/mydb
+    volumes:
+      - ./app:/app
+    networks:
+      - frontend
+      # BUG: Missing backend network — can't reach db!
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: wrong_password    # BUG: Wrong password!
+      POSTGRES_DB: mydb
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    # BUG: No health check — api starts before db is ready
+
+volumes:
+  db-data:
+
+networks:
+  frontend:
+  backend:
+    internal: true
+\`\`\`
+
+2. Debug checklist:
+\`\`\`bash
+# Step 1: Observe
+docker compose -f docker-compose.broken.yml ps -a
+
+# Step 2: Check logs for each failing container
+docker compose -f docker-compose.broken.yml logs api
+docker compose -f docker-compose.broken.yml logs db
+docker compose -f docker-compose.broken.yml logs web
+
+# Step 3: Identify issues
+# Issue 1: API can't connect to DB (wrong network)
+# Issue 2: DB password mismatch
+# Issue 3: No health check on DB
+\`\`\`
+
+3. \`docker-compose.fixed.yml\` — The corrected version with all issues resolved
+
+Verify:
+1. \`docker compose -f docker-compose.fixed.yml up -d\`
+2. All containers healthy
+3. \`curl http://localhost\` returns a response
+  `}
+/>
+
+<Exercise
+  title="Fix a Production Outage"
+  difficulty="advanced"
+  xpReward={45}
+  estimatedMinutes={30}
+  objectives={[
+    "Diagnose a multi-symptom production outage under time pressure",
+    "Prioritize which issues to fix first based on impact",
+    "Apply temporary fixes to restore service quickly",
+    "Document root cause and permanent fixes for post-mortem"
+  ]}
+  hints={[
+    "Triage: fix the customer-facing issue first, investigate root cause second",
+    "Check if the issue is OOM, disk space, or networking before diving into application logs",
+    "Use docker stats to quickly identify resource-constrained containers",
+    "Create a runbook document that captures your debugging steps for the team"
+  ]}
+  validationCriteria={`
+Create an outage simulation and response:
+
+1. \`simulate-outage.sh\` — Script that creates a realistic outage:
+\`\`\`bash
+#!/bin/bash
+echo "Simulating production outage..."
+
+# Create a stack
+docker compose -f docker-compose.prod.yml up -d
+
+# Wait for everything to be healthy
+sleep 10
+
+# Simulate OOM on the API
+docker update --memory=32m api-container
+
+# Simulate disk pressure (fill a volume)
+docker exec db-container sh -c "dd if=/dev/zero of=/var/lib/postgresql/data/bloat bs=1M count=100"
+
+# Simulate DNS issues (disconnect from network)
+docker network disconnect prod_backend api-container
+
+echo "Outage simulated! Systems are degraded."
+echo "Your job: restore service within 10 minutes."
+\`\`\`
+
+2. \`incident-response.md\` — Document your response:
+\`\`\`markdown
+# Incident Response: Production Outage
+
+## Timeline
+- T+0: Alert received
+- T+1: docker ps -a shows api restarting, db running
+- T+2: docker stats shows api at 32MB limit (OOM)
+- T+3: Fixed API memory limit: docker update --memory=512m api
+- T+5: API still failing — checked logs, can't reach db
+- T+6: docker network inspect — api not on backend network
+- T+7: Reconnected: docker network connect prod_backend api
+- T+8: API connecting but db errors — disk full on db volume
+- T+9: Removed bloat file, restarted db
+- T+10: All services healthy
+
+## Root Causes
+1. API memory limit was reduced to 32MB (cause: TBD)
+2. API disconnected from backend network
+3. DB volume filled with unexpected data
+
+## Action Items
+- [ ] Set up memory limit alerts
+- [ ] Add network connectivity monitoring
+- [ ] Implement disk usage alerts on volumes
+\`\`\`
+  `}
+/>
+
+<MiniProject
+  title="Docker Troubleshooting Toolkit"
+  difficulty="advanced"
+  xpReward={75}
+  estimatedMinutes={45}
+  objectives={[
+    "Build an automated health checking script that runs all diagnostic checks",
+    "Create a log analysis tool that identifies common error patterns",
+    "Implement an incident simulation framework for team training",
+    "Generate diagnostic reports that capture system state for post-mortems"
+  ]}
+  hints={[
+    "Use docker inspect, stats, and logs commands to gather diagnostic data",
+    "Parse container logs for common error patterns like OOM, connection refused, timeout",
+    "Store diagnostic output in a timestamped directory for post-mortem analysis",
+    "Include network, storage, and resource checks in the health check script"
+  ]}
+  validationCriteria={`
+Create a \`docker-toolkit/\` directory:
+
+1. \`diagnose.sh\` — Comprehensive diagnostic script:
+\`\`\`bash
+#!/bin/bash
+set -euo pipefail
+
+REPORT_DIR="./diagnostics/\$(date +%Y%m%d-%H%M%S)"
+mkdir -p \${REPORT_DIR}
+
+echo "=== Docker Diagnostics ==="
+echo "Report directory: \${REPORT_DIR}"
+
+# System info
+echo "[1/6] System information..."
+docker version > \${REPORT_DIR}/docker-version.txt
+docker info > \${REPORT_DIR}/docker-info.txt
+docker system df -v > \${REPORT_DIR}/disk-usage.txt
+
+# Container status
+echo "[2/6] Container status..."
+docker ps -a --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}" > \${REPORT_DIR}/containers.txt
+
+# Resource usage
+echo "[3/6] Resource usage..."
+docker stats --no-stream --format "table {{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}\\t{{.BlockIO}}" > \${REPORT_DIR}/stats.txt
+
+# Logs from failing containers
+echo "[4/6] Collecting logs from unhealthy containers..."
+for container in \$(docker ps -a --filter "status=exited" --filter "status=restarting" -q); do
+  name=\$(docker inspect --format '{{.Name}}' \$container | sed 's/^\\///')
+  docker logs \$container --tail 100 > \${REPORT_DIR}/logs-\${name}.txt 2>&1
+done
+
+# Network diagnostics
+echo "[5/6] Network diagnostics..."
+docker network ls > \${REPORT_DIR}/networks.txt
+for net in \$(docker network ls -q); do
+  docker network inspect \$net > \${REPORT_DIR}/network-\$(docker network inspect \$net --format '{{.Name}}').json 2>/dev/null
+done
+
+# Volume diagnostics
+echo "[6/6] Volume diagnostics..."
+docker volume ls > \${REPORT_DIR}/volumes.txt
+
+echo ""
+echo "Diagnostics complete: \${REPORT_DIR}"
+echo "Contents:"
+ls -la \${REPORT_DIR}/
+\`\`\`
+
+2. \`health-check.sh\` — Quick health summary:
+\`\`\`bash
+#!/bin/bash
+echo "=== Docker Health Check ==="
+
+# Check daemon
+if ! docker info > /dev/null 2>&1; then
+  echo "CRITICAL: Docker daemon is not running!"
+  exit 1
+fi
+
+# Check disk space
+DISK_USAGE=\$(df /var/lib/docker --output=pcent | tail -1 | tr -d ' %')
+if [ \${DISK_USAGE} -gt 90 ]; then
+  echo "WARNING: Docker disk usage at \${DISK_USAGE}%"
+fi
+
+# Check containers
+RESTARTING=\$(docker ps --filter "status=restarting" -q | wc -l)
+UNHEALTHY=\$(docker ps --filter "health=unhealthy" -q | wc -l)
+EXITED=\$(docker ps --filter "status=exited" -q | wc -l)
+
+echo "Containers: \$(docker ps -q | wc -l) running, \${RESTARTING} restarting, \${UNHEALTHY} unhealthy, \${EXITED} exited"
+
+if [ \${RESTARTING} -gt 0 ]; then
+  echo "CRITICAL: \${RESTARTING} containers are crash-looping"
+  docker ps --filter "status=restarting" --format "  - {{.Names}}: {{.Status}}"
+fi
+
+if [ \${UNHEALTHY} -gt 0 ]; then
+  echo "WARNING: \${UNHEALTHY} containers are unhealthy"
+  docker ps --filter "health=unhealthy" --format "  - {{.Names}}: {{.Status}}"
+fi
+\`\`\`
+
+Test:
+1. \`./health-check.sh\` — quick status check
+2. \`./diagnose.sh\` — full diagnostic report
+3. Check the generated report directory for complete system state
+  `}
+/>
+
+## Key Takeaways
+
+- **Follow the methodology**: Observe, Logs, Inspect, Exec, Network, Storage, Host — in that order, every time
+- **Exit codes tell the story**: 137 is OOM, 143 is graceful stop, 1 is application error, 127 is command not found
+- **Container won't start** — check image existence, platform architecture, entrypoint permissions, and file paths
+- **Crash loops** — check logs for the root cause, disable restart policy to debug, look for OOM and dependency failures
+- **Networking issues** — verify containers share a network, check DNS with nslookup, watch for MTU mismatches on cloud infrastructure
+- **Storage issues** — always use named volumes, set log rotation, monitor disk usage, never blindly prune volumes
+- **Performance problems** — check for CPU throttling via cgroup stats, memory pressure via swap usage, and noisy neighbors via docker stats
+- **Docker daemon problems** — check journalctl logs, validate daemon.json syntax, verify filesystem health
+- **Build your toolkit** — have diagnostic scripts ready before incidents happen, not during them
+
+## What's Next
+
+In the final lesson of Docker Advanced, you will explore **Beyond Docker: The Container Ecosystem**. You will learn about OCI standards, alternative runtimes like containerd and gVisor, Podman as a Docker replacement, security tools, service meshes, serverless containers, and the path forward to Kubernetes. This lesson ties together everything you have learned and shows where the container ecosystem is heading.

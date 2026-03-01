@@ -1,0 +1,1089 @@
+---
+title: "Storage Drivers and Advanced Volumes"
+description: "Master Docker storage internals from overlay2 and ZFS storage drivers to NFS volume plugins, tmpfs optimization, copy-on-write performance, and storage benchmarking with fio to make informed decisions for stateful containerized workloads."
+order: 4
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - "docker-fundamentals/10-docker-volumes"
+  - "foundations/linux/16-storage-and-mounting"
+objectives:
+  - Compare storage drivers (overlay2, devicemapper, btrfs, zfs) and select the right one for your workload
+  - Configure volume plugins for NFS, Ceph, and GlusterFS shared storage
+  - Optimize tmpfs mounts for high-performance I/O operations
+  - Understand copy-on-write mechanics and their performance implications
+  - Benchmark container storage performance using fio
+  - Design shared storage patterns for stateful applications
+tags:
+  - docker
+  - storage
+  - volumes
+  - overlay2
+  - zfs
+  - performance
+  - advanced
+---
+
+<Callout type="story" title="The Story">
+Your company's data engineering team containerized their ETL pipeline last month. It worked beautifully in development. Then they ran it in production with a 50 GB dataset and the container nearly ground to a halt. The pipeline that processed data in 20 minutes on bare metal was taking 3 hours in Docker. After profiling, you discover the problem: the storage driver. The team was writing temporary files inside the container's writable layer, which uses copy-on-write. Every write to a file that existed in a lower layer triggered a full file copy. After switching temporary data to a tmpfs mount and persistent data to named volumes with an appropriate storage driver, the pipeline ran in 18 minutes -- faster than bare metal because tmpfs operates entirely in RAM. This lesson is about understanding where Docker stores data, why it matters, and how to make the right storage choices.
+</Callout>
+
+## How Docker Stores Data: The Storage Stack
+
+Docker separates storage into three tiers, each with different performance characteristics and persistence guarantees.
+
+```
+Docker Storage Tiers:
+
+┌─────────────────────────────────────────────────────────────┐
+│                    Container                                │
+│                                                             │
+│  Tier 1: Container Writable Layer (ephemeral)               │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ Thin read-write layer managed by storage driver        │  │
+│  │ Destroyed when container is removed                    │  │
+│  │ Copy-on-Write (CoW) -- slow for write-heavy workloads  │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                             │
+│  Tier 2: Volumes (persistent, host-managed)                 │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ Named volumes: /var/lib/docker/volumes/mydata/_data    │  │
+│  │ Bind mounts: any host directory                        │  │
+│  │ Bypasses storage driver -- direct filesystem access    │  │
+│  │ Survives container removal                             │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                             │
+│  Tier 3: tmpfs (in-memory, ephemeral, fastest)              │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ RAM-backed filesystem                                  │  │
+│  │ Never written to disk                                  │  │
+│  │ Lost when container stops                              │  │
+│  │ No storage driver overhead -- pure memory speed        │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+Performance ranking:  tmpfs >> volumes > writable layer
+Persistence ranking: volumes > writable layer > tmpfs
+```
+
+## Storage Driver Comparison
+
+The storage driver controls how image layers and the container writable layer are managed on disk.
+
+### How Storage Drivers Work
+
+```
+Image layers and Copy-on-Write:
+
+┌──────────────────────────────────────────┐
+│ Container Writable Layer (thin)          │  ← Storage driver manages this
+│ Modifications: /app/data.txt (modified)  │
+├──────────────────────────────────────────┤
+│ Image Layer 3 (read-only)                │  ← Storage driver manages this
+│ RUN npm run build                        │
+├──────────────────────────────────────────┤
+│ Image Layer 2 (read-only)                │
+│ RUN npm install                          │
+├──────────────────────────────────────────┤
+│ Image Layer 1 (read-only)                │
+│ FROM node:18-alpine                      │
+└──────────────────────────────────────────┘
+
+When a container reads /app/data.txt:
+  1. Search top layer → found (modified version) → return it
+  2. If not found, search Layer 3 → Layer 2 → Layer 1
+
+When a container writes to /app/data.txt (exists in Layer 2):
+  1. Copy entire file from Layer 2 to writable layer (CoW)
+  2. Modify the copy in the writable layer
+  3. Future reads find the copy in the writable layer
+  4. Original in Layer 2 is untouched
+```
+
+### overlay2 (Default and Recommended)
+
+overlay2 is the default storage driver on modern Linux systems. It uses the OverlayFS filesystem built into the Linux kernel.
+
+```bash
+# Check your current storage driver
+docker info | grep "Storage Driver"
+# Storage Driver: overlay2
+
+# Inspect overlay2 layer details for a container
+docker inspect mycontainer --format '{{.GraphDriver.Data}}'
+# map[LowerDir:/var/lib/docker/overlay2/abc.../diff:...
+#     MergedDir:/var/lib/docker/overlay2/xyz.../merged
+#     UpperDir:/var/lib/docker/overlay2/xyz.../diff
+#     WorkDir:/var/lib/docker/overlay2/xyz.../work]
+```
+
+```
+overlay2 Architecture:
+
+┌──────────────────────────────────────────────┐
+│           Merged View (container sees this)  │
+│           /var/lib/docker/overlay2/.../merged │
+│                                              │
+│  Combines all layers into a unified view     │
+│  using OverlayFS kernel module               │
+└──────────────┬───────────────────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───┴──────────────┐  ┌───┴──────────────────────┐
+│ Upper Directory  │  │ Lower Directories         │
+│ (writable layer) │  │ (read-only image layers)  │
+│                  │  │                           │
+│ Container writes │  │ Layer 3 → Layer 2 → L1    │
+│ go here          │  │ Stacked with OverlayFS    │
+└──────────────────┘  └───────────────────────────┘
+```
+
+```bash
+# View the actual layer files on disk
+ls /var/lib/docker/overlay2/
+# a1b2c3d4e5f6...  (each is a layer)
+# l/                (symlinks for shorter paths)
+
+# The 'diff' directory contains the layer's files
+ls /var/lib/docker/overlay2/a1b2c3d4e5f6.../diff/
+# app/  etc/  usr/  var/
+
+# The 'merged' directory shows the unified view (only for running containers)
+ls /var/lib/docker/overlay2/xyz.../merged/
+# (complete filesystem as the container sees it)
+```
+
+<Callout type="info" title="overlay2 Performance Characteristics">
+overlay2 has excellent read performance because it uses page cache efficiently. Write performance for new files is also excellent. However, modifying files from lower layers triggers a copy-up operation where the entire file is copied to the upper directory, even if only one byte changed. This makes overlay2 poor for write-heavy workloads on existing image files -- use volumes instead.
+</Callout>
+
+### devicemapper
+
+devicemapper uses Linux device mapper thin provisioning for storage. It was the default on CentOS/RHEL before overlay2 support was added.
+
+```bash
+# Configure devicemapper (direct-lvm mode for production)
+# /etc/docker/daemon.json
+{
+  "storage-driver": "devicemapper",
+  "storage-opts": [
+    "dm.thinpooldev=/dev/mapper/docker-thinpool",
+    "dm.use_deferred_removal=true",
+    "dm.use_deferred_deletion=true",
+    "dm.basesize=20G"
+  ]
+}
+```
+
+```
+devicemapper Architecture:
+
+┌───────────────────────────────────┐
+│ Container thin device              │
+│ (allocated from thin pool)         │
+│                                    │
+│ Snapshot of image thin device      │
+│ with CoW at block level            │
+└───────────┬────────────────────────┘
+            │
+┌───────────┴────────────────────────┐
+│ Image thin device                  │
+│ (read-only snapshot)               │
+└───────────┬────────────────────────┘
+            │
+┌───────────┴────────────────────────┐
+│ Thin pool                          │
+│ (LVM logical volume)               │
+│                                    │
+│ Data LV:     /dev/vg/data          │
+│ Metadata LV: /dev/vg/metadata      │
+└────────────────────────────────────┘
+
+CoW at block level (64KB blocks by default)
+Better than overlay2 for random writes
+Worse than overlay2 for sequential reads
+```
+
+<Callout type="warning" title="devicemapper Modes">
+devicemapper has two modes: `loop-lvm` (uses loopback files, terrible performance, only for testing) and `direct-lvm` (uses raw block devices, production-ready). Docker warns loudly if you use loop-lvm. If you must use devicemapper, always configure direct-lvm with dedicated block devices.
+</Callout>
+
+### btrfs
+
+btrfs uses subvolumes and snapshots for Docker storage. It provides native CoW at the filesystem level.
+
+```bash
+# Prerequisites: btrfs-formatted partition
+mkfs.btrfs /dev/sdb1
+mount /dev/sdb1 /var/lib/docker
+
+# Configure Docker to use btrfs
+# /etc/docker/daemon.json
+{
+  "storage-driver": "btrfs"
+}
+
+# Restart Docker
+sudo systemctl restart docker
+
+# Verify
+docker info | grep "Storage Driver"
+# Storage Driver: btrfs
+```
+
+```
+btrfs Features for Docker:
+- Subvolumes for each image layer and container
+- Snapshots for CoW (instant, space-efficient)
+- Built-in compression (zstd, lzo)
+- Checksumming for data integrity
+- Online defragmentation
+- Quota groups for space management
+
+Downsides:
+- Higher memory usage than overlay2
+- Less mature than ext4/XFS
+- Fragmentation under write-heavy workloads
+- Not recommended for databases
+```
+
+### ZFS
+
+ZFS provides the most feature-rich storage backend with data integrity guarantees.
+
+```bash
+# Install ZFS (Ubuntu)
+sudo apt-get install zfsutils-linux
+
+# Create a ZFS pool for Docker
+sudo zpool create -f docker-pool /dev/sdb
+sudo zfs create -o mountpoint=/var/lib/docker docker-pool/docker
+
+# Configure Docker
+# /etc/docker/daemon.json
+{
+  "storage-driver": "zfs"
+}
+
+# Restart Docker
+sudo systemctl restart docker
+
+# ZFS-specific tuning
+sudo zfs set compression=lz4 docker-pool/docker
+sudo zfs set atime=off docker-pool/docker
+sudo zfs set recordsize=128k docker-pool/docker
+```
+
+```
+ZFS Features for Docker:
+- Copy-on-Write at block level
+- Data integrity with checksumming
+- Compression (lz4 provides ~2x compression with minimal CPU)
+- Deduplication (high memory cost, usually not worth it)
+- Snapshots and clones (instant, zero-cost)
+- ARC cache (adaptive replacement cache) for reads
+- ZIL (ZFS Intent Log) for write optimization with SLOG
+
+Downsides:
+- High memory usage (ARC wants 50% of RAM by default)
+- Not in mainline Linux kernel (DKMS module)
+- Complex tuning for optimal performance
+- Licensing concerns (CDDL vs GPL)
+```
+
+### Storage Driver Comparison Table
+
+```
+┌──────────────┬────────────┬────────────┬───────────┬───────────┐
+│ Feature      │ overlay2   │ devicemapper│ btrfs     │ zfs       │
+├──────────────┼────────────┼────────────┼───────────┼───────────┤
+│ CoW Level    │ File       │ Block(64KB)│ Block     │ Block     │
+│ Read Perf    │ Excellent  │ Good       │ Good      │ Very Good │
+│ Write Perf   │ Good*      │ Good       │ Good      │ Good      │
+│ Space Effic. │ Good       │ Good       │ Very Good │ Very Good │
+│ Stability    │ Excellent  │ Good       │ Fair      │ Very Good │
+│ Memory Usage │ Low        │ Low        │ Moderate  │ High      │
+│ Backing FS   │ ext4/xfs   │ Direct LVM │ btrfs     │ ZFS pool  │
+│ Kernel Req   │ 4.0+       │ 3.10+      │ 4.0+      │ DKMS      │
+│ Default On   │ Most Linux │ Legacy RHEL│ SUSE      │ Ubuntu**  │
+│ Production   │ Yes        │ Yes(d-lvm) │ Cautious  │ Yes       │
+│ Compression  │ No         │ No         │ Yes       │ Yes(lz4)  │
+│ Checksumming │ No         │ No         │ Yes       │ Yes       │
+└──────────────┴────────────┴────────────┴───────────┴───────────┘
+
+* overlay2 write performance degrades for large files modified in lower layers
+** Ubuntu Advantage with ZFS root filesystem
+```
+
+<Callout type="tip" title="Choosing a Storage Driver">
+For most workloads, use overlay2 -- it is the default, well-tested, and performant. Use ZFS if you need data integrity guarantees, compression, or are running on a ZFS root filesystem. Use devicemapper (direct-lvm) only on older RHEL/CentOS systems that lack OverlayFS support. Use btrfs if you are on SUSE Linux Enterprise. For write-heavy workloads, always use volumes regardless of the storage driver.
+</Callout>
+
+## Volume Plugins: Shared and Distributed Storage
+
+Docker's local volume driver stores data on the host's filesystem. Volume plugins extend this to network-attached and distributed storage systems.
+
+### NFS Volume Plugin
+
+```bash
+# Method 1: Docker built-in NFS volume (no plugin needed)
+docker volume create \
+  --driver local \
+  --opt type=nfs \
+  --opt o=addr=nfs-server.mycompany.com,rw,nfsvers=4.1 \
+  --opt device=:/exports/docker-data \
+  nfs-data
+
+# Use the NFS volume
+docker run -d \
+  --name app \
+  -v nfs-data:/app/data \
+  myapp:latest
+
+# Method 2: Docker Compose with NFS
+# docker-compose.yml
+# volumes:
+#   shared-data:
+#     driver: local
+#     driver_opts:
+#       type: nfs
+#       o: addr=nfs-server.mycompany.com,rw,nfsvers=4.1
+#       device: ":/exports/docker-data"
+```
+
+```
+NFS Volume Architecture:
+
+Host A                        Host B
+┌──────────────────┐         ┌──────────────────┐
+│ Container 1      │         │ Container 2      │
+│ /app/data ───────┼────┐    │ /app/data ───────┼────┐
+└──────────────────┘    │    └──────────────────┘    │
+                        │                            │
+                   NFS Mount                    NFS Mount
+                        │                            │
+                        ▼                            ▼
+                ┌────────────────────────────────────────┐
+                │         NFS Server                     │
+                │         /exports/docker-data           │
+                │                                        │
+                │  Both containers see the same files    │
+                │  Changes are immediately visible       │
+                │  File locking with NLM/NFSv4           │
+                └────────────────────────────────────────┘
+```
+
+### Ceph RBD Volume Plugin
+
+```bash
+# Install the Ceph volume plugin
+docker plugin install rexray/ceph \
+  CEPH_CONFIGFILE=/etc/ceph/ceph.conf \
+  CEPH_KEYRING=/etc/ceph/ceph.client.docker.keyring \
+  CEPH_POOL=docker-volumes
+
+# Create a Ceph-backed volume
+docker volume create \
+  --driver rexray/ceph \
+  --opt size=50 \
+  ceph-data
+
+# Use the Ceph volume
+docker run -d \
+  --name database \
+  -v ceph-data:/var/lib/postgresql/data \
+  postgres:16
+```
+
+### GlusterFS Volume Plugin
+
+```bash
+# Install the GlusterFS volume plugin
+docker plugin install glusterfs/gluster-plugin:latest \
+  --grant-all-permissions
+
+# Create a GlusterFS volume
+docker volume create \
+  --driver glusterfs/gluster-plugin \
+  --opt servers=gluster1.mycompany.com,gluster2.mycompany.com \
+  --opt volname=docker-vol \
+  --opt subdir=/app-data \
+  gluster-data
+
+# Use the GlusterFS volume
+docker run -d \
+  --name app \
+  -v gluster-data:/app/data \
+  myapp:latest
+```
+
+### Volume Driver Comparison
+
+```
+┌─────────────────┬────────────┬────────────┬────────────┬────────────┐
+│ Feature         │ Local      │ NFS        │ Ceph RBD   │ GlusterFS  │
+├─────────────────┼────────────┼────────────┼────────────┼────────────┤
+│ Multi-host      │ No         │ Yes        │ Yes        │ Yes        │
+│ Performance     │ Best       │ Good       │ Very Good  │ Good       │
+│ Scalability     │ Single host│ Good       │ Excellent  │ Excellent  │
+│ Setup Complexity│ None       │ Low        │ High       │ Medium     │
+│ Data Redundancy │ None       │ Server-side│ Built-in   │ Built-in   │
+│ Block/File      │ File       │ File       │ Block      │ File       │
+│ Concurrent R/W  │ N/A        │ Yes (NLM)  │ No (1:1)   │ Yes        │
+│ Best For        │ Dev/single │ Shared     │ Databases  │ File shares│
+│                 │ host       │ config/data│ block data │ media      │
+└─────────────────┴────────────┴────────────┴────────────┴────────────┘
+```
+
+<Callout type="warning" title="Volume Plugin Availability">
+Volume plugins like REX-Ray, Portworx, and NetApp Trident are enterprise products that require separate infrastructure. REX-Ray was open source but is no longer actively maintained. For modern Kubernetes-based environments, use CSI (Container Storage Interface) drivers instead. For Docker-only deployments, NFS volumes with the built-in local driver are the most reliable option.
+</Callout>
+
+## tmpfs Optimization for High-Performance I/O
+
+tmpfs mounts are backed by RAM (and potentially swap), providing the fastest possible I/O. They are ideal for temporary data that does not need to survive container restarts.
+
+### When to Use tmpfs
+
+```
+tmpfs Use Cases:
+┌──────────────────────────────────────────────────┐
+│                                                  │
+│  ✓ Build artifacts during compilation            │
+│  ✓ Session data and temporary caches             │
+│  ✓ Secrets that should not be written to disk     │
+│  ✓ Application tmp directories (/tmp)             │
+│  ✓ High-throughput logging buffers                │
+│  ✓ In-memory test databases                       │
+│  ✓ Scratch space for data processing              │
+│                                                  │
+│  ✗ Data that must persist across restarts         │
+│  ✗ Data larger than available RAM                 │
+│  ✗ Data that needs to be shared between hosts     │
+│                                                  │
+└──────────────────────────────────────────────────┘
+```
+
+### Configuring tmpfs Mounts
+
+```bash
+# Basic tmpfs mount
+docker run -d \
+  --name app \
+  --tmpfs /tmp:rw,noexec,nosuid,size=512m \
+  myapp:latest
+
+# Multiple tmpfs mounts with different sizes
+docker run -d \
+  --name etl-pipeline \
+  --tmpfs /tmp:rw,size=2g \
+  --tmpfs /app/cache:rw,size=1g \
+  --tmpfs /app/scratch:rw,size=4g,exec \
+  data-pipeline:latest
+
+# Using --mount syntax (more explicit)
+docker run -d \
+  --name app \
+  --mount type=tmpfs,destination=/tmp,tmpfs-size=536870912,tmpfs-mode=1777 \
+  --mount type=tmpfs,destination=/run/secrets,tmpfs-size=1048576,tmpfs-mode=0700 \
+  myapp:latest
+```
+
+### tmpfs Options Reference
+
+```
+┌──────────────┬───────────────────────────────────────────────┐
+│ Option       │ Description                                   │
+├──────────────┼───────────────────────────────────────────────┤
+│ size         │ Maximum size in bytes (supports k, m, g)       │
+│ mode         │ File mode (permissions) for the mount point    │
+│ rw / ro      │ Read-write or read-only                        │
+│ noexec       │ Prevent executing binaries from tmpfs          │
+│ nosuid       │ Ignore setuid bits on executables              │
+│ nodev        │ Do not interpret device files                  │
+│ nr_inodes    │ Maximum number of inodes                       │
+│ nr_blocks    │ Maximum number of blocks                       │
+└──────────────┴───────────────────────────────────────────────┘
+```
+
+### tmpfs for Secrets
+
+```bash
+# Mount secrets in tmpfs so they never touch disk
+docker run -d \
+  --name secure-app \
+  --mount type=tmpfs,destination=/run/secrets,tmpfs-size=1m,tmpfs-mode=0700 \
+  -e DB_PASSWORD_FILE=/run/secrets/db_password \
+  myapp:latest
+
+# The secrets directory is in RAM only
+# Even if someone accesses the host filesystem, secrets are not on disk
+```
+
+<Callout type="info" title="tmpfs and Swap">
+tmpfs data CAN be swapped to disk by the kernel if memory pressure is high. If your tmpfs contains sensitive data, either disable swap on the host (`swapoff -a`) or use `--memory-swappiness=0` on the container to prevent swapping. For the highest security, use encrypted swap.
+</Callout>
+
+## Copy-on-Write Performance Implications
+
+Understanding CoW behavior is critical for optimizing container performance.
+
+### CoW Performance Test
+
+```bash
+# Demonstrate CoW overhead with a simple test
+# Create a large file in the image
+cat > Dockerfile.cow-test << 'EOF'
+FROM ubuntu:22.04
+RUN dd if=/dev/urandom of=/data/largefile bs=1M count=100
+EOF
+
+docker build -f Dockerfile.cow-test -t cow-test .
+
+# Test 1: Modify the file inside the container (triggers CoW)
+docker run --rm cow-test \
+  bash -c "time dd if=/dev/urandom of=/data/largefile bs=1M count=100 conv=notrunc"
+# real    0m2.847s  <-- Slow: must copy 100MB file first, then write
+
+# Test 2: Write to a volume (no CoW)
+docker run --rm -v test-vol:/data cow-test \
+  bash -c "time dd if=/dev/urandom of=/data/largefile bs=1M count=100"
+# real    0m0.423s  <-- Fast: direct filesystem write
+
+# Test 3: Write to tmpfs (fastest)
+docker run --rm --tmpfs /data:rw,size=200m cow-test \
+  bash -c "time dd if=/dev/urandom of=/data/largefile bs=1M count=100"
+# real    0m0.198s  <-- Fastest: RAM-backed
+```
+
+```
+Copy-on-Write Impact by File Size:
+
+File Size   │ CoW Overhead    │ Volume Write   │ Ratio
+───────────┼─────────────────┼────────────────┼─────────
+1 KB        │ ~0.1ms          │ ~0.05ms        │ 2x
+100 KB      │ ~0.5ms          │ ~0.1ms         │ 5x
+1 MB        │ ~5ms            │ ~0.3ms         │ 17x
+10 MB       │ ~50ms           │ ~3ms           │ 17x
+100 MB      │ ~500ms          │ ~30ms          │ 17x
+1 GB        │ ~5000ms         │ ~300ms         │ 17x
+
+CoW copies the ENTIRE file on first write, regardless
+of how many bytes you actually modify.
+
+overlay2 CoW is file-level. devicemapper/zfs/btrfs CoW
+is block-level (64KB-128KB), which is much better for
+partial modifications of large files.
+```
+
+### Avoiding CoW Performance Penalties
+
+```dockerfile
+# PATTERN: Use volumes for writable data
+
+FROM python:3.11-slim
+WORKDIR /app
+
+# Application code (read-only in container, CoW not triggered)
+COPY . .
+
+# Data directory should be a volume (defined in docker-compose.yml)
+# Never write heavy data inside the container layer
+VOLUME ["/app/data", "/app/logs", "/app/cache"]
+
+# Temp directory should be tmpfs (defined at run time)
+# --tmpfs /tmp:rw,size=1g
+
+CMD ["python", "app.py"]
+```
+
+```yaml
+# docker-compose.yml
+services:
+  app:
+    image: myapp:latest
+    volumes:
+      - app-data:/app/data        # Persistent data on volume
+      - app-logs:/app/logs        # Logs on volume
+    tmpfs:
+      - /tmp:size=1g              # Temp files in RAM
+      - /app/cache:size=512m      # Cache in RAM
+
+volumes:
+  app-data:
+  app-logs:
+```
+
+## Storage Benchmarking with fio
+
+fio (Flexible I/O Tester) is the industry standard tool for benchmarking storage performance.
+
+### Installing fio in a Container
+
+```dockerfile
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y fio && rm -rf /var/lib/apt/lists/*
+WORKDIR /benchmark
+CMD ["bash"]
+```
+
+### Benchmark Configurations
+
+```bash
+# Build the benchmark image
+docker build -t fio-bench -f Dockerfile.fio .
+
+# Test 1: Sequential Write on Container Layer (CoW)
+docker run --rm fio-bench fio \
+  --name=seq-write-cow \
+  --ioengine=libaio \
+  --direct=1 \
+  --rw=write \
+  --bs=1m \
+  --numjobs=1 \
+  --size=1g \
+  --runtime=30 \
+  --time_based \
+  --filename=/benchmark/testfile \
+  --output-format=json
+
+# Test 2: Sequential Write on Named Volume
+docker run --rm -v bench-vol:/benchmark fio-bench fio \
+  --name=seq-write-vol \
+  --ioengine=libaio \
+  --direct=1 \
+  --rw=write \
+  --bs=1m \
+  --numjobs=1 \
+  --size=1g \
+  --runtime=30 \
+  --time_based \
+  --filename=/benchmark/testfile \
+  --output-format=json
+
+# Test 3: Sequential Write on tmpfs
+docker run --rm --tmpfs /benchmark:rw,size=2g fio-bench fio \
+  --name=seq-write-tmpfs \
+  --ioengine=libaio \
+  --direct=0 \
+  --rw=write \
+  --bs=1m \
+  --numjobs=1 \
+  --size=1g \
+  --runtime=30 \
+  --time_based \
+  --filename=/benchmark/testfile \
+  --output-format=json
+
+# Test 4: Random Read/Write (database workload simulation)
+docker run --rm -v bench-vol:/benchmark fio-bench fio \
+  --name=random-rw \
+  --ioengine=libaio \
+  --direct=1 \
+  --rw=randrw \
+  --rwmixread=70 \
+  --bs=4k \
+  --numjobs=4 \
+  --iodepth=32 \
+  --size=1g \
+  --runtime=60 \
+  --time_based \
+  --filename=/benchmark/testfile \
+  --group_reporting \
+  --output-format=json
+
+# Test 5: NFS Volume Performance
+docker run --rm -v nfs-data:/benchmark fio-bench fio \
+  --name=nfs-seq-write \
+  --ioengine=libaio \
+  --direct=1 \
+  --rw=write \
+  --bs=1m \
+  --numjobs=1 \
+  --size=1g \
+  --runtime=30 \
+  --time_based \
+  --filename=/benchmark/testfile \
+  --output-format=json
+```
+
+### Benchmark Script
+
+```bash
+#!/bin/bash
+# benchmark-storage.sh - Compare Docker storage performance
+
+set -euo pipefail
+
+IMAGE="fio-bench"
+RESULTS_DIR="./benchmark-results"
+mkdir -p "$RESULTS_DIR"
+
+run_benchmark() {
+  local name=$1
+  local mount_opts=$2
+  local test_type=$3
+  local bs=$4
+
+  echo "Running benchmark: ${name} (${test_type}, bs=${bs})"
+
+  docker run --rm $mount_opts "$IMAGE" fio \
+    --name="$name" \
+    --ioengine=libaio \
+    --direct=1 \
+    --rw="$test_type" \
+    --bs="$bs" \
+    --numjobs=1 \
+    --size=512m \
+    --runtime=30 \
+    --time_based \
+    --filename=/benchmark/testfile \
+    --output-format=json > "${RESULTS_DIR}/${name}.json"
+
+  # Extract key metrics
+  local bw=$(jq '.jobs[0].write.bw_bytes // .jobs[0].read.bw_bytes' "${RESULTS_DIR}/${name}.json")
+  local iops=$(jq '.jobs[0].write.iops // .jobs[0].read.iops' "${RESULTS_DIR}/${name}.json")
+  local lat=$(jq '.jobs[0].write.lat_ns.mean // .jobs[0].read.lat_ns.mean' "${RESULTS_DIR}/${name}.json")
+
+  echo "  Bandwidth: $((bw / 1048576)) MB/s"
+  echo "  IOPS: ${iops}"
+  echo "  Avg Latency: $((lat / 1000)) us"
+  echo ""
+}
+
+echo "=== Docker Storage Benchmark ==="
+echo ""
+
+# Sequential write tests
+run_benchmark "cow-seq-write"    ""                            "write"  "1m"
+run_benchmark "vol-seq-write"    "-v bench-vol:/benchmark"     "write"  "1m"
+run_benchmark "tmpfs-seq-write"  "--tmpfs /benchmark:size=1g"  "write"  "1m"
+
+# Random read tests
+run_benchmark "cow-rand-read"    ""                            "randread" "4k"
+run_benchmark "vol-rand-read"    "-v bench-vol:/benchmark"     "randread" "4k"
+run_benchmark "tmpfs-rand-read"  "--tmpfs /benchmark:size=1g"  "randread" "4k"
+
+echo "=== Benchmark Complete ==="
+echo "Results saved to ${RESULTS_DIR}/"
+```
+
+### Sample Benchmark Results
+
+```
+Docker Storage Benchmark Results (NVMe SSD host, overlay2):
+
+┌──────────────────────┬────────────┬──────────┬────────────┐
+│ Test                 │ Bandwidth  │ IOPS     │ Latency    │
+│                      │ (MB/s)     │          │ (us)       │
+├──────────────────────┼────────────┼──────────┼────────────┤
+│ Container Layer      │            │          │            │
+│  Sequential Write    │ 245        │ 245      │ 4,082      │
+│  Random Read 4K      │ 62         │ 15,892   │ 62         │
+│  Random Write 4K     │ 48         │ 12,288   │ 81         │
+├──────────────────────┼────────────┼──────────┼────────────┤
+│ Named Volume         │            │          │            │
+│  Sequential Write    │ 1,847      │ 1,847    │ 541        │
+│  Random Read 4K      │ 285        │ 73,088   │ 13         │
+│  Random Write 4K     │ 198        │ 50,688   │ 19         │
+├──────────────────────┼────────────┼──────────┼────────────┤
+│ tmpfs                │            │          │            │
+│  Sequential Write    │ 4,521      │ 4,521    │ 221        │
+│  Random Read 4K      │ 892        │ 228,352  │ 4          │
+│  Random Write 4K     │ 756        │ 193,536  │ 5          │
+├──────────────────────┼────────────┼──────────┼────────────┤
+│ NFS Volume           │            │          │            │
+│  Sequential Write    │ 112        │ 112      │ 8,928      │
+│  Random Read 4K      │ 18         │ 4,608    │ 217        │
+│  Random Write 4K     │ 8          │ 2,048    │ 488        │
+└──────────────────────┴────────────┴──────────┴────────────┘
+
+Key insight: Named volumes are 7.5x faster than container layer writes.
+tmpfs is 18x faster than container layer writes.
+NFS is fine for config/shared data but not for databases.
+```
+
+<Callout type="tip" title="Database Storage Recommendations">
+For databases in Docker, always use named volumes backed by fast local storage (NVMe SSD). Never use the container writable layer. For PostgreSQL, also consider mounting the WAL directory on a separate volume for write-ahead log isolation. For highest performance, use ZFS with a SLOG device for the ZIL, or devicemapper with direct-lvm on dedicated SSDs.
+</Callout>
+
+## Shared Storage Patterns for Stateful Applications
+
+### Pattern 1: Leader-Follower with Shared Volume
+
+```yaml
+# PostgreSQL primary-replica with shared backup volume
+services:
+  postgres-primary:
+    image: postgres:16
+    volumes:
+      - pg-primary-data:/var/lib/postgresql/data
+      - pg-backups:/backups          # Shared backup volume
+    environment:
+      POSTGRES_PASSWORD: secret
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: replsecret
+
+  postgres-replica:
+    image: postgres:16
+    volumes:
+      - pg-replica-data:/var/lib/postgresql/data
+      - pg-backups:/backups:ro       # Read-only access to backups
+    environment:
+      POSTGRES_REPLICATION_MODE: slave
+      POSTGRES_MASTER_HOST: postgres-primary
+    depends_on:
+      - postgres-primary
+
+volumes:
+  pg-primary-data:
+  pg-replica-data:
+  pg-backups:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=nfs-server,rw
+      device: ":/backups/postgres"
+```
+
+### Pattern 2: Shared Configuration Volume
+
+```yaml
+# Multiple services share read-only configuration
+services:
+  config-loader:
+    image: config-loader:latest
+    volumes:
+      - shared-config:/config        # Writes config files
+
+  api:
+    image: api:latest
+    volumes:
+      - shared-config:/config:ro     # Reads config (read-only)
+    depends_on:
+      - config-loader
+
+  worker:
+    image: worker:latest
+    volumes:
+      - shared-config:/config:ro     # Reads same config
+    depends_on:
+      - config-loader
+
+volumes:
+  shared-config:
+```
+
+### Pattern 3: Sidecar for Log Processing
+
+```yaml
+services:
+  app:
+    image: myapp:latest
+    volumes:
+      - app-logs:/var/log/app        # App writes logs here
+
+  log-shipper:
+    image: fluent-bit:latest
+    volumes:
+      - app-logs:/var/log/app:ro     # Reads and ships logs
+    depends_on:
+      - app
+
+volumes:
+  app-logs:
+    driver: local
+    driver_opts:
+      type: tmpfs                    # Logs in RAM, shipped in real-time
+      device: tmpfs
+      o: size=512m
+```
+
+<Exercise title="Configure and Benchmark NFS Volume Driver" difficulty="intermediate" xpReward={35} estimatedMinutes={25}
+  objectives={["Set up an NFS server and configure Docker NFS volumes", "Deploy a multi-container application using shared NFS storage", "Benchmark NFS volume performance against local volumes and tmpfs", "Identify appropriate use cases for NFS volumes in Docker"]}
+  hints={["You can run an NFS server in a container for testing (erichough/nfs-server)", "Use the built-in local driver with NFS opts instead of a plugin", "Make sure the NFS exports allow access from the Docker subnet", "Compare sequential and random I/O patterns across all storage types"]}
+  validationCriteria={["An NFS server is running and accessible from Docker containers", "At least one Docker volume is created using the NFS driver", "Multiple containers can read and write to the shared NFS volume simultaneously", "fio benchmarks compare NFS, local volume, container layer, and tmpfs performance", "A summary table shows bandwidth, IOPS, and latency for each storage type", "Recommendations are documented for which workloads suit each storage type"]}
+>
+
+Set up NFS shared storage for Docker and benchmark its performance against other storage options.
+
+**Task 1: NFS Server Setup**
+
+Set up an NFS server (either on the host or in a privileged container):
+
+```bash
+# Install NFS server
+sudo apt-get install nfs-kernel-server
+
+# Create export directory
+sudo mkdir -p /exports/docker-data
+sudo chmod 777 /exports/docker-data
+
+# Configure exports
+echo "/exports/docker-data *(rw,sync,no_subtree_check,no_root_squash)" | \
+  sudo tee -a /etc/exports
+sudo exportfs -ra
+```
+
+**Task 2: Docker NFS Volume**
+
+Create a Docker volume backed by NFS and verify it works:
+
+```bash
+docker volume create \
+  --driver local \
+  --opt type=nfs \
+  --opt o=addr=<nfs-server-ip>,rw,nfsvers=4.1 \
+  --opt device=:/exports/docker-data \
+  nfs-shared
+```
+
+**Task 3: Multi-Container Shared Storage**
+
+Deploy two containers that both write to the NFS volume. Verify that:
+- Both containers can see each other's files
+- File locking works correctly
+- Changes are immediately visible
+
+**Task 4: Performance Benchmarking**
+
+Run fio benchmarks across four storage types:
+1. Container writable layer
+2. Named local volume
+3. NFS volume
+4. tmpfs
+
+Test both sequential write (1MB blocks) and random read/write (4KB blocks). Create a comparison table.
+
+</Exercise>
+
+<Exercise title="Benchmark and Optimize Storage Performance" difficulty="intermediate" xpReward={35} estimatedMinutes={20}
+  objectives={["Use fio to benchmark different Docker storage configurations", "Identify CoW performance penalties in real workloads", "Optimize a data-intensive application by choosing the right storage tier", "Create reproducible benchmarking scripts for storage evaluation"]}
+  hints={["Install fio in a container to keep your host clean", "Use --direct=1 for O_DIRECT (bypass OS cache) to measure raw device performance", "Use --direct=0 with tmpfs since tmpfs IS the cache", "Test with both large sequential I/O (databases) and small random I/O (applications)"]}
+  validationCriteria={["A fio benchmark container is built with appropriate tooling", "At least 4 storage configurations are benchmarked (container layer, volume, tmpfs, bind mount)", "Both sequential and random I/O patterns are tested", "Results include bandwidth, IOPS, and latency metrics", "A clear recommendation is documented for database, application, and temporary data storage", "The benchmarking script is reproducible and parameterized"]}
+>
+
+Create a comprehensive storage benchmarking suite for Docker.
+
+**Task 1: Build the Benchmark Image**
+
+Create a Docker image with fio and reporting tools.
+
+**Task 2: Define Benchmark Profiles**
+
+Create fio job files for different workload simulations:
+
+```ini
+# database-oltp.fio - Simulates database OLTP workload
+[database-oltp]
+ioengine=libaio
+direct=1
+rw=randrw
+rwmixread=70
+bs=8k
+numjobs=4
+iodepth=32
+size=1g
+runtime=60
+time_based
+group_reporting
+
+# etl-pipeline.fio - Simulates ETL sequential processing
+[etl-pipeline]
+ioengine=libaio
+direct=1
+rw=readwrite
+rwmixread=50
+bs=1m
+numjobs=2
+size=2g
+runtime=60
+time_based
+group_reporting
+```
+
+**Task 3: Run Benchmarks**
+
+Test each profile against:
+- Container writable layer (overlay2)
+- Named volume
+- Bind mount
+- tmpfs
+
+**Task 4: Optimize a Real Application**
+
+Given a Python data processing script that reads a 1GB CSV, transforms it, and writes the output:
+- Profile where it spends I/O time
+- Move temporary data to tmpfs
+- Move input/output to volumes
+- Measure the before/after improvement
+
+</Exercise>
+
+<MiniProject title="Production Storage Architecture" difficulty="advanced" xpReward={50} estimatedMinutes={35}
+  objectives={["Design a complete storage architecture for a multi-service application", "Select appropriate storage drivers and volume types for each service", "Implement backup and disaster recovery for persistent data", "Create monitoring and alerting for storage capacity and performance"]}
+  hints={["Map each service's data to the right storage tier based on access patterns", "Use docker system df to monitor space usage", "Implement volume backup with docker run --volumes-from", "Consider using ZFS snapshots for consistent database backups"]}
+  validationCriteria={["A storage architecture document maps each service to its storage type with justification", "Database services use named volumes on appropriate storage", "Temporary data uses tmpfs with appropriate size limits", "A backup script creates consistent backups of all persistent volumes", "A restore procedure is tested and documented", "Storage monitoring tracks capacity and alerts before running out of space", "A benchmark suite validates that performance meets requirements", "Cleanup scripts prevent orphaned volumes and images from consuming disk space"]}
+>
+
+Design and implement the storage architecture for a microservices application.
+
+**Application Services and Their Data:**
+
+| Service | Data Type | Size | Access Pattern | Persistence |
+|---------|----------|------|----------------|-------------|
+| PostgreSQL | Database files | 50 GB | Random R/W | Critical |
+| Redis | Cache | 2 GB | Random R/W | Ephemeral |
+| Elasticsearch | Indices | 100 GB | Sequential + Random | Important |
+| API Server | Logs, temp files | 1 GB | Sequential write | Logs: ship, Temp: discard |
+| ETL Worker | Processing scratch | 10 GB | Sequential R/W | Discard after run |
+| Config | YAML/JSON files | 10 MB | Read-mostly | Version controlled |
+
+**Deliverables:**
+
+1. **Storage Architecture Document** (`storage-architecture.md`):
+   - Diagram of all services and their storage
+   - Justification for each storage choice
+   - Capacity planning projections
+
+2. **Docker Compose Configuration** (`docker-compose.yml`):
+   - All services with appropriate volume configurations
+   - tmpfs for ephemeral data
+   - Named volumes for persistent data
+   - Volume driver options for NFS or other shared storage where needed
+
+3. **Backup System** (`backup.sh`, `restore.sh`):
+   - Consistent PostgreSQL backup (pg_dump inside container)
+   - Elasticsearch snapshot
+   - Volume-level backup with `docker run --volumes-from`
+   - Automated daily backup with retention policy
+
+4. **Monitoring** (`monitor-storage.sh`):
+   - Track volume usage with `docker system df`
+   - Alert when usage exceeds 80%
+   - Report on orphaned volumes and images
+   - Garbage collection of unused resources
+
+5. **Performance Validation** (`validate-performance.sh`):
+   - Benchmark each storage configuration
+   - Compare against baseline requirements
+   - Generate a pass/fail report
+
+</MiniProject>
+
+## Key Takeaways
+
+- Docker has three storage tiers with vastly different performance: container writable layer (slowest, CoW overhead), named volumes (fast, direct filesystem), and tmpfs (fastest, RAM-backed)
+- overlay2 is the recommended storage driver for most workloads, with file-level CoW that is efficient for reads but expensive for writes to existing files
+- ZFS and btrfs provide block-level CoW, compression, and data integrity features but require more memory and operational expertise
+- Volume plugins enable NFS, Ceph, and GlusterFS shared storage for multi-host access, but NFS with the built-in local driver is the simplest approach
+- tmpfs mounts are ideal for temporary data, build artifacts, and secrets that should never touch disk, with performance 10-20x faster than SSD volumes
+- Copy-on-Write penalties are proportional to file size: a 1 GB file modification copies the entire file before making changes, making volumes essential for write-heavy workloads
+- Always benchmark with fio before choosing a storage configuration, testing both sequential and random I/O patterns that match your workload
+- For databases in Docker, use named volumes on fast local storage (NVMe), never the container writable layer
+
+## What's Next
+
+With networking and storage mastered, it is time to bring everything together with sophisticated deployment configurations. In the next lesson, **Advanced Docker Compose Patterns**, you will learn YAML anchors and extensions for DRY configurations, Compose profiles for environment-specific services, multi-file overrides, healthcheck-based dependencies, and Compose Watch for streamlined development workflows.
