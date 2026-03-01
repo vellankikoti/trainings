@@ -1,0 +1,369 @@
+---
+title: "Variables and Data Types"
+description: "Master bash variables, quoting, parameter expansion, and the rules that prevent 90% of shell scripting bugs."
+order: 3
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 02-first-script
+objectives:
+  - Declare and use variables correctly
+  - Understand quoting rules (single, double, backticks)
+  - Use parameter expansion for defaults and transformations
+  - Work with environment variables
+tags:
+  - shell-scripting
+  - variables
+  - bash
+---
+
+<Callout type="story" title="The Story">
+A deployment script has a variable `$APP_DIR`. Someone forgot to quote it. The value is `/opt/my app` (with a space). The script runs `rm -rf $APP_DIR/old` which becomes `rm -rf /opt/my app/old` — which deletes `/opt/my` AND tries to delete `app/old`. One missing pair of quotes, one production incident. Quoting rules aren't pedantic — they're survival skills.
+</Callout>
+
+## Variable Basics
+
+```bash
+# Assigning variables (NO spaces around =)
+NAME="Alice"
+PORT=8080
+APP_DIR="/opt/webapp"
+
+# WRONG — this runs "NAME" as a command with "=Alice" as argument
+NAME = "Alice"    # Error!
+
+# Using variables
+echo "$NAME"
+echo "Running on port $PORT"
+echo "App directory: ${APP_DIR}"
+```
+
+### Variable Naming Rules
+
+- Letters, numbers, underscores only
+- Must start with a letter or underscore
+- Case-sensitive (`name` and `NAME` are different)
+- Convention: `UPPERCASE` for environment/global, `lowercase` for local
+
+```bash
+# Good names
+APP_NAME="webapp"
+log_file="/var/log/app.log"
+_internal_var="hidden"
+
+# Bad names
+2fast="no"         # can't start with number
+my-var="no"        # no hyphens allowed
+my var="no"        # no spaces
+```
+
+## Quoting: The Most Important Rule
+
+### Double Quotes — Use These (Almost Always)
+
+Double quotes allow variable expansion but prevent word splitting:
+
+```bash
+NAME="John Smith"
+
+# WITHOUT quotes — word splitting breaks this
+echo $NAME         # Works here, but...
+FILE="my file.txt"
+rm $FILE           # WRONG: tries to remove "my" and "file.txt" separately
+
+# WITH quotes — always safe
+echo "$NAME"
+rm "$FILE"         # Correct: removes "my file.txt"
+```
+
+### Single Quotes — Literal Strings
+
+Single quotes prevent ALL expansion:
+
+```bash
+echo 'Hello $NAME'     # Output: Hello $NAME (literal)
+echo "Hello $NAME"     # Output: Hello John Smith (expanded)
+
+echo 'Price: $9.99'    # Output: Price: $9.99
+echo "Price: $9.99"    # Output: Price: .99 ($9 is expanded as empty)
+```
+
+### Backticks and `$()` — Command Substitution
+
+```bash
+# Modern syntax (preferred)
+TODAY=$(date +%Y-%m-%d)
+FILE_COUNT=$(ls | wc -l)
+
+# Old syntax (avoid — harder to nest)
+TODAY=`date +%Y-%m-%d`
+
+# Nested command substitution
+LATEST_LOG=$(ls -t $(find /var/log -name "*.log") | head -1)
+```
+
+<Callout type="tip" title="The Golden Rule">
+**Always double-quote your variables: `"$var"`**. The only exception is when you intentionally want word splitting (which is rare). When in doubt, quote it.
+</Callout>
+
+## Parameter Expansion
+
+Bash has powerful built-in string manipulation:
+
+### Defaults and Fallbacks
+
+```bash
+# Use default if unset
+echo "${NAME:-Anonymous}"    # If NAME is unset, use "Anonymous"
+
+# Set default and assign
+echo "${NAME:=Anonymous}"    # If NAME is unset, set it to "Anonymous" AND use it
+
+# Error if unset
+echo "${NAME:?Variable NAME is required}"   # Exits with error if unset
+
+# Use alternative if SET
+echo "${NAME:+User: $NAME}"  # Only prints if NAME is set
+```
+
+### String Operations
+
+```bash
+STR="Hello World"
+
+# Length
+echo "${#STR}"            # 11
+
+# Substring
+echo "${STR:0:5}"         # Hello (start at 0, take 5)
+echo "${STR:6}"           # World (start at 6)
+
+# Replace
+echo "${STR/World/Bash}"  # Hello Bash (first match)
+echo "${STR//l/L}"        # HeLLo WorLd (all matches)
+
+# Remove prefix/suffix
+FILE="backup-2024-01-15.tar.gz"
+echo "${FILE%.tar.gz}"    # backup-2024-01-15 (remove shortest suffix)
+echo "${FILE%%.*}"        # backup-2024-01-15 (remove longest suffix)
+echo "${FILE#backup-}"    # 2024-01-15.tar.gz (remove shortest prefix)
+
+# Case conversion (bash 4+)
+echo "${STR,,}"           # hello world (lowercase)
+echo "${STR^^}"           # HELLO WORLD (uppercase)
+```
+
+<Exercise number={1} title="Variable Practice">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# 1. Basic variables
+FIRST_NAME="Jane"
+LAST_NAME="Doe"
+FULL_NAME="$FIRST_NAME $LAST_NAME"
+echo "Hello, $FULL_NAME"
+
+# 2. Command substitution
+CURRENT_DIR=$(pwd)
+KERNEL=$(uname -r)
+echo "In $CURRENT_DIR on kernel $KERNEL"
+
+# 3. Parameter expansion defaults
+echo "User: ${USER:-unknown}"
+echo "Editor: ${EDITOR:-vim}"
+
+# 4. String manipulation
+FILE_PATH="/var/log/nginx/access.log"
+echo "Directory: $(dirname "$FILE_PATH")"
+echo "Filename: $(basename "$FILE_PATH")"
+echo "Extension: ${FILE_PATH##*.}"
+echo "Without ext: ${FILE_PATH%.*}"
+
+# 5. Length
+PASSWORD="MyS3cur3P@ss"
+echo "Password length: ${#PASSWORD}"
+if [ "${#PASSWORD}" -lt 8 ]; then
+    echo "Password too short!"
+else
+    echo "Password length OK"
+fi
+```
+
+</Exercise>
+
+## Environment Variables
+
+Environment variables are inherited by child processes:
+
+```bash
+# Set for current shell only
+MY_VAR="local"
+
+# Export to make available to child processes
+export MY_VAR="exported"
+
+# Set for a single command only
+DATABASE_URL="postgres://localhost" ./app.sh
+
+# Common environment variables
+echo "$HOME"       # Home directory
+echo "$USER"       # Current username
+echo "$PATH"       # Command search paths
+echo "$SHELL"      # Current shell
+echo "$PWD"        # Current directory
+echo "$HOSTNAME"   # Machine name
+echo "$RANDOM"     # Random number (0-32767)
+echo "$$"          # Current script's PID
+echo "$?"          # Exit code of last command
+```
+
+## Arithmetic
+
+Bash is primarily a string processor. For math, use `$(( ))`:
+
+```bash
+# Arithmetic expansion
+A=5
+B=3
+echo $((A + B))     # 8
+echo $((A * B))     # 15
+echo $((A / B))     # 1 (integer division)
+echo $((A % B))     # 2 (modulo)
+echo $((A ** 2))    # 25 (exponent)
+
+# Increment
+COUNT=0
+COUNT=$((COUNT + 1))
+((COUNT++))          # Also works
+
+# Comparison in arithmetic context
+if (( A > B )); then
+    echo "$A is greater"
+fi
+```
+
+<Exercise number={2} title="Build a Configuration Script">
+
+```bash
+cat > ~/configure.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Configuration with defaults
+APP_NAME="${APP_NAME:-myapp}"
+APP_PORT="${APP_PORT:-3000}"
+APP_ENV="${APP_ENV:-development}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+DB_NAME="${DB_NAME:-${APP_NAME}_${APP_ENV}}"
+
+echo "=== Application Configuration ==="
+echo "App:       $APP_NAME"
+echo "Port:      $APP_PORT"
+echo "Env:       $APP_ENV"
+echo "Log Level: $LOG_LEVEL"
+echo "Database:  $DB_HOST:$DB_PORT/$DB_NAME"
+echo ""
+
+# Validate port is a number
+if ! [[ "$APP_PORT" =~ ^[0-9]+$ ]]; then
+    echo "Error: APP_PORT must be a number"
+    exit 1
+fi
+
+# Validate port range
+if (( APP_PORT < 1 || APP_PORT > 65535 )); then
+    echo "Error: APP_PORT must be between 1 and 65535"
+    exit 1
+fi
+
+echo "Configuration valid!"
+SCRIPT
+
+chmod +x ~/configure.sh
+
+# Run with defaults
+~/configure.sh
+
+# Run with custom values
+APP_NAME=webapp APP_PORT=8080 APP_ENV=production ~/configure.sh
+```
+
+</Exercise>
+
+<MiniProject title="Environment Configuration Manager">
+
+```bash
+cat > ~/envmanager.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+ENV_FILE="${1:-.env}"
+
+show() {
+    if [ ! -f "$ENV_FILE" ]; then
+        echo "No $ENV_FILE found"
+        return
+    fi
+    echo "=== $ENV_FILE ==="
+    grep -v '^#' "$ENV_FILE" | grep -v '^$' | sort
+}
+
+get() {
+    local KEY="${1:?Usage: $0 get KEY}"
+    if [ ! -f "$ENV_FILE" ]; then
+        echo "File not found: $ENV_FILE"
+        exit 1
+    fi
+    grep "^${KEY}=" "$ENV_FILE" | cut -d= -f2- || echo "(not set)"
+}
+
+set_var() {
+    local KEY="${1:?Usage: $0 set KEY VALUE}"
+    local VALUE="${2:?Usage: $0 set KEY VALUE}"
+    if grep -q "^${KEY}=" "$ENV_FILE" 2>/dev/null; then
+        sed -i "s|^${KEY}=.*|${KEY}=${VALUE}|" "$ENV_FILE"
+        echo "Updated: ${KEY}=${VALUE}"
+    else
+        echo "${KEY}=${VALUE}" >> "$ENV_FILE"
+        echo "Added: ${KEY}=${VALUE}"
+    fi
+}
+
+case "${1:-help}" in
+    show)   shift; show ;;
+    get)    shift; get "$@" ;;
+    set)    shift; set_var "$@" ;;
+    *)      echo "Usage: $0 {show|get|set} [args]" ;;
+esac
+SCRIPT
+
+chmod +x ~/envmanager.sh
+
+# Test it
+echo "APP_NAME=myapp" > /tmp/.env.test
+echo "PORT=3000" >> /tmp/.env.test
+~/envmanager.sh show /tmp/.env.test
+~/envmanager.sh get PORT /tmp/.env.test
+rm /tmp/.env.test
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- No spaces around `=` in variable assignment: `NAME="value"`
+- Always double-quote variables: `"$var"` — prevents word splitting bugs
+- Single quotes are literal; double quotes allow expansion
+- Use `${var:-default}` for fallback values
+- `${#var}` for length, `${var%pattern}` for suffix removal
+- `$(command)` for command substitution (not backticks)
+- `$(( ))` for arithmetic; bash only does integer math
+- Export variables to make them available to child processes
+
+## What's Next
+
+Your scripts have data. Now they need input. In **User Input and Arguments**, you'll learn to accept command-line arguments, read user input, and make scripts that are truly interactive.

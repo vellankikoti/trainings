@@ -1,0 +1,420 @@
+---
+title: "Arrays and String Manipulation"
+description: "Master bash arrays, associative arrays, and advanced string operations. Handle collections of data and complex text processing in your scripts."
+order: 8
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 07-functions
+objectives:
+  - Create and manipulate indexed arrays
+  - Use associative arrays (bash 4+)
+  - Apply advanced string manipulation techniques
+  - Process collections of data in scripts
+tags:
+  - shell-scripting
+  - arrays
+  - strings
+  - bash
+---
+
+<Callout type="story" title="The Story">
+You need to deploy to 12 servers, but skip 3 that are in maintenance. You need to map server names to IP addresses. You need to track which deployments succeeded and which failed. Simple variables won't cut it — you need arrays and associative arrays to manage collections of data in your scripts.
+</Callout>
+
+## Indexed Arrays
+
+### Creating Arrays
+
+```bash
+# Method 1: Assign directly
+SERVERS=("web01" "web02" "web03" "db01" "db02")
+
+# Method 2: Assign by index
+PORTS[0]=80
+PORTS[1]=443
+PORTS[2]=8080
+
+# Method 3: From command output
+LOG_FILES=($(find /var/log -maxdepth 1 -name "*.log" 2>/dev/null))
+```
+
+### Accessing Elements
+
+```bash
+SERVERS=("web01" "web02" "web03" "db01")
+
+# Single element
+echo "${SERVERS[0]}"     # web01 (first element)
+echo "${SERVERS[2]}"     # web03
+
+# All elements
+echo "${SERVERS[@]}"     # web01 web02 web03 db01
+
+# Array length
+echo "${#SERVERS[@]}"    # 4
+
+# Length of element
+echo "${#SERVERS[0]}"    # 5 (length of "web01")
+
+# Last element
+echo "${SERVERS[-1]}"    # db01
+
+# Slice
+echo "${SERVERS[@]:1:2}" # web02 web03 (start at 1, take 2)
+```
+
+### Modifying Arrays
+
+```bash
+ITEMS=("a" "b" "c")
+
+# Append
+ITEMS+=("d")
+ITEMS+=("e" "f")
+
+# Remove by index (leaves a gap)
+unset 'ITEMS[1]'
+
+# Replace element
+ITEMS[0]="A"
+
+# Print all
+echo "${ITEMS[@]}"    # A c d e f (b was removed)
+```
+
+### Iterating Over Arrays
+
+```bash
+SERVERS=("web01" "web02" "web03")
+
+# Iterate values
+for server in "${SERVERS[@]}"; do
+    echo "Server: $server"
+done
+
+# Iterate with index
+for i in "${!SERVERS[@]}"; do
+    echo "Index $i: ${SERVERS[$i]}"
+done
+```
+
+<Exercise number={1} title="Array Operations">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# 1. Create a server list
+SERVERS=("web01" "web02" "api01" "db01" "cache01")
+echo "All servers: ${SERVERS[@]}"
+echo "Count: ${#SERVERS[@]}"
+
+# 2. Add more servers
+SERVERS+=("monitor01" "lb01")
+echo "After adding: ${SERVERS[@]}"
+echo "Count: ${#SERVERS[@]}"
+
+# 3. Iterate and categorize
+WEB_COUNT=0
+DB_COUNT=0
+OTHER_COUNT=0
+
+for server in "${SERVERS[@]}"; do
+    case "$server" in
+        web*) WEB_COUNT=$((WEB_COUNT + 1)) ;;
+        db*) DB_COUNT=$((DB_COUNT + 1)) ;;
+        *) OTHER_COUNT=$((OTHER_COUNT + 1)) ;;
+    esac
+done
+
+echo ""
+echo "Categories:"
+echo "  Web: $WEB_COUNT"
+echo "  DB: $DB_COUNT"
+echo "  Other: $OTHER_COUNT"
+
+# 4. Filter into a new array
+CRITICAL=()
+for server in "${SERVERS[@]}"; do
+    if [[ "$server" == db* ]] || [[ "$server" == api* ]]; then
+        CRITICAL+=("$server")
+    fi
+done
+echo ""
+echo "Critical servers: ${CRITICAL[@]}"
+
+# 5. Check if an element exists
+contains() {
+    local needle="$1"
+    shift
+    for item in "$@"; do
+        [ "$item" = "$needle" ] && return 0
+    done
+    return 1
+}
+
+if contains "db01" "${SERVERS[@]}"; then
+    echo "db01 is in the server list"
+fi
+```
+
+</Exercise>
+
+## Associative Arrays (bash 4+)
+
+Associative arrays use strings as keys (like dictionaries/maps):
+
+```bash
+# Declare (required for associative arrays)
+declare -A SERVER_IPS
+
+# Assign
+SERVER_IPS["web01"]="10.0.1.10"
+SERVER_IPS["web02"]="10.0.1.11"
+SERVER_IPS["db01"]="10.0.2.10"
+
+# Or declare with initial values
+declare -A ROLES=(
+    ["web01"]="frontend"
+    ["api01"]="backend"
+    ["db01"]="database"
+)
+
+# Access
+echo "${SERVER_IPS[web01]}"     # 10.0.1.10
+
+# All keys
+echo "${!SERVER_IPS[@]}"         # web01 web02 db01
+
+# All values
+echo "${SERVER_IPS[@]}"          # 10.0.1.10 10.0.1.11 10.0.2.10
+
+# Length
+echo "${#SERVER_IPS[@]}"         # 3
+
+# Check if key exists
+if [ -v SERVER_IPS["web01"] ]; then
+    echo "web01 exists"
+fi
+
+# Iterate
+for key in "${!SERVER_IPS[@]}"; do
+    echo "$key -> ${SERVER_IPS[$key]}"
+done
+
+# Delete
+unset 'SERVER_IPS[web02]'
+```
+
+## Advanced String Manipulation
+
+### String Operations
+
+```bash
+STR="Hello, DevOps World!"
+
+# Length
+echo "${#STR}"                # 20
+
+# Substring
+echo "${STR:7:6}"            # DevOps
+
+# Find and replace
+echo "${STR/World/Engineer}" # Hello, DevOps Engineer!
+echo "${STR//o/0}"           # Hell0, Dev0ps W0rld!
+
+# Remove prefix
+FILE="/var/log/nginx/access.log"
+echo "${FILE#*/}"            # var/log/nginx/access.log (shortest prefix)
+echo "${FILE##*/}"           # access.log (longest prefix = basename)
+
+# Remove suffix
+echo "${FILE%/*}"            # /var/log/nginx (shortest suffix = dirname)
+echo "${FILE%%/*}"           # (empty — removed everything after first /)
+echo "${FILE%.log}"          # /var/log/nginx/access
+
+# Case conversion
+echo "${STR,,}"              # hello, devops world!
+echo "${STR^^}"              # HELLO, DEVOPS WORLD!
+echo "${STR^}"               # Hello, DevOps World! (capitalize first)
+```
+
+### String Testing
+
+```bash
+# Check if string contains substring
+if [[ "$STR" == *"DevOps"* ]]; then
+    echo "Contains DevOps"
+fi
+
+# Check if string starts with
+if [[ "$STR" == Hello* ]]; then
+    echo "Starts with Hello"
+fi
+
+# Regex match
+if [[ "$STR" =~ ^[A-Z] ]]; then
+    echo "Starts with uppercase"
+fi
+
+# Extract regex match
+VERSION="app-v2.3.1-linux"
+if [[ "$VERSION" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    echo "Version: ${BASH_REMATCH[1]}"    # 2.3.1
+fi
+```
+
+<Exercise number={2} title="Associative Array Project">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Build a server inventory using associative arrays
+declare -A IP
+declare -A ROLE
+declare -A STATUS
+
+# Populate
+SERVERS=("web01" "web02" "api01" "db01" "cache01")
+
+IP["web01"]="10.0.1.10"   ROLE["web01"]="frontend"   STATUS["web01"]="active"
+IP["web02"]="10.0.1.11"   ROLE["web02"]="frontend"   STATUS["web02"]="active"
+IP["api01"]="10.0.2.10"   ROLE["api01"]="backend"    STATUS["api01"]="active"
+IP["db01"]="10.0.3.10"    ROLE["db01"]="database"    STATUS["db01"]="active"
+IP["cache01"]="10.0.4.10" ROLE["cache01"]="cache"    STATUS["cache01"]="maintenance"
+
+# Display inventory
+echo "=== Server Inventory ==="
+printf "%-12s %-15s %-12s %s\n" "HOST" "IP" "ROLE" "STATUS"
+printf "%-12s %-15s %-12s %s\n" "----" "--" "----" "------"
+
+for server in "${SERVERS[@]}"; do
+    printf "%-12s %-15s %-12s %s\n" \
+        "$server" "${IP[$server]}" "${ROLE[$server]}" "${STATUS[$server]}"
+done
+
+# Filter by role
+echo ""
+echo "=== Frontend Servers ==="
+for server in "${SERVERS[@]}"; do
+    [ "${ROLE[$server]}" = "frontend" ] && echo "  $server (${IP[$server]})"
+done
+
+# Count by status
+echo ""
+ACTIVE=0
+MAINT=0
+for server in "${SERVERS[@]}"; do
+    case "${STATUS[$server]}" in
+        active) ACTIVE=$((ACTIVE + 1)) ;;
+        maintenance) MAINT=$((MAINT + 1)) ;;
+    esac
+done
+echo "Active: $ACTIVE, Maintenance: $MAINT"
+```
+
+</Exercise>
+
+<MiniProject title="Configuration Parser">
+
+```bash
+cat > ~/config-parser.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Parse a key=value config file into an associative array
+
+declare -A CONFIG
+
+parse_config() {
+    local file="$1"
+
+    if [ ! -f "$file" ]; then
+        echo "Error: Config file not found: $file"
+        return 1
+    fi
+
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// /}" ]] && continue
+
+        # Parse key=value
+        local key="${line%%=*}"
+        local value="${line#*=}"
+
+        # Trim whitespace
+        key="${key// /}"
+        value="${value## }"
+        value="${value%% }"
+
+        # Remove surrounding quotes
+        value="${value#\"}"
+        value="${value%\"}"
+        value="${value#\'}"
+        value="${value%\'}"
+
+        CONFIG["$key"]="$value"
+    done < "$file"
+}
+
+get_config() {
+    local key="$1"
+    local default="${2:-}"
+    echo "${CONFIG[$key]:-$default}"
+}
+
+show_config() {
+    echo "=== Parsed Configuration ==="
+    for key in $(echo "${!CONFIG[@]}" | tr ' ' '\n' | sort); do
+        printf "  %-20s = %s\n" "$key" "${CONFIG[$key]}"
+    done
+}
+
+# Create sample config
+cat > /tmp/app.conf << 'CONF'
+# Application Configuration
+APP_NAME=myapp
+APP_PORT=8080
+APP_ENV="production"
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME='myapp_prod'
+# Debug settings
+LOG_LEVEL=info
+CONF
+
+# Parse and use
+parse_config /tmp/app.conf
+show_config
+
+echo ""
+echo "App: $(get_config APP_NAME)"
+echo "Port: $(get_config APP_PORT)"
+echo "Missing key: $(get_config MISSING 'default-value')"
+
+rm /tmp/app.conf
+SCRIPT
+
+chmod +x ~/config-parser.sh
+~/config-parser.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Indexed arrays: `arr=("a" "b" "c")`, access with `${arr[0]}`, `${arr[@]}`
+- Always quote array expansion: `"${arr[@]}"` preserves elements with spaces
+- `declare -A` creates associative arrays (bash 4+) for key-value pairs
+- `${#arr[@]}` = length, `${!arr[@]}` = keys/indices
+- String manipulation: `${str/old/new}`, `${str#prefix}`, `${str%suffix}`
+- `${str,,}` for lowercase, `${str^^}` for uppercase
+- `[[ $str =~ regex ]]` for pattern matching; `${BASH_REMATCH[1]}` for captures
+- Arrays are essential for managing collections (servers, files, configs)
+
+## What's Next
+
+You've mastered the building blocks: variables, conditionals, loops, functions, and data structures. In **File Operations in Scripts**, you'll apply all of these to reading, writing, and transforming files — the most common task in real-world shell scripting.

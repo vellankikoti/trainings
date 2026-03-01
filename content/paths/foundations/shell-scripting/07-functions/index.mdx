@@ -1,0 +1,459 @@
+---
+title: "Functions and Modular Scripts"
+description: "Write reusable bash functions, pass parameters, return values, and structure scripts that stay maintainable as they grow."
+order: 7
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 06-loops
+objectives:
+  - Define and call functions
+  - Pass parameters and return values
+  - Understand variable scope (local vs global)
+  - Structure scripts with functions for maintainability
+tags:
+  - shell-scripting
+  - functions
+  - modularity
+  - bash
+---
+
+<Callout type="story" title="The Story">
+Your deployment script has grown to 300 lines. The same 10-line block for logging appears in 8 places. When you find a bug in the logging, you have to fix it in 8 places. Functions solve this: write once, use everywhere. They turn spaghetti scripts into organized, testable, maintainable code.
+</Callout>
+
+## Defining Functions
+
+```bash
+# Method 1: Recommended
+greet() {
+    echo "Hello, $1!"
+}
+
+# Method 2: With 'function' keyword
+function greet {
+    echo "Hello, $1!"
+}
+
+# Call the function
+greet "World"
+greet "Alice"
+```
+
+## Parameters and Return Values
+
+### Parameters
+
+Functions use the same positional parameters as scripts (`$1`, `$2`, `$@`, `$#`):
+
+```bash
+deploy() {
+    local env="$1"
+    local version="$2"
+    echo "Deploying $version to $env"
+}
+
+deploy "production" "v2.0.0"
+```
+
+### Return Values
+
+Functions return exit codes (0-255). For data, use stdout:
+
+```bash
+# Return exit code
+is_running() {
+    systemctl is-active "$1" &>/dev/null
+}
+
+if is_running nginx; then
+    echo "Nginx is running"
+fi
+
+# Return data via stdout
+get_ip() {
+    hostname -I | awk '{print $1}'
+}
+
+MY_IP=$(get_ip)
+echo "My IP: $MY_IP"
+
+# Return multiple values via stdout
+get_disk_info() {
+    df -h / | awk 'NR==2 {print $3, $4, $5}'
+}
+
+read -r USED FREE PCT <<< "$(get_disk_info)"
+echo "Disk: $USED used, $FREE free ($PCT)"
+```
+
+## Variable Scope
+
+```bash
+# Global variable (default — avoid when possible)
+GLOBAL_VAR="I'm global"
+
+my_function() {
+    # Local variable (only exists inside this function)
+    local LOCAL_VAR="I'm local"
+
+    # This modifies the global variable!
+    GLOBAL_VAR="Modified by function"
+
+    echo "Inside: $LOCAL_VAR, $GLOBAL_VAR"
+}
+
+my_function
+echo "Outside: $GLOBAL_VAR"       # Modified
+echo "Outside: ${LOCAL_VAR:-unset}" # unset — local is gone
+```
+
+<Callout type="tip" title="Always Use local">
+Declare all function variables with `local`. This prevents accidental modification of global state and makes functions predictable and reusable.
+</Callout>
+
+## Common Function Patterns
+
+### Logging Function
+
+```bash
+LOG_LEVEL="${LOG_LEVEL:-info}"
+
+log() {
+    local level="$1"
+    shift
+    local message="$*"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    case "$level" in
+        error)   echo "[$timestamp] ERROR: $message" >&2 ;;
+        warn)    echo "[$timestamp] WARN:  $message" >&2 ;;
+        info)    echo "[$timestamp] INFO:  $message" ;;
+        debug)   [ "$LOG_LEVEL" = "debug" ] && echo "[$timestamp] DEBUG: $message" ;;
+    esac
+}
+
+log info "Deployment starting"
+log warn "Disk usage above 80%"
+log error "Database connection failed"
+```
+
+### Retry Function
+
+```bash
+retry() {
+    local max_attempts="${1:-3}"
+    local delay="${2:-2}"
+    shift 2
+    local cmd="$@"
+
+    local attempt=1
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if eval "$cmd"; then
+            return 0
+        fi
+
+        echo "Attempt $attempt/$max_attempts failed. Retrying in ${delay}s..."
+        sleep "$delay"
+        attempt=$((attempt + 1))
+    done
+
+    echo "All $max_attempts attempts failed"
+    return 1
+}
+
+# Usage
+retry 3 2 curl -sf http://localhost:8080/health
+```
+
+### Cleanup Function with trap
+
+```bash
+TEMP_DIR=""
+
+cleanup() {
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+        rm -rf "$TEMP_DIR"
+        echo "Cleaned up: $TEMP_DIR"
+    fi
+}
+
+# Register cleanup to run on exit (even if script fails)
+trap cleanup EXIT
+
+TEMP_DIR=$(mktemp -d)
+echo "Working in: $TEMP_DIR"
+# ... do work ...
+# cleanup runs automatically when script exits
+```
+
+<Exercise number={1} title="Build a Function Library">
+
+```bash
+cat > ~/lib.sh << 'SCRIPT'
+#!/bin/bash
+# Reusable function library
+
+# Colors (if terminal supports it)
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Logging
+log_info()  { echo -e "[${GREEN}INFO${NC}]  $*"; }
+log_warn()  { echo -e "[${YELLOW}WARN${NC}]  $*" >&2; }
+log_error() { echo -e "[${RED}ERROR${NC}] $*" >&2; }
+
+# Validation
+require_command() {
+    local cmd="$1"
+    if ! command -v "$cmd" &>/dev/null; then
+        log_error "Required command not found: $cmd"
+        return 1
+    fi
+}
+
+require_file() {
+    local file="$1"
+    if [ ! -f "$file" ]; then
+        log_error "Required file not found: $file"
+        return 1
+    fi
+}
+
+require_var() {
+    local var_name="$1"
+    local var_value="${!var_name:-}"
+    if [ -z "$var_value" ]; then
+        log_error "Required variable not set: $var_name"
+        return 1
+    fi
+}
+
+# Confirmation
+confirm() {
+    local message="${1:-Are you sure?}"
+    read -p "$message [y/N]: " reply
+    [[ "$reply" =~ ^[yY] ]]
+}
+
+# Timer
+timer_start() { TIMER_START=$(date +%s); }
+timer_end() {
+    local elapsed=$(( $(date +%s) - TIMER_START ))
+    echo "${elapsed}s"
+}
+SCRIPT
+
+# Use the library in a script
+cat > ~/use-lib.sh << 'USE'
+#!/bin/bash
+set -euo pipefail
+source ~/lib.sh
+
+log_info "Starting process"
+timer_start
+
+require_command curl
+require_command git
+log_info "All commands available"
+
+require_file /etc/hostname
+log_info "Config file found"
+
+log_warn "This is a warning example"
+
+ELAPSED=$(timer_end)
+log_info "Completed in $ELAPSED"
+USE
+
+chmod +x ~/use-lib.sh
+~/use-lib.sh
+```
+
+</Exercise>
+
+<Exercise number={2} title="Modular Script Structure">
+
+```bash
+cat > ~/app-manager.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+APP_NAME="myapp"
+APP_DIR="/tmp/${APP_NAME}-demo"
+
+# --- Functions ---
+
+init() {
+    echo "Initializing $APP_NAME..."
+    mkdir -p "$APP_DIR"/{logs,config,data}
+    echo "port=8080" > "$APP_DIR/config/app.conf"
+    echo "Initialized at: $APP_DIR"
+}
+
+status() {
+    echo "=== $APP_NAME Status ==="
+    if [ -d "$APP_DIR" ]; then
+        echo "  Directory: $APP_DIR (exists)"
+        echo "  Files: $(find "$APP_DIR" -type f | wc -l)"
+        echo "  Size: $(du -sh "$APP_DIR" | cut -f1)"
+        [ -f "$APP_DIR/config/app.conf" ] && echo "  Config: $(cat "$APP_DIR/config/app.conf")"
+    else
+        echo "  Not initialized. Run: $0 init"
+    fi
+}
+
+clean() {
+    if [ -d "$APP_DIR" ]; then
+        rm -rf "$APP_DIR"
+        echo "Cleaned up: $APP_DIR"
+    else
+        echo "Nothing to clean"
+    fi
+}
+
+usage() {
+    echo "Usage: $0 {init|status|clean}"
+}
+
+# --- Main ---
+
+case "${1:-}" in
+    init)   init ;;
+    status) status ;;
+    clean)  clean ;;
+    *)      usage; exit 2 ;;
+esac
+SCRIPT
+
+chmod +x ~/app-manager.sh
+
+~/app-manager.sh init
+~/app-manager.sh status
+~/app-manager.sh clean
+```
+
+</Exercise>
+
+<MiniProject title="Modular Deployment Framework">
+
+```bash
+cat > ~/framework.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# --- Configuration ---
+APP_NAME="${APP_NAME:-webapp}"
+DEPLOY_DIR="/tmp/deploy-demo"
+LOG_FILE="/tmp/deploy-demo.log"
+
+# --- Utility Functions ---
+
+log() {
+    local msg="[$(date '+%H:%M:%S')] $*"
+    echo "$msg"
+    echo "$msg" >> "$LOG_FILE"
+}
+
+step() {
+    local step_num="$1"
+    local total="$2"
+    local description="$3"
+    echo ""
+    log "=== Step $step_num/$total: $description ==="
+}
+
+check_prereqs() {
+    local missing=0
+    for cmd in "$@"; do
+        if command -v "$cmd" &>/dev/null; then
+            log "  [OK] $cmd"
+        else
+            log "  [MISSING] $cmd"
+            missing=$((missing + 1))
+        fi
+    done
+    return "$missing"
+}
+
+# --- Deployment Steps ---
+
+pre_deploy() {
+    step 1 4 "Pre-deployment checks"
+    check_prereqs bash cat ls || { log "Missing prerequisites"; exit 1; }
+    mkdir -p "$DEPLOY_DIR"
+    log "Pre-deployment checks passed"
+}
+
+download() {
+    step 2 4 "Download $APP_NAME"
+    log "Simulating download..."
+    echo "app-binary-v1.0" > "$DEPLOY_DIR/app"
+    echo "default-config" > "$DEPLOY_DIR/config"
+    log "Download complete"
+}
+
+install() {
+    step 3 4 "Install $APP_NAME"
+    log "Installing files..."
+    chmod +x "$DEPLOY_DIR/app"
+    log "Installation complete"
+}
+
+verify() {
+    step 4 4 "Verify deployment"
+    if [ -f "$DEPLOY_DIR/app" ] && [ -x "$DEPLOY_DIR/app" ]; then
+        log "Verification PASSED"
+        return 0
+    else
+        log "Verification FAILED"
+        return 1
+    fi
+}
+
+# --- Main ---
+
+main() {
+    log "Deploying $APP_NAME"
+
+    pre_deploy
+    download
+    install
+
+    if verify; then
+        log ""
+        log "Deployment SUCCESSFUL"
+    else
+        log ""
+        log "Deployment FAILED"
+        exit 1
+    fi
+
+    # Cleanup demo
+    rm -rf "$DEPLOY_DIR" "$LOG_FILE"
+}
+
+main "$@"
+SCRIPT
+
+chmod +x ~/framework.sh
+~/framework.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Functions keep scripts DRY (Don't Repeat Yourself)
+- Always use `local` for function variables to avoid scope leaks
+- Functions return exit codes (0-255); use stdout for data
+- `trap cleanup EXIT` ensures cleanup runs even on errors
+- Source shared functions with `source lib.sh` or `. lib.sh`
+- Structure scripts: configuration at top, functions in middle, main logic at bottom
+- A good script reads like a high-level description of what it does
+
+## What's Next
+
+Functions handle logic. But scripts also need to work with collections of data. In **Arrays and String Manipulation**, you'll learn bash arrays, associative arrays, and advanced string operations that handle complex data processing.

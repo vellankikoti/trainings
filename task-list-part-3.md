@@ -240,7 +240,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-100: Create Shell Scripting Lessons 01-08 — Fundamentals
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-099
 - **Estimated effort:** XL

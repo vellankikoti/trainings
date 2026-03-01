@@ -1,0 +1,447 @@
+---
+title: "User Input and Arguments"
+description: "Accept command-line arguments, parse options with getopts, and read interactive input. Make scripts that are flexible and user-friendly."
+order: 4
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 03-variables
+objectives:
+  - Access positional parameters ($1, $2, $@)
+  - Validate and process command-line arguments
+  - Read interactive input with read
+  - Parse options with getopts
+tags:
+  - shell-scripting
+  - arguments
+  - input
+  - bash
+---
+
+<Callout type="story" title="The Story">
+You wrote a deployment script that works perfectly — for one server. Now you need it to deploy to dev, staging, or production based on what the user passes in. Hardcoding values won't work anymore. Your script needs to accept arguments, validate them, and fail clearly when given bad input.
+</Callout>
+
+## Positional Parameters
+
+When you run `./script.sh arg1 arg2 arg3`, bash sets special variables:
+
+| Variable | Meaning |
+|---|---|
+| `$0` | Script name |
+| `$1` | First argument |
+| `$2` | Second argument |
+| `$#` | Number of arguments |
+| `$@` | All arguments (as separate words) |
+| `$*` | All arguments (as a single string) |
+
+```bash
+#!/bin/bash
+echo "Script:    $0"
+echo "First:     ${1:-none}"
+echo "Second:    ${2:-none}"
+echo "Count:     $#"
+echo "All args:  $@"
+```
+
+### `$@` vs `$*`
+
+```bash
+# Always use "$@" (quoted) when iterating
+for arg in "$@"; do
+    echo "Arg: $arg"
+done
+
+# $* joins all args into one string — usually not what you want
+# "$@" preserves each argument as separate items
+```
+
+### The `shift` Command
+
+```bash
+#!/bin/bash
+# shift removes $1 and shifts everything left
+
+echo "Before shift: $1 $2 $3"
+shift
+echo "After shift:  $1 $2 $3"
+# What was $2 is now $1
+```
+
+## Argument Validation
+
+Always validate arguments before using them:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Check argument count
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <environment> <version>"
+    echo "  environment: dev, staging, production"
+    echo "  version: e.g., v1.2.3"
+    exit 2
+fi
+
+ENV="$1"
+VERSION="$2"
+
+# Validate environment
+case "$ENV" in
+    dev|staging|production)
+        echo "Deploying $VERSION to $ENV..."
+        ;;
+    *)
+        echo "Error: Invalid environment '$ENV'"
+        echo "Must be: dev, staging, or production"
+        exit 1
+        ;;
+esac
+```
+
+## Interactive Input with `read`
+
+```bash
+# Basic read
+echo -n "Enter your name: "
+read NAME
+echo "Hello, $NAME!"
+
+# Read with prompt (-p)
+read -p "Enter your name: " NAME
+
+# Read silently (-s) for passwords
+read -sp "Enter password: " PASSWORD
+echo ""  # newline after hidden input
+
+# Read with timeout (-t)
+read -t 5 -p "Quick! Enter something (5 sec): " ANSWER
+
+# Read with default
+read -p "Port [8080]: " PORT
+PORT="${PORT:-8080}"
+
+# Read into array
+read -p "Enter fruits (space-separated): " -a FRUITS
+echo "First fruit: ${FRUITS[0]}"
+```
+
+### Yes/No Confirmation
+
+```bash
+confirm() {
+    read -p "$1 [y/N]: " REPLY
+    case "$REPLY" in
+        [yY]|[yY][eE][sS]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if confirm "Delete all temporary files?"; then
+    echo "Deleting..."
+else
+    echo "Cancelled."
+fi
+```
+
+<Exercise number={1} title="Argument Handling">
+
+```bash
+cat > ~/deploy-sim.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Simulated deployment script with argument validation
+
+usage() {
+    echo "Usage: $0 <environment> <version> [--dry-run]"
+    echo ""
+    echo "Arguments:"
+    echo "  environment   dev, staging, or production"
+    echo "  version       Version tag (e.g., v1.2.3)"
+    echo ""
+    echo "Options:"
+    echo "  --dry-run     Show what would happen without doing it"
+    exit 2
+}
+
+# Check minimum args
+[ $# -lt 2 ] && usage
+
+ENV="$1"
+VERSION="$2"
+DRY_RUN=false
+
+# Check for flags
+shift 2
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true ;;
+        *) echo "Unknown option: $1"; usage ;;
+    esac
+    shift
+done
+
+# Validate environment
+case "$ENV" in
+    dev|staging|production) ;;
+    *) echo "Error: Invalid environment '$ENV'"; usage ;;
+esac
+
+# Validate version format
+if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: Version must match format vX.Y.Z (got: $VERSION)"
+    exit 1
+fi
+
+# Simulate deployment
+echo "=== Deployment Plan ==="
+echo "  Environment: $ENV"
+echo "  Version:     $VERSION"
+echo "  Dry run:     $DRY_RUN"
+echo ""
+
+if [ "$DRY_RUN" = true ]; then
+    echo "[DRY RUN] Would deploy $VERSION to $ENV"
+else
+    echo "Deploying $VERSION to $ENV..."
+    sleep 1
+    echo "Done!"
+fi
+SCRIPT
+
+chmod +x ~/deploy-sim.sh
+
+# Test cases
+~/deploy-sim.sh dev v1.0.0
+~/deploy-sim.sh production v2.3.1 --dry-run
+~/deploy-sim.sh invalid v1.0.0 2>/dev/null || echo "(expected failure)"
+```
+
+</Exercise>
+
+## Parsing Options with `getopts`
+
+For scripts with multiple flags and options:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Defaults
+VERBOSE=false
+OUTPUT=""
+COUNT=1
+
+usage() {
+    echo "Usage: $0 [-v] [-o output-file] [-n count] <input-file>"
+    exit 2
+}
+
+while getopts "vo:n:h" opt; do
+    case "$opt" in
+        v) VERBOSE=true ;;
+        o) OUTPUT="$OPTARG" ;;
+        n) COUNT="$OPTARG" ;;
+        h) usage ;;
+        ?) usage ;;
+    esac
+done
+
+# Remove parsed options, leaving positional args
+shift $((OPTIND - 1))
+
+# Remaining arguments
+INPUT="${1:-}"
+[ -z "$INPUT" ] && usage
+
+echo "Verbose: $VERBOSE"
+echo "Output:  ${OUTPUT:-stdout}"
+echo "Count:   $COUNT"
+echo "Input:   $INPUT"
+```
+
+<Exercise number={2} title="Interactive Script">
+
+```bash
+cat > ~/setup-project.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+echo "=== Project Setup Wizard ==="
+echo ""
+
+# Gather input
+read -p "Project name: " PROJECT_NAME
+if [ -z "$PROJECT_NAME" ]; then
+    echo "Error: Project name is required"
+    exit 1
+fi
+
+read -p "Language [bash]: " LANGUAGE
+LANGUAGE="${LANGUAGE:-bash}"
+
+read -p "Include tests? [Y/n]: " INCLUDE_TESTS
+INCLUDE_TESTS="${INCLUDE_TESTS:-Y}"
+
+read -p "Git init? [Y/n]: " GIT_INIT
+GIT_INIT="${GIT_INIT:-Y}"
+
+# Confirm
+echo ""
+echo "=== Summary ==="
+echo "  Project:  $PROJECT_NAME"
+echo "  Language: $LANGUAGE"
+echo "  Tests:    $INCLUDE_TESTS"
+echo "  Git:      $GIT_INIT"
+echo ""
+read -p "Create project? [y/N]: " CONFIRM
+
+if [[ ! "$CONFIRM" =~ ^[yY] ]]; then
+    echo "Cancelled."
+    exit 0
+fi
+
+# Create project
+PROJECT_DIR="$HOME/$PROJECT_NAME"
+mkdir -p "$PROJECT_DIR/src"
+echo "# $PROJECT_NAME" > "$PROJECT_DIR/README.md"
+
+if [[ "$INCLUDE_TESTS" =~ ^[yY] ]]; then
+    mkdir -p "$PROJECT_DIR/tests"
+    echo "# Tests go here" > "$PROJECT_DIR/tests/.gitkeep"
+fi
+
+if [[ "$GIT_INIT" =~ ^[yY] ]]; then
+    cd "$PROJECT_DIR" && git init -q
+    echo "node_modules/" > .gitignore
+    echo "*.log" >> .gitignore
+fi
+
+echo ""
+echo "Project created at: $PROJECT_DIR"
+ls -la "$PROJECT_DIR"
+
+# Clean up for exercise
+rm -rf "$PROJECT_DIR"
+echo "(Cleaned up for exercise)"
+SCRIPT
+
+chmod +x ~/setup-project.sh
+echo "Run with: ~/setup-project.sh"
+```
+
+</Exercise>
+
+<MiniProject title="CLI Tool with Full Argument Parsing">
+
+```bash
+cat > ~/backup.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+VERSION="1.0.0"
+VERBOSE=false
+DRY_RUN=false
+COMPRESS=true
+DEST="/tmp/backups"
+
+usage() {
+    cat << EOF
+backup.sh v$VERSION — Backup files and directories
+
+Usage: $0 [options] <source> [source2 ...]
+
+Options:
+  -d DIR     Destination directory (default: $DEST)
+  -n         Dry run (show what would happen)
+  -v         Verbose output
+  --no-compress  Don't compress the backup
+  -h         Show this help
+
+Examples:
+  $0 /etc/nginx /etc/ssh
+  $0 -v -d /mnt/backup /home/deploy
+  $0 -n /var/log
+EOF
+    exit 0
+}
+
+log() {
+    [ "$VERBOSE" = true ] && echo "[$(date '+%H:%M:%S')] $*"
+}
+
+# Parse options
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -d) DEST="$2"; shift 2 ;;
+        -n) DRY_RUN=true; shift ;;
+        -v) VERBOSE=true; shift ;;
+        --no-compress) COMPRESS=false; shift ;;
+        -h|--help) usage ;;
+        -*) echo "Unknown option: $1"; usage ;;
+        *) break ;;
+    esac
+done
+
+# Check for sources
+if [ $# -eq 0 ]; then
+    echo "Error: No source files specified"
+    usage
+fi
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_NAME="backup_${TIMESTAMP}"
+
+echo "=== Backup ==="
+echo "  Sources:     $@"
+echo "  Destination: $DEST"
+echo "  Compress:    $COMPRESS"
+echo "  Dry run:     $DRY_RUN"
+echo ""
+
+if [ "$DRY_RUN" = true ]; then
+    echo "[DRY RUN] Would backup:"
+    for src in "$@"; do
+        echo "  $src"
+    done
+    exit 0
+fi
+
+mkdir -p "$DEST"
+log "Created destination directory"
+
+if [ "$COMPRESS" = true ]; then
+    BACKUP_FILE="${DEST}/${BACKUP_NAME}.tar.gz"
+    log "Creating compressed backup: $BACKUP_FILE"
+    tar czf "$BACKUP_FILE" "$@" 2>/dev/null
+    echo "Backup created: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
+else
+    BACKUP_DIR="${DEST}/${BACKUP_NAME}"
+    mkdir -p "$BACKUP_DIR"
+    log "Copying files to: $BACKUP_DIR"
+    cp -r "$@" "$BACKUP_DIR/"
+    echo "Backup created: $BACKUP_DIR"
+fi
+SCRIPT
+
+chmod +x ~/backup.sh
+~/backup.sh -v -n /etc/hostname /etc/resolv.conf
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `$1`, `$2`, etc. are positional parameters; `$#` is the count; `"$@"` is all args
+- Always quote `"$@"` to preserve arguments with spaces
+- Validate arguments before using them — fail early with clear messages
+- `read -p` for interactive input; `read -s` for passwords
+- `getopts` for standard option parsing (`-v`, `-o file`)
+- Use `shift` to process arguments in a loop
+- Provide a `usage()` function — make scripts self-documenting
+
+## What's Next
+
+Your scripts can accept input and store data. Now they need to make decisions. In **Conditionals and Control Flow**, you'll learn `if`, `case`, test operators, and the logic that makes scripts smart.

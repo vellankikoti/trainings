@@ -1,0 +1,400 @@
+---
+title: "Your First Shell Script"
+description: "Learn the structure of a proper bash script — shebang, comments, permissions, exit codes, and the habits that make scripts reliable."
+order: 2
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 01-why-shell-scripting
+objectives:
+  - Write a properly structured bash script
+  - Understand the shebang line and why it matters
+  - Make scripts executable and run them
+  - Use exit codes for success and failure
+tags:
+  - shell-scripting
+  - bash
+  - basics
+---
+
+<Callout type="story" title="The Story">
+A colleague shares a script file. You open it — no shebang, no comments, no error handling. You run it and it fails silently. Did it work? Did it do anything? You have no idea. A well-structured script tells you what it does, handles errors, and communicates clearly. This lesson teaches you to write scripts that don't leave people guessing.
+</Callout>
+
+## Anatomy of a Shell Script
+
+```bash
+#!/bin/bash
+# ============================================
+# Script: deploy.sh
+# Description: Deploy the web application
+# Author: DevOps Team
+# Date: 2024-01-15
+# ============================================
+
+set -euo pipefail    # strict mode
+
+# Variables
+APP_DIR="/opt/webapp"
+LOG_FILE="/var/log/deploy.log"
+
+# Main logic
+echo "Starting deployment..."
+echo "[$(date)] Deployment started" >> "$LOG_FILE"
+
+# ... deployment steps ...
+
+echo "Deployment complete!"
+exit 0
+```
+
+### The Shebang Line
+
+The first line `#!/bin/bash` tells the OS which interpreter to use:
+
+```bash
+#!/bin/bash      # Use bash
+#!/bin/sh        # Use POSIX shell (more portable, fewer features)
+#!/usr/bin/env bash   # Find bash in PATH (most portable)
+#!/usr/bin/env python3  # Python scripts use this too
+```
+
+Without a shebang, the script runs with whatever shell invoked it — which might not be bash.
+
+```bash
+# With shebang — runs with bash regardless of your current shell
+./script.sh
+
+# Without shebang — runs with your current shell (might be zsh, dash, etc.)
+./script.sh
+```
+
+## Creating and Running Scripts
+
+### Method 1: Create, Make Executable, Run
+
+```bash
+# Create the script
+cat > hello.sh << 'EOF'
+#!/bin/bash
+echo "Hello, World!"
+echo "Running as: $(whoami)"
+echo "Current directory: $(pwd)"
+echo "Date: $(date)"
+EOF
+
+# Make it executable
+chmod +x hello.sh
+
+# Run it
+./hello.sh
+```
+
+### Method 2: Run with bash Explicitly
+
+```bash
+# No need for chmod +x
+bash hello.sh
+
+# But this is less clean — use method 1
+```
+
+### Why `./` Before the Script Name?
+
+```bash
+# This fails:
+hello.sh
+# -bash: hello.sh: command not found
+
+# This works:
+./hello.sh
+```
+
+Your shell looks for commands in `$PATH` directories. The current directory (`.`) is not in `$PATH` by default (for security). `./` tells the shell to look in the current directory.
+
+## Comments
+
+```bash
+#!/bin/bash
+
+# This is a single-line comment
+
+echo "Hello"  # This is an inline comment
+
+# Multi-line comments use multiple # signs
+# There's no native multi-line comment syntax in bash
+# But this is the convention
+```
+
+## Exit Codes
+
+Every command returns an exit code. `0` = success, anything else = failure:
+
+```bash
+# Check the exit code of the last command
+ls /tmp
+echo $?    # 0 (success)
+
+ls /nonexistent
+echo $?    # 2 (failure — no such file)
+```
+
+### Using Exit Codes in Scripts
+
+```bash
+#!/bin/bash
+
+# Exit with success
+exit 0
+
+# Exit with failure
+exit 1
+
+# Common convention:
+# 0 = success
+# 1 = general error
+# 2 = misuse (wrong arguments)
+# 126 = command not executable
+# 127 = command not found
+# 130 = killed by Ctrl+C
+```
+
+```bash
+#!/bin/bash
+# check-service.sh — check if a service is running
+
+SERVICE="$1"
+
+if [ -z "$SERVICE" ]; then
+    echo "Usage: $0 <service-name>"
+    exit 2    # wrong usage
+fi
+
+if systemctl is-active "$SERVICE" >/dev/null 2>&1; then
+    echo "$SERVICE is running"
+    exit 0    # success
+else
+    echo "$SERVICE is NOT running"
+    exit 1    # failure
+fi
+```
+
+## Strict Mode: `set -euo pipefail`
+
+Always start your scripts with this:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# set -e: Exit immediately if any command fails
+# set -u: Treat unset variables as errors
+# set -o pipefail: Pipe fails if any command in the pipe fails
+```
+
+### Why Each Matters
+
+```bash
+# Without set -e: script continues after errors
+#!/bin/bash
+rm /nonexistent/file    # fails, but script continues
+echo "This still runs!"  # BAD — you might not notice the error
+
+# With set -e: script stops at the error
+#!/bin/bash
+set -e
+rm /nonexistent/file    # fails, script exits here
+echo "This never runs"   # GOOD — you see the failure
+```
+
+```bash
+# Without set -u: unset variables become empty strings
+#!/bin/bash
+rm -rf $DEPLOY_DIR/     # If DEPLOY_DIR is unset, this becomes rm -rf /
+
+# With set -u: unset variables cause an error
+#!/bin/bash
+set -u
+rm -rf $DEPLOY_DIR/     # Error: DEPLOY_DIR: unbound variable (SAFE!)
+```
+
+<Exercise number={1} title="Script Structure">
+
+Create a properly structured script:
+
+```bash
+cat > ~/greeting.sh << 'SCRIPT'
+#!/bin/bash
+# ============================================
+# Script: greeting.sh
+# Description: Greet the user with system info
+# ============================================
+
+set -euo pipefail
+
+# Get the current hour
+HOUR=$(date +%H)
+
+# Determine greeting
+if [ "$HOUR" -lt 12 ]; then
+    GREETING="Good morning"
+elif [ "$HOUR" -lt 18 ]; then
+    GREETING="Good afternoon"
+else
+    GREETING="Good evening"
+fi
+
+# Display greeting
+echo "$GREETING, $(whoami)!"
+echo "It's $(date '+%A, %B %d, %Y at %I:%M %p')"
+echo "You are on $(hostname)"
+echo ""
+echo "System status:"
+echo "  Uptime: $(uptime -p 2>/dev/null || uptime)"
+echo "  Load:   $(cat /proc/loadavg | awk '{print $1, $2, $3}')"
+
+exit 0
+SCRIPT
+
+chmod +x ~/greeting.sh
+~/greeting.sh
+echo "Exit code: $?"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Exit Codes">
+
+Practice using exit codes:
+
+```bash
+# 1. Create a script that validates a file exists
+cat > ~/check-file.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+FILE="${1:-}"
+
+if [ -z "$FILE" ]; then
+    echo "Error: No file specified"
+    echo "Usage: $0 <filename>"
+    exit 2
+fi
+
+if [ -f "$FILE" ]; then
+    echo "File exists: $FILE"
+    echo "Size: $(du -h "$FILE" | cut -f1)"
+    echo "Type: $(file -b "$FILE")"
+    exit 0
+elif [ -d "$FILE" ]; then
+    echo "That's a directory, not a file: $FILE"
+    exit 1
+else
+    echo "File not found: $FILE"
+    exit 1
+fi
+SCRIPT
+
+chmod +x ~/check-file.sh
+
+# 2. Test with different inputs
+~/check-file.sh /etc/passwd
+echo "Exit code: $?"
+
+~/check-file.sh /nonexistent
+echo "Exit code: $?"
+
+~/check-file.sh /etc
+echo "Exit code: $?"
+
+~/check-file.sh
+echo "Exit code: $?"
+```
+
+</Exercise>
+
+<MiniProject title="Script Template Generator">
+
+Create a tool that generates properly structured scripts:
+
+```bash
+cat > ~/mkscript.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+NAME="${1:-}"
+if [ -z "$NAME" ]; then
+    echo "Usage: $0 <script-name>"
+    exit 2
+fi
+
+# Add .sh extension if not present
+[[ "$NAME" == *.sh ]] || NAME="${NAME}.sh"
+
+if [ -f "$NAME" ]; then
+    echo "Error: $NAME already exists"
+    exit 1
+fi
+
+cat > "$NAME" << EOF
+#!/bin/bash
+# ============================================
+# Script: $NAME
+# Description: TODO — describe what this does
+# Author: $(whoami)
+# Date: $(date +%Y-%m-%d)
+# ============================================
+
+set -euo pipefail
+
+# --- Configuration ---
+# Add your variables here
+
+# --- Functions ---
+usage() {
+    echo "Usage: \$0 [options]"
+    echo "  -h    Show this help"
+    exit 0
+}
+
+log() {
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$*"
+}
+
+# --- Main ---
+log "Starting \$0..."
+
+# Your code here
+
+log "Done."
+exit 0
+EOF
+
+chmod +x "$NAME"
+echo "Created: $NAME"
+echo "Edit it with: vim $NAME"
+SCRIPT
+
+chmod +x ~/mkscript.sh
+
+# Test it
+~/mkscript.sh my-deploy
+cat my-deploy.sh
+rm my-deploy.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Always start with `#!/bin/bash` (or `#!/usr/bin/env bash`)
+- Use `set -euo pipefail` at the top for safety
+- Make scripts executable with `chmod +x`
+- Exit code `0` = success, non-zero = failure
+- Check exit codes with `$?` or use them in conditionals
+- Comment your scripts — your future self will thank you
+- A header block (name, description, date) makes scripts maintainable
+
+## What's Next
+
+Your scripts need to work with data. In **Variables and Data Types**, you'll learn how bash handles variables, strings, numbers, and the critical quoting rules that prevent 90% of script bugs.

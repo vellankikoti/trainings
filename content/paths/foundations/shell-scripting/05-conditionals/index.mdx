@@ -1,0 +1,414 @@
+---
+title: "Conditionals and Control Flow"
+description: "Master bash conditionals with if/elif/else, test operators, case statements, and the logic constructs that make scripts intelligent."
+order: 5
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 04-user-input
+objectives:
+  - Write if/elif/else statements
+  - Use test operators for files, strings, and numbers
+  - Build case statements for multi-way branching
+  - Combine conditions with AND/OR logic
+tags:
+  - shell-scripting
+  - conditionals
+  - control-flow
+  - bash
+---
+
+<Callout type="story" title="The Story">
+Your deployment script needs to be smart: if the environment is production, require approval. If disk space is below 10%, abort. If the previous deployment failed, offer a rollback. Without conditionals, your script is just a list of commands. With conditionals, it's an intelligent automation that handles the real-world complexity of production systems.
+</Callout>
+
+## The `if` Statement
+
+```bash
+if [ condition ]; then
+    # commands
+elif [ another_condition ]; then
+    # commands
+else
+    # commands
+fi
+```
+
+### Important: Spaces Matter
+
+```bash
+# CORRECT — spaces inside brackets
+if [ "$NAME" = "Alice" ]; then
+
+# WRONG — missing spaces
+if ["$NAME" = "Alice"]; then   # Error!
+```
+
+## Test Operators
+
+### String Comparisons
+
+```bash
+# Equal
+if [ "$STR" = "hello" ]; then echo "match"; fi
+
+# Not equal
+if [ "$STR" != "hello" ]; then echo "different"; fi
+
+# Empty string
+if [ -z "$STR" ]; then echo "empty"; fi
+
+# Non-empty string
+if [ -n "$STR" ]; then echo "has value"; fi
+
+# Using [[ ]] — supports regex and pattern matching
+if [[ "$STR" == hello* ]]; then echo "starts with hello"; fi
+if [[ "$STR" =~ ^[0-9]+$ ]]; then echo "is a number"; fi
+```
+
+### Numeric Comparisons
+
+```bash
+# Use -eq, -ne, -lt, -gt, -le, -ge inside [ ]
+if [ "$A" -eq "$B" ]; then echo "equal"; fi
+if [ "$A" -ne "$B" ]; then echo "not equal"; fi
+if [ "$A" -lt "$B" ]; then echo "less than"; fi
+if [ "$A" -gt "$B" ]; then echo "greater than"; fi
+if [ "$A" -le "$B" ]; then echo "less or equal"; fi
+if [ "$A" -ge "$B" ]; then echo "greater or equal"; fi
+
+# Or use (( )) for arithmetic comparisons
+if (( A > B )); then echo "greater"; fi
+if (( A >= 10 && A <= 100 )); then echo "in range"; fi
+```
+
+### File Tests
+
+```bash
+# File exists
+if [ -f "/etc/nginx/nginx.conf" ]; then echo "file exists"; fi
+
+# Directory exists
+if [ -d "/var/log" ]; then echo "directory exists"; fi
+
+# File or directory exists (either)
+if [ -e "/path/to/something" ]; then echo "exists"; fi
+
+# File is readable / writable / executable
+if [ -r "$FILE" ]; then echo "readable"; fi
+if [ -w "$FILE" ]; then echo "writable"; fi
+if [ -x "$FILE" ]; then echo "executable"; fi
+
+# File is not empty (has content)
+if [ -s "$FILE" ]; then echo "not empty"; fi
+
+# Symbolic link
+if [ -L "$FILE" ]; then echo "is a symlink"; fi
+
+# File is newer than another
+if [ "$FILE_A" -nt "$FILE_B" ]; then echo "A is newer"; fi
+```
+
+## Combining Conditions
+
+```bash
+# AND — both must be true
+if [ -f "$CONFIG" ] && [ -r "$CONFIG" ]; then
+    echo "Config exists and is readable"
+fi
+
+# OR — at least one must be true
+if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ]; then
+    echo "Error: DB_HOST and DB_PORT are required"
+    exit 1
+fi
+
+# NOT — negate
+if [ ! -f "$LOCK_FILE" ]; then
+    echo "No lock file — safe to proceed"
+fi
+
+# Using [[ ]] (supports && and || inside)
+if [[ -f "$CONFIG" && -r "$CONFIG" ]]; then
+    echo "Config exists and is readable"
+fi
+```
+
+<Exercise number={1} title="Conditional Logic">
+
+```bash
+cat > ~/check-ready.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+echo "=== Deployment Readiness Check ==="
+
+READY=true
+
+# Check 1: Config file exists
+CONFIG="/etc/hostname"
+if [ -f "$CONFIG" ]; then
+    echo "[PASS] Config file exists: $CONFIG"
+else
+    echo "[FAIL] Config file missing: $CONFIG"
+    READY=false
+fi
+
+# Check 2: Disk space (more than 10% free)
+DISK_USAGE=$(df / | awk 'NR==2 {gsub(/%/,""); print $5}')
+if [ "$DISK_USAGE" -lt 90 ]; then
+    echo "[PASS] Disk usage: ${DISK_USAGE}% (< 90%)"
+else
+    echo "[FAIL] Disk usage: ${DISK_USAGE}% (too high!)"
+    READY=false
+fi
+
+# Check 3: Memory available
+MEM_AVAIL=$(free -m | awk '/Mem:/ {print $7}')
+if [ "$MEM_AVAIL" -gt 100 ]; then
+    echo "[PASS] Available memory: ${MEM_AVAIL}MB"
+else
+    echo "[FAIL] Low memory: ${MEM_AVAIL}MB"
+    READY=false
+fi
+
+# Check 4: Required command exists
+if command -v curl &>/dev/null; then
+    echo "[PASS] curl is installed"
+else
+    echo "[FAIL] curl is not installed"
+    READY=false
+fi
+
+echo ""
+if [ "$READY" = true ]; then
+    echo "All checks passed! Ready to deploy."
+    exit 0
+else
+    echo "Some checks failed. Fix issues before deploying."
+    exit 1
+fi
+SCRIPT
+
+chmod +x ~/check-ready.sh
+~/check-ready.sh
+```
+
+</Exercise>
+
+## The `case` Statement
+
+`case` is cleaner than long if/elif chains:
+
+```bash
+case "$COMMAND" in
+    start)
+        echo "Starting service..."
+        ;;
+    stop)
+        echo "Stopping service..."
+        ;;
+    restart)
+        echo "Restarting service..."
+        ;;
+    status)
+        echo "Service status..."
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+```
+
+### Pattern Matching in case
+
+```bash
+case "$INPUT" in
+    [yY]|[yY][eE][sS])
+        echo "Confirmed"
+        ;;
+    [nN]|[nN][oO])
+        echo "Cancelled"
+        ;;
+    *.tar.gz|*.tgz)
+        echo "Compressed tar archive"
+        ;;
+    *.zip)
+        echo "ZIP archive"
+        ;;
+    [0-9]*)
+        echo "Starts with a number"
+        ;;
+    *)
+        echo "Unknown input"
+        ;;
+esac
+```
+
+<Exercise number={2} title="Service Controller">
+
+```bash
+cat > ~/service-ctl.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+SERVICE="${1:-}"
+ACTION="${2:-}"
+
+usage() {
+    echo "Usage: $0 <service> <action>"
+    echo "  Actions: start, stop, restart, status, logs"
+    exit 2
+}
+
+[ -z "$SERVICE" ] || [ -z "$ACTION" ] && usage
+
+case "$ACTION" in
+    start)
+        echo "Starting $SERVICE..."
+        if systemctl is-active "$SERVICE" &>/dev/null; then
+            echo "$SERVICE is already running"
+        else
+            sudo systemctl start "$SERVICE" 2>/dev/null && echo "Started" || echo "Failed to start"
+        fi
+        ;;
+    stop)
+        echo "Stopping $SERVICE..."
+        if systemctl is-active "$SERVICE" &>/dev/null; then
+            sudo systemctl stop "$SERVICE" 2>/dev/null && echo "Stopped" || echo "Failed to stop"
+        else
+            echo "$SERVICE is not running"
+        fi
+        ;;
+    restart)
+        echo "Restarting $SERVICE..."
+        sudo systemctl restart "$SERVICE" 2>/dev/null && echo "Restarted" || echo "Failed to restart"
+        ;;
+    status)
+        if systemctl is-active "$SERVICE" &>/dev/null; then
+            echo "$SERVICE: RUNNING"
+            systemctl show "$SERVICE" --property=ActiveState,MainPID,MemoryCurrent 2>/dev/null | sed 's/^/  /'
+        else
+            echo "$SERVICE: STOPPED"
+        fi
+        ;;
+    logs)
+        echo "=== Last 20 log lines for $SERVICE ==="
+        journalctl -u "$SERVICE" --no-pager -n 20 2>/dev/null || echo "No logs found"
+        ;;
+    *)
+        echo "Unknown action: $ACTION"
+        usage
+        ;;
+esac
+SCRIPT
+
+chmod +x ~/service-ctl.sh
+~/service-ctl.sh cron status
+```
+
+</Exercise>
+
+<MiniProject title="Intelligent Deployment Script">
+
+```bash
+cat > ~/smart-deploy.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+ENV="${1:-}"
+VERSION="${2:-}"
+
+[ -z "$ENV" ] || [ -z "$VERSION" ] && {
+    echo "Usage: $0 <environment> <version>"
+    exit 2
+}
+
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+# Environment-specific configuration
+case "$ENV" in
+    dev)
+        SERVERS=1
+        APPROVAL_REQUIRED=false
+        HEALTH_CHECK_RETRIES=3
+        ;;
+    staging)
+        SERVERS=2
+        APPROVAL_REQUIRED=false
+        HEALTH_CHECK_RETRIES=5
+        ;;
+    production)
+        SERVERS=6
+        APPROVAL_REQUIRED=true
+        HEALTH_CHECK_RETRIES=10
+        ;;
+    *)
+        echo "Error: Unknown environment '$ENV'"
+        exit 1
+        ;;
+esac
+
+log "Deploying $VERSION to $ENV ($SERVERS servers)"
+
+# Production requires approval
+if [ "$APPROVAL_REQUIRED" = true ]; then
+    echo ""
+    echo "WARNING: You are deploying to PRODUCTION"
+    read -p "Type 'deploy' to confirm: " CONFIRM
+    if [ "$CONFIRM" != "deploy" ]; then
+        log "Deployment cancelled"
+        exit 0
+    fi
+fi
+
+# Pre-flight checks
+log "Running pre-flight checks..."
+CHECKS_PASSED=true
+
+if ! command -v curl &>/dev/null; then
+    log "FAIL: curl not found"
+    CHECKS_PASSED=false
+fi
+
+DISK_PCT=$(df / | awk 'NR==2 {gsub(/%/,""); print $5}')
+if [ "$DISK_PCT" -gt 90 ]; then
+    log "FAIL: Disk usage too high (${DISK_PCT}%)"
+    CHECKS_PASSED=false
+fi
+
+if [ "$CHECKS_PASSED" = false ]; then
+    log "Pre-flight checks FAILED. Aborting."
+    exit 1
+fi
+log "All pre-flight checks passed"
+
+# Simulate deployment
+for i in $(seq 1 "$SERVERS"); do
+    log "Deploying to server $i of $SERVERS..."
+    sleep 0.5
+done
+
+log "Deployment of $VERSION to $ENV complete!"
+SCRIPT
+
+chmod +x ~/smart-deploy.sh
+~/smart-deploy.sh dev v1.0.0
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Use `[ ]` for POSIX-compatible tests; `[[ ]]` for bash-specific features
+- Always quote variables in conditions: `[ "$var" = "value" ]`
+- String comparison uses `=` and `!=`; numeric uses `-eq`, `-lt`, `-gt`
+- File tests: `-f` (file), `-d` (directory), `-e` (exists), `-r` (readable)
+- Combine with `&&` (AND) and `||` (OR)
+- `case` is cleaner than long if/elif chains for matching patterns
+- `command -v` checks if a command exists (better than `which`)
+
+## What's Next
+
+Your scripts make decisions. Now they need to repeat actions. In **Loops and Iteration**, you'll learn `for`, `while`, and `until` loops — the constructs that process lists, files, and streams automatically.
