@@ -9,7 +9,7 @@ interface LessonContentProps {
 
 export function LessonContent({ source }: LessonContentProps) {
   return (
-    <article className="prose prose-neutral dark:prose-invert max-w-none">
+    <article className="prose prose-neutral dark:prose-invert max-w-none prose-pre:overflow-x-auto prose-table:overflow-x-auto prose-img:rounded-lg">
       <MDXRemote {...source} components={mdxComponents as any} />
     </article>
   );

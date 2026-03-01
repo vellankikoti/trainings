@@ -45,6 +45,8 @@ export function Callout({ type = "info", title, children }: CalloutProps) {
 
   return (
     <div
+      role="note"
+      aria-label={title || style.defaultTitle}
       className={`my-4 rounded-lg border-l-4 ${style.border} ${style.bg} p-4`}
     >
       <div className="flex items-center gap-2 font-semibold">

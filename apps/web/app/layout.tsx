@@ -21,6 +21,16 @@ export const metadata: Metadata = {
     "sre",
     "learning platform",
   ],
+  manifest: "/manifest.json",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "DevOps Eng",
+  },
 };
 
 function AuthProvider({ children }: { children: React.ReactNode }) {

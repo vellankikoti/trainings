@@ -211,11 +211,12 @@ export function QuizContainer({ quizId, lessonUrl }: QuizContainerProps) {
           Previous
         </button>
 
-        <div className="flex gap-2">
+        <div className="hidden flex-wrap justify-center gap-2 sm:flex">
           {quizData.questions.map((q, i) => (
             <button
               key={q.id}
               onClick={() => setCurrentIndex(i)}
+              aria-label={`Question ${i + 1}${q.id in answers ? " (answered)" : ""}`}
               className={`h-8 w-8 rounded-full text-xs ${
                 i === currentIndex
                   ? "bg-primary text-primary-foreground"
@@ -228,6 +229,9 @@ export function QuizContainer({ quizId, lessonUrl }: QuizContainerProps) {
             </button>
           ))}
         </div>
+        <span className="text-sm text-muted-foreground sm:hidden">
+          {currentIndex + 1} / {quizData.totalQuestions}
+        </span>
 
         {currentIndex < quizData.totalQuestions - 1 ? (
           <button

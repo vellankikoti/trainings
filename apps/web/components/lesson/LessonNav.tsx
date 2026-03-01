@@ -15,7 +15,7 @@ export function LessonNav({
   nextLesson,
 }: LessonNavProps) {
   return (
-    <div className="mt-12 flex items-center justify-between border-t pt-6">
+    <div className="mt-12 flex flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
       {prevLesson ? (
         <Button variant="outline" asChild>
           <Link

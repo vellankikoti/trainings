@@ -19,7 +19,7 @@ export function Header() {
         <div className="flex items-center gap-6">
           <MobileNav />
           <Logo />
-          <nav className="hidden items-center gap-6 md:flex">
+          <nav aria-label="Main navigation" className="hidden items-center gap-6 md:flex">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.href}

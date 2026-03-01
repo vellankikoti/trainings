@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SkipToContent } from "@/components/layout/SkipToContent";
 
 export const metadata: Metadata = {
   title: "Admin Dashboard",
@@ -19,13 +20,14 @@ export default function AdminLayout({
 }) {
   return (
     <div className="min-h-screen">
+      <SkipToContent />
       <header className="border-b bg-background">
         <div className="container mx-auto flex h-14 items-center justify-between px-4">
           <div className="flex items-center gap-6">
             <Link href="/admin" className="font-bold">
               Admin
             </Link>
-            <nav className="flex items-center gap-4">
+            <nav aria-label="Admin navigation" className="flex items-center gap-4">
               {NAV_ITEMS.map((item) => (
                 <Link
                   key={item.href}
@@ -45,7 +47,7 @@ export default function AdminLayout({
           </Link>
         </div>
       </header>
-      <main className="container mx-auto px-4 py-8">{children}</main>
+      <main id="main-content" className="container mx-auto px-4 py-8">{children}</main>
     </div>
   );
 }

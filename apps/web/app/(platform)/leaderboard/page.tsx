@@ -48,8 +48,8 @@ export default async function LeaderboardPage() {
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border">
-          <table className="w-full">
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full min-w-[500px]">
             <thead>
               <tr className="border-b text-sm text-muted-foreground">
                 <th className="px-4 py-3 text-left">Rank</th>
