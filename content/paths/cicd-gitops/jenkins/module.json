@@ -1,0 +1,17 @@
+{
+  "id": "jenkins",
+  "title": "Jenkins",
+  "slug": "jenkins",
+  "pathSlug": "cicd-gitops",
+  "description": "Master Jenkins for enterprise CI/CD. Declarative and scripted pipelines, shared libraries, and distributed builds.",
+  "order": 3,
+  "estimatedHours": 35,
+  "lessonsCount": 5,
+  "lessons": [
+    { "slug": "introduction", "title": "Introduction to Jenkins", "order": 1 },
+    { "slug": "pipeline-syntax", "title": "Declarative vs Scripted Pipelines", "order": 2 },
+    { "slug": "jenkinsfile", "title": "Writing Jenkinsfiles", "order": 3 },
+    { "slug": "shared-libraries", "title": "Shared Libraries", "order": 4 },
+    { "slug": "agents-executors", "title": "Agents, Executors & Distributed Builds", "order": 5 }
+  ]
+}

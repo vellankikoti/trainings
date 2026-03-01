@@ -1,0 +1,325 @@
+---
+title: "Transformers — Labels, Annotations & Prefixes"
+description: "Apply cross-cutting modifications to every resource in your Kustomize build — labels, annotations, name prefixes/suffixes, namespaces, and images — using built-in transformers."
+order: 5
+xpReward: 25
+estimatedMinutes: 25
+prerequisites: ["generators"]
+objectives:
+  - Add labels and annotations to all resources with a single directive
+  - Use namePrefix and nameSuffix to avoid naming collisions
+  - Override namespaces across an entire overlay
+  - Swap container images without editing manifests
+  - Understand how transformers interact with selectors and references
+tags:
+  - kustomize
+  - kubernetes
+  - transformers
+  - labels
+  - annotations
+---
+
+<Callout type="story" title="The Story">
+Your platform team runs a shared cluster. Four product teams deploy into it, and resources keep colliding — two teams named their Deployment "api-server." You need a way to prefix every resource name with the team name, stamp every object with ownership labels for cost tracking, and set the namespace without editing dozens of YAML files. Kustomize transformers do exactly this: they apply the same modification to every resource in the build, automatically. One line in your kustomization.yaml, and every Deployment, Service, ConfigMap, and Secret gets the label, the prefix, or the namespace.
+</Callout>
+
+## What Are Transformers?
+
+Transformers are built-in Kustomize features that modify resources globally. Unlike patches, which target specific resources, transformers apply to **every resource** in the kustomization.
+
+The built-in transformers are:
+
+| Transformer | What it does |
+|-------------|-------------|
+| `commonLabels` | Adds labels to all resources and selectors |
+| `commonAnnotations` | Adds annotations to all resources |
+| `namePrefix` | Prepends a string to every resource name |
+| `nameSuffix` | Appends a string to every resource name |
+| `namespace` | Sets the namespace on every resource |
+| `images` | Overrides container image names, tags, or digests |
+
+## commonLabels
+
+Adds labels to every resource's `metadata.labels`, and also to `spec.selector`, `spec.template.metadata.labels`, and other selector fields.
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+commonLabels:
+  app.kubernetes.io/managed-by: kustomize
+  team: payments
+  environment: production
+```
+
+The result: every resource gets these three labels. Services get them in both `metadata.labels` and `spec.selector`. Deployments get them in `metadata.labels`, `spec.selector.matchLabels`, and `spec.template.metadata.labels`.
+
+<Callout type="warning" title="Selector Immutability">
+`commonLabels` modifies `spec.selector.matchLabels` on Deployments and StatefulSets. Since Kubernetes considers selectors immutable after creation, adding a new commonLabel to an existing deployment will cause an error on apply. Use `labels` (without selector modification) if you need to add labels after initial deployment. This requires Kustomize v5.0+.
+</Callout>
+
+### Labels Without Selectors (Kustomize v5.0+)
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+
+labels:
+  - pairs:
+      cost-center: cc-1234
+      owner: platform-team
+    includeSelectors: false    # only metadata.labels, not selectors
+```
+
+This adds labels to `metadata.labels` only, leaving selectors untouched. Safe to add at any time.
+
+## commonAnnotations
+
+Adds annotations to every resource's `metadata.annotations`:
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml
+
+commonAnnotations:
+  config.kubernetes.io/origin: "kustomize overlay/production"
+  team-slack: "#payments-oncall"
+  last-reviewed: "2025-03-15"
+```
+
+Unlike `commonLabels`, annotations are never added to selectors — they only go into `metadata.annotations`. This makes them safe to add or change at any time.
+
+## namePrefix and nameSuffix
+
+Prepend or append strings to every resource name:
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namePrefix: payments-
+nameSuffix: -v2
+```
+
+A Deployment named `api-server` becomes `payments-api-server-v2`. Kustomize also updates all **cross-references**: Service selectors, volume claim references, ConfigMap references, and more.
+
+### How Cross-References Are Updated
+
+```yaml
+# base/deployment.yaml (before)
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          envFrom:
+            - configMapRef:
+                name: app-config   # original name
+
+# After kustomize build with namePrefix: payments-
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          envFrom:
+            - configMapRef:
+                name: payments-app-config   # prefix applied here too
+```
+
+Kustomize knows that `configMapRef.name` is a reference to a ConfigMap and applies the prefix there as well. This works for ServiceAccount references, Volume references, Ingress service backends, and more.
+
+## namespace
+
+Sets the namespace on every resource:
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: payments-production
+```
+
+Every resource in the output gets `metadata.namespace: payments-production`. This is invaluable for deploying the same base into different namespaces:
+
+```yaml
+# overlays/team-a/kustomization.yaml
+resources:
+  - ../../base
+namespace: team-a
+
+# overlays/team-b/kustomization.yaml
+resources:
+  - ../../base
+namespace: team-b
+```
+
+Cluster-scoped resources (like ClusterRole, ClusterRoleBinding, Namespace) are excluded from the namespace transformation automatically.
+
+## images
+
+The `images` transformer overrides container images without writing a patch. This is one of the most frequently used transformers in CI/CD pipelines.
+
+### Changing an Image Tag
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+
+images:
+  - name: myregistry/order-service
+    newTag: v2.5.0
+```
+
+Every container using `myregistry/order-service` (regardless of the current tag) gets updated to `myregistry/order-service:v2.5.0`.
+
+### Changing Image Name and Tag
+
+```yaml
+images:
+  - name: myregistry/order-service
+    newName: prod-registry.company.com/order-service
+    newTag: v2.5.0
+```
+
+This changes both the registry/name and the tag. Useful when promoting images between registries.
+
+### Using a Digest
+
+```yaml
+images:
+  - name: myregistry/order-service
+    newName: prod-registry.company.com/order-service
+    digest: sha256:3a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b
+```
+
+Digests pin to an exact image — more secure than tags, which can be overwritten.
+
+### CI/CD Integration
+
+In a pipeline, you typically set the image tag dynamically:
+
+```bash
+# In your CI/CD pipeline
+cd overlays/production
+kustomize edit set image myregistry/order-service:${GIT_SHA}
+```
+
+This modifies `kustomization.yaml` in place, which you then commit (in a GitOps workflow) or apply directly.
+
+## Combining Transformers
+
+Transformers compose naturally. Use several in one kustomization:
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namePrefix: prod-
+namespace: production
+
+commonLabels:
+  environment: production
+  app.kubernetes.io/managed-by: kustomize
+
+commonAnnotations:
+  oncall-team: backend-oncall@company.com
+
+images:
+  - name: myregistry/order-service
+    newTag: v2.5.0
+  - name: myregistry/notification-service
+    newTag: v1.3.0
+```
+
+The execution order is deterministic: namespace, namePrefix/nameSuffix, commonLabels, commonAnnotations, images. Each transformer sees the output of the previous one.
+
+## Transformers in a Multi-Overlay Setup
+
+A practical example showing how transformers differ across environments:
+
+```yaml
+# overlays/development/kustomization.yaml
+resources:
+  - ../../base
+namePrefix: dev-
+namespace: development
+commonLabels:
+  environment: development
+images:
+  - name: myregistry/order-service
+    newTag: latest
+```
+
+```yaml
+# overlays/staging/kustomization.yaml
+resources:
+  - ../../base
+namePrefix: stg-
+namespace: staging
+commonLabels:
+  environment: staging
+images:
+  - name: myregistry/order-service
+    newTag: rc-2.5.0
+```
+
+```yaml
+# overlays/production/kustomization.yaml
+resources:
+  - ../../base
+namePrefix: prod-
+namespace: production
+commonLabels:
+  environment: production
+images:
+  - name: myregistry/order-service
+    digest: sha256:3a1b2c3d4e5f...
+```
+
+Each environment gets distinct names, namespaces, labels, and image versions — all without editing a single base manifest.
+
+## Summary
+
+- **commonLabels** adds labels to all resources and selectors — use cautiously on existing deployments due to selector immutability
+- **commonAnnotations** adds annotations to all resources — safe to modify at any time
+- **namePrefix / nameSuffix** rename resources and update all cross-references automatically
+- **namespace** sets the namespace on all namespace-scoped resources
+- **images** overrides container image names, tags, and digests without patches
+- Transformers compose in a deterministic order and are the simplest way to differentiate environments
+- Use `labels` with `includeSelectors: false` (Kustomize v5.0+) for labels without selector modification
+
+## What's Next
+
+You have seen how overlays customize bases and transformers apply global modifications. But what about optional features that you want to mix and match — like monitoring, debugging sidecars, or network policies? Next, you will learn about **Reusable Components** in Kustomize.

@@ -1,0 +1,181 @@
+---
+title: "Helm Chart Structure"
+description: "Understand the anatomy of a Helm chart — Chart.yaml, values.yaml, templates directory, and how all the pieces fit together."
+order: 2
+xpReward: 35
+estimatedMinutes: 40
+prerequisites: ["introduction"]
+objectives:
+  - Create a Helm chart from scratch
+  - Understand every file in the chart directory structure
+  - Configure Chart.yaml metadata
+  - Use values.yaml for default configuration
+tags:
+  - helm
+  - charts
+  - templates
+  - structure
+---
+
+<Callout type="story" title="The Story">
+Your team has been deploying applications with raw YAML files — copying and pasting between services, manually updating image tags, and hoping nothing falls through the cracks. You decide to create a Helm chart for your standard microservice. Once built, any team member can deploy a new service with `helm install my-service ./microservice-chart --set image.tag=v2.0` — no YAML editing required.
+</Callout>
+
+## Creating a Chart
+
+```bash
+helm create my-app
+```
+
+This generates:
+
+```
+my-app/
+├── Chart.yaml          # Chart metadata (name, version, description)
+├── values.yaml         # Default configuration values
+├── charts/             # Dependency charts
+├── templates/          # Kubernetes manifest templates
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   ├── serviceaccount.yaml
+│   ├── hpa.yaml
+│   ├── _helpers.tpl    # Template helper functions
+│   ├── NOTES.txt       # Post-install instructions
+│   └── tests/
+│       └── test-connection.yaml
+├── .helmignore         # Files to exclude from chart
+└── README.md
+```
+
+## Chart.yaml
+
+The chart's identity card:
+
+```yaml
+apiVersion: v2
+name: my-app
+description: A Helm chart for my microservice
+type: application         # "application" or "library"
+version: 1.0.0           # Chart version (follows semver)
+appVersion: "2.3.1"      # Application version being deployed
+keywords:
+  - microservice
+  - api
+maintainers:
+  - name: Platform Team
+    email: platform@company.com
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+```
+
+## values.yaml
+
+Default configuration — users override these at install time:
+
+```yaml
+# values.yaml
+replicaCount: 2
+
+image:
+  repository: myregistry/my-app
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  hostname: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilization: 70
+
+redis:
+  enabled: false
+```
+
+## Templates
+
+Templates are Kubernetes manifests with Go template placeholders:
+
+```yaml
+# templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "my-app.fullname" . }}
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "my-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "my-app.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+```
+
+## Rendering and Debugging
+
+Preview what Helm will generate without installing:
+
+```bash
+# Render templates locally
+helm template my-release ./my-app
+
+# Render with custom values
+helm template my-release ./my-app -f production-values.yaml
+
+# Dry-run against cluster (validates with API server)
+helm install my-release ./my-app --dry-run --debug
+```
+
+## Packaging and Sharing
+
+```bash
+# Package into a .tgz archive
+helm package ./my-app
+# Creates: my-app-1.0.0.tgz
+
+# Install from archive
+helm install my-release my-app-1.0.0.tgz
+```
+
+## Summary
+
+- `helm create` scaffolds a complete chart structure
+- `Chart.yaml` defines metadata; `values.yaml` defines defaults
+- Templates use Go templating to generate Kubernetes manifests
+- `helm template` renders charts locally for debugging
+- Package charts as `.tgz` archives for distribution
+
+## What's Next
+
+The power of Helm is in its templating. Next, you'll master **Go templates and template functions** to build flexible, reusable charts.

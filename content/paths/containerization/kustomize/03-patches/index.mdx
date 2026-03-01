@@ -1,0 +1,308 @@
+---
+title: "Strategic Merge & JSON Patches"
+description: "Master Kustomize's two patching strategies — Strategic Merge Patches for intuitive YAML merging and JSON Patches for surgical, path-based modifications."
+order: 3
+xpReward: 35
+estimatedMinutes: 35
+prerequisites: ["bases-overlays"]
+objectives:
+  - Understand the difference between Strategic Merge Patches and JSON Patches
+  - Write Strategic Merge Patches to modify, add, and delete fields
+  - Write JSON Patches for precise, path-based operations
+  - Use inline patches for small, targeted changes
+  - Choose the right patch type for each scenario
+tags:
+  - kustomize
+  - kubernetes
+  - patches
+  - strategic-merge
+  - json-patch
+---
+
+<Callout type="story" title="The Story">
+Production needs a sidecar container for log shipping. Staging needs an extra environment variable. And a security audit requires removing a specific volume mount from every Deployment in the cluster. Strategic Merge Patches handle the first two cases naturally — you write partial YAML that gets merged. But removing an item from the middle of a list? That requires surgical precision. JSON Patches let you target an exact array index or path and add, remove, or replace it. Together, these two patching strategies cover every customization you will encounter.
+</Callout>
+
+## Two Ways to Patch
+
+Kustomize supports two patching strategies:
+
+| | Strategic Merge Patch | JSON Patch |
+|---|----------------------|------------|
+| **Format** | Partial Kubernetes YAML | JSON Patch operations (RFC 6902) |
+| **Merge behavior** | Deep merge by field name | Explicit add/remove/replace at paths |
+| **List handling** | Merge by key (e.g., container name) | Target by index or value |
+| **Removing fields** | `$patch: delete` directive | `"op": "remove"` |
+| **Best for** | Most modifications | List manipulation, field removal |
+
+## Strategic Merge Patches
+
+A Strategic Merge Patch (SMP) looks like an incomplete Kubernetes resource. You specify only the fields you want to change. Kustomize merges your patch into the base resource.
+
+### Changing a Field
+
+```yaml
+# patches/increase-replicas.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 10
+```
+
+The patch must include enough metadata to identify the target: `apiVersion`, `kind`, and `metadata.name`. Only the `spec.replicas` field is modified; everything else from the base is preserved.
+
+### Adding a Sidecar Container
+
+Strategic Merge Patches merge lists by key. For containers, the key is `name`. If the name matches, the container is updated. If it does not match, the container is added.
+
+```yaml
+# patches/add-sidecar.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: log-shipper
+          image: fluent/fluent-bit:2.1
+          volumeMounts:
+            - name: app-logs
+              mountPath: /var/log/app
+      volumes:
+        - name: app-logs
+          emptyDir: {}
+```
+
+Because no container named `log-shipper` exists in the base, it gets appended to the containers list.
+
+### Modifying an Existing Container
+
+To change a field on an existing container, match it by name:
+
+```yaml
+# patches/update-image.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: order-service
+          image: myregistry/order-service:v2.0.0
+          env:
+            - name: NEW_FEATURE
+              value: "enabled"
+```
+
+The container named `order-service` is merged: the image is updated and the new environment variable is added alongside existing ones.
+
+### Deleting a Field
+
+Use the `$patch: delete` directive to remove an element from a list:
+
+```yaml
+# patches/remove-hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: order-service
+$patch: delete
+```
+
+This removes the entire HPA resource from the output. You can also delete individual containers:
+
+```yaml
+# patches/remove-sidecar.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: log-shipper
+          $patch: delete
+```
+
+### Registering Strategic Merge Patches
+
+Reference patches in your `kustomization.yaml`:
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - path: patches/increase-replicas.yaml
+  - path: patches/add-sidecar.yaml
+  - path: patches/update-image.yaml
+```
+
+## JSON Patches (RFC 6902)
+
+JSON Patches use an array of operations. Each operation has an `op` (add, remove, replace, move, copy, test), a `path` (JSON pointer), and optionally a `value`.
+
+### Replacing a Value
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target:
+      kind: Deployment
+      name: order-service
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 10
+```
+
+### Adding a Value
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: order-service
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: TRACING_ENABLED
+          value: "true"
+```
+
+The `-` at the end of the path means "append to the array." This adds a new environment variable to the first container without touching the others.
+
+### Removing a Value
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: order-service
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/containers/0/volumeMounts/1
+```
+
+This removes the second volume mount (index 1) from the first container. JSON Patches give you index-level precision that Strategic Merge Patches cannot.
+
+### Targeting Multiple Resources
+
+The `target` field supports selectors to apply the same patch across many resources:
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: "app.kubernetes.io/part-of=order-system"
+    patch: |-
+      - op: add
+        path: /metadata/annotations/security-audit
+        value: "passed-2024-q3"
+```
+
+You can also use `annotationSelector`, `name` regex patterns, and `namespace`:
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: ".*-service"    # regex matching
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 512Mi
+```
+
+### Combining Multiple Operations
+
+A single JSON Patch can contain multiple operations, executed in order:
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: order-service
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 5
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8080"
+      - op: remove
+        path: /spec/template/spec/containers/0/livenessProbe
+```
+
+## Inline Patches
+
+For small changes, you can embed Strategic Merge Patches directly in `kustomization.yaml` instead of creating a separate file:
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target:
+      kind: Service
+      name: order-service
+    patch: |-
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: order-service
+        annotations:
+          service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+```
+
+This keeps simple patches close to the overlay definition, reducing file count.
+
+## Choosing the Right Patch Type
+
+Use **Strategic Merge Patches** when:
+- Changing or adding scalar fields (replicas, image, labels)
+- Adding containers or volumes (merged by name key)
+- The modification is intuitive to express as partial YAML
+
+Use **JSON Patches** when:
+- Removing specific items from lists by index
+- Applying the same change to many resources via target selectors
+- You need operations like `move`, `copy`, or `test`
+- The precise path-based approach is clearer than a merge
+
+## Summary
+
+- **Strategic Merge Patches** are partial YAML merged into base resources — intuitive for most changes
+- **JSON Patches** (RFC 6902) provide surgical operations: add, remove, replace, move, copy, test
+- Strategic Merge Patches merge lists by key (e.g., container name); JSON Patches target by index
+- Use `$patch: delete` in merge patches or `op: remove` in JSON patches to remove fields
+- The `target` field with selectors lets you apply one patch to many resources
+- Inline patches keep small changes in `kustomization.yaml` without extra files
+
+## What's Next
+
+Patches modify existing resources. But some resources — ConfigMaps and Secrets — are often generated dynamically from files or literals. Next, you will learn about **ConfigMap and Secret Generators** in Kustomize.

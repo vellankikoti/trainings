@@ -1,0 +1,16 @@
+{
+  "id": "prometheus",
+  "title": "Prometheus",
+  "slug": "prometheus",
+  "pathSlug": "observability",
+  "description": "Master Prometheus for metrics collection, PromQL for querying, and alerting rules for proactive incident detection.",
+  "order": 2,
+  "estimatedHours": 30,
+  "lessonsCount": 4,
+  "lessons": [
+    { "slug": "introduction", "title": "Introduction to Prometheus", "order": 1 },
+    { "slug": "metrics", "title": "Metrics Types & Instrumentation", "order": 2 },
+    { "slug": "promql", "title": "PromQL — Querying Metrics", "order": 3 },
+    { "slug": "alerting", "title": "Alerting Rules & Alertmanager", "order": 4 }
+  ]
+}

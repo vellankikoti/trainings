@@ -1,0 +1,335 @@
+---
+title: "Bases & Overlays"
+description: "Master the core Kustomize pattern — bases and overlays. Learn to structure multi-environment Kubernetes configurations with reusable bases and environment-specific overlays."
+order: 2
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["introduction"]
+objectives:
+  - Understand the base-overlay pattern and why it exists
+  - Create a reusable base with shared Kubernetes manifests
+  - Build overlays for development, staging, and production
+  - Compose overlays that reference remote and local bases
+  - Preview and validate generated output before applying
+tags:
+  - kustomize
+  - kubernetes
+  - overlays
+  - configuration
+  - multi-environment
+---
+
+<Callout type="story" title="The Story">
+Your team just shipped version 1.0 of an order service. It runs in three environments: development (1 replica, debug logging), staging (2 replicas, info logging), and production (5 replicas, warn logging, higher resource limits). The deployment manifests are nearly identical. Copying YAML between folders and hand-editing values is fragile — one missed change caused a staging outage last sprint. You need a pattern where the common manifests live in one place and each environment declares only what is different. That pattern is bases and overlays.
+</Callout>
+
+## The Base-Overlay Mental Model
+
+A **base** is a directory containing Kubernetes manifests and a `kustomization.yaml` that lists them. It represents the canonical, environment-agnostic version of your application.
+
+An **overlay** is a directory that references one or more bases and applies modifications on top. Each overlay represents a specific variant — an environment, a region, or a tenant.
+
+```
+order-service/
+├── base/
+│   ├── kustomization.yaml
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── hpa.yaml
+└── overlays/
+    ├── development/
+    │   ├── kustomization.yaml
+    │   └── replica-patch.yaml
+    ├── staging/
+    │   ├── kustomization.yaml
+    │   └── replica-patch.yaml
+    └── production/
+        ├── kustomization.yaml
+        ├── replica-patch.yaml
+        └── resource-patch.yaml
+```
+
+The key insight: **base manifests are valid Kubernetes YAML on their own.** You could `kubectl apply` them directly. Overlays just customize them.
+
+## Building a Base
+
+Start with the `kustomization.yaml` that declares which resources belong to this base.
+
+```yaml
+# base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+```
+
+```yaml
+# base/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+        - name: order-service
+          image: myregistry/order-service:v1.0.0
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          env:
+            - name: LOG_LEVEL
+              value: "info"
+```
+
+```yaml
+# base/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+spec:
+  selector:
+    app: order-service
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+```yaml
+# base/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: order-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: order-service
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+```
+
+Validate the base on its own:
+
+```bash
+kubectl kustomize ./base
+```
+
+This outputs the merged YAML. If the manifests are valid, you see clean output. If something is wrong, you get an error immediately.
+
+## Creating Overlays
+
+### Development Overlay
+
+Development needs minimal resources and debug logging.
+
+```yaml
+# overlays/development/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namePrefix: dev-
+
+commonLabels:
+  environment: development
+
+patches:
+  - path: replica-patch.yaml
+```
+
+```yaml
+# overlays/development/replica-patch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: order-service
+          env:
+            - name: LOG_LEVEL
+              value: "debug"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+```
+
+### Production Overlay
+
+Production needs higher replicas, stricter resource limits, and a wider HPA range.
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namePrefix: prod-
+namespace: production
+
+commonLabels:
+  environment: production
+
+commonAnnotations:
+  team: backend
+  oncall: backend-oncall@company.com
+
+patches:
+  - path: replica-patch.yaml
+  - path: resource-patch.yaml
+```
+
+```yaml
+# overlays/production/replica-patch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+        - name: order-service
+          env:
+            - name: LOG_LEVEL
+              value: "warn"
+```
+
+```yaml
+# overlays/production/resource-patch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: order-service
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+```
+
+## Previewing and Comparing Environments
+
+```bash
+# Preview production output
+kubectl kustomize ./overlays/production
+
+# Diff development vs production
+diff <(kubectl kustomize ./overlays/development) \
+     <(kubectl kustomize ./overlays/production)
+
+# Apply a specific environment
+kubectl apply -k ./overlays/production
+```
+
+The `diff` command is invaluable during reviews. It shows exactly what differs between environments — no guessing, no stale documentation.
+
+## Referencing Remote Bases
+
+Bases do not have to be local directories. Kustomize can pull from Git repositories:
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - https://github.com/my-org/order-service//base?ref=v1.2.0
+
+namePrefix: prod-
+namespace: production
+```
+
+The `?ref=` parameter pins the base to a specific tag or commit. This lets separate teams own the base and consumers pick up updates intentionally.
+
+<Callout type="warning" title="Pin Your References">
+Always use a tag or commit SHA when referencing remote bases. Pointing to a branch means your production manifests can change without your knowledge.
+</Callout>
+
+## Multi-Base Composition
+
+An overlay can reference multiple bases. This is useful when your application consists of several independent components.
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../bases/order-service
+  - ../../bases/notification-service
+  - ../../bases/shared-config
+
+namespace: production
+
+commonLabels:
+  environment: production
+```
+
+Kustomize merges all resources from all bases, then applies the overlay's modifications uniformly.
+
+## Common Pitfalls
+
+1. **Forgetting to list resources in kustomization.yaml** — Kustomize only processes files explicitly listed. An unlisted manifest is silently ignored.
+2. **Patching a resource that does not exist in the base** — The patch target must match by apiVersion, kind, and metadata.name.
+3. **Circular references** — Overlay A references Overlay B which references Overlay A. Kustomize will error, but the message can be confusing.
+4. **Overly large bases** — If your base contains manifests for unrelated services, overlays will carry unnecessary resources. Keep bases focused.
+
+## Summary
+
+- A **base** holds shared, valid Kubernetes YAML that works on its own
+- An **overlay** references a base and applies environment-specific modifications
+- Use `namePrefix`, `namespace`, `commonLabels`, and `commonAnnotations` in overlays for quick differentiation
+- Patches in overlays change specific fields without duplicating entire manifests
+- Remote bases let teams share configurations across repositories with pinned versions
+- Always preview with `kubectl kustomize` and diff environments before applying
+
+## What's Next
+
+You now know how to structure bases and overlays. But the patches we used so far are simple strategic merge patches. Next, you will learn about **Strategic Merge Patches and JSON Patches** — giving you fine-grained control over exactly how resources are modified.

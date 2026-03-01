@@ -1,0 +1,472 @@
+---
+title: "Helm Best Practices"
+description: "Learn production-proven patterns for writing maintainable Helm charts -- naming conventions, security hardening, chart design, and operational excellence."
+order: 9
+xpReward: 35
+estimatedMinutes: 40
+prerequisites: ["testing"]
+objectives:
+  - Apply Helm naming and labeling conventions consistently
+  - Design charts for security with least-privilege defaults
+  - Structure templates for readability and maintainability
+  - Implement operational patterns for production deployments
+tags:
+  - helm
+  - kubernetes
+  - best-practices
+  - security
+  - production
+---
+
+<Callout type="story" title="The Story">
+Your team has been writing Helm charts for six months. Some charts use camelCase values, others use snake_case. One chart hard-codes the namespace, another relies on a global variable that nobody remembers setting. A security audit reveals that most charts run containers as root with no resource limits. The charts work, but they are a maintenance nightmare. You sit down with the team to establish a set of best practices that will make every chart consistent, secure, and production-ready from day one.
+</Callout>
+
+## Naming Conventions
+
+### Chart Names
+
+- Use lowercase, hyphen-separated names: `my-app`, `api-gateway`, `auth-service`
+- Avoid underscores and camelCase in chart names
+- Match the chart name to the application it deploys
+
+### Template Names
+
+Use the standard helper patterns from `helm create`:
+
+```yaml
+# templates/_helpers.tpl
+
+# Chart name
+{{- define "my-app.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+# Fully qualified name (includes release)
+{{- define "my-app.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+```
+
+Always truncate names to 63 characters -- Kubernetes has a 63-character limit on most resource names.
+
+### Values Keys
+
+- Use camelCase for values keys: `replicaCount`, `serviceAccount`, `podAnnotations`
+- Group related settings: `image.repository`, `image.tag`, `image.pullPolicy`
+- Use `enabled` booleans for optional features: `ingress.enabled`, `autoscaling.enabled`
+
+## Labels and Annotations
+
+### Standard Labels
+
+Apply the Kubernetes recommended labels to every resource:
+
+```yaml
+# templates/_helpers.tpl
+{{- define "my-app.labels" -}}
+helm.sh/chart: {{ include "my-app.chart" . }}
+app.kubernetes.io/name: {{ include "my-app.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/component: {{ .Values.component | default "server" }}
+app.kubernetes.io/part-of: {{ .Values.partOf | default .Chart.Name }}
+{{- end }}
+
+{{- define "my-app.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "my-app.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+```
+
+Key rules:
+- **Selector labels** must be immutable -- never change them after the first install
+- **Metadata labels** can be updated freely
+- Always use `include` (not `template`) so output can be piped through `nindent`
+
+### Custom Labels and Annotations
+
+Let users add their own:
+
+```yaml
+# values.yaml
+podLabels: {}
+podAnnotations: {}
+commonLabels: {}
+commonAnnotations: {}
+```
+
+```yaml
+# templates/deployment.yaml
+metadata:
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+```
+
+## Security Best Practices
+
+### Run as Non-Root by Default
+
+```yaml
+# values.yaml
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+```
+
+```yaml
+# templates/deployment.yaml
+spec:
+  template:
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+```
+
+### ServiceAccount Configuration
+
+```yaml
+# values.yaml
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+```
+
+```yaml
+# templates/serviceaccount.yaml
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "my-app.serviceAccountName" . }}
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+{{- end }}
+```
+
+### Network Policies
+
+Include a default-deny network policy that users can customize:
+
+```yaml
+# values.yaml
+networkPolicy:
+  enabled: false
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: 8080
+```
+
+### Always Set Resource Limits
+
+```yaml
+# values.yaml
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+```
+
+Never ship a chart without default resource requests and limits. Pods without limits can consume unbounded resources and destabilize the cluster.
+
+## Template Design Patterns
+
+### Use with for Optional Blocks
+
+```yaml
+# Good -- only renders if values exist
+{{- with .Values.tolerations }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+
+# Good -- only renders if values exist
+{{- with .Values.nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+```
+
+### Use default for Fallback Values
+
+```yaml
+# In templates, provide safe defaults
+replicas: {{ .Values.replicaCount | default 1 }}
+port: {{ .Values.service.port | default 8080 }}
+```
+
+### Use required for Mandatory Values
+
+```yaml
+# Fail early with a clear message if a required value is missing
+image: {{ required "image.repository is required" .Values.image.repository }}
+```
+
+### Keep Templates Readable
+
+```yaml
+# Bad -- dense and hard to read
+containers:
+  - name: {{ .Chart.Name }}
+    image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+    {{- if .Values.command }}command: {{- toYaml .Values.command | nindent 6 }}{{- end }}
+    ports: {{- toYaml .Values.ports | nindent 6 }}
+
+# Good -- clear structure with whitespace
+containers:
+  - name: {{ .Chart.Name }}
+    image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+    {{- if .Values.command }}
+    command:
+      {{- toYaml .Values.command | nindent 6 }}
+    {{- end }}
+    ports:
+      {{- toYaml .Values.ports | nindent 6 }}
+```
+
+## Values File Best Practices
+
+### Document Every Value
+
+```yaml
+# values.yaml
+
+# -- Number of pod replicas
+replicaCount: 2
+
+# -- Container image configuration
+image:
+  # -- Image repository
+  repository: myregistry/my-app
+  # -- Image tag (defaults to Chart.appVersion)
+  tag: ""
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+
+# -- Resource requests and limits
+# ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+```
+
+The `# --` comment prefix is used by `helm-docs` to auto-generate documentation.
+
+### Provide Sensible Development Defaults
+
+The default `values.yaml` should work out of the box for development:
+- Single replica
+- No ingress
+- No autoscaling
+- Reasonable resource limits
+- Debug-friendly logging
+
+Production values go in a separate `values-production.yaml`.
+
+### Avoid Deeply Nested Structures
+
+```yaml
+# Bad -- too deeply nested
+app:
+  config:
+    server:
+      http:
+        port: 8080
+
+# Good -- flat and predictable
+service:
+  port: 8080
+```
+
+## Chart Versioning
+
+### Semantic Versioning
+
+Follow semver strictly:
+
+- **MAJOR** (1.0.0 -> 2.0.0): Breaking changes to values or templates
+- **MINOR** (1.0.0 -> 1.1.0): New features, backward-compatible
+- **PATCH** (1.0.0 -> 1.0.1): Bug fixes, no new features
+
+### Separate Chart and App Versions
+
+```yaml
+# Chart.yaml
+version: 2.3.1      # Chart packaging version
+appVersion: "1.15.0" # Application version being deployed
+```
+
+Bump `version` when the chart changes. Update `appVersion` when the application changes.
+
+## Operational Excellence
+
+### Health Checks
+
+Always include liveness and readiness probes:
+
+```yaml
+# values.yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
+
+### Graceful Shutdown
+
+```yaml
+# values.yaml
+terminationGracePeriodSeconds: 30
+
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "sleep 5"]
+```
+
+### Pod Disruption Budgets
+
+```yaml
+# values.yaml
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  # maxUnavailable: 1
+```
+
+```yaml
+# templates/pdb.yaml
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "my-app.fullname" . }}
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "my-app.selectorLabels" . | nindent 6 }}
+  {{- with .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+{{- end }}
+```
+
+### NOTES.txt
+
+Provide clear post-install instructions:
+
+```
+# templates/NOTES.txt
+Thank you for installing {{ .Chart.Name }}!
+
+Your release "{{ .Release.Name }}" has been deployed to namespace "{{ .Release.Namespace }}".
+
+To access the application:
+{{- if eq .Values.service.type "LoadBalancer" }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+  kubectl get svc -w {{ include "my-app.fullname" . }}
+{{- else if eq .Values.service.type "NodePort" }}
+  export NODE_PORT=$(kubectl get svc {{ include "my-app.fullname" . }} -o jsonpath="{.spec.ports[0].nodePort}")
+  export NODE_IP=$(kubectl get nodes -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo "Visit http://$NODE_IP:$NODE_PORT"
+{{- else }}
+  kubectl port-forward svc/{{ include "my-app.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  echo "Visit http://localhost:{{ .Values.service.port }}"
+{{- end }}
+```
+
+## Checklist for Production Charts
+
+Use this checklist before publishing or deploying any chart:
+
+- [ ] `helm lint --strict` passes without warnings
+- [ ] `helm template` produces valid Kubernetes manifests
+- [ ] `values.schema.json` validates required values
+- [ ] All resources have standard labels applied
+- [ ] Containers run as non-root with dropped capabilities
+- [ ] Resource requests and limits are set
+- [ ] Health checks (liveness and readiness probes) are configured
+- [ ] ServiceAccount is created with minimal permissions
+- [ ] NOTES.txt provides clear post-install guidance
+- [ ] Chart version follows semver
+- [ ] All values are documented with `# --` comments
+
+## Summary
+
+- Follow consistent naming: lowercase-hyphen chart names, camelCase value keys, truncated resource names
+- Apply standard Kubernetes labels to every resource for discoverability
+- Default to secure configurations: non-root, read-only filesystem, dropped capabilities, resource limits
+- Use `with` for optional blocks, `default` for fallbacks, and `required` for mandatory values
+- Document every value in `values.yaml` and provide a `values.schema.json` for validation
+- Include health checks, PodDisruptionBudgets, and graceful shutdown configuration
+- Follow semver for chart versions and keep `appVersion` separate from chart `version`
+
+## What's Next
+
+Ready to share your well-crafted charts with the world? Next, you'll learn about **running your own chart repository** -- hosting a private Helm repository for your organization.

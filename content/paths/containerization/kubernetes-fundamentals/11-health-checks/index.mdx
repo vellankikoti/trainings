@@ -1,0 +1,193 @@
+---
+title: "Health Checks — Liveness, Readiness & Startup Probes"
+description: "Configure health checks so Kubernetes can detect and recover from application failures automatically."
+order: 11
+xpReward: 35
+estimatedMinutes: 40
+prerequisites: ["resource-management"]
+objectives:
+  - Differentiate between liveness, readiness, and startup probes
+  - Configure HTTP, TCP, and command-based probes
+  - Set appropriate probe timing parameters
+  - Debug probe-related pod failures
+tags:
+  - kubernetes
+  - health-checks
+  - probes
+  - reliability
+---
+
+<Callout type="story" title="The Story">
+Your API pod is running, the container hasn't crashed, and the process is alive. But it's not actually handling requests — the application entered a deadlocked state where it can't process new connections. Kubernetes sees the container is running and keeps sending traffic to it. Users see timeouts. Without health checks, Kubernetes doesn't know the difference between "running" and "healthy." Probes fix this by giving Kubernetes a way to ask your application: "Are you actually okay?"
+</Callout>
+
+## Three Types of Probes
+
+### Liveness Probe
+
+"Is the application alive?" If it fails, Kubernetes **restarts** the container.
+
+Use for: detecting deadlocks, infinite loops, corrupted state.
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 3
+```
+
+### Readiness Probe
+
+"Is the application ready to receive traffic?" If it fails, Kubernetes **removes the pod from service endpoints** (no traffic routed to it).
+
+Use for: waiting for cache warmup, database connections, dependency initialization.
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 3
+```
+
+### Startup Probe
+
+"Has the application finished starting?" Disables liveness/readiness checks until it succeeds.
+
+Use for: slow-starting applications (loading large datasets, complex initialization).
+
+```yaml
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  failureThreshold: 30
+  periodSeconds: 10
+  # Allows up to 5 minutes for startup (30 * 10s)
+```
+
+## Probe Types
+
+### HTTP GET
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+    httpHeaders:
+      - name: Accept
+        value: application/json
+```
+
+Returns 200-399 = healthy. Anything else = unhealthy.
+
+### TCP Socket
+
+```yaml
+livenessProbe:
+  tcpSocket:
+    port: 5432
+```
+
+Can connect = healthy. Connection refused = unhealthy.
+
+### Command Execution
+
+```yaml
+livenessProbe:
+  exec:
+    command:
+      - cat
+      - /tmp/healthy
+```
+
+Exit code 0 = healthy. Non-zero = unhealthy.
+
+## Timing Parameters
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 15   # Wait before first check
+  periodSeconds: 10          # Check every 10 seconds
+  timeoutSeconds: 3          # Timeout per check
+  successThreshold: 1        # Successes needed to be healthy
+  failureThreshold: 3        # Failures before action is taken
+```
+
+<Callout type="warning" title="Avoid Aggressive Probes">
+Setting probes too aggressive (low period, low failure threshold) causes unnecessary restarts. A liveness probe with `periodSeconds: 1` and `failureThreshold: 1` will restart your pod on any single slow response.
+</Callout>
+
+## Complete Example
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: myapi:v2.0
+          ports:
+            - containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 3
+```
+
+## Debugging Probe Failures
+
+```bash
+# Check pod events for probe failures
+kubectl describe pod api-server-xxx | grep -A 10 Events
+
+# Common events:
+# Liveness probe failed: HTTP probe failed with statuscode: 500
+# Readiness probe failed: connection refused
+```
+
+## Summary
+
+- **Liveness**: Restarts unhealthy containers (deadlocks, corruption)
+- **Readiness**: Removes pods from traffic until ready (warmup, dependencies)
+- **Startup**: Gives slow applications time to start
+- Always implement health check endpoints in your applications
+- Tune timing parameters — too aggressive causes flapping
+
+## What's Next
+
+Next, you'll learn about **Jobs and CronJobs** — running batch tasks and scheduled work in Kubernetes.

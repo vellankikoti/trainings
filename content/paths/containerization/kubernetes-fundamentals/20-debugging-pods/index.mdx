@@ -1,0 +1,210 @@
+---
+title: "Debugging Kubernetes — Common Failures & Fixes"
+description: "Master debugging CrashLoopBackOff, ImagePullBackOff, OOMKilled, pending pods, and other common Kubernetes failures with systematic troubleshooting."
+order: 20
+xpReward: 45
+estimatedMinutes: 50
+prerequisites: ["scheduling"]
+objectives:
+  - Systematically debug pod failures using kubectl
+  - Fix CrashLoopBackOff, ImagePullBackOff, and OOMKilled
+  - Diagnose pending pods and scheduling failures
+  - Debug service networking and DNS issues
+  - Use ephemeral debug containers
+tags:
+  - kubernetes
+  - debugging
+  - troubleshooting
+  - crashloopbackoff
+  - oomkilled
+---
+
+<Callout type="story" title="The Story">
+It's Monday morning. You deploy a new version to production. The dashboard turns red. Pods are restarting every 30 seconds with "CrashLoopBackOff." You check the logs — nothing useful, the app crashes before it can log anything. Users are getting 503 errors. Your manager is asking for an ETA. This lesson gives you the systematic debugging toolkit that turns these crises from "I have no idea what's wrong" into "I can diagnose this in 5 minutes."
+</Callout>
+
+## The Debugging Toolkit
+
+Your primary tools:
+
+```bash
+kubectl get pods              # What's the status?
+kubectl describe pod <name>   # What events occurred?
+kubectl logs <name>           # What did the app say?
+kubectl logs <name> --previous  # What did the previous instance say?
+kubectl exec -it <name> -- sh  # Get inside the container
+kubectl get events --sort-by=.lastTimestamp  # Cluster-wide events
+```
+
+## CrashLoopBackOff
+
+**Symptom**: Pod starts, crashes, restarts, crashes again with increasing delays.
+
+**Root causes**:
+1. Application error (unhandled exception, missing config)
+2. Missing environment variables or secrets
+3. Wrong command or entrypoint
+4. Insufficient resources
+
+**Debug steps**:
+
+```bash
+# 1. Check logs (current and previous crash)
+kubectl logs my-pod
+kubectl logs my-pod --previous
+
+# 2. Check events for clues
+kubectl describe pod my-pod
+
+# 3. Check environment variables
+kubectl exec my-pod -- env
+
+# 4. Check if the container can start at all
+kubectl run debug --image=myapp:v2.0 --rm -it -- /bin/sh
+```
+
+## ImagePullBackOff
+
+**Symptom**: Pod stuck in ImagePullBackOff/ErrImagePull.
+
+**Root causes**:
+1. Image doesn't exist (typo in name/tag)
+2. Private registry without credentials
+3. Network connectivity issue
+
+**Debug steps**:
+
+```bash
+# 1. Check the exact image name in events
+kubectl describe pod my-pod | grep -A 5 "Events"
+
+# 2. Verify image exists
+docker pull myapp:v2.0
+
+# 3. Check imagePullSecrets
+kubectl get pod my-pod -o jsonpath='{.spec.imagePullSecrets}'
+
+# 4. Create registry credentials if needed
+kubectl create secret docker-registry regcred \
+  --docker-server=registry.example.com \
+  --docker-username=user \
+  --docker-password=pass
+```
+
+## OOMKilled
+
+**Symptom**: Pod terminated with exit code 137, reason OOMKilled.
+
+**Root causes**:
+1. Application using more memory than the limit
+2. Memory leak
+3. Limit set too low
+
+**Debug steps**:
+
+```bash
+# 1. Confirm OOMKilled
+kubectl describe pod my-pod | grep -A 3 "Last State"
+# Reason: OOMKilled
+
+# 2. Check current memory usage
+kubectl top pod my-pod
+
+# 3. Check limits
+kubectl get pod my-pod -o jsonpath='{.spec.containers[0].resources}'
+
+# 4. Increase the limit or fix the memory leak
+```
+
+## Pending Pods
+
+**Symptom**: Pod stuck in Pending state.
+
+**Root causes**:
+1. Insufficient cluster resources (CPU/memory)
+2. No nodes match scheduling constraints
+3. PersistentVolumeClaim not bound
+
+**Debug steps**:
+
+```bash
+# 1. Check the reason
+kubectl describe pod my-pod | grep -A 10 "Events"
+# "0/3 nodes are available: 3 Insufficient cpu"
+
+# 2. Check node resources
+kubectl top nodes
+kubectl describe node worker-1 | grep -A 5 "Allocated resources"
+
+# 3. Check for taints blocking scheduling
+kubectl describe nodes | grep Taints
+```
+
+## Service Networking Issues
+
+**Symptom**: Service exists but pods can't reach it.
+
+```bash
+# 1. Check endpoints (are pods registered?)
+kubectl get endpoints my-service
+# Empty endpoints = selector doesn't match any pod labels
+
+# 2. Verify labels match
+kubectl get pods --show-labels
+kubectl get svc my-service -o jsonpath='{.spec.selector}'
+
+# 3. Test DNS resolution
+kubectl run debug --rm -it --image=busybox -- nslookup my-service
+
+# 4. Test connectivity
+kubectl run debug --rm -it --image=busybox -- wget -qO- http://my-service:8080/healthz
+```
+
+## Ephemeral Debug Containers
+
+Debug a running pod without restarting it:
+
+```bash
+# Attach a debug container to a running pod
+kubectl debug -it my-pod --image=busybox --target=my-container
+
+# Create a debug copy of a pod
+kubectl debug my-pod -it --copy-to=my-pod-debug --container=debug --image=busybox
+```
+
+## The Debugging Checklist
+
+When something goes wrong:
+
+1. `kubectl get pods` — What's the status?
+2. `kubectl describe pod` — What events occurred?
+3. `kubectl logs` (and `--previous`) — What did the app say?
+4. `kubectl get events` — What happened cluster-wide?
+5. `kubectl top pods/nodes` — Resource exhaustion?
+6. `kubectl get endpoints` — Service routing correct?
+
+<Callout type="tip" title="Document Your Fixes">
+Keep a runbook of common failures and their fixes. The third time you solve the same issue, you'll be glad you wrote it down the first time.
+</Callout>
+
+## Summary
+
+- **CrashLoopBackOff**: Check logs (current and `--previous`), environment, and command
+- **ImagePullBackOff**: Verify image name, registry credentials, and network
+- **OOMKilled**: Increase memory limits or fix memory leaks
+- **Pending**: Check node resources, scheduling constraints, and PVC bindings
+- **Networking**: Verify selectors match labels and endpoints are populated
+- Use `kubectl describe` and events as your first diagnostic tool
+
+## Module Complete!
+
+Congratulations — you've completed the Kubernetes Fundamentals module! You now understand:
+
+- Why Kubernetes exists and its architecture
+- Pods, Deployments, Services, ConfigMaps, Secrets
+- Namespaces, Storage, Labels, Resource Management
+- Health checks, Jobs, DaemonSets, StatefulSets
+- RBAC, Network Policies, Ingress, Autoscaling
+- Scheduling and Debugging
+
+You're ready to move on to **Kubernetes Advanced** topics or start exploring **Helm** and **Kustomize** for package management.

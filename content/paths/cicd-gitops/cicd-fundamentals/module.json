@@ -1,0 +1,17 @@
+{
+  "id": "cicd-fundamentals",
+  "title": "CI/CD Fundamentals",
+  "slug": "cicd-fundamentals",
+  "pathSlug": "cicd-gitops",
+  "description": "Understand the principles and practices of Continuous Integration and Continuous Delivery. Build your first automated pipeline.",
+  "order": 1,
+  "estimatedHours": 20,
+  "lessonsCount": 5,
+  "lessons": [
+    { "slug": "what-is-cicd", "title": "What Is CI/CD?", "order": 1 },
+    { "slug": "pipeline-concepts", "title": "Pipeline Architecture & Concepts", "order": 2 },
+    { "slug": "branching-strategies", "title": "Branching Strategies for CI/CD", "order": 3 },
+    { "slug": "testing-in-pipelines", "title": "Testing in CI/CD Pipelines", "order": 4 },
+    { "slug": "deployment-strategies", "title": "Deployment Strategies — Blue-Green, Canary & Rolling", "order": 5 }
+  ]
+}

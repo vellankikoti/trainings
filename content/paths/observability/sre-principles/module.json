@@ -1,0 +1,16 @@
+{
+  "id": "sre-principles",
+  "title": "SRE Principles",
+  "slug": "sre-principles",
+  "pathSlug": "observability",
+  "description": "Learn Site Reliability Engineering principles — SLOs, error budgets, incident management, and the practices that keep systems reliable.",
+  "order": 7,
+  "estimatedHours": 25,
+  "lessonsCount": 4,
+  "lessons": [
+    { "slug": "introduction", "title": "What Is SRE?", "order": 1 },
+    { "slug": "slos-slis", "title": "SLOs, SLIs & SLAs", "order": 2 },
+    { "slug": "error-budgets", "title": "Error Budgets", "order": 3 },
+    { "slug": "incident-management", "title": "Incident Management", "order": 4 }
+  ]
+}

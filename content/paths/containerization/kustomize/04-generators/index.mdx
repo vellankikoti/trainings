@@ -1,0 +1,325 @@
+---
+title: "ConfigMap & Secret Generators"
+description: "Use Kustomize generators to create ConfigMaps and Secrets from files, literals, and environment files — with automatic hash suffixes for safe rollouts."
+order: 4
+xpReward: 30
+estimatedMinutes: 30
+prerequisites: ["patches"]
+objectives:
+  - Generate ConfigMaps from files, literals, and env files
+  - Generate Secrets using the same source types
+  - Understand content-hash suffixes and why they trigger rolling updates
+  - Control generator behavior with generatorOptions
+  - Combine generators with overlays for per-environment configuration
+tags:
+  - kustomize
+  - kubernetes
+  - configmaps
+  - secrets
+  - generators
+---
+
+<Callout type="story" title="The Story">
+Your order service reads its configuration from a ConfigMap and its database credentials from a Secret. Every time the ops team updates a config value, they edit the ConfigMap in place — but the pods keep running with the old values because Kubernetes does not restart pods when a ConfigMap changes. Deploys become unpredictable: sometimes the new config takes effect, sometimes it doesn't. Kustomize generators solve this by appending a content hash to ConfigMap and Secret names. When the content changes, the name changes, and Kubernetes rolls out new pods automatically. No more stale configuration.
+</Callout>
+
+## The Problem with Static ConfigMaps
+
+When you define a ConfigMap in a YAML file and `kubectl apply` it, Kubernetes updates the ConfigMap object. But existing pods that mount it do not restart. You get a mismatch: the ConfigMap has new values, but your pods are running with cached old values.
+
+Kustomize generators fix this by treating ConfigMaps and Secrets as **immutable, content-addressed objects**. Each time the content changes, a new name is generated, and Deployments referencing it get updated — triggering a rolling restart.
+
+## ConfigMap Generators
+
+### From Literals
+
+The simplest generator creates a ConfigMap from key-value pairs:
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - LOG_LEVEL=info
+      - MAX_CONNECTIONS=100
+      - CACHE_TTL=300
+```
+
+Running `kubectl kustomize .` produces:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-g6t2h8d9mc   # hash suffix!
+data:
+  LOG_LEVEL: info
+  MAX_CONNECTIONS: "100"
+  CACHE_TTL: "300"
+```
+
+The suffix `g6t2h8d9mc` is a hash of the ConfigMap's content. Any Deployment that references `app-config` is automatically updated to reference `app-config-g6t2h8d9mc`.
+
+### From Files
+
+Generate a ConfigMap where each file becomes a key:
+
+```yaml
+configMapGenerator:
+  - name: nginx-config
+    files:
+      - nginx.conf
+      - mime.types
+```
+
+This creates a ConfigMap with two keys — `nginx.conf` and `mime.types` — whose values are the file contents. You can also rename the key:
+
+```yaml
+configMapGenerator:
+  - name: nginx-config
+    files:
+      - custom-nginx.conf=nginx.conf    # key=filename
+```
+
+### From Environment Files
+
+An env file is a simple `KEY=VALUE` format, one per line:
+
+```
+# config.env
+DATABASE_HOST=postgres.default.svc
+DATABASE_PORT=5432
+LOG_FORMAT=json
+ENABLE_METRICS=true
+```
+
+```yaml
+configMapGenerator:
+  - name: app-config
+    envs:
+      - config.env
+```
+
+Each line becomes a separate key in the ConfigMap. Comments and blank lines are ignored.
+
+### Combining Sources
+
+A single generator can mix all three source types:
+
+```yaml
+configMapGenerator:
+  - name: app-config
+    literals:
+      - APP_VERSION=2.1.0
+    files:
+      - templates/email.html
+    envs:
+      - config.env
+```
+
+## Secret Generators
+
+Secret generators work identically to ConfigMap generators, but produce Kubernetes Secrets with base64-encoded values.
+
+### From Literals
+
+```yaml
+secretGenerator:
+  - name: db-credentials
+    literals:
+      - username=admin
+      - password=s3cur3-p@ss
+    type: Opaque
+```
+
+### From Files
+
+```yaml
+secretGenerator:
+  - name: tls-certs
+    files:
+      - tls.crt
+      - tls.key
+    type: kubernetes.io/tls
+```
+
+### From Environment Files
+
+```yaml
+secretGenerator:
+  - name: api-keys
+    envs:
+      - secrets.env
+```
+
+<Callout type="warning" title="Secrets in Git">
+Kustomize does not encrypt Secrets. The literal values and env files are stored in plain text in your repository. Use tools like SOPS, Sealed Secrets, or an external secret manager for production credentials.
+</Callout>
+
+## How Hash Suffixes Work
+
+When Kustomize generates a ConfigMap or Secret, it:
+
+1. Creates the resource with a hash suffix appended to the name
+2. Finds every reference to that name in other resources (Deployments, StatefulSets, etc.)
+3. Updates those references to use the suffixed name
+
+```yaml
+# Before (in your base deployment.yaml)
+env:
+  - name: LOG_LEVEL
+    valueFrom:
+      configMapKeyRef:
+        name: app-config        # original name
+        key: LOG_LEVEL
+
+# After kustomize build
+env:
+  - name: LOG_LEVEL
+    valueFrom:
+      configMapKeyRef:
+        name: app-config-g6t2h8d9mc   # updated automatically
+        key: LOG_LEVEL
+```
+
+This also works for `envFrom`, `volumes`, and `volumeMounts` that reference ConfigMaps or Secrets.
+
+When you change a value in the generator input, the hash changes, the ConfigMap/Secret name changes, the Deployment spec changes, and Kubernetes performs a rolling update. Old ConfigMap objects remain in the cluster until you clean them up.
+
+## Generator Options
+
+Control generator behavior with `generatorOptions`:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - LOG_LEVEL=info
+
+generatorOptions:
+  disableNameSuffixHash: true    # no hash suffix
+  labels:
+    generated-by: kustomize
+  annotations:
+    note: "auto-generated"
+```
+
+Setting `disableNameSuffixHash: true` turns off the content-hash behavior globally. You lose automatic rollouts but gain predictable names. You can also set options per generator:
+
+```yaml
+configMapGenerator:
+  - name: app-config
+    literals:
+      - LOG_LEVEL=info
+    options:
+      disableNameSuffixHash: true   # only for this ConfigMap
+```
+
+## Generators in Overlays
+
+Generators are particularly powerful when combined with overlays. The base can define default configuration, and each overlay can override or extend it.
+
+### Base Generator
+
+```yaml
+# base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - LOG_LEVEL=info
+      - CACHE_TTL=300
+```
+
+### Overlay That Overrides
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - LOG_LEVEL=warn
+      - MAX_CONNECTIONS=500
+```
+
+The `behavior: merge` directive tells Kustomize to merge this generator with the one from the base. The result: `LOG_LEVEL` is overridden to `warn`, `MAX_CONNECTIONS` is added, and `CACHE_TTL` is preserved from the base.
+
+Other behavior values:
+- `create` (default) — create a new ConfigMap; error if the name already exists in a base
+- `merge` — merge with the base generator of the same name
+- `replace` — completely replace the base generator of the same name
+
+### Per-Environment Secrets
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+secretGenerator:
+  - name: db-credentials
+    behavior: replace
+    envs:
+      - secrets.env   # production-specific credentials
+```
+
+Each environment overlay has its own `secrets.env` file with the appropriate credentials for that environment.
+
+## Multiple ConfigMaps
+
+A single kustomization can generate multiple ConfigMaps:
+
+```yaml
+configMapGenerator:
+  - name: app-config
+    literals:
+      - LOG_LEVEL=info
+  - name: feature-flags
+    literals:
+      - DARK_MODE=true
+      - BETA_API=false
+  - name: nginx-config
+    files:
+      - nginx.conf
+```
+
+Each generates an independent ConfigMap with its own hash suffix.
+
+## Summary
+
+- **ConfigMap generators** create ConfigMaps from literals, files, and env files
+- **Secret generators** work identically but produce base64-encoded Secrets
+- **Hash suffixes** ensure that content changes trigger rolling updates automatically
+- Use `generatorOptions` to control suffix behavior and add labels/annotations
+- The `behavior` field (`create`, `merge`, `replace`) controls how overlay generators interact with base generators
+- Combine generators with overlays for clean per-environment configuration
+- Secrets generated by Kustomize are not encrypted — use external tools for production credentials
+
+## What's Next
+
+Generators create new resources. But what about modifying metadata across all resources at once — adding labels, annotations, or name prefixes? Next, you will learn about **Transformers** in Kustomize.

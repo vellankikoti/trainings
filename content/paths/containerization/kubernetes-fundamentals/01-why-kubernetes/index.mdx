@@ -1,0 +1,160 @@
+---
+title: "Why Kubernetes?"
+description: "Discover why Google's internal container orchestration system became the de facto standard for running applications at scale, and why every DevOps engineer needs to understand it."
+order: 1
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["docker-fundamentals"]
+objectives:
+  - Understand the problems Kubernetes solves beyond Docker
+  - Trace the history from Google's Borg system to open-source Kubernetes
+  - Explain why manual container management fails at scale
+  - Describe the key benefits of container orchestration
+  - Identify when Kubernetes is (and isn't) the right solution
+tags:
+  - kubernetes
+  - containers
+  - orchestration
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+It is 2014, and your company's microservices architecture has grown from 5 services to 50. Each service runs in Docker containers, deployed across a fleet of 200 servers. The deployment team manually SSH-es into machines, pulls new images, stops old containers, and starts new ones. One morning, three servers crash simultaneously. Containers that were running on those machines simply vanish — no automatic restart, no failover, no self-healing. Customer-facing services go down for 45 minutes while the team scrambles to figure out which containers were running where and restart them manually. The CTO demands a solution. Meanwhile, at Google, engineers who have been running billions of containers per week using an internal system called Borg decide it's time to share what they've learned with the world. They call it Kubernetes — Greek for "helmsman" — the pilot who steers the ship. This is the story of why the world needed container orchestration.
+</Callout>
+
+## The Problem with "Just Docker"
+
+Docker solved the packaging problem brilliantly. You can build an image once and run it anywhere. But Docker alone doesn't answer critical production questions:
+
+- **Where** should each container run? Which server has enough CPU and memory?
+- **How many** copies of each service should be running?
+- **What happens** when a container crashes? Who restarts it?
+- **How do** containers find and communicate with each other?
+- **How do you** update 50 services without downtime?
+- **How do you** scale up during a traffic spike and scale down after?
+
+These are **orchestration** problems, and Docker by itself doesn't solve them.
+
+### The Manual Management Nightmare
+
+Without orchestration, teams resort to manual processes:
+
+```bash
+# The "deployment process" before Kubernetes
+ssh server-42 "docker pull myapp:v2.3.1 && docker stop myapp && docker run -d --name myapp -p 8080:8080 myapp:v2.3.1"
+# Repeat for servers 43, 44, 45...
+# Hope nothing goes wrong on servers 1-41 while you're busy
+```
+
+This approach breaks at scale. With 50 services across 200 servers, you're managing **thousands** of containers. Human error becomes inevitable.
+
+## From Borg to Kubernetes
+
+Google had been running containers in production since the early 2000s — long before Docker existed. Their internal system, **Borg**, managed hundreds of thousands of jobs across millions of machines in data centers worldwide.
+
+### What Google Learned
+
+After a decade of running Borg, Google distilled their learnings:
+
+1. **Declarative over imperative**: Tell the system *what* you want, not *how* to do it
+2. **Self-healing**: The system should automatically fix problems
+3. **Service discovery built in**: Containers need to find each other without hardcoded addresses
+4. **Rolling updates**: Deploy new versions without any downtime
+5. **Resource efficiency**: Pack containers onto machines optimally
+
+In 2014, Google open-sourced these ideas as **Kubernetes** (often abbreviated as **K8s** — K, 8 letters, s).
+
+## What Kubernetes Actually Does
+
+Kubernetes is a **container orchestration platform**. You tell it what you want your application to look like, and it continuously works to make reality match your description.
+
+```yaml
+# You declare: "I want 3 copies of my web app"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: myapp:v2.3.1
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+```
+
+Kubernetes then handles:
+- Finding machines with enough resources to run 3 copies
+- Starting the containers and monitoring their health
+- Restarting any that crash
+- Replacing containers on nodes that go down
+- Spreading copies across nodes for fault tolerance
+
+### The Reconciliation Loop
+
+The core magic of Kubernetes is the **reconciliation loop**:
+
+1. You declare the **desired state** (e.g., "3 replicas of my app")
+2. Kubernetes observes the **current state** (e.g., "only 2 are running")
+3. Kubernetes takes **action** to match desired to current (e.g., "start 1 more")
+4. Repeat forever
+
+This loop runs continuously. If a server crashes and takes a container with it, Kubernetes automatically detects the discrepancy and schedules a replacement.
+
+## When to Use Kubernetes
+
+Kubernetes is powerful, but it's not always the right choice.
+
+**Use Kubernetes when:**
+- You're running multiple services (microservices architecture)
+- You need high availability and self-healing
+- You need to scale services independently
+- You're deploying to multiple environments
+- Your team is large enough to manage the complexity
+
+**Consider alternatives when:**
+- You have a single, simple application
+- You're a small team with limited ops experience
+- Your traffic is predictable and low
+- Managed platforms (Heroku, Vercel, Railway) would suffice
+
+<Callout type="tip" title="Key Insight">
+Kubernetes adds operational complexity. The question isn't "Can I use Kubernetes?" — it's "Does the complexity I'm managing without Kubernetes exceed the complexity Kubernetes adds?"
+</Callout>
+
+## The Kubernetes Ecosystem
+
+Kubernetes doesn't work alone. It's the foundation for a rich ecosystem:
+
+- **Helm**: Package manager for Kubernetes (like apt for Linux)
+- **Prometheus**: Monitoring and alerting
+- **Istio/Linkerd**: Service mesh for traffic management
+- **ArgoCD/Flux**: GitOps continuous deployment
+- **Terraform**: Infrastructure provisioning including Kubernetes clusters
+
+You'll learn many of these tools in later modules. For now, understand that Kubernetes is the **platform that platforms are built on**.
+
+## Summary
+
+- Docker solved packaging; Kubernetes solves orchestration
+- Manual container management breaks at scale
+- Google built Kubernetes on a decade of experience running Borg
+- Kubernetes uses a declarative model with reconciliation loops
+- It handles scheduling, scaling, self-healing, and service discovery
+- It's the right tool for complex, multi-service production systems
+
+## What's Next
+
+In the next lesson, you'll learn the architecture of Kubernetes — the control plane, worker nodes, and the components that make the orchestration loop work.

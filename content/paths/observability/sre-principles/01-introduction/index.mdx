@@ -1,0 +1,557 @@
+---
+title: "What Is SRE?"
+description: "Learn how Google created Site Reliability Engineering by putting software engineers in charge of operations, why SRE treats reliability as a feature, and how its principles of SLOs, error budgets, and blameless culture have transformed how the industry runs production systems."
+order: 1
+xpReward: 30
+estimatedMinutes: 30
+prerequisites: []
+objectives:
+  - Understand the origin of SRE at Google and the problem it was created to solve
+  - Explain how SRE differs from traditional operations and from DevOps
+  - Identify the core principles of Site Reliability Engineering
+  - Describe the key responsibilities of an SRE team
+  - Understand the concepts of SLOs, error budgets, and toil reduction at a high level
+  - Articulate why SRE practices matter for any organization running production systems
+tags:
+  - observability
+  - monitoring
+  - sre
+  - reliability
+  - devops
+  - operations
+  - google
+---
+
+<Callout type="story" title="The Story">
+It is 2003 at Google. The company is growing at a staggering pace — search traffic is doubling every few months, Gmail is about to launch, and the infrastructure team is struggling to keep up. The traditional approach of hiring more system administrators to manually manage servers is not scaling. Every new service needs more hands, more runbooks, and more late-night pages. Ben Treynor Sloss, a software engineer, is put in charge of a production team and asks a radical question: "What happens when you ask a software engineer to design an operations team?" His answer is to treat operations as a software problem. Instead of hiring sysadmins who manually run systems, he hires software engineers who write code to automate operations. Instead of aiming for 100% uptime (an impossible and economically wasteful goal), he introduces "error budgets" — an acceptable amount of unreliability that lets teams move fast. Instead of throwing bodies at scaling problems, his team builds self-healing systems and automated tooling. He calls this approach "Site Reliability Engineering." Over the next two decades, SRE grows from a single team at Google to a global discipline practiced at companies of every size. Google publishes three books on SRE, and the role of "Site Reliability Engineer" becomes one of the most sought-after positions in tech. What started as one engineer's frustration with the status quo became a revolution in how the world runs production systems.
+</Callout>
+
+## The Problem: Operations Does Not Scale
+
+Before SRE, the relationship between development teams and operations teams was fundamentally broken.
+
+### The Dev vs. Ops Conflict
+
+Development and operations had **opposing incentives**:
+
+```
+Development Team:                    Operations Team:
+────────────────                    ─────────────────
+Goal: Ship features fast            Goal: Keep systems stable
+
+"Let's deploy the new              "No changes until we
+ payment flow today!"               finish the maintenance window."
+
+"Move fast and break things."       "If it ain't broke, don't touch it."
+
+"We need to release weekly."        "We need a 3-week change freeze."
+
+Success metric:                     Success metric:
+  Features shipped                    Uptime percentage
+```
+
+This created a toxic cycle:
+
+```
+The Dev vs. Ops Death Spiral:
+═════════════════════════════
+
+Developers push for faster releases
+         │
+         ▼
+Operations pushes back (change = risk)
+         │
+         ▼
+Developers bundle more changes into each release
+(fewer releases = fewer fights with ops)
+         │
+         ▼
+Releases become massive and risky
+         │
+         ▼
+Releases break things more often
+         │
+         ▼
+Operations tightens controls further
+(more approval gates, longer change freezes)
+         │
+         ▼
+Developers slow down even more, or find
+ways to bypass operations entirely
+         │
+         ▼
+Repeat. Everyone is miserable.
+```
+
+### The Operations Scaling Problem
+
+Traditional operations teams scale **linearly** — more systems require more people:
+
+```
+Traditional Operations Scaling:
+═══════════════════════════════
+
+Servers:    10      50      200     1,000    10,000
+Ops team:    2       8       25       80      ???
+
+At some point, you simply cannot hire fast enough.
+And humans don't scale linearly anyway —
+communication overhead grows quadratically.
+```
+
+Google hit this wall early. With services handling billions of requests per day across hundreds of thousands of servers, hiring more sysadmins was not an option. They needed a fundamentally different approach.
+
+<Callout type="warning" title="The 100% Uptime Trap">
+Traditional operations teams often chase 100% uptime. But the difference between 99.99% and 100% availability is astronomically expensive and almost never worth it. Going from 99.99% (52 minutes of downtime per year) to 99.999% (5 minutes per year) might require 10x the investment. Going to 100% is effectively impossible for any non-trivial system. SRE's insight was to stop pretending 100% is the goal and start managing the inevitable unreliability deliberately.
+</Callout>
+
+## SRE: A Software Engineering Approach to Operations
+
+Ben Treynor Sloss defined SRE with a deceptively simple statement:
+
+> "SRE is what happens when you ask a software engineer to design an operations function."
+
+This means several concrete things:
+
+### 1. Hire Software Engineers, Not Sysadmins
+
+Google's SRE teams are composed of software engineers who happen to work on reliability. They spend their time writing code — automation tools, monitoring systems, deployment pipelines, capacity planning software — not manually configuring servers.
+
+```
+Traditional Ops Engineer Day:        SRE Engineer Day:
+─────────────────────────────        ──────────────────
+
+09:00  Check dashboards              09:00  Review monitoring alerts
+09:30  Restart failed service        09:30  Write automation to prevent
+10:00  Manually deploy update                the failure from recurring
+11:00  Update runbook                11:00  Code review a deployment
+12:00  Lunch                                 pipeline improvement
+13:00  Provision new servers         12:00  Lunch
+14:00  Apply security patches        13:00  Write load testing framework
+15:00  Debug networking issue        14:00  Design capacity planning tool
+16:00  Update firewall rules         15:00  Analyze reliability trends
+17:00  Answer tickets                16:00  Write postmortem for incident
+                                     17:00  Review SLO dashboard
+
+Manual, reactive, repetitive         Engineering, proactive, creative
+```
+
+### 2. Cap Operational Work at 50%
+
+Google's SRE teams have a rule: no more than 50% of an SRE's time should be spent on operational work (toil). The other 50% or more must be spent on engineering work that improves the system.
+
+```
+SRE Time Allocation:
+════════════════════
+
+┌──────────────────────────────┐
+│                              │
+│   ███████████████            │  50% Engineering Work
+│   ███████████████            │  - Automation
+│                              │  - Tool building
+│   ░░░░░░░░░░░░░░░            │  - Performance optimization
+│   ░░░░░░░░░░░░░░░            │  50% Operations Work (max)
+│                              │  - On-call
+│                              │  - Incident response
+│                              │  - Tickets
+└──────────────────────────────┘
+
+If ops work exceeds 50%, the team either:
+  1. Redirects tickets back to the development team
+  2. Halts feature work until reliability improves
+  3. Automates the operational burden away
+```
+
+### 3. Treat Operations Problems as Software Problems
+
+When an SRE encounters a repetitive operational task, the response is not "let me do this faster" — it is "let me write software so nobody ever has to do this again."
+
+```python
+# The SRE mentality in code:
+
+# A sysadmin approach to certificate renewal:
+# 1. Put "renew certs" on calendar
+# 2. SSH into each server
+# 3. Run renewal commands manually
+# 4. Restart services
+# 5. Hope you didn't miss one
+
+# An SRE approach to certificate renewal:
+class CertificateManager:
+    def check_expiring_certs(self):
+        """Find all certs expiring within 30 days."""
+        expiring = []
+        for cert in self.inventory.all_certificates():
+            if cert.days_until_expiry() < 30:
+                expiring.append(cert)
+        return expiring
+
+    def renew_and_deploy(self, cert):
+        """Automatically renew and deploy a certificate."""
+        new_cert = self.ca.issue_renewal(cert)
+        self.deploy(new_cert, cert.targets)
+        self.verify(new_cert, cert.targets)
+        self.notify(f"Renewed {cert.domain}, expires {new_cert.expiry}")
+
+    def run(self):
+        """Run as a continuous service — never think about certs again."""
+        for cert in self.check_expiring_certs():
+            self.renew_and_deploy(cert)
+```
+
+## SRE vs. DevOps
+
+SRE and DevOps are closely related but not identical. DevOps is a set of cultural principles; SRE is a concrete implementation of those principles.
+
+```
+DevOps vs. SRE:
+═══════════════
+
+DevOps:
+  "Development and operations should work together."
+  "Automate everything."
+  "Measure and improve."
+  (Philosophy / culture)
+
+SRE:
+  "Here is exactly how to do that."
+  "Here are the practices, metrics, and organizational
+   structures that make it work."
+  (Implementation / practice)
+```
+
+Google's VP of Engineering, Ben Treynor Sloss, put it this way:
+
+> "One could equivalently view SRE as a specific implementation of DevOps with some idiosyncratic extensions."
+
+### Detailed Comparison
+
+| Aspect | DevOps | SRE |
+|---|---|---|
+| **Nature** | Culture and philosophy | Specific role and practices |
+| **Origin** | Community movement (2008) | Google (2003) |
+| **Focus** | Breaking down silos between dev and ops | Reliability through engineering |
+| **Failure handling** | "Fail fast" | Error budgets define acceptable failure |
+| **Measurement** | Broad (DORA metrics, etc.) | Specific (SLIs, SLOs, SLAs) |
+| **Team structure** | Shared responsibility | Dedicated SRE team |
+| **Toil** | Automate repetitive work | Explicit cap at 50% |
+| **Change management** | Continuous delivery | Error budget-driven release velocity |
+
+<Callout type="info" title="Not Either/Or">
+SRE and DevOps are complementary, not competing. Many organizations practice DevOps culture across all teams while having dedicated SRE teams that focus on the most critical services. You do not have to choose one or the other — most mature organizations blend both.
+</Callout>
+
+## Core SRE Principles
+
+SRE is built on several foundational principles that work together as a coherent system.
+
+### 1. Service Level Objectives (SLOs)
+
+An **SLO** is a target for how reliable a service should be. Not 100% — a specific, deliberate target that balances reliability with the ability to innovate.
+
+```
+SLO Examples:
+═════════════
+
+Service: Payment API
+  SLO: 99.95% of requests succeed within 300ms
+  Meaning: In a 30-day window, we accept up to
+           21.6 minutes of downtime or degradation
+
+Service: User Dashboard
+  SLO: 99.9% of page loads complete within 2 seconds
+  Meaning: In a 30-day window, we accept up to
+           43.2 minutes of slow or failed loads
+
+Service: Batch Data Pipeline
+  SLO: 99.5% of jobs complete within their SLA window
+  Meaning: Lower reliability is acceptable because
+           batch jobs can be retried
+```
+
+SLOs are set based on **user expectations**, not engineering ego. A batch data pipeline does not need 99.99% availability. A payment system does. SREs help teams set appropriate targets.
+
+### 2. Error Budgets
+
+An **error budget** is the inverse of the SLO — the amount of unreliability your service is "allowed" to have. This is SRE's most powerful concept because it turns reliability from a vague aspiration into a concrete, measurable resource.
+
+```
+Error Budget Example:
+═════════════════════
+
+SLO: 99.9% availability over 30 days
+Error Budget: 0.1% = 43.2 minutes of downtime
+
+Budget tracking over a month:
+─────────────────────────────
+
+Day 1-10:   ████████████████████████░░░░  Budget: 38 min remaining
+            (5 min outage on day 4)
+
+Day 10-20:  ████████████████░░░░░░░░░░░░  Budget: 23 min remaining
+            (15 min outage on day 15)
+
+Day 20-25:  ████████████░░░░░░░░░░░░░░░░  Budget: 13 min remaining
+            (10 min degradation on day 22)
+
+Day 25-30:  ████████████░░░░░░░░░░░░░░░░  Budget: 13 min remaining
+            (No further incidents — budget preserved)
+
+Budget remaining → Team can still deploy new features
+Budget exhausted → Team must focus on reliability
+```
+
+The error budget creates a natural feedback loop:
+
+```
+Error Budget Feedback Loop:
+═══════════════════════════
+
+Plenty of error budget remaining?
+  → Ship features faster
+  → Take more risks
+  → Run experiments
+
+Error budget running low?
+  → Slow down releases
+  → Focus on fixing reliability
+  → Pay down technical debt
+
+Error budget exhausted?
+  → Freeze non-critical deployments
+  → All engineering effort goes to reliability
+  → Must earn back budget before resuming features
+```
+
+<Callout type="tip" title="Why Error Budgets Change Everything">
+Error budgets remove the dev vs. ops conflict. Developers no longer argue "we need to ship faster." Operations no longer argues "we need to freeze changes." Instead, both teams look at the error budget: if there is budget remaining, ship features. If the budget is spent, focus on reliability. The data makes the decision, not politics.
+</Callout>
+
+### 3. Eliminating Toil
+
+**Toil** is manual, repetitive, automatable work that scales linearly with service growth and has no enduring value. SRE aims to systematically eliminate toil.
+
+```
+Toil vs. Engineering Work:
+══════════════════════════
+
+Toil (eliminate this):
+  - Manually restarting a crashed process
+  - Running the same deployment script by hand
+  - Manually scaling capacity for a known traffic spike
+  - Copying dashboards between environments
+  - Responding to the same alert with the same fix every week
+
+Engineering Work (do more of this):
+  - Building auto-restart and self-healing systems
+  - Creating fully automated deployment pipelines
+  - Writing auto-scaling policies
+  - Building dashboard-as-code provisioning
+  - Writing automation that handles the alert automatically
+```
+
+The SRE test for toil: if you are doing the same thing for the third time, it is time to automate it.
+
+### 4. Monitoring and Observability
+
+SRE requires deep visibility into system behavior. Monitoring is not optional — it is the foundation that everything else (SLOs, error budgets, incident response) depends on.
+
+SREs think about monitoring in terms of **signals, not checks**:
+
+```
+Traditional Monitoring:           SRE Monitoring:
+───────────────────              ─────────────────
+"Is the server up?"              "Are users getting the experience
+                                  they expect?"
+
+"Is CPU below 80%?"              "Is the error budget being consumed
+                                  faster than expected?"
+
+"Are there errors?"              "What is the error rate relative
+                                  to our SLO?"
+
+"Did the deploy work?"           "Is the new version performing
+                                  the same as the old version?"
+```
+
+### 5. Blameless Postmortems
+
+When incidents happen (and they will), SRE practices **blameless postmortems** — a structured analysis of what happened, why, and how to prevent it, without blaming individuals.
+
+```
+Blameless Postmortem Structure:
+═══════════════════════════════
+
+1. INCIDENT SUMMARY
+   What happened, when, and impact
+
+2. TIMELINE
+   Minute-by-minute account of the incident
+
+3. ROOT CAUSE
+   The underlying technical cause
+
+4. CONTRIBUTING FACTORS
+   What conditions allowed this to happen?
+   - Missing monitoring?
+   - Inadequate testing?
+   - Unclear runbooks?
+
+5. ACTION ITEMS
+   Concrete, assigned, deadline-driven tasks
+   to prevent recurrence
+
+6. LESSONS LEARNED
+   What did we learn? What went well?
+   What could we improve?
+
+NOT INCLUDED:
+  "Bob made a mistake"
+  "The on-call engineer should have known better"
+  "Alice pushed a bad deploy"
+```
+
+<Callout type="warning" title="Blame Prevents Learning">
+When people fear being blamed, they hide mistakes, avoid taking risks, and do not share information freely. Blameless culture does not mean "no accountability." It means focusing on systemic improvements rather than individual punishment. The question is never "who caused this?" but "what in our system allowed this to happen?"
+</Callout>
+
+### 6. Managed Risk
+
+SRE acknowledges that some amount of risk is both inevitable and desirable. The goal is not to eliminate risk but to **manage it consciously**:
+
+```
+Risk Management Spectrum:
+═════════════════════════
+
+Too Cautious:                          Too Reckless:
+No changes ever.                       Deploy everything immediately.
+Nothing breaks.                        Things break constantly.
+Nothing improves.                      Users leave.
+Competitors overtake you.              Users leave.
+Users leave.                           Users leave.
+
+                    SRE Sweet Spot:
+                    ┌──────────────────────────┐
+                    │ Deliberate risk-taking    │
+                    │ guided by error budgets.  │
+                    │                           │
+                    │ Ship fast when budget     │
+                    │ allows. Stabilize when    │
+                    │ it doesn't.               │
+                    └──────────────────────────┘
+```
+
+## SRE Responsibilities
+
+What does an SRE team actually do day to day?
+
+```
+SRE Team Responsibilities:
+══════════════════════════
+
+Availability & Performance:
+  ├── Define and track SLOs for critical services
+  ├── Build and maintain monitoring and alerting
+  ├── Capacity planning and load testing
+  └── Performance optimization
+
+Incident Response:
+  ├── On-call rotation for critical services
+  ├── Incident command during major outages
+  ├── Write and maintain runbooks
+  └── Conduct blameless postmortems
+
+Automation & Tooling:
+  ├── Build deployment pipelines
+  ├── Create self-healing automation
+  ├── Develop internal developer tools
+  └── Eliminate toil through engineering
+
+Architecture & Design:
+  ├── Review system designs for reliability
+  ├── Advise on failure modes and resilience
+  ├── Design disaster recovery procedures
+  └── Conduct chaos engineering experiments
+
+Collaboration:
+  ├── Partner with development teams
+  ├── Train developers on reliability practices
+  ├── Advocate for reliability in product decisions
+  └── Share knowledge across the organization
+```
+
+### SRE in Practice: Different Models
+
+Not every organization implements SRE the same way:
+
+```
+SRE Implementation Models:
+══════════════════════════
+
+Model 1: Dedicated SRE Team (Google model)
+  ┌────────────┐    ┌────────────┐
+  │  Dev Team  │◄──►│  SRE Team  │
+  │  (features)│    │ (reliability)
+  └────────────┘    └────────────┘
+  Best for: Large orgs with critical services
+
+Model 2: Embedded SRE (one SRE per dev team)
+  ┌──────────────────────┐
+  │    Dev Team           │
+  │  ┌──────┐            │
+  │  │ SRE  │ ← embedded │
+  │  └──────┘            │
+  └──────────────────────┘
+  Best for: Mid-sized orgs wanting SRE culture
+
+Model 3: SRE Practices Without SRE Title
+  ┌──────────────────────┐
+  │    Dev Team           │
+  │  (everyone does SRE  │
+  │   practices)          │
+  └──────────────────────┘
+  Best for: Startups and small teams
+```
+
+<Callout type="info" title="You Don't Need Google's Scale">
+You do not need 10,000 engineers to benefit from SRE practices. A startup with 5 engineers can adopt SLOs, error budgets, and blameless postmortems. The principles scale down just as well as they scale up. Start with defining an SLO for your most important service and tracking it. That single step changes how your team thinks about reliability.
+</Callout>
+
+## The SRE Book Trilogy
+
+Google published three books that codified SRE practices for the industry:
+
+```
+The SRE Books:
+══════════════
+
+1. "Site Reliability Engineering" (2016)
+    The original SRE book. Covers principles,
+    practices, and Google's experience.
+    (Available free online: sre.google/sre-book)
+
+2. "The Site Reliability Workbook" (2018)
+    Practical how-to guide with worked examples.
+    Focuses on implementation.
+    (Available free online: sre.google/workbook)
+
+3. "Building Secure and Reliable Systems" (2020)
+    Combines SRE with security engineering.
+    (Available free online: sre.google/books)
+```
+
+These books are freely available online and are considered essential reading for anyone working in operations, platform engineering, or infrastructure.
+
+## Key Takeaways
+
+- **SRE was created at Google in 2003** by Ben Treynor Sloss as a response to the scaling limitations of traditional operations — "what happens when a software engineer designs an operations function"
+- **SRE is a specific implementation of DevOps principles** with concrete practices, metrics, and organizational structures; they are complementary, not competing
+- **Core SRE principles** include Service Level Objectives (SLOs), error budgets, toil elimination, blameless postmortems, and managed risk
+- **Error budgets** are SRE's most transformative concept — they turn reliability into a measurable resource that balances innovation speed with system stability
+- **SREs are software engineers** who solve operations problems through code, automation, and systems design rather than manual processes
+- **The 50% rule** ensures SRE teams spend at least half their time on engineering work that permanently improves reliability, not repetitive operational tasks
+- **SRE practices scale down** — any team, regardless of size, can benefit from adopting SLOs, error budgets, and blameless postmortems
+
+## What's Next
+
+Now that you understand what SRE is and the principles behind it, the next lesson dives into **SLOs, SLIs & SLAs** — the measurement framework at the heart of SRE. You will learn how to define Service Level Indicators that measure what users care about, set Service Level Objectives that balance reliability with velocity, and understand how SLAs create contractual commitments with customers.

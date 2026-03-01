@@ -11,6 +11,13 @@ const serverSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),
+  // Stripe (optional — payment features disabled if not set)
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PREMIUM_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_PREMIUM_ANNUAL_PRICE_ID: z.string().optional(),
+  STRIPE_TEAM_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_TEAM_ANNUAL_PRICE_ID: z.string().optional(),
 });
 
 /**

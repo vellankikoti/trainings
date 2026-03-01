@@ -1,0 +1,223 @@
+---
+title: "Kubernetes Architecture"
+description: "Understand the components that make Kubernetes work — the control plane, worker nodes, etcd, the API server, and how they coordinate to manage your containers."
+order: 2
+xpReward: 35
+estimatedMinutes: 45
+prerequisites: ["why-kubernetes"]
+objectives:
+  - Draw and explain the Kubernetes architecture diagram
+  - Describe the role of each control plane component
+  - Explain how worker nodes run and manage containers
+  - Understand how kubectl communicates with the cluster
+  - Differentiate between the data plane and control plane
+tags:
+  - kubernetes
+  - architecture
+  - control-plane
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+Imagine an airport. Thousands of flights need to land, take off, taxi, and park every day. There's a control tower (the control plane) that makes decisions — which runway to use, when flights can depart, how to handle emergencies. Then there are the terminals and ground crews (the worker nodes) that actually handle the aircraft. The control tower doesn't physically move any planes — it just decides what should happen and communicates those decisions. The ground crews execute. Kubernetes works the same way. Let's tour the airport.
+</Callout>
+
+## The Big Picture
+
+A Kubernetes cluster has two types of machines:
+
+1. **Control Plane nodes**: The "brain" — they make scheduling decisions, monitor the cluster, and respond to events
+2. **Worker nodes**: The "hands" — they run your actual application containers
+
+```
+┌─────────────────────────────────────────────────┐
+│                 Control Plane                    │
+│  ┌──────────┐ ┌───────────┐ ┌────────────────┐ │
+│  │API Server│ │ Scheduler │ │Controller Mgr  │ │
+│  └──────────┘ └───────────┘ └────────────────┘ │
+│  ┌──────────────────────────────────────────┐   │
+│  │               etcd                        │   │
+│  └──────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘
+         │              │              │
+    ┌────┴────┐    ┌────┴────┐   ┌────┴────┐
+    │ Worker 1│    │ Worker 2│   │ Worker 3│
+    │┌───────┐│    │┌───────┐│   │┌───────┐│
+    ││kubelet││    ││kubelet││   ││kubelet││
+    │├───────┤│    │├───────┤│   │├───────┤│
+    ││kube   ││    ││kube   ││   ││kube   ││
+    ││proxy  ││    ││proxy  ││   ││proxy  ││
+    │├───────┤│    │├───────┤│   │├───────┤│
+    ││pods   ││    ││pods   ││   ││pods   ││
+    │└───────┘│    │└───────┘│   │└───────┘│
+    └─────────┘    └─────────┘   └─────────┘
+```
+
+## Control Plane Components
+
+### 1. API Server (kube-apiserver)
+
+The API server is the **front door** to Kubernetes. Every interaction — whether from `kubectl`, the dashboard, or internal components — goes through the API server.
+
+```bash
+# When you run this command:
+kubectl get pods
+
+# It sends an HTTPS request to the API server:
+# GET https://api-server:6443/api/v1/namespaces/default/pods
+```
+
+The API server:
+- Validates and processes API requests
+- Is the only component that talks to etcd directly
+- Handles authentication and authorization
+- Serves as the communication hub for all components
+
+### 2. etcd
+
+etcd is the **cluster's database** — a distributed key-value store that holds all cluster state: what pods exist, which nodes are available, what configurations are active.
+
+Think of it as the airport's flight database. Without it, nobody knows which planes are where.
+
+```
+Key: /registry/pods/default/web-app-7d4b8c6f9-x2k5j
+Value: {
+  "metadata": { "name": "web-app-7d4b8c6f9-x2k5j", ... },
+  "spec": { "containers": [...], "nodeName": "worker-2" },
+  "status": { "phase": "Running", ... }
+}
+```
+
+<Callout type="warning" title="Critical Component">
+etcd is the single source of truth. If etcd is lost and not backed up, you lose your entire cluster state. Production clusters always run etcd with replication (typically 3 or 5 instances).
+</Callout>
+
+### 3. Scheduler (kube-scheduler)
+
+When a new pod needs to be created, the scheduler decides **which worker node** should run it. It considers:
+
+- Available CPU and memory on each node
+- Affinity and anti-affinity rules
+- Taints and tolerations
+- Data locality
+
+The scheduler doesn't start the pod — it just assigns a node. The kubelet on that node handles the actual startup.
+
+### 4. Controller Manager (kube-controller-manager)
+
+The controller manager runs **control loops** that watch the cluster state and make changes to move toward the desired state. Key controllers include:
+
+- **Deployment controller**: Ensures the right number of pods are running
+- **ReplicaSet controller**: Maintains the desired replica count
+- **Node controller**: Monitors node health, marks unhealthy nodes
+- **Job controller**: Manages batch jobs to completion
+
+Each controller follows the same pattern: observe current state → compare to desired state → take action.
+
+## Worker Node Components
+
+### 1. kubelet
+
+The kubelet is an **agent** that runs on every worker node. It:
+- Receives pod assignments from the API server
+- Starts and stops containers using the container runtime
+- Reports pod and node status back to the API server
+- Runs liveness and readiness probes
+
+The kubelet is the ground crew — it does the actual work of running containers.
+
+### 2. kube-proxy
+
+kube-proxy handles **networking** on each node. It maintains network rules that allow pods to communicate with each other and with the outside world.
+
+When you create a Kubernetes Service, kube-proxy sets up the routing rules that direct traffic to the right pods.
+
+### 3. Container Runtime
+
+The container runtime is what actually runs containers. Kubernetes supports:
+- **containerd** (most common, default in most distributions)
+- **CRI-O** (popular in OpenShift)
+
+Note: Docker itself is no longer a supported runtime in Kubernetes (since v1.24), but Docker images still work because they follow the OCI standard.
+
+## How It All Works Together
+
+Let's trace what happens when you deploy an application:
+
+```bash
+kubectl apply -f deployment.yaml
+```
+
+1. `kubectl` sends the deployment spec to the **API server**
+2. The API server validates it and stores it in **etcd**
+3. The **Deployment controller** notices a new deployment and creates a ReplicaSet
+4. The **ReplicaSet controller** notices it needs pods and creates pod objects
+5. The **Scheduler** sees unscheduled pods and assigns them to nodes
+6. The **kubelet** on each assigned node pulls the image and starts the container
+7. The **kubelet** reports the pod status back to the API server
+8. The API server updates the status in **etcd**
+
+This entire flow takes seconds and happens without any human intervention after the initial `kubectl apply`.
+
+## Interacting with the Cluster
+
+### kubectl — The Command-Line Tool
+
+`kubectl` is your primary tool for interacting with Kubernetes:
+
+```bash
+# View cluster info
+kubectl cluster-info
+
+# List all nodes
+kubectl get nodes
+
+# List all pods across all namespaces
+kubectl get pods --all-namespaces
+
+# Describe a specific resource
+kubectl describe pod web-app-7d4b8c6f9-x2k5j
+
+# View logs
+kubectl logs web-app-7d4b8c6f9-x2k5j
+```
+
+### kubeconfig
+
+kubectl knows how to reach your cluster through a **kubeconfig** file (default: `~/.kube/config`):
+
+```yaml
+apiVersion: v1
+kind: Config
+clusters:
+  - name: my-cluster
+    cluster:
+      server: https://api-server:6443
+      certificate-authority: /path/to/ca.crt
+users:
+  - name: admin
+    user:
+      client-certificate: /path/to/admin.crt
+      client-key: /path/to/admin.key
+contexts:
+  - name: my-context
+    context:
+      cluster: my-cluster
+      user: admin
+      namespace: default
+current-context: my-context
+```
+
+## Summary
+
+- Kubernetes has a **control plane** (brain) and **worker nodes** (hands)
+- The **API server** is the central hub — all communication goes through it
+- **etcd** stores all cluster state — back it up religiously
+- The **scheduler** decides where pods run; **controllers** ensure desired state
+- **kubelet** on each node runs containers and reports status
+- **kube-proxy** handles networking on each node
+- `kubectl` is your command-line interface to the cluster
+
+## What's Next
+
+Now that you understand the architecture, it's time to get hands-on. In the next lesson, you'll learn about Pods — the fundamental building block of Kubernetes.

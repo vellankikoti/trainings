@@ -3,5 +3,42 @@
   "buildCommand": "pnpm build",
   "installCommand": "pnpm install",
   "framework": "nextjs",
-  "outputDirectory": "apps/web/.next"
+  "outputDirectory": "apps/web/.next",
+  "redirects": [
+    {
+      "source": "/www/:path*",
+      "destination": "/:path*",
+      "permanent": true
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/health",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/api/webhooks/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store"
+        }
+      ]
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/health",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/emails",
+      "schedule": "0 9 * * *"
+    }
+  ]
 }

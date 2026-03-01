@@ -6,7 +6,7 @@
   "description": "Master container orchestration with Kubernetes. Deploy, scale, and manage containerized applications in production.",
   "order": 4,
   "estimatedHours": 65,
-  "lessonsCount": 40,
+  "lessonsCount": 20,
   "lessons": [
     { "slug": "why-kubernetes", "title": "Why Kubernetes?", "order": 1 },
     { "slug": "architecture", "title": "Kubernetes Architecture", "order": 2 },
@@ -15,6 +15,18 @@
     { "slug": "services", "title": "Services & Networking", "order": 5 },
     { "slug": "configmaps-secrets", "title": "ConfigMaps & Secrets", "order": 6 },
     { "slug": "namespaces", "title": "Namespaces & Resource Isolation", "order": 7 },
-    { "slug": "persistent-volumes", "title": "Persistent Volumes", "order": 8 }
+    { "slug": "persistent-volumes", "title": "Persistent Volumes", "order": 8 },
+    { "slug": "labels-selectors", "title": "Labels, Selectors & Annotations", "order": 9 },
+    { "slug": "resource-management", "title": "Resource Requests, Limits & QoS", "order": 10 },
+    { "slug": "health-checks", "title": "Health Checks — Liveness, Readiness & Startup Probes", "order": 11 },
+    { "slug": "jobs-cronjobs", "title": "Jobs & CronJobs", "order": 12 },
+    { "slug": "daemonsets", "title": "DaemonSets", "order": 13 },
+    { "slug": "statefulsets", "title": "StatefulSets", "order": 14 },
+    { "slug": "rbac", "title": "RBAC — Role-Based Access Control", "order": 15 },
+    { "slug": "network-policies", "title": "Network Policies", "order": 16 },
+    { "slug": "ingress", "title": "Ingress & Ingress Controllers", "order": 17 },
+    { "slug": "hpa-autoscaling", "title": "Horizontal Pod Autoscaler (HPA)", "order": 18 },
+    { "slug": "scheduling", "title": "Scheduling — Taints, Tolerations & Affinity", "order": 19 },
+    { "slug": "debugging-pods", "title": "Debugging Kubernetes — Common Failures & Fixes", "order": 20 }
   ]
 }

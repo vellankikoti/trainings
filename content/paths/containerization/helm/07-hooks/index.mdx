@@ -1,0 +1,343 @@
+---
+title: "Helm Hooks & Lifecycle"
+description: "Understand Helm's release lifecycle and use hooks to run database migrations, backups, validation, and cleanup at precise moments during install, upgrade, and delete."
+order: 7
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["repositories"]
+objectives:
+  - Understand the Helm release lifecycle and where hooks execute
+  - Create pre-install and post-install hooks for setup tasks
+  - Use pre-upgrade hooks for database migrations and backups
+  - Control hook execution with weights, deletion policies, and timeouts
+tags:
+  - helm
+  - kubernetes
+  - hooks
+  - lifecycle
+  - migrations
+---
+
+<Callout type="story" title="The Story">
+Your application upgrade just went sideways. The new code expects database columns that do not exist yet because the migration never ran. Rolling back restores the old code, but the deployment process clearly needs a step between "download the new version" and "route traffic to it." Helm hooks solve exactly this -- they let you run database migrations before the upgrade, verify health after it, and clean up resources when a release is deleted. Your deployments become reliable, ordered workflows instead of hopeful YAML applications.
+</Callout>
+
+## The Release Lifecycle
+
+Every Helm operation follows a defined lifecycle. Hooks let you inject actions at specific points:
+
+### Install Lifecycle
+
+```
+helm install
+  │
+  ├── 1. Render templates
+  ├── 2. Run pre-install hooks (wait for completion)
+  ├── 3. Submit rendered resources to Kubernetes
+  ├── 4. Wait for resources to become ready
+  └── 5. Run post-install hooks (wait for completion)
+```
+
+### Upgrade Lifecycle
+
+```
+helm upgrade
+  │
+  ├── 1. Render templates
+  ├── 2. Run pre-upgrade hooks (wait for completion)
+  ├── 3. Update resources in Kubernetes
+  ├── 4. Wait for resources to become ready
+  └── 5. Run post-upgrade hooks (wait for completion)
+```
+
+### Delete Lifecycle
+
+```
+helm uninstall
+  │
+  ├── 1. Run pre-delete hooks (wait for completion)
+  ├── 2. Delete all release resources
+  └── 3. Run post-delete hooks (wait for completion)
+```
+
+## Available Hook Types
+
+| Hook | When It Runs |
+|------|-------------|
+| `pre-install` | After templates render, before resources are created |
+| `post-install` | After all resources are created and ready |
+| `pre-upgrade` | After templates render, before resources are updated |
+| `post-upgrade` | After all resources are updated and ready |
+| `pre-delete` | Before any release resources are deleted |
+| `post-delete` | After all release resources are deleted |
+| `pre-rollback` | Before a rollback is performed |
+| `post-rollback` | After a rollback is performed |
+| `test` | When `helm test` is invoked |
+
+## Creating a Hook
+
+A hook is a regular Kubernetes resource with the `helm.sh/hook` annotation:
+
+```yaml
+# templates/pre-install-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "my-app.fullname" . }}-db-init
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  template:
+    metadata:
+      name: {{ include "my-app.fullname" . }}-db-init
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-init
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["./scripts/init-database.sh"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-app.fullname" . }}-db-credentials
+                  key: url
+  backoffLimit: 3
+```
+
+## Database Migration Hook
+
+The most common use case -- run migrations before the application starts:
+
+```yaml
+# templates/pre-upgrade-migration.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "my-app.fullname" . }}-migrate-{{ .Release.Revision }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["./manage.py", "migrate", "--no-input"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-app.fullname" . }}-db
+                  key: url
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+  backoffLimit: 1
+```
+
+## Hook Weights
+
+When multiple hooks run at the same lifecycle point, weights control the execution order. Lower weights run first:
+
+```yaml
+# Weight -5: Create database schema first
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "my-app.fullname" . }}-schema
+  annotations:
+    "helm.sh/hook": pre-install
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: schema
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["./scripts/create-schema.sh"]
+---
+# Weight 0: Seed data after schema
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "my-app.fullname" . }}-seed
+  annotations:
+    "helm.sh/hook": pre-install
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["./scripts/seed-data.sh"]
+```
+
+Execution order: weight `-5` (schema) runs first, then weight `0` (seed).
+
+## Hook Deletion Policies
+
+Control when hook resources are cleaned up:
+
+| Policy | Behavior |
+|--------|----------|
+| `hook-succeeded` | Delete the hook resource after it succeeds |
+| `hook-failed` | Delete the hook resource after it fails |
+| `before-hook-creation` | Delete the previous hook resource before the new one is created |
+
+```yaml
+annotations:
+  "helm.sh/hook-delete-policy": hook-succeeded,hook-failed
+```
+
+If no deletion policy is specified, hook resources remain indefinitely. Use `before-hook-creation` for idempotent hooks that run on every upgrade -- it cleans up the previous Job before creating the new one.
+
+## Post-Install Notification Hook
+
+Send a notification after a successful deployment:
+
+```yaml
+# templates/post-install-notify.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "my-app.fullname" . }}-notify
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": hook-succeeded,hook-failed
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: notify
+          image: curlimages/curl:latest
+          command:
+            - sh
+            - -c
+            - |
+              curl -X POST "$SLACK_WEBHOOK" \
+                -H "Content-Type: application/json" \
+                -d "{\"text\": \"Deployed {{ .Chart.Name }} v{{ .Chart.AppVersion }} to {{ .Release.Namespace }}\"}"
+          env:
+            - name: SLACK_WEBHOOK
+              valueFrom:
+                secretKeyRef:
+                  name: slack-credentials
+                  key: webhook-url
+  backoffLimit: 1
+```
+
+## Pre-Delete Backup Hook
+
+Take a backup before tearing down a release:
+
+```yaml
+# templates/pre-delete-backup.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "my-app.fullname" . }}-backup
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: backup
+          image: postgres:16
+          command:
+            - sh
+            - -c
+            - |
+              pg_dump "$DATABASE_URL" | gzip > /backups/$(date +%Y%m%d-%H%M%S).sql.gz
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-app.fullname" . }}-db
+                  key: url
+          volumeMounts:
+            - name: backup-volume
+              mountPath: /backups
+      volumes:
+        - name: backup-volume
+          persistentVolumeClaim:
+            claimName: {{ include "my-app.fullname" . }}-backups
+  backoffLimit: 1
+```
+
+## Hook Timeouts
+
+Control how long Helm waits for hooks to complete:
+
+```bash
+# Wait up to 10 minutes for hooks (default: 5 minutes)
+helm install my-app ./my-app --timeout 10m
+
+# Hooks that exceed the timeout cause the release to fail
+```
+
+Set `activeDeadlineSeconds` on the Job spec itself to enforce a hard timeout at the Kubernetes level.
+
+## Hooks vs. Init Containers
+
+| Feature | Hooks | Init Containers |
+|---------|-------|-----------------|
+| **Runs** | Once per release operation | Every time the Pod starts |
+| **Blocks** | The entire release | Only Pod startup |
+| **Visible** | Separate Job resource | Part of the Pod spec |
+| **Use for** | Migrations, backups, notifications | Config generation, dependency checks |
+
+Use hooks for one-time operations per release. Use init containers for tasks that must run every time a Pod starts.
+
+## Debugging Hooks
+
+```bash
+# Hooks run as Jobs -- check their status
+kubectl get jobs -l app.kubernetes.io/instance=my-release
+
+# View hook logs
+kubectl logs job/my-release-my-app-migrate-2
+
+# If a hook fails, the release is marked as failed
+helm list --failed
+
+# Check for stuck hooks
+kubectl get jobs --field-selector status.successful=0
+```
+
+## Summary
+
+- Helm hooks run actions at specific lifecycle points: pre/post-install, pre/post-upgrade, pre/post-delete
+- Hooks are regular Kubernetes resources with `helm.sh/hook` annotations
+- Use hook weights to control execution order when multiple hooks exist
+- Deletion policies (`hook-succeeded`, `before-hook-creation`) keep your cluster clean
+- Common use cases: database migrations, backups, notifications, and health verification
+- Hooks block the release until they complete or timeout -- failed hooks fail the release
+- Use init containers instead of hooks for tasks that must run on every Pod restart
+
+## What's Next
+
+How do you know your charts actually work? Next, you'll learn about **testing Helm charts** -- from linting and template validation to integration tests with `helm test`.

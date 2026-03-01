@@ -1,0 +1,115 @@
+---
+title: "Mega Project: Incident Response Simulation"
+description: "Practice real-world incident response scenarios — from detection to resolution to post-mortem. Build the muscle memory for production emergencies."
+difficulty: "Advanced"
+estimatedHours: 40
+technologies:
+  - Prometheus
+  - Grafana
+  - Kubernetes
+  - Linux
+  - Shell Scripting
+prerequisites:
+  - observability-fundamentals
+  - prometheus
+  - kubernetes-fundamentals
+  - linux
+xpReward: 350
+---
+
+# Incident Response Simulation
+
+## Overview
+
+This project simulates real production incidents that SRE and DevOps teams face. You'll set up a monitoring stack, inject failures, detect them through alerts, diagnose root causes, and write post-mortems. This builds the critical thinking and systematic debugging skills that separate junior engineers from senior ones.
+
+## Setup
+
+Deploy a microservices application with full monitoring:
+
+- 3-service application (frontend, API, database)
+- Prometheus + Grafana monitoring stack
+- Alertmanager with configured alert rules
+- Centralized logging with Loki
+- Runbook with response procedures
+
+## Incident Scenarios
+
+### Incident 1: Memory Leak (Severity 2)
+
+**Scenario**: The API service memory usage grows linearly. After 4 hours, pods hit their memory limit and get OOMKilled. The Deployment restarts them, but they crash again within hours.
+
+**Tasks**:
+1. Detect the issue through Grafana dashboards
+2. Identify the OOMKilled pods using kubectl
+3. Analyze memory growth patterns in Prometheus
+4. Identify the root cause (simulated memory leak)
+5. Apply a fix (increase limits temporarily, deploy patch)
+6. Write a post-mortem
+
+### Incident 2: Cascading Failure (Severity 1)
+
+**Scenario**: The database connection pool is exhausted. The API can't get connections, so requests queue up. The frontend times out. Users see 503 errors. The HPA scales up API pods, making the connection pool problem worse.
+
+**Tasks**:
+1. Respond to PagerDuty alert (simulated)
+2. Identify the cascade: database → API → frontend
+3. Stop the bleeding (scale down HPA, add circuit breaker)
+4. Fix the root cause (connection pool configuration)
+5. Validate recovery
+6. Write a post-mortem with action items
+
+### Incident 3: Certificate Expiry (Severity 1)
+
+**Scenario**: TLS certificates expire at 2 AM. HTTPS connections fail. External monitoring detects the outage before internal alerting.
+
+**Tasks**:
+1. Diagnose the TLS handshake failure
+2. Renew or replace certificates
+3. Verify HTTPS is working
+4. Implement certificate expiry monitoring
+5. Set up automated renewal with cert-manager
+
+### Incident 4: DNS Propagation Issue (Severity 2)
+
+**Scenario**: After a DNS change, 30% of users can't reach the service. Different DNS resolvers return different IP addresses.
+
+**Tasks**:
+1. Identify the split traffic pattern
+2. Check DNS propagation across resolvers
+3. Understand TTL and caching implications
+4. Roll back or fix the DNS change
+5. Implement DNS monitoring
+
+### Incident 5: Deployment Gone Wrong (Severity 1)
+
+**Scenario**: A new deployment introduces a bug that only manifests under load. The canary passes (low traffic), but when the full rollout happens, error rates spike to 15%.
+
+**Tasks**:
+1. Detect the error rate spike via alerts
+2. Correlate with the deployment timeline
+3. Initiate rollback
+4. Verify rollback successful
+5. Improve canary testing to catch the issue
+
+## Post-Mortem Template
+
+For each incident, write a post-mortem covering:
+
+1. **Summary**: What happened, duration, impact
+2. **Timeline**: Minute-by-minute events
+3. **Root Cause**: Why it happened
+4. **Detection**: How was it detected, could we detect it faster?
+5. **Resolution**: What fixed it
+6. **Action Items**: Prevent recurrence (with owners and deadlines)
+7. **Lessons Learned**: What went well, what didn't
+
+## Validation Criteria
+
+- [ ] All 5 incidents simulated, detected, and resolved
+- [ ] Alert rules correctly fire for each scenario
+- [ ] Root cause correctly identified for each incident
+- [ ] Post-mortem written for each incident
+- [ ] At least 3 preventive action items implemented
+- [ ] Mean time to detection < 5 minutes for all incidents
+- [ ] Rollback procedures tested and documented

@@ -1,0 +1,16 @@
+{
+  "id": "ansible",
+  "title": "Ansible",
+  "slug": "ansible",
+  "pathSlug": "iac-cloud",
+  "description": "Automate server configuration and application deployment with Ansible. Agentless, simple, powerful.",
+  "order": 6,
+  "estimatedHours": 25,
+  "lessonsCount": 4,
+  "lessons": [
+    { "slug": "introduction", "title": "Introduction to Ansible", "order": 1 },
+    { "slug": "playbooks", "title": "Writing Playbooks", "order": 2 },
+    { "slug": "roles", "title": "Roles & Galaxy", "order": 3 },
+    { "slug": "inventory", "title": "Inventory Management", "order": 4 }
+  ]
+}

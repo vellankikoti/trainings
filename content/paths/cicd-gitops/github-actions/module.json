@@ -1,0 +1,20 @@
+{
+  "id": "github-actions",
+  "title": "GitHub Actions",
+  "slug": "github-actions",
+  "pathSlug": "cicd-gitops",
+  "description": "Master GitHub Actions for automating builds, tests, and deployments. From basic workflows to advanced patterns.",
+  "order": 2,
+  "estimatedHours": 40,
+  "lessonsCount": 8,
+  "lessons": [
+    { "slug": "introduction", "title": "Introduction to GitHub Actions", "order": 1 },
+    { "slug": "workflow-syntax", "title": "Workflow YAML Syntax Deep Dive", "order": 2 },
+    { "slug": "actions-marketplace", "title": "Actions Marketplace & Custom Actions", "order": 3 },
+    { "slug": "self-hosted-runners", "title": "Self-Hosted Runners", "order": 4 },
+    { "slug": "matrix-builds", "title": "Matrix Builds & Strategy", "order": 5 },
+    { "slug": "secrets-environments", "title": "Secrets, Variables & Environments", "order": 6 },
+    { "slug": "reusable-workflows", "title": "Reusable Workflows & Composite Actions", "order": 7 },
+    { "slug": "advanced-patterns", "title": "Advanced Workflow Patterns", "order": 8 }
+  ]
+}

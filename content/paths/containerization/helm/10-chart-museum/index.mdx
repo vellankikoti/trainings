@@ -1,0 +1,393 @@
+---
+title: "Running Your Own Chart Repository"
+description: "Learn how to host a private Helm chart repository using ChartMuseum, GitHub Pages, cloud storage, and OCI registries for your organization."
+order: 10
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["best-practices"]
+objectives:
+  - Set up ChartMuseum as a private Helm repository
+  - Host charts using GitHub Pages and cloud storage
+  - Push and manage charts in an OCI-compliant registry
+  - Automate chart publishing in CI/CD pipelines
+tags:
+  - helm
+  - kubernetes
+  - chartmuseum
+  - repositories
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your organization now has a dozen Helm charts powering internal services -- API gateways, authentication providers, data pipelines, and monitoring stacks. These charts live scattered across Git repositories, and teams share them by copying tgz files in Slack. When someone fixes a bug in a shared chart, nobody else gets the update. You need a central, versioned, searchable chart repository that your teams can publish to and pull from -- just like your container registry, but for Helm charts.
+</Callout>
+
+## Why Host Your Own Repository?
+
+Public repositories like Artifact Hub are great for open-source charts, but organizations need private repositories for:
+
+- **Internal charts** that should not be public
+- **Approved chart mirrors** vetted by your security team
+- **Versioned distribution** with proper release management
+- **Access control** to restrict who can publish and consume charts
+- **Availability** without depending on external infrastructure
+
+## Option 1: ChartMuseum
+
+[ChartMuseum](https://chartmuseum.com) is an open-source Helm chart repository server with a built-in API for uploading charts.
+
+### Deploying ChartMuseum with Helm
+
+```bash
+# Add the ChartMuseum repository
+helm repo add chartmuseum https://chartmuseum.github.io/charts
+
+# Install ChartMuseum
+helm install chartmuseum chartmuseum/chartmuseum \
+  --set env.open.DISABLE_API=false \
+  --set persistence.enabled=true \
+  --set persistence.size=10Gi
+```
+
+### ChartMuseum Configuration
+
+```yaml
+# chartmuseum-values.yaml
+env:
+  open:
+    DISABLE_API: false
+    STORAGE: local
+    ALLOW_OVERWRITE: false
+    AUTH_ANONYMOUS_GET: true
+    DEPTH: 1
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: standard
+
+ingress:
+  enabled: true
+  hosts:
+    - name: charts.company.com
+      path: /
+  tls:
+    - secretName: chartmuseum-tls
+      hosts:
+        - charts.company.com
+
+# Basic auth for uploads
+env:
+  secret:
+    BASIC_AUTH_USER: admin
+    BASIC_AUTH_PASS: changeme
+```
+
+```bash
+helm install chartmuseum chartmuseum/chartmuseum \
+  -f chartmuseum-values.yaml
+```
+
+### Using Cloud Storage Backends
+
+ChartMuseum supports multiple storage backends:
+
+```yaml
+# Amazon S3
+env:
+  open:
+    STORAGE: amazon
+    STORAGE_AMAZON_BUCKET: my-helm-charts
+    STORAGE_AMAZON_REGION: us-east-1
+
+# Google Cloud Storage
+env:
+  open:
+    STORAGE: google
+    STORAGE_GOOGLE_BUCKET: my-helm-charts
+
+# Azure Blob Storage
+env:
+  open:
+    STORAGE: microsoft
+    STORAGE_MICROSOFT_CONTAINER: helm-charts
+```
+
+### Uploading Charts to ChartMuseum
+
+```bash
+# Package your chart
+helm package ./my-app
+
+# Upload using the ChartMuseum API
+curl --data-binary "@my-app-1.0.0.tgz" \
+  -u admin:changeme \
+  https://charts.company.com/api/charts
+
+# Or use the helm-push plugin
+helm plugin install https://github.com/chartmuseum/helm-push
+
+# Add the repository and push
+helm repo add company https://charts.company.com
+helm cm-push ./my-app company
+helm cm-push my-app-1.0.0.tgz company
+```
+
+### Consuming Charts from ChartMuseum
+
+```bash
+# Add the repository
+helm repo add company https://charts.company.com \
+  --username reader --password readpass
+
+# Search and install
+helm repo update
+helm search repo company/
+helm install my-release company/my-app
+```
+
+## Option 2: GitHub Pages
+
+Host a chart repository for free using GitHub Pages -- no server required.
+
+### Setup
+
+```bash
+# Create a gh-pages branch for your charts repo
+git checkout --orphan gh-pages
+git rm -rf .
+
+# Create the initial index
+echo "# Helm Charts" > README.md
+git add README.md
+git commit -m "Initial gh-pages"
+git push origin gh-pages
+git checkout main
+```
+
+### Publishing Charts
+
+```bash
+# Package the chart
+helm package charts/my-app -d .deploy
+
+# Generate or update the repository index
+helm repo index .deploy --url https://my-org.github.io/helm-charts
+
+# Copy to gh-pages branch and push
+git checkout gh-pages
+cp .deploy/* .
+git add .
+git commit -m "Release my-app 1.0.0"
+git push origin gh-pages
+git checkout main
+```
+
+### Automated Publishing with GitHub Actions
+
+```yaml
+# .github/workflows/release-chart.yaml
+name: Release Helm Chart
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          charts_dir: charts
+```
+
+The `chart-releaser-action` automates everything:
+1. Detects changed charts
+2. Packages them
+3. Creates GitHub releases with chart archives
+4. Updates the `index.yaml` on `gh-pages`
+
+### Using the GitHub Pages Repository
+
+```bash
+helm repo add my-org https://my-org.github.io/helm-charts
+helm repo update
+helm search repo my-org/
+helm install my-release my-org/my-app
+```
+
+## Option 3: Cloud Storage (S3/GCS)
+
+Host a chart repository using a cloud storage bucket with static website hosting.
+
+### Amazon S3
+
+```bash
+# Create and configure the bucket
+aws s3 mb s3://my-helm-charts
+aws s3 website s3://my-helm-charts --index-document index.yaml
+
+# Package and upload
+helm package ./my-app
+helm repo index . --url https://my-helm-charts.s3.amazonaws.com
+aws s3 sync . s3://my-helm-charts --exclude "*" \
+  --include "*.tgz" --include "index.yaml"
+```
+
+### Google Cloud Storage
+
+```bash
+# Create the bucket
+gsutil mb gs://my-helm-charts
+
+# Package and upload
+helm package ./my-app
+helm repo index . --url https://my-helm-charts.storage.googleapis.com
+gsutil cp *.tgz index.yaml gs://my-helm-charts/
+```
+
+## Option 4: OCI Registry
+
+The modern approach -- store charts in the same registry as your container images.
+
+### Using Harbor
+
+Harbor is a popular open-source registry that natively supports Helm charts:
+
+```bash
+# Log in to Harbor
+helm registry login harbor.company.com
+
+# Push a chart
+helm package ./my-app
+helm push my-app-1.0.0.tgz oci://harbor.company.com/charts
+
+# Pull and install
+helm install my-release oci://harbor.company.com/charts/my-app --version 1.0.0
+```
+
+### Using AWS ECR
+
+```bash
+# Authenticate with ECR
+aws ecr get-login-password --region us-east-1 | \
+  helm registry login --username AWS --password-stdin \
+  123456789.dkr.ecr.us-east-1.amazonaws.com
+
+# Create a repository for the chart
+aws ecr create-repository --repository-name charts/my-app
+
+# Push the chart
+helm push my-app-1.0.0.tgz \
+  oci://123456789.dkr.ecr.us-east-1.amazonaws.com/charts
+```
+
+### Using GitHub Container Registry
+
+```bash
+# Authenticate
+echo $GITHUB_TOKEN | helm registry login ghcr.io \
+  --username $GITHUB_USER --password-stdin
+
+# Push
+helm push my-app-1.0.0.tgz oci://ghcr.io/my-org/charts
+
+# Install
+helm install my-release oci://ghcr.io/my-org/charts/my-app --version 1.0.0
+```
+
+## CI/CD Integration
+
+### Automated Chart Publishing Pipeline
+
+```yaml
+# .github/workflows/publish-chart.yaml
+name: Publish Helm Chart
+on:
+  push:
+    tags:
+      - 'chart-*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io \
+            --username ${{ github.actor }} --password-stdin
+
+      - name: Lint chart
+        run: helm lint charts/my-app --strict
+
+      - name: Package chart
+        run: helm package charts/my-app
+
+      - name: Push to GHCR
+        run: |
+          helm push my-app-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
+```
+
+### Using Charts from Private Registries in Dependencies
+
+```yaml
+# Chart.yaml
+dependencies:
+  - name: auth-service
+    version: "2.x.x"
+    repository: "oci://registry.company.com/charts"
+  - name: common-lib
+    version: "1.x.x"
+    repository: "oci://ghcr.io/my-org/charts"
+```
+
+## Choosing the Right Approach
+
+| Approach | Best For | Complexity | Cost |
+|----------|----------|------------|------|
+| **ChartMuseum** | Full-featured self-hosted repository | Medium | Infrastructure costs |
+| **GitHub Pages** | Open-source projects, small teams | Low | Free |
+| **Cloud Storage** | Teams already on cloud platforms | Low | Minimal storage costs |
+| **OCI Registry** | Modern teams, unified infrastructure | Low | Registry costs |
+
+For new projects, **OCI registries** are the recommended approach. They leverage existing container registry infrastructure, provide better security through unified access control, and are the direction Helm is moving toward.
+
+## Summary
+
+- ChartMuseum provides a full-featured, API-driven chart repository with multiple storage backends
+- GitHub Pages offers free, static chart hosting using the chart-releaser action for automation
+- Cloud storage (S3, GCS) can serve as simple, cost-effective chart repositories
+- OCI registries are the modern standard, unifying container image and chart distribution
+- Automate chart publishing in CI/CD pipelines to ensure consistent, tested releases
+- Choose OCI registries for new projects -- they offer the best security, tooling, and future compatibility
+
+## What's Next
+
+Congratulations! You have completed the Helm fundamentals path. You can now create, template, test, and distribute Helm charts with confidence. Continue practicing by converting your existing Kubernetes manifests into well-structured, reusable Helm charts.

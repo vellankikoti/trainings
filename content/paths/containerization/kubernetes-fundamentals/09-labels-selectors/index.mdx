@@ -1,0 +1,122 @@
+---
+title: "Labels, Selectors & Annotations"
+description: "Master the Kubernetes labeling system that connects Deployments to Pods, Services to backends, and enables powerful querying."
+order: 9
+xpReward: 30
+estimatedMinutes: 30
+prerequisites: ["persistent-volumes"]
+objectives:
+  - Use labels to organize and select Kubernetes resources
+  - Write label selectors for filtering resources
+  - Understand the difference between labels and annotations
+  - Apply labels strategically for production workloads
+tags:
+  - kubernetes
+  - labels
+  - selectors
+  - annotations
+---
+
+<Callout type="story" title="The Story">
+Your cluster has grown to 500 pods across 20 services. Someone asks: "Which pods belong to the payment service? Which are running version 2.1? Which are in the canary release?" Without labels, you'd have to inspect each pod individually. Labels are metadata tags that let you organize, select, and filter resources instantly. They're the glue that connects Services to Pods, Deployments to ReplicaSets, and queries to results.
+</Callout>
+
+## Labels
+
+Labels are key-value pairs attached to Kubernetes objects:
+
+```yaml
+metadata:
+  labels:
+    app: payment-service
+    version: "2.1"
+    environment: production
+    team: payments
+    release: canary
+```
+
+### Adding and Modifying Labels
+
+```bash
+# Add a label
+kubectl label pod web-app tier=frontend
+
+# Overwrite an existing label
+kubectl label pod web-app tier=backend --overwrite
+
+# Remove a label
+kubectl label pod web-app tier-
+```
+
+## Selectors
+
+Selectors filter resources by their labels:
+
+```bash
+# Equality-based
+kubectl get pods -l app=payment-service
+kubectl get pods -l environment=production,team=payments
+
+# Set-based
+kubectl get pods -l 'environment in (staging, production)'
+kubectl get pods -l 'version notin (1.0, 1.1)'
+kubectl get pods -l 'canary'          # Has the label
+kubectl get pods -l '!canary'         # Doesn't have the label
+```
+
+### Selectors in Manifests
+
+Services use selectors to find pods:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-api
+spec:
+  selector:
+    app: payment-service    # Routes to pods with this label
+    version: "2.1"
+```
+
+## Annotations
+
+Annotations store non-identifying metadata — information for tools, not for selection:
+
+```yaml
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: "3"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    description: "Payment processing service"
+    owner: "payments-team@company.com"
+```
+
+**Labels** = for selecting and filtering. **Annotations** = for storing metadata.
+
+## Recommended Labels
+
+Kubernetes recommends standard labels:
+
+```yaml
+metadata:
+  labels:
+    app.kubernetes.io/name: payment-service
+    app.kubernetes.io/version: "2.1.0"
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: e-commerce
+    app.kubernetes.io/managed-by: helm
+```
+
+## Summary
+
+- Labels are key-value tags for organizing and selecting resources
+- Selectors filter resources by labels (equality or set-based)
+- Services, Deployments, and other controllers use selectors to find their targets
+- Annotations store non-filtering metadata for tools and humans
+- Use consistent labeling conventions across your organization
+
+## What's Next
+
+With your cluster organized, let's ensure pods don't consume unbounded resources. **Resource Management** is next — requests, limits, and quality of service classes.

@@ -1,0 +1,130 @@
+---
+title: "Introduction to Helm"
+description: "Discover Helm, the package manager for Kubernetes. Understand why Kubernetes needs a package manager and how Helm simplifies application deployment."
+order: 1
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["kubernetes-fundamentals"]
+objectives:
+  - Understand why Kubernetes needs a package manager
+  - Install and configure Helm
+  - Deploy your first application using a Helm chart
+  - Manage releases with helm install, upgrade, and rollback
+tags:
+  - helm
+  - kubernetes
+  - package-management
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+Your team needs to deploy a monitoring stack: Prometheus for metrics, Grafana for dashboards, and Alertmanager for notifications. Each requires multiple Kubernetes resources — Deployments, Services, ConfigMaps, Secrets, ServiceAccounts, RBAC rules. You're looking at writing and maintaining hundreds of lines of YAML across dozens of files. Then someone says: "Why not just `helm install prometheus`?" In one command, Helm deploys the entire stack, pre-configured and production-ready. Welcome to the Kubernetes package manager.
+</Callout>
+
+## What Is Helm?
+
+Helm is the **package manager for Kubernetes** — like apt for Ubuntu, brew for macOS, or npm for Node.js. It packages Kubernetes manifests into reusable units called **charts**.
+
+### Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Chart** | A package of Kubernetes resources (like an npm package) |
+| **Release** | A running instance of a chart (like an installed package) |
+| **Repository** | A collection of charts (like npm registry) |
+| **Values** | Configuration that customizes a chart for your needs |
+
+## Installing Helm
+
+```bash
+# macOS
+brew install helm
+
+# Linux
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Verify
+helm version
+```
+
+## Your First Helm Deployment
+
+```bash
+# Add a repository
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
+# Search for charts
+helm search repo nginx
+
+# Install a chart
+helm install my-nginx bitnami/nginx
+
+# List releases
+helm list
+
+# Check status
+helm status my-nginx
+```
+
+This single command creates a Deployment, Service, ConfigMap, and more — all configured with sensible defaults.
+
+## Customizing with Values
+
+Override defaults without modifying the chart:
+
+```bash
+# See available values
+helm show values bitnami/nginx
+
+# Install with custom values
+helm install my-nginx bitnami/nginx \
+  --set replicaCount=3 \
+  --set service.type=ClusterIP
+
+# Or with a values file
+helm install my-nginx bitnami/nginx -f my-values.yaml
+```
+
+```yaml
+# my-values.yaml
+replicaCount: 3
+service:
+  type: ClusterIP
+  port: 80
+resources:
+  requests:
+    memory: 128Mi
+    cpu: 100m
+  limits:
+    memory: 256Mi
+    cpu: 200m
+```
+
+## Managing Releases
+
+```bash
+# Upgrade a release
+helm upgrade my-nginx bitnami/nginx --set replicaCount=5
+
+# Rollback to a previous revision
+helm rollback my-nginx 1
+
+# View history
+helm history my-nginx
+
+# Uninstall
+helm uninstall my-nginx
+```
+
+## Summary
+
+- Helm is the package manager for Kubernetes — it bundles resources into charts
+- Charts are reusable, versioned, and customizable via values
+- `helm install` deploys, `helm upgrade` updates, `helm rollback` reverts
+- Repositories like Artifact Hub have thousands of community charts
+- Helm dramatically simplifies complex Kubernetes deployments
+
+## What's Next
+
+Next, you'll dive into **Helm chart structure** — understanding every file and directory that makes up a chart.

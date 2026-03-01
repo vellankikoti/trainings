@@ -1,0 +1,15 @@
+{
+  "id": "career-development",
+  "title": "DevOps Career Development",
+  "slug": "career-development",
+  "pathSlug": "platform-engineering",
+  "description": "Build a successful DevOps career — from resume building to technical interviews and salary negotiation.",
+  "order": 6,
+  "estimatedHours": 15,
+  "lessonsCount": 3,
+  "lessons": [
+    { "slug": "devops-career", "title": "The DevOps Career Landscape", "order": 1 },
+    { "slug": "interview-prep", "title": "Technical Interview Preparation", "order": 2 },
+    { "slug": "building-portfolio", "title": "Building Your DevOps Portfolio", "order": 3 }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "grafana",
+  "title": "Grafana",
+  "slug": "grafana",
+  "pathSlug": "observability",
+  "description": "Build beautiful, informative dashboards with Grafana. Connect data sources, design panels, and create alerts.",
+  "order": 3,
+  "estimatedHours": 20,
+  "lessonsCount": 3,
+  "lessons": [
+    { "slug": "introduction", "title": "Introduction to Grafana", "order": 1 },
+    { "slug": "dashboards", "title": "Building Dashboards", "order": 2 },
+    { "slug": "data-sources", "title": "Data Sources & Variables", "order": 3 }
+  ]
+}

@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { getProfileByClerkId, updateProfile } from "@/lib/profile";
+import { profileUpdateSchema, validateBody } from "@/lib/validations";
 
 export async function GET() {
   const { userId } = await auth();
@@ -26,7 +27,12 @@ export async function PATCH(req: Request) {
   }
 
   const body = await req.json();
-  const updated = await updateProfile(userId, body);
+  const validated = validateBody(profileUpdateSchema, body);
+  if (validated.error) {
+    return NextResponse.json({ error: validated.error }, { status: 400 });
+  }
+
+  const updated = await updateProfile(userId, validated.data);
 
   if (!updated) {
     return NextResponse.json(

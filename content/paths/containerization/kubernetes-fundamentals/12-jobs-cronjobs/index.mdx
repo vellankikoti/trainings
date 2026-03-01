@@ -1,0 +1,125 @@
+---
+title: "Jobs & CronJobs"
+description: "Run batch processing tasks and scheduled jobs in Kubernetes. Learn when to use Jobs vs Deployments and how to configure CronJobs for recurring tasks."
+order: 12
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["health-checks"]
+objectives:
+  - Create Jobs for one-time batch tasks
+  - Configure CronJobs for scheduled recurring tasks
+  - Set completion counts, parallelism, and backoff limits
+  - Understand Job cleanup and history management
+tags:
+  - kubernetes
+  - jobs
+  - cronjobs
+  - batch-processing
+---
+
+<Callout type="story" title="The Story">
+Every night at midnight, your e-commerce platform needs to generate sales reports, clean up expired sessions, and send digest emails. You can't use a Deployment for these — they're not long-running services, they're tasks that run once and complete. Kubernetes Jobs are designed for exactly this: run a task to completion, retry on failure, and report the result. CronJobs extend this with scheduling, like cron on Linux but orchestrated by Kubernetes.
+</Callout>
+
+## Jobs
+
+A Job creates pods that run to completion:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-migration
+spec:
+  template:
+    spec:
+      containers:
+        - name: migrate
+          image: myapp:v1.0
+          command: ["python", "migrate.py"]
+      restartPolicy: Never
+  backoffLimit: 4    # Retry up to 4 times on failure
+```
+
+```bash
+kubectl apply -f job.yaml
+kubectl get jobs
+kubectl logs job/data-migration
+```
+
+### Parallel Jobs
+
+Process a batch of items in parallel:
+
+```yaml
+spec:
+  completions: 10    # Total tasks to complete
+  parallelism: 3     # Run 3 pods at a time
+  template:
+    spec:
+      containers:
+        - name: worker
+          image: batch-worker:v1.0
+      restartPolicy: Never
+```
+
+## CronJobs
+
+Schedule recurring jobs using cron syntax:
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-report
+spec:
+  schedule: "0 0 * * *"    # Midnight every day
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: report
+              image: report-generator:v1.0
+          restartPolicy: OnFailure
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  concurrencyPolicy: Forbid    # Don't run if previous job is still running
+```
+
+### Cron Schedule Format
+
+```
+┌───────────── minute (0 - 59)
+│ ┌───────────── hour (0 - 23)
+│ │ ┌───────────── day of month (1 - 31)
+│ │ │ ┌───────────── month (1 - 12)
+│ │ │ │ ┌───────────── day of week (0 - 6, Sunday = 0)
+│ │ │ │ │
+* * * * *
+```
+
+Examples:
+- `*/5 * * * *` — every 5 minutes
+- `0 9 * * 1-5` — 9 AM on weekdays
+- `0 0 1 * *` — midnight on the 1st of each month
+
+### Concurrency Policies
+
+| Policy | Behavior |
+|--------|----------|
+| **Allow** | Multiple jobs can run concurrently (default) |
+| **Forbid** | Skip new run if previous is still running |
+| **Replace** | Cancel the running job and start a new one |
+
+## Summary
+
+- **Jobs** run tasks to completion with retry support
+- **CronJobs** schedule recurring Jobs using cron syntax
+- Use `parallelism` for concurrent batch processing
+- Set `concurrencyPolicy: Forbid` to prevent overlapping runs
+- Configure history limits to prevent old Job pod accumulation
+
+## What's Next
+
+Some workloads need to run on every node — log collectors, monitoring agents, network plugins. That's the job of **DaemonSets**.

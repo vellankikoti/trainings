@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { getProfileId, updateExerciseProgress } from "@/lib/progress";
+import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
+import { exerciseProgressSchema, validateBody } from "@/lib/validations";
 
 export async function POST(request: Request) {
   const { userId: clerkId } = await auth();
@@ -8,15 +10,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json();
-  const { lessonSlug, exerciseId } = body;
-
-  if (!lessonSlug || !exerciseId) {
-    return NextResponse.json(
-      { error: "Missing required fields: lessonSlug, exerciseId" },
-      { status: 400 },
-    );
+  // Rate limit: 30 requests/minute per user
+  const rl = rateLimit(`progress:${clerkId}`, RATE_LIMITS.progress);
+  if (!rl.success) {
+    return rateLimitResponse(rl);
   }
+
+  const body = await request.json();
+  const validated = validateBody(exerciseProgressSchema, body);
+  if (validated.error) {
+    return NextResponse.json({ error: validated.error }, { status: 400 });
+  }
+
+  const { lessonSlug, exerciseId } = validated.data;
 
   const profileId = await getProfileId(clerkId);
   if (!profileId) {

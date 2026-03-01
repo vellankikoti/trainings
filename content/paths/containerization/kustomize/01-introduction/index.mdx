@@ -1,0 +1,153 @@
+---
+title: "Introduction to Kustomize"
+description: "Learn Kustomize — a template-free way to customize Kubernetes manifests. Understand how it differs from Helm and when to use it."
+order: 1
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["kubernetes-fundamentals"]
+objectives:
+  - Understand the Kustomize approach to configuration management
+  - Create your first kustomization.yaml
+  - Apply customized manifests with kubectl
+  - Understand the difference between Kustomize and Helm
+tags:
+  - kustomize
+  - kubernetes
+  - configuration
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+Your team maintains three environments: development, staging, and production. The Kubernetes manifests are 95% identical — same Deployments, same Services — but production needs more replicas, different resource limits, and separate ConfigMaps. With Helm, you'd write templates with conditionals and variables. With Kustomize, you take a different approach: start with the plain YAML manifests that already work, then layer small patches on top for each environment. No templates, no variables, no learning a templating language. Just Kubernetes YAML, all the way down.
+</Callout>
+
+## What Is Kustomize?
+
+Kustomize is a **configuration management tool** built into kubectl. It customizes Kubernetes manifests through **overlays** and **patches** — without templates.
+
+The philosophy: your base manifests are valid Kubernetes YAML. Customizations are additive layers on top.
+
+```bash
+# Kustomize is built into kubectl
+kubectl kustomize ./overlays/production
+
+# Apply directly
+kubectl apply -k ./overlays/production
+```
+
+## Project Structure
+
+```
+my-app/
+├── base/                    # Shared manifests
+│   ├── kustomization.yaml
+│   ├── deployment.yaml
+│   └── service.yaml
+└── overlays/
+    ├── development/
+    │   ├── kustomization.yaml
+    │   └── replica-patch.yaml
+    ├── staging/
+    │   ├── kustomization.yaml
+    │   └── replica-patch.yaml
+    └── production/
+        ├── kustomization.yaml
+        ├── replica-patch.yaml
+        └── resource-patch.yaml
+```
+
+## Creating a Base
+
+```yaml
+# base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+```
+
+```yaml
+# base/deployment.yaml (plain Kubernetes YAML)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: myapp:v1.0
+          ports:
+            - containerPort: 8080
+```
+
+## Creating an Overlay
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+namePrefix: prod-
+commonLabels:
+  environment: production
+patches:
+  - path: replica-patch.yaml
+```
+
+```yaml
+# overlays/production/replica-patch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+spec:
+  replicas: 5
+```
+
+When you run `kubectl apply -k ./overlays/production`, you get:
+- The base Deployment with 5 replicas (patched)
+- Name prefixed with `prod-`
+- Label `environment: production` added to all resources
+
+## Preview Output
+
+```bash
+# See what will be generated
+kubectl kustomize ./overlays/production
+
+# Compare environments
+diff <(kubectl kustomize ./overlays/staging) <(kubectl kustomize ./overlays/production)
+```
+
+## Kustomize vs. Helm
+
+| | Kustomize | Helm |
+|---|-----------|------|
+| **Approach** | Patch plain YAML | Template with Go syntax |
+| **Learning curve** | Low (just YAML) | Higher (Go templates) |
+| **Packaging** | Directories | Chart archives |
+| **Sharing** | Git repos | Chart repositories |
+| **Best for** | Environment variations | Reusable packages |
+
+## Summary
+
+- Kustomize customizes Kubernetes YAML through overlays and patches — no templates
+- Built into kubectl (`kubectl apply -k`)
+- Base manifests are plain, valid Kubernetes YAML
+- Overlays add environment-specific modifications
+- Choose Kustomize for environment variations, Helm for reusable packages
+
+## What's Next
+
+Next, you'll deep-dive into **Bases and Overlays** — the core pattern of Kustomize for managing multi-environment deployments.

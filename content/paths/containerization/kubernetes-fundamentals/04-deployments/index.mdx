@@ -1,0 +1,222 @@
+---
+title: "Deployments & ReplicaSets"
+description: "Master Kubernetes Deployments — the standard way to run and update applications. Learn rolling updates, rollbacks, scaling, and how ReplicaSets work behind the scenes."
+order: 4
+xpReward: 40
+estimatedMinutes: 50
+prerequisites: ["pods"]
+objectives:
+  - Create Deployments to manage replicated pods
+  - Perform rolling updates with zero downtime
+  - Roll back to previous versions when things go wrong
+  - Scale applications up and down
+  - Understand how ReplicaSets maintain desired pod count
+tags:
+  - kubernetes
+  - deployments
+  - replicasets
+  - scaling
+  - rolling-updates
+---
+
+<Callout type="story" title="The Story">
+Your team has deployed a web application as a single pod. It works great — until the pod crashes at 3 AM. Nobody restarts it until morning. The next week, you need to push an update, so you delete the old pod and create a new one. For 30 seconds, your site is completely down. Users complain. Your manager asks: "Can't we do this without downtime?" The answer is Deployments. A Deployment ensures the right number of pods are always running, handles updates without downtime, and lets you roll back when a release goes bad. It's how professionals run applications on Kubernetes.
+</Callout>
+
+## What Is a Deployment?
+
+A Deployment is a Kubernetes resource that:
+
+1. **Declares** how many replicas of a pod should run
+2. **Ensures** that exact number is always running (self-healing)
+3. **Manages** updates with rolling deployments (zero downtime)
+4. **Enables** rollbacks to previous versions
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: myapp:v1.0
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+```
+
+```bash
+kubectl apply -f deployment.yaml
+```
+
+## The Deployment → ReplicaSet → Pod Chain
+
+Deployments don't manage pods directly. The hierarchy is:
+
+```
+Deployment (manages versioned rollouts)
+  └── ReplicaSet (maintains N pod replicas)
+       ├── Pod 1
+       ├── Pod 2
+       └── Pod 3
+```
+
+- The **Deployment** creates a **ReplicaSet** for each version
+- The **ReplicaSet** ensures the desired number of **Pods** are running
+- During updates, the Deployment creates a new ReplicaSet and scales down the old one
+
+```bash
+# See the chain
+kubectl get deployments
+kubectl get replicasets
+kubectl get pods
+
+# All three levels visible:
+# NAME                      READY   UP-TO-DATE   AVAILABLE
+# web-app                   3/3     3            3
+#
+# NAME                          DESIRED   CURRENT   READY
+# web-app-6d4b8c6f9             3         3         3
+#
+# NAME                              READY   STATUS
+# web-app-6d4b8c6f9-x2k5j          1/1     Running
+# web-app-6d4b8c6f9-a8m3n          1/1     Running
+# web-app-6d4b8c6f9-p4r7q          1/1     Running
+```
+
+## Rolling Updates
+
+When you update a Deployment (e.g., new image version), Kubernetes performs a **rolling update** by default:
+
+```bash
+# Update the image
+kubectl set image deployment/web-app web=myapp:v2.0
+
+# Or edit the YAML and apply
+kubectl apply -f deployment.yaml
+```
+
+What happens during a rolling update:
+
+1. New ReplicaSet created with `myapp:v2.0`
+2. One new pod starts in the new ReplicaSet
+3. Once healthy, one old pod is terminated
+4. Repeat until all pods are running v2.0
+5. Old ReplicaSet kept (with 0 replicas) for rollback
+
+```bash
+# Watch the rollout
+kubectl rollout status deployment/web-app
+
+# View rollout history
+kubectl rollout history deployment/web-app
+```
+
+### Controlling Update Speed
+
+```yaml
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1    # Max pods that can be unavailable during update
+      maxSurge: 1           # Max extra pods above desired count during update
+```
+
+## Rollbacks
+
+Deployed a bad version? Roll back instantly:
+
+```bash
+# Roll back to the previous version
+kubectl rollout undo deployment/web-app
+
+# Roll back to a specific revision
+kubectl rollout history deployment/web-app
+kubectl rollout undo deployment/web-app --to-revision=2
+```
+
+Kubernetes keeps old ReplicaSets (by default, the last 10) specifically for rollbacks.
+
+## Scaling
+
+```bash
+# Scale to 5 replicas
+kubectl scale deployment/web-app --replicas=5
+
+# Scale down to 1
+kubectl scale deployment/web-app --replicas=1
+```
+
+Or update the YAML:
+
+```yaml
+spec:
+  replicas: 5
+```
+
+## Self-Healing in Action
+
+Delete a pod manually and watch the Deployment recreate it:
+
+```bash
+# List pods
+kubectl get pods
+
+# Delete one
+kubectl delete pod web-app-6d4b8c6f9-x2k5j
+
+# Watch — a new pod appears immediately
+kubectl get pods -w
+```
+
+The ReplicaSet controller detects that the actual pod count (2) is less than the desired count (3) and creates a replacement.
+
+## Deployment Strategies
+
+### RollingUpdate (Default)
+
+Gradually replaces old pods with new ones. Zero downtime.
+
+### Recreate
+
+Kills all old pods first, then creates new ones. Brief downtime but simpler.
+
+```yaml
+spec:
+  strategy:
+    type: Recreate
+```
+
+Use Recreate when:
+- Your app can't run two versions simultaneously
+- Database schema changes require the old version to be fully stopped
+
+## Summary
+
+- Deployments manage ReplicaSets, which manage Pods
+- They ensure the desired number of pods are always running
+- Rolling updates deploy new versions with zero downtime
+- Rollbacks let you revert to any previous version instantly
+- Scaling is as simple as changing the replica count
+- Self-healing automatically replaces crashed pods
+
+## What's Next
+
+Your pods are running, but how do other services find and talk to them? Pod IPs are ephemeral — they change when pods restart. You need **Services** to provide stable networking. That's next.

@@ -1,0 +1,567 @@
+---
+title: "Introduction to Grafana"
+description: "Learn what Grafana is, why it became the standard for observability dashboards, and how to connect data sources, build panels, and create your first dashboard that turns raw metrics into actionable insights."
+order: 1
+xpReward: 30
+estimatedMinutes: 30
+prerequisites:
+  - "observability-fundamentals/introduction"
+objectives:
+  - Understand what Grafana is and the problem it solves
+  - Explain why visualization matters for observability
+  - Identify Grafana's core concepts — data sources, dashboards, and panels
+  - Connect Prometheus as a data source in Grafana
+  - Build a basic dashboard with multiple panel types
+  - Describe Grafana's role in the observability stack
+tags:
+  - observability
+  - monitoring
+  - sre
+  - grafana
+  - dashboards
+  - visualization
+---
+
+<Callout type="story" title="The Story">
+It is 3 AM and the on-call engineer at a mid-sized fintech company gets paged. Latency on the payments API has tripled. She opens a terminal and runs a PromQL query against Prometheus: `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{service="payments"}[5m]))`. A wall of numbers scrolls past. She runs another query. More numbers. She copies the results into a spreadsheet, tries to spot patterns, squints at timestamps, and mentally tries to correlate request rates with error counts with CPU usage across eight different services. Forty-five minutes later, she still cannot see the full picture. Meanwhile, across town, another company has the same problem. Their on-call engineer opens a browser, pulls up Grafana, and immediately sees a dashboard: request latency spiking in a red-highlighted graph, a correlated drop in throughput on the panel below it, and a heatmap showing that the slowdown is concentrated in a single availability zone. In under two minutes, she identifies the issue — a degraded network link in us-east-1b — and begins remediation. Same data. Same metrics. Same Prometheus underneath. The difference is that one team was reading raw numbers in a terminal, and the other was looking at a picture. Grafana is that picture.
+</Callout>
+
+## Why Visualization Matters
+
+Humans are visual creatures. We process images 60,000 times faster than text. A wall of numbers is data. A well-designed dashboard is information. This is not a nice-to-have — it fundamentally changes how fast you can detect, diagnose, and resolve problems.
+
+### Numbers vs. Graphs
+
+Consider these two representations of the same data:
+
+```
+Raw metrics output from Prometheus:
+───────────────────────────────────
+14:00  http_request_duration_seconds{p99} = 0.045
+14:01  http_request_duration_seconds{p99} = 0.048
+14:02  http_request_duration_seconds{p99} = 0.044
+14:03  http_request_duration_seconds{p99} = 0.052
+14:04  http_request_duration_seconds{p99} = 0.089
+14:05  http_request_duration_seconds{p99} = 0.156
+14:06  http_request_duration_seconds{p99} = 0.342
+14:07  http_request_duration_seconds{p99} = 0.891
+14:08  http_request_duration_seconds{p99} = 1.203
+14:09  http_request_duration_seconds{p99} = 0.934
+14:10  http_request_duration_seconds{p99} = 0.423
+14:11  http_request_duration_seconds{p99} = 0.087
+14:12  http_request_duration_seconds{p99} = 0.051
+
+Can you spot the anomaly? How long did it take?
+```
+
+Now the same data as a graph:
+
+```
+p99 Latency (seconds)
+│
+1.2 │                        *
+    │                     *     *
+0.8 │
+    │
+0.4 │                  *          *
+    │
+0.1 │            *                    *
+    │  * * * *                           * *
+0.0 │──────────────────────────────────────────
+    14:00  02   04   06   08   10   12
+                    Time
+```
+
+The anomaly jumps out instantly in the graph. The spike between 14:04 and 14:11 is immediately visible, and you can see its shape — a sharp rise, a peak, and a gradual decline. In the raw numbers, spotting this pattern requires careful reading and mental modeling.
+
+<Callout type="info" title="The Dashboard Effect">
+Studies of incident response teams show that well-designed dashboards reduce Mean Time to Detection (MTTD) by up to 70% and Mean Time to Resolution (MTTR) by up to 50%. Visualization is not decoration — it is a critical operational tool.
+</Callout>
+
+## What Is Grafana?
+
+**Grafana** is an open-source analytics and visualization platform. It connects to data sources like Prometheus, Elasticsearch, Loki, InfluxDB, PostgreSQL, and dozens more, and lets you build interactive dashboards that turn raw data into visual insights.
+
+Grafana was created in 2014 by Torkel Odegaard as a fork of Kibana 3, specifically to support Graphite as a data source. It quickly grew beyond Graphite to become the universal dashboard tool for the entire observability ecosystem.
+
+```
+Grafana at a Glance:
+════════════════════
+
+First release:      2014
+Creator:            Torkel Odegaard
+Company:            Grafana Labs
+License:            AGPL v3 (open source)
+Language:           Go (backend), TypeScript (frontend)
+Supported sources:  90+ data sources
+Downloads:          1 billion+ Docker pulls
+Used by:            Bloomberg, PayPal, eBay, Rackspace, CERN
+```
+
+### What Grafana Is and Is Not
+
+| Grafana Is | Grafana Is Not |
+|---|---|
+| A visualization and dashboarding tool | A data storage system |
+| A data source aggregator | A metrics collector (use Prometheus) |
+| An alerting platform | A log storage system (use Loki) |
+| A collaboration tool for teams | A replacement for Prometheus or Loki |
+| A query editor for multiple backends | A monitoring agent |
+
+Grafana does not store metrics, logs, or traces itself. It is a **presentation layer** that queries other systems and displays the results. This separation of concerns is a strength — you can swap out your metrics backend without touching your dashboards, or add new data sources without changing your infrastructure.
+
+## Core Concepts
+
+Grafana is built around three fundamental concepts: **data sources**, **dashboards**, and **panels**.
+
+### Data Sources
+
+A **data source** is a connection to a backend system that stores your data. Grafana queries data sources to populate dashboards.
+
+```
+Grafana Data Sources
+════════════════════
+
+Metrics:                    Logs:
+├── Prometheus              ├── Loki
+├── InfluxDB                ├── Elasticsearch
+├── Graphite                └── CloudWatch Logs
+├── CloudWatch
+└── Azure Monitor           Traces:
+                            ├── Jaeger
+Databases:                  ├── Tempo
+├── PostgreSQL              └── Zipkin
+├── MySQL
+├── Microsoft SQL Server    Other:
+└── ClickHouse              ├── JSON API
+                            ├── CSV
+                            └── Google Sheets
+```
+
+The most common data source in cloud-native environments is Prometheus. When you add Prometheus as a data source, Grafana sends PromQL queries to Prometheus and visualizes the results.
+
+```
+How Grafana Queries Work:
+═════════════════════════
+
+  ┌───────────────────────┐
+  │       Grafana          │
+  │                        │
+  │  Dashboard Panel:      │
+  │  "Show me CPU usage"   │
+  │         │              │
+  │         ▼              │
+  │  PromQL query:         │
+  │  rate(cpu_seconds[5m]) │
+  └────────┬───────────────┘
+           │ HTTP query
+           ▼
+  ┌────────────────────────┐
+  │     Prometheus          │
+  │                        │
+  │  Executes query        │
+  │  Returns time-series   │
+  │  data as JSON          │
+  └────────┬───────────────┘
+           │ JSON response
+           ▼
+  ┌────────────────────────┐
+  │       Grafana          │
+  │                        │
+  │  Renders the data as   │
+  │  a graph, gauge, or    │
+  │  other visualization   │
+  └────────────────────────┘
+```
+
+### Dashboards
+
+A **dashboard** is a collection of panels organized on a grid. Dashboards are the primary way you view and interact with your data in Grafana.
+
+```
+Example Dashboard Layout:
+═════════════════════════
+
+┌──────────────────────────────────────────────────────┐
+│  Payment Service Overview          [Last 6 hours ▼]  │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐       │
+│  │ Requests/s │ │  Error %   │ │ p99 Latency│       │
+│  │   1,247    │ │   0.3%     │ │   45ms     │       │
+│  │  (stat)    │ │  (stat)    │ │  (stat)    │       │
+│  └────────────┘ └────────────┘ └────────────┘       │
+│                                                      │
+│  ┌──────────────────────────────────────────┐       │
+│  │          Request Rate Over Time           │       │
+│  │  (time-series graph)                      │       │
+│  │  ┌──────────────────────────────────┐    │       │
+│  │  │    ╱╲    ╱╲╱╲       ╱╲           │    │       │
+│  │  │ ──╱──╲──╱────╲─────╱──╲──────── │    │       │
+│  │  │ ╱      ╲╱      ╲  ╱    ╲         │    │       │
+│  │  └──────────────────────────────────┘    │       │
+│  └──────────────────────────────────────────┘       │
+│                                                      │
+│  ┌─────────────────────┐ ┌──────────────────┐       │
+│  │  Latency Heatmap    │ │  Top Endpoints   │       │
+│  │  (heatmap)          │ │  (table)         │       │
+│  │  ████░░░░           │ │  /pay    1,024   │       │
+│  │  ████████░░         │ │  /refund   203   │       │
+│  │  ██░░░░░░░░         │ │  /status    20   │       │
+│  └─────────────────────┘ └──────────────────┘       │
+└──────────────────────────────────────────────────────┘
+```
+
+Key dashboard features:
+- **Time range selector** — View data for the last 5 minutes, 6 hours, 7 days, or any custom range
+- **Auto-refresh** — Dashboards update automatically (every 5s, 10s, 30s, etc.)
+- **Template variables** — Drop-down filters for service, region, environment
+- **Annotations** — Mark events like deployments directly on graphs
+- **Links** — Navigate between related dashboards
+
+### Panels
+
+A **panel** is a single visualization within a dashboard. Grafana supports many panel types, each suited to different kinds of data:
+
+```
+Panel Types:
+════════════
+
+Time Series    │ Line/area graphs showing data over time
+               │ Best for: trends, patterns, correlations
+               │ Example: request rate, latency over time
+
+Stat           │ Single big number with optional sparkline
+               │ Best for: current values, KPIs
+               │ Example: current error rate, total requests today
+
+Gauge          │ Circular gauge showing value against thresholds
+               │ Best for: utilization, capacity
+               │ Example: CPU usage, disk space remaining
+
+Bar Chart      │ Horizontal or vertical bars
+               │ Best for: comparisons, rankings
+               │ Example: requests per endpoint, errors by service
+
+Table          │ Tabular data with sorting and filtering
+               │ Best for: detailed breakdowns, lists
+               │ Example: top 10 slowest endpoints, alert history
+
+Heatmap        │ Color-coded matrix showing distribution
+               │ Best for: latency distribution, activity patterns
+               │ Example: request latency distribution over time
+
+Logs           │ Log lines with search and filtering
+               │ Best for: exploring log data from Loki
+               │ Example: error logs for a specific service
+
+Alert List     │ List of current and recent alerts
+               │ Best for: operational awareness
+               │ Example: all firing alerts across the platform
+```
+
+<Callout type="tip" title="Choose the Right Panel">
+The most common mistake in dashboard design is using the wrong panel type. Use time-series graphs for data that changes over time. Use stat panels for current values. Use heatmaps for distributions. Use tables for detailed breakdowns. The right visualization makes the data speak; the wrong one hides the signal in noise.
+</Callout>
+
+## Building Your First Dashboard
+
+Let us walk through creating a dashboard from scratch. We will assume Prometheus is running and connected as a data source.
+
+### Step 1: Add Prometheus as a Data Source
+
+Navigate to **Connections > Data sources > Add data source** and select Prometheus.
+
+```
+Data Source Configuration:
+══════════════════════════
+
+Name:       Prometheus
+Type:       Prometheus
+URL:        http://prometheus:9090    (or http://localhost:9090)
+Access:     Server (default)
+
+[Save & Test]
+→ "Data source is working"
+```
+
+The URL should point to where your Prometheus server is running. If both Grafana and Prometheus are running in Docker on the same network, use the container name. If running locally, use `localhost`.
+
+### Step 2: Create a New Dashboard
+
+Navigate to **Dashboards > New Dashboard > Add visualization**.
+
+### Step 3: Build Your First Panel — Request Rate
+
+Configure a time-series panel that shows the HTTP request rate:
+
+```
+Panel Configuration:
+════════════════════
+
+Data source: Prometheus
+
+Query A:
+  PromQL: rate(prometheus_http_requests_total[5m])
+  Legend: {{handler}}
+
+Panel Options:
+  Title: "Prometheus HTTP Request Rate"
+
+Axes:
+  Left Y: requests/second
+  X:      time
+```
+
+This query uses Prometheus's own metrics (since Prometheus monitors itself) to show how many HTTP requests Prometheus is handling per second, broken down by handler (endpoint).
+
+### Step 4: Add a Stat Panel — Uptime
+
+Add a second panel showing how long Prometheus has been running:
+
+```
+Panel Configuration:
+════════════════════
+
+Data source: Prometheus
+
+Query A:
+  PromQL: (time() - process_start_time_seconds{job="prometheus"}) / 3600
+
+Panel Options:
+  Title: "Prometheus Uptime"
+  Panel type: Stat
+
+Value Options:
+  Unit: hours
+  Decimals: 1
+```
+
+### Step 5: Add a Gauge Panel — Memory Usage
+
+Add a gauge panel showing memory usage:
+
+```
+Panel Configuration:
+════════════════════
+
+Data source: Prometheus
+
+Query A:
+  PromQL: process_resident_memory_bytes{job="prometheus"} / 1024 / 1024
+
+Panel Options:
+  Title: "Memory Usage"
+  Panel type: Gauge
+
+Thresholds:
+  Green:  0 - 200 MB
+  Yellow: 200 - 500 MB
+  Red:    500+ MB
+
+Value Options:
+  Unit: MB
+```
+
+### Step 6: Arrange and Save
+
+Drag panels to arrange them on the grid and click **Save dashboard**.
+
+```
+Your First Dashboard:
+═════════════════════
+
+┌──────────────────────────────────────────────────┐
+│  Prometheus Self-Monitoring        [Last 1h ▼]   │
+├──────────────────────────────────────────────────┤
+│                                                   │
+│  ┌──────────────┐  ┌──────────────┐              │
+│  │  Uptime      │  │  Memory      │              │
+│  │  47.3 hrs    │  │  ██████░░░░  │              │
+│  │  (stat)      │  │  156 MB      │              │
+│  └──────────────┘  └──────────────┘              │
+│                                                   │
+│  ┌────────────────────────────────────────┐      │
+│  │      HTTP Request Rate by Handler      │      │
+│  │                                        │      │
+│  │  ─── /api/v1/query                     │      │
+│  │  ─── /api/v1/query_range               │      │
+│  │  ─── /metrics                          │      │
+│  │  ─── /api/v1/labels                    │      │
+│  └────────────────────────────────────────┘      │
+└──────────────────────────────────────────────────┘
+```
+
+<Callout type="tip" title="Start Simple">
+Resist the temptation to build a 30-panel dashboard on day one. Start with 3-5 panels that answer your most critical questions: Is the service handling traffic? Are there errors? Is latency acceptable? You can always add more panels as you learn what questions come up during incidents.
+</Callout>
+
+## Dashboard as Code
+
+Grafana dashboards can be exported as JSON and stored in version control. This means your dashboards become **infrastructure as code** — versioned, reviewable, and reproducible.
+
+```json
+{
+  "dashboard": {
+    "title": "Payment Service Overview",
+    "panels": [
+      {
+        "title": "Request Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{service=\"payment\"}[5m])",
+            "legendFormat": "{{method}} {{endpoint}}"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+You can provision dashboards automatically using:
+- **JSON files** in a provisioning directory
+- **Grafana HTTP API** for programmatic dashboard management
+- **Grafana Terraform provider** for infrastructure-as-code workflows
+- **Grafonnet** (Jsonnet library) for generating dashboards from code
+
+```
+Dashboard Lifecycle:
+════════════════════
+
+  Developer writes PromQL queries
+         │
+         ▼
+  Builds dashboard in Grafana UI
+         │
+         ▼
+  Exports dashboard as JSON
+         │
+         ▼
+  Commits JSON to Git repository
+         │
+         ▼
+  CI/CD pipeline provisions dashboard
+  to staging and production Grafana instances
+         │
+         ▼
+  Dashboard changes are tracked,
+  reviewed, and reproducible
+```
+
+## Grafana in the Observability Stack
+
+Grafana sits at the top of the observability stack as the **unified visualization layer**:
+
+```
+The Grafana Ecosystem:
+══════════════════════
+
+         ┌──────────────────────────────┐
+         │          Grafana             │
+         │    Unified Visualization     │
+         │    & Alerting Platform       │
+         └───────┬──────┬──────┬───────┘
+                 │      │      │
+        ┌────────┘      │      └────────┐
+        │               │               │
+  ┌─────▼─────┐  ┌─────▼─────┐  ┌─────▼─────┐
+  │Prometheus │  │   Loki    │  │  Tempo    │
+  │ (Metrics) │  │  (Logs)   │  │ (Traces)  │
+  └───────────┘  └───────────┘  └───────────┘
+
+  Grafana can query all three simultaneously,
+  letting you jump from a metric spike → to the
+  relevant logs → to the specific trace that
+  shows the root cause.
+```
+
+This integration is one of Grafana's most powerful features. During an incident, you can:
+
+1. See a latency spike on a **metrics** dashboard
+2. Click to see **logs** from the affected service at that exact time
+3. Click a log entry to see the distributed **trace** for that request
+4. Identify the exact service and line of code causing the issue
+
+All without leaving Grafana.
+
+<Callout type="info" title="The LGTM Stack">
+Grafana Labs created the "LGTM" observability stack: **L**oki (logs), **G**rafana (visualization), **T**empo (traces), and **M**imir (metrics, a scalable Prometheus). Together, these tools provide a fully open-source, integrated observability platform. Prometheus is often used in place of Mimir for smaller deployments.
+</Callout>
+
+## Dashboard Design Principles
+
+Building effective dashboards is a skill. Here are principles that distinguish useful dashboards from walls of confusion:
+
+### The Four Golden Signals
+
+Google's SRE book recommends monitoring four golden signals for every service. These make excellent default dashboard panels:
+
+```
+The Four Golden Signals:
+════════════════════════
+
+1. LATENCY
+   How long requests take
+   Panel: Time series with p50, p95, p99 lines
+
+2. TRAFFIC
+   How much demand the service is handling
+   Panel: Time series of requests per second
+
+3. ERRORS
+   The rate of failed requests
+   Panel: Stat panel with color thresholds
+
+4. SATURATION
+   How "full" the service is (CPU, memory, queue depth)
+   Panel: Gauge with red/yellow/green thresholds
+```
+
+### Layout Best Practices
+
+```
+Dashboard Layout Pattern:
+═════════════════════════
+
+Row 1: Summary stats (stat panels)
+┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐
+│ RPS  │ │Error%│ │ p99  │ │ CPU  │
+│ 1.2k │ │ 0.3% │ │ 45ms │ │ 67%  │
+└──────┘ └──────┘ └──────┘ └──────┘
+
+Row 2: Request traffic and errors (time series)
+┌──────────────────────┐ ┌──────────────────┐
+│  Request Rate        │ │  Error Rate      │
+│  (time series)       │ │  (time series)   │
+└──────────────────────┘ └──────────────────┘
+
+Row 3: Latency details (time series + heatmap)
+┌──────────────────────┐ ┌──────────────────┐
+│  Latency Percentiles │ │  Latency Heatmap │
+│  p50 / p95 / p99     │ │  (distribution)  │
+└──────────────────────┘ └──────────────────┘
+
+Row 4: Infrastructure (gauges + time series)
+┌──────────────────────┐ ┌──────────────────┐
+│  CPU / Memory Usage  │ │  Connections     │
+│  (time series)       │ │  (time series)   │
+└──────────────────────┘ └──────────────────┘
+```
+
+The pattern follows a top-down approach: summary at the top for a quick glance, progressively more detail as you scroll down. An on-call engineer should be able to assess the health of a service by looking at the top row in under five seconds.
+
+## Key Takeaways
+
+- Grafana is an open-source visualization and dashboarding platform that connects to 90+ data sources including Prometheus, Loki, and Tempo
+- Visualization is not cosmetic — it fundamentally changes how fast teams can detect, diagnose, and resolve incidents
+- The three core concepts are **data sources** (where data comes from), **dashboards** (collections of panels), and **panels** (individual visualizations)
+- Grafana does not store data itself — it is a presentation layer that queries backends like Prometheus
+- Dashboards can be exported as JSON and managed as code through version control, APIs, and Terraform
+- Grafana serves as the **unified visualization layer** for the entire observability stack, correlating metrics, logs, and traces in one interface
+- Effective dashboard design follows the four golden signals (latency, traffic, errors, saturation) and uses a top-down layout from summary to detail
+
+## What's Next
+
+Now that you understand what Grafana is and the fundamentals of dashboarding, the next lesson covers **Building Dashboards** in depth. You will learn advanced panel configuration, template variables for dynamic filtering, annotations to mark events like deployments, and how to design dashboards that teams actually use during incidents.

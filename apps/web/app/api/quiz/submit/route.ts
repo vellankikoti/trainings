@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { getQuizById, scoreQuiz } from "@/lib/quiz";
 import { getProfileId, awardXP } from "@/lib/progress";
 import { createAdminClient } from "@/lib/supabase/server";
+import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
+import { quizSubmitSchema, validateBody } from "@/lib/validations";
 
 export async function POST(request: Request) {
   const { userId: clerkId } = await auth();
@@ -10,15 +12,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json();
-  const { quizId, answers, timeSpentSeconds } = body;
-
-  if (!quizId || !answers) {
-    return NextResponse.json(
-      { error: "Missing required fields: quizId, answers" },
-      { status: 400 },
-    );
+  // Rate limit: 10 requests/minute per user
+  const rl = rateLimit(`quiz-submit:${clerkId}`, RATE_LIMITS.quizSubmit);
+  if (!rl.success) {
+    return rateLimitResponse(rl);
   }
+
+  const body = await request.json();
+  const validated = validateBody(quizSubmitSchema, body);
+  if (validated.error) {
+    return NextResponse.json({ error: validated.error }, { status: 400 });
+  }
+
+  const { quizId, answers, timeSpentSeconds } = validated.data;
 
   const quiz = getQuizById(quizId);
   if (!quiz) {

@@ -1,0 +1,147 @@
+---
+title: "Resource Requests, Limits & QoS"
+description: "Learn how to properly configure CPU and memory resources for pods, understand Quality of Service classes, and prevent resource contention."
+order: 10
+xpReward: 35
+estimatedMinutes: 40
+prerequisites: ["labels-selectors"]
+objectives:
+  - Configure CPU and memory requests and limits
+  - Understand the three QoS classes (Guaranteed, Burstable, BestEffort)
+  - Prevent OOMKilled and CPU throttling issues
+  - Right-size pod resource allocations
+tags:
+  - kubernetes
+  - resources
+  - cpu
+  - memory
+  - qos
+---
+
+<Callout type="story" title="The Story">
+It's 2 AM and your monitoring alerts fire. A pod running a data processing job is consuming 8 GB of memory on a node that only has 16 GB. Other pods on the same node are being evicted — including your production API. The culprit had no memory limits set, so Kubernetes let it consume as much as it wanted. Resource management isn't optional in production — it's the difference between a stable cluster and a cascading failure.
+</Callout>
+
+## CPU and Memory Units
+
+### CPU
+
+Measured in **millicores** (m). One CPU core = 1000m.
+
+```yaml
+resources:
+  requests:
+    cpu: "250m"     # 0.25 CPU core
+  limits:
+    cpu: "1000m"    # 1 full CPU core (can also write "1")
+```
+
+CPU is **compressible** — when a pod hits its CPU limit, it gets throttled (slowed down) but not killed.
+
+### Memory
+
+Measured in bytes. Common suffixes: Mi (mebibytes), Gi (gibibytes).
+
+```yaml
+resources:
+  requests:
+    memory: "256Mi"   # 256 MiB
+  limits:
+    memory: "512Mi"   # 512 MiB
+```
+
+Memory is **incompressible** — when a pod exceeds its memory limit, it's immediately killed (OOMKilled).
+
+## Requests vs. Limits
+
+| | Requests | Limits |
+|---|---------|--------|
+| **Purpose** | Scheduling guarantee | Runtime ceiling |
+| **When used** | Scheduler finds nodes with enough capacity | Enforced at runtime |
+| **CPU exceeded** | N/A | Pod is throttled |
+| **Memory exceeded** | N/A | Pod is OOMKilled |
+
+```yaml
+spec:
+  containers:
+    - name: api
+      image: myapp:v1.0
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+```
+
+## Quality of Service (QoS) Classes
+
+Kubernetes assigns a QoS class to each pod based on its resource configuration:
+
+### Guaranteed
+
+Requests equal limits for all containers. Highest priority — last to be evicted.
+
+```yaml
+resources:
+  requests:
+    cpu: "500m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"       # Same as request
+    memory: "256Mi"   # Same as request
+```
+
+### Burstable
+
+Has requests but they're lower than limits. Medium priority.
+
+```yaml
+resources:
+  requests:
+    cpu: "250m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"       # Higher than request
+    memory: "256Mi"   # Higher than request
+```
+
+### BestEffort
+
+No requests or limits. Lowest priority — first to be evicted under pressure.
+
+```yaml
+resources: {}   # No resources specified
+```
+
+<Callout type="tip" title="Production Rule">
+Always use **Guaranteed** QoS for critical production workloads. Use **Burstable** for services that can tolerate some throttling. Never use **BestEffort** in production.
+</Callout>
+
+## Right-Sizing Resources
+
+Start with generous limits and observe actual usage:
+
+```bash
+# View resource usage
+kubectl top pods
+kubectl top nodes
+
+# Check if pods were OOMKilled
+kubectl describe pod <pod-name> | grep -A 5 "Last State"
+```
+
+Set requests to the P95 usage and limits to the peak usage with some headroom.
+
+## Summary
+
+- **Requests** guarantee scheduling capacity; **limits** enforce runtime ceilings
+- CPU throttling slows pods; memory exceeding limits kills pods (OOMKilled)
+- Use **Guaranteed** QoS for critical workloads
+- Always set resource requests and limits in production
+- Monitor actual usage and right-size over time
+
+## What's Next
+
+Running pods need health monitoring. **Health Checks** (liveness, readiness, startup probes) tell Kubernetes whether your application is healthy and ready to serve traffic.
