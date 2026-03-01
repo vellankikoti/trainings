@@ -1,0 +1,412 @@
+---
+title: "File Operations"
+description: "Master essential file operations: create, copy, move, rename, and delete files and directories. Learn the safety habits that prevent catastrophic mistakes."
+order: 7
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 06-filesystem-navigation
+objectives:
+  - Create files and directories with touch and mkdir
+  - Copy, move, and rename files safely
+  - Understand hard links and symbolic links
+  - Delete files with proper safety practices
+tags:
+  - linux
+  - files
+  - commands
+  - filesystem
+---
+
+<Callout type="story" title="The Story">
+A junior engineer was cleaning up a development server. They typed `rm -rf /tmp /important-data` (note the space). Instead of deleting `/tmp/important-data`, they deleted `/tmp` AND `/important-data`. Two separate paths. The entire data directory — gone. This lesson will teach you file operations AND the safety habits that prevent disasters like this.
+</Callout>
+
+## Creating Files
+
+### `touch` — Create Empty Files or Update Timestamps
+
+```bash
+# Create an empty file
+touch newfile.txt
+
+# Create multiple files
+touch file1.txt file2.txt file3.txt
+
+# Update the timestamp of an existing file (without modifying it)
+touch existing-file.txt
+
+# Create files with a specific timestamp
+touch -t 202401150800 backdated-file.txt
+```
+
+### Creating Files with Content
+
+```bash
+# Redirect output to create a file
+echo "Hello, World" > greeting.txt
+
+# Append to a file (>> instead of >)
+echo "Another line" >> greeting.txt
+
+# Create multi-line files with heredoc
+cat > config.yaml << 'EOF'
+server:
+  port: 8080
+  host: 0.0.0.0
+database:
+  host: localhost
+  port: 5432
+EOF
+```
+
+<Callout type="warning" title="Danger Zone">
+`>` overwrites the file completely. `>>` appends. If you accidentally use `> important-file.txt`, the file's contents are gone instantly. There is no undo.
+</Callout>
+
+## Creating Directories — `mkdir`
+
+```bash
+# Create a directory
+mkdir projects
+
+# Create nested directories (parent directories created automatically)
+mkdir -p projects/webapp/{src,tests,docs}/v2
+
+# Create with specific permissions
+mkdir -m 750 private-dir
+
+# Verify the structure
+tree projects/
+```
+
+## Copying Files — `cp`
+
+```bash
+# Copy a file
+cp source.txt destination.txt
+
+# Copy to a directory
+cp config.yaml /tmp/
+
+# Copy a directory recursively
+cp -r project/ project-backup/
+
+# Copy preserving permissions, timestamps, ownership
+cp -a /etc/nginx/ /backup/nginx/
+
+# Interactive: prompt before overwriting
+cp -i source.txt destination.txt
+
+# Verbose: show what's being copied
+cp -rv project/ /backup/project/
+```
+
+### Copy Patterns for DevOps
+
+```bash
+# Backup a config before editing
+cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak
+
+# Timestamped backup
+cp /etc/nginx/nginx.conf "/etc/nginx/nginx.conf.$(date +%Y%m%d_%H%M%S)"
+
+# Copy only newer files
+cp -u source/* destination/
+```
+
+## Moving and Renaming — `mv`
+
+In Linux, moving and renaming are the same operation:
+
+```bash
+# Rename a file
+mv old-name.txt new-name.txt
+
+# Move to a different directory
+mv report.txt /home/ubuntu/documents/
+
+# Move and rename simultaneously
+mv /tmp/download.tar.gz ~/backups/app-backup-2024.tar.gz
+
+# Move multiple files to a directory
+mv *.log /var/archive/
+
+# Interactive: prompt before overwriting
+mv -i source.txt destination.txt
+
+# Don't overwrite existing files
+mv -n source.txt destination.txt
+```
+
+<Exercise number={1} title="File Operations Practice">
+
+Build and manipulate a project structure:
+
+```bash
+# 1. Create a project structure
+mkdir -p ~/project-ops/{src,tests,config,docs,scripts}
+
+# 2. Create some files
+touch ~/project-ops/src/{app.py,utils.py,models.py}
+touch ~/project-ops/tests/{test_app.py,test_utils.py}
+touch ~/project-ops/config/{dev.yaml,prod.yaml,staging.yaml}
+echo "# Project Ops" > ~/project-ops/docs/README.md
+
+# 3. Verify the structure
+tree ~/project-ops
+
+# 4. Copy the entire project as a backup
+cp -r ~/project-ops ~/project-ops-backup
+
+# 5. Rename a file
+mv ~/project-ops/src/app.py ~/project-ops/src/main.py
+
+# 6. Move config files to a new location
+mkdir -p ~/project-ops/config/environments
+mv ~/project-ops/config/{dev,prod,staging}.yaml ~/project-ops/config/environments/
+
+# 7. Verify changes
+tree ~/project-ops
+```
+
+</Exercise>
+
+## Deleting Files — `rm`
+
+```bash
+# Remove a file
+rm file.txt
+
+# Remove with confirmation prompt
+rm -i important-file.txt
+
+# Remove a directory and its contents
+rm -r old-project/
+
+# Force removal (no prompts, no errors for missing files)
+rm -f maybe-exists.txt
+
+# The dangerous combination: recursive + force
+rm -rf directory/    # USE WITH EXTREME CAUTION
+```
+
+### `rm` Safety Rules
+
+1. **Never run `rm -rf /`** — Most modern systems prevent this, but don't test it
+2. **Always double-check paths** with variables: `rm -rf $DIR/` — if `$DIR` is empty, this becomes `rm -rf /`
+3. **Use `rm -ri`** for interactive deletion of directories
+4. **List before deleting**: `ls path/` before `rm -r path/`
+5. **Use trash instead of rm** for important work
+
+```bash
+# WRONG: Variable might be empty
+rm -rf $DEPLOY_DIR/old-release
+
+# SAFER: Quote and validate
+if [ -n "$DEPLOY_DIR" ] && [ -d "$DEPLOY_DIR/old-release" ]; then
+    rm -rf "${DEPLOY_DIR}/old-release"
+fi
+```
+
+### Removing Directories — `rmdir`
+
+```bash
+# Remove an empty directory (safe — only works if empty)
+rmdir empty-dir/
+
+# Remove nested empty directories
+rmdir -p path/to/empty/dirs/
+```
+
+## Links: Hard Links and Symbolic Links
+
+### Symbolic Links (Symlinks)
+
+A symlink is a pointer to another file — like a shortcut:
+
+```bash
+# Create a symlink
+ln -s /etc/nginx/nginx.conf ~/nginx-config
+
+# The symlink points to the target
+ls -l ~/nginx-config
+# lrwxrwxrwx 1 ubuntu ubuntu 21 ... nginx-config -> /etc/nginx/nginx.conf
+
+# Read through the symlink
+cat ~/nginx-config    # reads /etc/nginx/nginx.conf
+
+# Create a symlink to a directory
+ln -s /var/log ~/logs
+
+# Remove a symlink (does NOT delete the target)
+rm ~/nginx-config
+```
+
+### Hard Links
+
+A hard link is a second name for the same file data:
+
+```bash
+# Create a hard link
+echo "Original content" > original.txt
+ln original.txt hardlink.txt
+
+# Both point to the same data
+ls -li original.txt hardlink.txt
+# Notice: same inode number, link count = 2
+
+# Modify through either name
+echo "Modified" >> hardlink.txt
+cat original.txt    # shows "Modified" too
+
+# Deleting one doesn't affect the other
+rm original.txt
+cat hardlink.txt    # still works — data exists until all links removed
+```
+
+### When to Use Each
+
+| Feature | Symlink | Hard Link |
+|---|---|---|
+| Cross filesystems | Yes | No |
+| Link to directories | Yes | No (usually) |
+| Target can be deleted | Yes (creates broken link) | No (data persists) |
+| Shows as different file type | Yes (`l` in ls -l) | No (looks like regular file) |
+| Common use | Config shortcuts, version switching | Backups, shared data |
+
+```bash
+# DevOps use: switch between config versions
+ln -sf /etc/nginx/sites-available/v2.conf /etc/nginx/sites-enabled/active.conf
+
+# DevOps use: current release pointer
+ln -sfn /opt/app/releases/v2.3.1 /opt/app/current
+```
+
+<Exercise number={2} title="Links Lab">
+
+Practice with both types of links:
+
+```bash
+# 1. Create a test environment
+mkdir -p ~/links-lab && cd ~/links-lab
+
+# 2. Create a source file
+echo "I am the original file" > source.txt
+
+# 3. Create a symlink
+ln -s source.txt sym-link.txt
+
+# 4. Create a hard link
+ln source.txt hard-link.txt
+
+# 5. Compare them
+ls -li source.txt sym-link.txt hard-link.txt
+
+# 6. Modify through the hard link
+echo "Added via hard link" >> hard-link.txt
+cat source.txt        # Does it show the new line?
+
+# 7. Delete the original
+rm source.txt
+
+# 8. Test both links
+cat hard-link.txt     # Does this work?
+cat sym-link.txt      # Does this work? Why or why not?
+
+# 9. Clean up
+cd ~ && rm -r ~/links-lab
+```
+
+</Exercise>
+
+<MiniProject title="Safe File Operations Script">
+
+Create a utility script with safe file operations:
+
+```bash
+cat > ~/safe-ops.sh << 'SCRIPT'
+#!/bin/bash
+# Safe File Operations — move to trash instead of rm
+
+TRASH_DIR="$HOME/.trash"
+mkdir -p "$TRASH_DIR"
+
+safe_delete() {
+    local file="$1"
+    if [ ! -e "$file" ]; then
+        echo "Error: '$file' does not exist"
+        return 1
+    fi
+
+    local basename=$(basename "$file")
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local trash_name="${basename}.${timestamp}"
+
+    mv "$file" "$TRASH_DIR/$trash_name"
+    echo "Moved '$file' to trash as '$trash_name'"
+}
+
+safe_backup() {
+    local file="$1"
+    if [ ! -e "$file" ]; then
+        echo "Error: '$file' does not exist"
+        return 1
+    fi
+
+    local backup="${file}.$(date +%Y%m%d_%H%M%S).bak"
+    cp -a "$file" "$backup"
+    echo "Backed up '$file' to '$backup'"
+}
+
+empty_trash() {
+    local count=$(find "$TRASH_DIR" -maxdepth 1 -not -path "$TRASH_DIR" | wc -l)
+    if [ "$count" -eq 0 ]; then
+        echo "Trash is empty"
+        return 0
+    fi
+
+    echo "Trash contains $count items:"
+    ls -lh "$TRASH_DIR"
+    echo ""
+    read -p "Permanently delete all? (yes/no): " confirm
+    if [ "$confirm" = "yes" ]; then
+        rm -rf "${TRASH_DIR:?}"/*
+        echo "Trash emptied"
+    else
+        echo "Cancelled"
+    fi
+}
+
+case "$1" in
+    delete)  safe_delete "$2" ;;
+    backup)  safe_backup "$2" ;;
+    trash)   empty_trash ;;
+    *)       echo "Usage: $0 {delete|backup|trash} [file]" ;;
+esac
+SCRIPT
+
+chmod +x ~/safe-ops.sh
+
+# Test it
+touch ~/test-file.txt
+~/safe-ops.sh backup ~/test-file.txt
+~/safe-ops.sh delete ~/test-file.txt
+~/safe-ops.sh trash
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `touch` creates empty files; `mkdir -p` creates nested directory trees
+- `cp -a` preserves all file attributes; `cp -r` copies directories recursively
+- `mv` both moves and renames; there is no separate rename command
+- `rm -rf` is the most dangerous command in Linux — always double-check paths
+- Symlinks are pointers (shortcuts); hard links are additional names for the same data
+- Always backup config files before editing: `cp file file.bak`
+- Consider a "trash" approach instead of permanent `rm` for important work
+
+## What's Next
+
+Now that you can create and manage files, you need to control who can access them. In **Users and Groups**, you'll learn the Linux permission model that underpins everything from SSH access to web server security.

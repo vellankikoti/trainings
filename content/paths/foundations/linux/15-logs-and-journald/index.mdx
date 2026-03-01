@@ -1,0 +1,362 @@
+---
+title: "Logs and journald"
+description: "Master Linux logging with journalctl, /var/log, syslog, and log rotation. Learn to find answers in log files when debugging production issues."
+order: 15
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 14-system-monitoring
+objectives:
+  - Navigate /var/log and understand key log files
+  - Use journalctl to query systemd journal logs
+  - Configure log rotation with logrotate
+  - Search logs effectively during incident response
+tags:
+  - linux
+  - logs
+  - journalctl
+  - syslog
+  - troubleshooting
+---
+
+<Callout type="story" title="The Story">
+The application went down at 3:17 AM and recovered at 3:23 AM. Nobody was awake. The only way to figure out what happened is the logs. But the server generates thousands of log lines per minute. How do you find the 5 lines that matter among the 50,000 that don't? That's what this lesson teaches — how to read, search, and analyze logs like a detective.
+</Callout>
+
+## Where Are the Logs?
+
+### `/var/log` — The Log Directory
+
+```bash
+ls /var/log/
+
+# Key log files:
+# syslog (or messages)  — general system log
+# auth.log (or secure)  — authentication events
+# kern.log              — kernel messages
+# dpkg.log              — package manager activity
+# apt/history.log       — apt install/remove history
+# nginx/                — web server logs (if installed)
+# mysql/                — database logs (if installed)
+```
+
+| Log File | Contains |
+|---|---|
+| `/var/log/syslog` | General system messages (Debian/Ubuntu) |
+| `/var/log/messages` | General system messages (RHEL/CentOS) |
+| `/var/log/auth.log` | Login attempts, sudo usage, SSH |
+| `/var/log/kern.log` | Kernel messages, hardware issues |
+| `/var/log/dmesg` | Boot-time kernel messages |
+| `/var/log/apt/history.log` | Package install/remove history |
+| `/var/log/cron.log` | Cron job execution logs |
+
+### Reading Log Files
+
+```bash
+# View the end of a log (most recent entries)
+tail -20 /var/log/syslog
+
+# Follow a log in real-time (live tail)
+tail -f /var/log/syslog
+
+# Follow multiple logs at once
+tail -f /var/log/syslog /var/log/auth.log
+
+# Search for a pattern
+grep "error" /var/log/syslog
+grep -i "failed" /var/log/auth.log
+
+# Search with context (3 lines before and after)
+grep -C 3 "error" /var/log/syslog
+
+# Search within a time window
+awk '/Jan 15 03:1[0-9]/' /var/log/syslog
+```
+
+## journalctl — The systemd Journal
+
+Modern Linux uses systemd's journal alongside (or instead of) traditional log files. `journalctl` is the tool to query it.
+
+### Basic Usage
+
+```bash
+# View all journal entries
+journalctl
+
+# View entries from the current boot
+journalctl -b
+
+# View entries from the previous boot
+journalctl -b -1
+
+# Follow new entries (like tail -f)
+journalctl -f
+
+# Show only the last 50 entries
+journalctl -n 50
+
+# No pager (print directly)
+journalctl --no-pager -n 20
+```
+
+### Filtering by Service
+
+```bash
+# Logs for a specific service
+journalctl -u nginx
+journalctl -u ssh
+
+# Follow a service's logs
+journalctl -u nginx -f
+
+# Logs from multiple services
+journalctl -u nginx -u php-fpm
+```
+
+### Filtering by Time
+
+```bash
+# Since a specific time
+journalctl --since "2024-01-15 03:00:00"
+
+# Until a specific time
+journalctl --until "2024-01-15 04:00:00"
+
+# Time range
+journalctl --since "2024-01-15 03:00" --until "2024-01-15 03:30"
+
+# Relative time
+journalctl --since "1 hour ago"
+journalctl --since "30 minutes ago"
+journalctl --since yesterday
+journalctl --since today
+```
+
+### Filtering by Priority
+
+```bash
+# Only errors and above
+journalctl -p err
+
+# Only warnings and above
+journalctl -p warning
+
+# Critical messages only
+journalctl -p crit
+```
+
+Priority levels (0=most severe):
+| Level | Name | Meaning |
+|---|---|---|
+| 0 | emerg | System is unusable |
+| 1 | alert | Immediate action required |
+| 2 | crit | Critical conditions |
+| 3 | err | Error conditions |
+| 4 | warning | Warning conditions |
+| 5 | notice | Normal but significant |
+| 6 | info | Informational |
+| 7 | debug | Debug messages |
+
+### Output Formats
+
+```bash
+# JSON output (for scripts)
+journalctl -u nginx --output=json-pretty -n 5
+
+# Short output with microseconds
+journalctl --output=short-precise -n 10
+
+# Verbose (all fields)
+journalctl --output=verbose -n 5
+```
+
+<Exercise number={1} title="Log Investigation">
+
+Practice searching logs like a production incident:
+
+```bash
+# 1. View recent system logs
+journalctl -n 30 --no-pager
+
+# 2. Check for errors in the last hour
+journalctl --since "1 hour ago" -p err --no-pager
+
+# 3. View kernel messages from this boot
+journalctl -b -k --no-pager | tail -20
+
+# 4. Check authentication logs
+journalctl -u ssh --no-pager -n 20 2>/dev/null
+# or on older systems:
+tail -20 /var/log/auth.log 2>/dev/null
+
+# 5. Find all services that had errors today
+journalctl --since today -p err --no-pager | awk '{print $5}' | sort | uniq -c | sort -rn | head -10
+
+# 6. Check disk space used by journals
+journalctl --disk-usage
+
+# 7. View logs in JSON format
+journalctl -n 3 --output=json-pretty --no-pager
+```
+
+</Exercise>
+
+## Log Rotation with `logrotate`
+
+Without rotation, log files grow forever and fill the disk. `logrotate` automatically compresses, rotates, and cleans old logs.
+
+```bash
+# Main config
+cat /etc/logrotate.conf
+
+# Per-application configs
+ls /etc/logrotate.d/
+
+# View a specific config
+cat /etc/logrotate.d/nginx
+```
+
+### logrotate Configuration Example
+
+```bash
+# /etc/logrotate.d/myapp
+/var/log/myapp/*.log {
+    daily              # Rotate daily
+    missingok          # Don't error if log missing
+    rotate 14          # Keep 14 rotated files
+    compress           # Compress rotated files
+    delaycompress      # Don't compress the most recent rotation
+    notifempty         # Don't rotate if empty
+    create 0640 appuser appgroup   # Create new log with these permissions
+    sharedscripts      # Run scripts once (not per file)
+    postrotate
+        systemctl reload myapp 2>/dev/null || true
+    endscript
+}
+```
+
+### Testing logrotate
+
+```bash
+# Dry run (show what would happen)
+sudo logrotate -d /etc/logrotate.d/myapp
+
+# Force rotation (for testing)
+sudo logrotate -f /etc/logrotate.d/myapp
+
+# Check logrotate status
+cat /var/lib/logrotate/status
+```
+
+## Journal Size Management
+
+```bash
+# Check journal disk usage
+journalctl --disk-usage
+
+# Limit journal size
+sudo journalctl --vacuum-size=500M    # shrink to 500MB
+sudo journalctl --vacuum-time=30d     # keep only last 30 days
+
+# Permanent limit — edit /etc/systemd/journald.conf
+# [Journal]
+# SystemMaxUse=500M
+# MaxRetentionSec=30d
+```
+
+<Exercise number={2} title="Log Analysis Challenge">
+
+Analyze logs to find patterns:
+
+```bash
+# 1. Count log entries by hour today
+journalctl --since today --no-pager | awk '{print $3}' | cut -d: -f1 | sort | uniq -c
+
+# 2. Find the most chatty services
+journalctl --since today --no-pager | awk '{print $5}' | sed 's/\[.*//;s/://' | sort | uniq -c | sort -rn | head -10
+
+# 3. Count errors vs warnings today
+echo "Errors: $(journalctl --since today -p err --no-pager 2>/dev/null | wc -l)"
+echo "Warnings: $(journalctl --since today -p warning --no-pager 2>/dev/null | wc -l)"
+
+# 4. Check journal disk usage
+journalctl --disk-usage
+
+# 5. View boot messages
+journalctl -b --no-pager | head -30
+
+# 6. Check for failed login attempts
+journalctl _COMM=sshd --no-pager 2>/dev/null | grep -i "failed\|invalid" | tail -10
+```
+
+</Exercise>
+
+<MiniProject title="Log Analyzer Script">
+
+Create a script that analyzes logs and generates a summary report:
+
+```bash
+cat > ~/log-analyzer.sh << 'SCRIPT'
+#!/bin/bash
+# Log Analyzer — generate summary report from journalctl
+
+SINCE="${1:-1 hour ago}"
+
+echo "============================================="
+echo "  Log Analysis Report"
+echo "  Period: $SINCE → now"
+echo "  Generated: $(date)"
+echo "============================================="
+
+echo ""
+echo "--- Entry Count by Priority ---"
+for level in emerg alert crit err warning notice info; do
+    COUNT=$(journalctl --since "$SINCE" -p $level --no-pager 2>/dev/null | wc -l)
+    printf "  %-10s %d entries\n" "$level:" "$COUNT"
+done
+
+echo ""
+echo "--- Top 10 Log Sources ---"
+journalctl --since "$SINCE" --no-pager 2>/dev/null | \
+    awk '{print $5}' | sed 's/\[.*//;s/://' | sort | uniq -c | sort -rn | head -10 | \
+    while read count source; do
+        printf "  %6d  %s\n" "$count" "$source"
+    done
+
+echo ""
+echo "--- Error Messages ---"
+journalctl --since "$SINCE" -p err --no-pager 2>/dev/null | tail -20
+
+echo ""
+echo "--- Disk Space ---"
+df -h | grep -E '^/dev/' | awk '{printf "  %-20s %s used (%s free)\n", $1, $5, $4}'
+
+echo ""
+echo "--- Journal Disk Usage ---"
+journalctl --disk-usage 2>/dev/null
+
+echo ""
+echo "============================================="
+echo "  Analysis Complete"
+echo "============================================="
+SCRIPT
+
+chmod +x ~/log-analyzer.sh
+~/log-analyzer.sh "1 hour ago"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `/var/log/` contains traditional log files; `journalctl` queries systemd journal
+- `journalctl -u service -f` is your go-to for watching a service's logs
+- Filter by time (`--since`), priority (`-p err`), and service (`-u`) to find what matters
+- `logrotate` prevents log files from filling your disk
+- During incidents: filter by time window first, then by error level, then by service
+- Manage journal size with `--vacuum-size` or `journald.conf` settings
+- Automate log analysis — recurring issues should be caught by scripts, not humans
+
+## What's Next
+
+You've mastered monitoring and logging for the system layer. Now it's time to work with storage at a deeper level. In **Storage and Mounting**, you'll learn about filesystems, disk partitioning, mounting, LVM, and the `/etc/fstab` that controls what gets mounted at boot.

@@ -1,0 +1,414 @@
+---
+title: "Networking Essentials"
+description: "Master Linux networking with ip, ss, ping, traceroute, DNS tools, and /etc/hosts. Learn the networking commands DevOps engineers use daily."
+order: 17
+xpReward: 100
+estimatedMinutes: 45
+prerequisites:
+  - 16-storage-and-mounting
+objectives:
+  - Configure and inspect network interfaces with ip
+  - Test connectivity with ping, traceroute, and curl
+  - Understand DNS resolution and manage /etc/hosts
+  - Monitor network connections with ss and netstat
+tags:
+  - linux
+  - networking
+  - dns
+  - troubleshooting
+---
+
+<Callout type="story" title="The Story">
+"The app can't connect to the database." This is the most common networking issue in DevOps. Is the database running? Is the port open? Is DNS resolving correctly? Is a firewall blocking traffic? You need to systematically test each layer of the network to find the problem. This lesson gives you the diagnostic toolkit.
+</Callout>
+
+## Network Interfaces
+
+```bash
+# List all interfaces
+ip addr show
+# or shorter:
+ip a
+
+# Show a specific interface
+ip addr show eth0
+
+# Show just IPv4 addresses
+ip -4 addr show
+
+# Show interface statistics
+ip -s link show
+```
+
+### Understanding `ip addr` Output
+
+```bash
+ip addr show eth0
+# 2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP
+#     link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+#     inet 192.168.1.100/24 brd 192.168.1.255 scope global dynamic eth0
+#     inet6 fe80::5054:ff:fe12:3456/64 scope link
+```
+
+| Field | Meaning |
+|---|---|
+| `UP` | Interface is enabled |
+| `LOWER_UP` | Physical link is connected |
+| `mtu 1500` | Maximum transmission unit (bytes) |
+| `link/ether` | MAC address |
+| `inet 192.168.1.100/24` | IPv4 address with subnet mask |
+| `scope global` | Routable address |
+| `scope link` | Link-local only (fe80::) |
+
+### Configuring Interfaces (Temporary)
+
+```bash
+# Add an IP address
+sudo ip addr add 192.168.1.200/24 dev eth0
+
+# Remove an IP address
+sudo ip addr del 192.168.1.200/24 dev eth0
+
+# Bring interface up/down
+sudo ip link set eth0 up
+sudo ip link set eth0 down
+```
+
+## Routing
+
+```bash
+# Show routing table
+ip route show
+# default via 192.168.1.1 dev eth0 proto dhcp
+# 192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.100
+
+# Show the route to a specific destination
+ip route get 8.8.8.8
+
+# Add a static route
+sudo ip route add 10.0.0.0/8 via 192.168.1.1
+
+# Delete a route
+sudo ip route del 10.0.0.0/8
+```
+
+## Testing Connectivity
+
+### `ping` — Basic Connectivity
+
+```bash
+# Ping a host
+ping -c 4 8.8.8.8
+
+# Ping with specific count and timeout
+ping -c 3 -W 2 google.com
+
+# Ping a local host
+ping -c 2 192.168.1.1
+```
+
+### `traceroute` — Path Discovery
+
+```bash
+# Trace the route to a destination
+traceroute google.com
+
+# Use TCP instead of UDP (better for firewalled networks)
+sudo traceroute -T google.com
+
+# Quick trace
+traceroute -w 2 -m 15 8.8.8.8
+```
+
+### `curl` — HTTP Testing
+
+```bash
+# Test HTTP connectivity
+curl -I http://localhost:8080    # headers only
+
+# Test with verbose output
+curl -v http://example.com
+
+# Test specific port
+curl http://localhost:3000/health
+
+# Show timing information
+curl -w "DNS: %{time_namelookup}s\nConnect: %{time_connect}s\nTotal: %{time_total}s\n" -o /dev/null -s http://example.com
+```
+
+<Exercise number={1} title="Network Diagnostics">
+
+```bash
+# 1. Check your IP configuration
+ip addr show | grep "inet " | grep -v 127.0.0.1
+
+# 2. Check your default gateway
+ip route | grep default
+
+# 3. Check DNS configuration
+cat /etc/resolv.conf
+
+# 4. Test local connectivity
+ping -c 2 127.0.0.1
+
+# 5. Test DNS resolution
+host google.com 2>/dev/null || nslookup google.com
+
+# 6. Check routing
+ip route get 8.8.8.8
+
+# 7. View all network interfaces and their status
+ip -br link show
+
+# 8. Check network statistics
+ip -s link show | head -20
+```
+
+</Exercise>
+
+## DNS — Domain Name System
+
+### How DNS Resolution Works
+
+```
+Application requests: "google.com"
+  ↓
+1. Check /etc/hosts (local override)
+  ↓
+2. Check DNS cache
+  ↓
+3. Query DNS server from /etc/resolv.conf
+  ↓
+4. DNS server resolves → returns IP: 142.250.80.46
+```
+
+### DNS Configuration
+
+```bash
+# DNS servers configuration
+cat /etc/resolv.conf
+# nameserver 8.8.8.8
+# nameserver 8.8.4.4
+# search example.com
+
+# Local DNS override
+cat /etc/hosts
+# 127.0.0.1       localhost
+# 192.168.1.50    db-server
+# 192.168.1.51    app-server
+
+# Resolution order
+cat /etc/nsswitch.conf | grep hosts
+# hosts: files dns
+# "files" = check /etc/hosts first, then "dns" = query DNS servers
+```
+
+### DNS Lookup Tools
+
+```bash
+# Simple lookup
+host google.com
+
+# Detailed lookup
+dig google.com
+
+# Specific record types
+dig google.com MX       # mail servers
+dig google.com NS       # name servers
+dig google.com TXT      # text records
+dig google.com A        # IPv4 address
+dig google.com AAAA     # IPv6 address
+
+# Reverse DNS lookup
+dig -x 8.8.8.8
+
+# Query a specific DNS server
+dig @8.8.8.8 google.com
+
+# Interactive lookup
+nslookup google.com
+```
+
+### `/etc/hosts` — Local DNS Override
+
+```bash
+# Add a local hostname mapping
+echo "192.168.1.50 db-server db" | sudo tee -a /etc/hosts
+
+# Test it
+ping -c 1 db-server
+
+# Common use: block domains
+echo "127.0.0.1 ads.example.com" | sudo tee -a /etc/hosts
+```
+
+## Monitoring Connections — `ss`
+
+`ss` (socket statistics) is the modern replacement for `netstat`:
+
+```bash
+# Show all TCP connections
+ss -t
+
+# Show listening ports
+ss -tlnp
+#  -t  TCP
+#  -l  listening
+#  -n  numeric (don't resolve names)
+#  -p  show process name
+
+# Show all UDP listening ports
+ss -ulnp
+
+# Show established connections
+ss -t state established
+
+# Show connections to a specific port
+ss -t dst :443
+
+# Count connections by state
+ss -t | awk '{print $1}' | sort | uniq -c | sort -rn
+
+# Show socket summary
+ss -s
+```
+
+### Common Port Numbers
+
+| Port | Service |
+|---|---|
+| 22 | SSH |
+| 80 | HTTP |
+| 443 | HTTPS |
+| 3000 | Node.js (dev) |
+| 3306 | MySQL |
+| 5432 | PostgreSQL |
+| 6379 | Redis |
+| 8080 | HTTP alternate |
+| 9090 | Prometheus |
+
+<Exercise number={2} title="Network Troubleshooting">
+
+Practice the systematic approach to diagnosing network issues:
+
+```bash
+# Scenario: "Can't connect to the database on db-server:5432"
+
+# Step 1: Can we resolve the hostname?
+host db-server 2>/dev/null || echo "DNS resolution failed — check /etc/hosts or DNS"
+
+# Step 2: Can we ping the host?
+ping -c 2 -W 2 127.0.0.1 && echo "Host reachable" || echo "Host unreachable"
+
+# Step 3: Is the port open?
+ss -tlnp | grep 5432 || echo "Port 5432 not listening locally"
+
+# Step 4: Test TCP connection
+timeout 3 bash -c 'echo > /dev/tcp/127.0.0.1/22' 2>/dev/null && echo "Port 22 open" || echo "Port 22 closed/filtered"
+
+# Step 5: Check for firewall rules
+sudo iptables -L -n 2>/dev/null | head -10
+
+# Step 6: Check routing
+ip route get 127.0.0.1
+
+# Step 7: Check DNS configuration
+cat /etc/resolv.conf
+
+# Step 8: Full diagnostic summary
+echo ""
+echo "=== Network Diagnostic Summary ==="
+echo "Interfaces:"
+ip -br addr show
+echo ""
+echo "Default route:"
+ip route | grep default
+echo ""
+echo "Listening ports:"
+ss -tlnp | head -10
+```
+
+</Exercise>
+
+<MiniProject title="Network Diagnostic Tool">
+
+```bash
+cat > ~/net-diag.sh << 'SCRIPT'
+#!/bin/bash
+# Network Diagnostic Tool
+
+TARGET="${1:-127.0.0.1}"
+PORT="${2:-}"
+
+echo "============================================="
+echo "  Network Diagnostics"
+echo "  Target: $TARGET"
+[ -n "$PORT" ] && echo "  Port: $PORT"
+echo "  Time: $(date)"
+echo "============================================="
+
+echo ""
+echo "--- Local Network Config ---"
+echo "  IP: $(ip -4 addr show | grep 'inet ' | grep -v 127.0.0.1 | awk '{print $2}' | head -1)"
+echo "  Gateway: $(ip route | grep default | awk '{print $3}')"
+echo "  DNS: $(grep nameserver /etc/resolv.conf | awk '{print $2}' | tr '\n' ' ')"
+
+echo ""
+echo "--- DNS Resolution ---"
+if host "$TARGET" >/dev/null 2>&1; then
+    echo "  Resolved: $(host "$TARGET" | head -1)"
+else
+    echo "  Resolution: Using IP directly or failed"
+fi
+
+echo ""
+echo "--- Ping Test ---"
+if ping -c 3 -W 2 "$TARGET" >/dev/null 2>&1; then
+    PING_RESULT=$(ping -c 3 -W 2 "$TARGET" 2>/dev/null | tail -1)
+    echo "  Result: Reachable"
+    echo "  Stats: $PING_RESULT"
+else
+    echo "  Result: Unreachable"
+fi
+
+if [ -n "$PORT" ]; then
+    echo ""
+    echo "--- Port Test ($PORT) ---"
+    if timeout 3 bash -c "echo > /dev/tcp/$TARGET/$PORT" 2>/dev/null; then
+        echo "  Result: Port $PORT is OPEN"
+    else
+        echo "  Result: Port $PORT is CLOSED or filtered"
+    fi
+fi
+
+echo ""
+echo "--- Active Connections ---"
+ss -s 2>/dev/null
+
+echo ""
+echo "--- Listening Services ---"
+ss -tlnp 2>/dev/null | head -15
+
+echo ""
+echo "============================================="
+SCRIPT
+
+chmod +x ~/net-diag.sh
+~/net-diag.sh 127.0.0.1 22
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `ip addr` shows interfaces; `ip route` shows routing; these replace `ifconfig` and `route`
+- Troubleshoot systematically: DNS → ping → port → firewall → application
+- `ss -tlnp` shows listening ports — your go-to for "is the service running?"
+- `/etc/hosts` overrides DNS — useful for testing and blocking domains
+- `/etc/resolv.conf` controls DNS servers; `dig` and `host` test resolution
+- `curl -v` is essential for HTTP debugging
+- Network issues are always at a specific layer — identify which layer first
+
+## What's Next
+
+You can diagnose network issues, but how do you control network access? In **Firewall and Security**, you'll learn iptables, ufw, SSH hardening, and the security practices that protect production servers.

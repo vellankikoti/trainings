@@ -1,0 +1,416 @@
+---
+title: "Special Permissions & ACLs"
+description: "Learn SUID, SGID, sticky bit, and Access Control Lists (ACLs). Understand the advanced permission mechanisms used in production Linux systems."
+order: 10
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 09-permissions-deep-dive
+objectives:
+  - Understand and identify SUID, SGID, and sticky bit
+  - Use ACLs for fine-grained access control
+  - Audit special permissions for security
+  - Apply these concepts to real server configurations
+tags:
+  - linux
+  - permissions
+  - security
+  - acl
+  - suid
+  - sgid
+---
+
+<Callout type="story" title="The Story">
+During a security audit, the scanner flags 47 files with SUID set. Your security lead asks: "Which of these are legitimate and which are potential backdoors?" You need to understand what SUID means, why it exists, and why an unauthorized SUID binary is one of the most dangerous things on a Linux system. This lesson covers the permission mechanisms that go beyond basic rwx.
+</Callout>
+
+## SUID — Set User ID
+
+When SUID is set on an executable, it runs with the permissions of the **file owner**, not the user who runs it.
+
+```bash
+# The classic example: passwd
+ls -l /usr/bin/passwd
+# -rwsr-xr-x 1 root root 68208 ... /usr/bin/passwd
+#    ^
+#    s instead of x = SUID is set
+```
+
+Why does `passwd` need SUID? Regular users need to change their own password, but the password hash is stored in `/etc/shadow` which only root can write. SUID lets `passwd` run as root temporarily.
+
+### Setting and Removing SUID
+
+```bash
+# Set SUID (numeric: add 4000)
+chmod u+s program
+chmod 4755 program
+
+# Remove SUID
+chmod u-s program
+
+# Verify
+ls -l program
+# -rwsr-xr-x  = SUID set, owner has execute
+# -rwSr-xr-x  = SUID set, owner does NOT have execute (capital S = warning)
+```
+
+<Callout type="warning" title="Security Warning">
+SUID on root-owned executables is a major attack vector. If an attacker can replace a SUID binary or find a vulnerability in one, they get root access. Never set SUID on scripts — only compiled binaries. Audit SUID files regularly.
+</Callout>
+
+### Finding All SUID Files
+
+```bash
+# Find all SUID files on the system
+find / -perm -4000 -type f 2>/dev/null
+
+# Common legitimate SUID binaries:
+# /usr/bin/passwd     — change password
+# /usr/bin/sudo       — run as root
+# /usr/bin/su         — switch user
+# /usr/bin/ping       — raw socket access (older systems)
+# /usr/bin/mount      — mount filesystems
+# /usr/bin/umount     — unmount filesystems
+```
+
+## SGID — Set Group ID
+
+SGID works differently depending on whether it's on a file or directory.
+
+### SGID on Files
+
+The file runs with the permissions of the **group owner**:
+
+```bash
+ls -l /usr/bin/wall
+# -rwxr-sr-x 1 root tty 15344 ... /usr/bin/wall
+#         ^
+#         s in group execute position = SGID
+```
+
+### SGID on Directories (More Common)
+
+When SGID is set on a directory, new files and subdirectories inherit the **group of the directory**, not the group of the user who created them. This is essential for shared directories:
+
+```bash
+# Without SGID: files get the creator's default group
+mkdir /opt/project
+touch /opt/project/file1.txt
+ls -l /opt/project/file1.txt
+# -rw-r--r-- 1 ubuntu ubuntu ... file1.txt  (ubuntu's group)
+
+# With SGID: files inherit the directory's group
+sudo mkdir /opt/shared
+sudo chown root:developers /opt/shared
+sudo chmod 2775 /opt/shared
+#           ^
+#           2 = SGID bit
+
+touch /opt/shared/file2.txt
+ls -l /opt/shared/file2.txt
+# -rw-rw-r-- 1 ubuntu developers ... file2.txt  (inherited group!)
+```
+
+### Setting SGID
+
+```bash
+# Set SGID (numeric: add 2000)
+chmod g+s directory/
+chmod 2775 directory/
+
+# Remove SGID
+chmod g-s directory/
+
+# Verify
+ls -ld directory/
+# drwxrwsr-x  = SGID set on directory
+```
+
+## Sticky Bit
+
+The sticky bit on a directory means only the file owner (or root) can delete or rename files inside it, even if others have write permission. The classic example is `/tmp`:
+
+```bash
+ls -ld /tmp
+# drwxrwxrwt 15 root root 4096 ... /tmp
+#          ^
+#          t = sticky bit set
+```
+
+Without sticky bit: anyone with write permission to `/tmp` could delete anyone else's files. With sticky bit: you can only delete your own files.
+
+### Setting Sticky Bit
+
+```bash
+# Set sticky bit (numeric: add 1000)
+chmod +t directory/
+chmod 1777 directory/
+
+# Remove sticky bit
+chmod -t directory/
+
+# Verify
+ls -ld directory/
+# drwxrwxrwt  = sticky bit set (t in others execute position)
+# drwxrwxrwT  = sticky bit set, but others don't have execute (T = warning)
+```
+
+### Practical Use: Shared Upload Directory
+
+```bash
+# Create a shared uploads directory
+sudo mkdir /var/uploads
+sudo chown root:www-data /var/uploads
+sudo chmod 1773 /var/uploads
+#           ^^^^
+#           1 = sticky bit (users can only delete own files)
+#           7 = owner rwx
+#           7 = group rwx
+#           3 = others wx (can create files but not list)
+```
+
+## Special Permissions Summary
+
+| Permission | Numeric | On Files | On Directories |
+|---|---|---|---|
+| SUID | 4000 | Runs as file owner | (no effect) |
+| SGID | 2000 | Runs as file group | New files inherit directory group |
+| Sticky | 1000 | (no effect) | Only owner can delete their files |
+
+The four-digit numeric permission: `4755` = SUID + rwxr-xr-x
+
+<Exercise number={1} title="Special Permissions Practice">
+
+```bash
+# 1. Create a shared project directory with SGID
+sudo groupadd project-team 2>/dev/null
+sudo mkdir -p /opt/team-share
+sudo chown root:project-team /opt/team-share
+sudo chmod 2775 /opt/team-share
+
+# 2. Verify SGID is set
+ls -ld /opt/team-share
+# Should show drwxrwsr-x
+
+# 3. Create a file and check its group
+touch /opt/team-share/test-file.txt
+ls -l /opt/team-share/test-file.txt
+# Group should be project-team (not your personal group)
+
+# 4. Create a directory with sticky bit
+sudo mkdir /opt/shared-temp
+sudo chmod 1777 /opt/shared-temp
+ls -ld /opt/shared-temp
+# Should show drwxrwxrwt
+
+# 5. Find all SUID files on the system
+find / -perm -4000 -type f 2>/dev/null | wc -l
+echo "SUID files found on this system"
+
+# 6. Find all SGID files
+find / -perm -2000 -type f 2>/dev/null | head -10
+
+# 7. Clean up
+sudo rm -rf /opt/team-share /opt/shared-temp
+sudo groupdel project-team 2>/dev/null
+```
+
+</Exercise>
+
+## Access Control Lists (ACLs)
+
+Standard permissions only allow one owner and one group. ACLs let you set permissions for specific users and groups beyond that:
+
+```bash
+# Check if filesystem supports ACLs
+mount | grep acl
+
+# View ACLs on a file
+getfacl /var/log/syslog
+
+# Set ACL: give alice read access to a file
+setfacl -m u:alice:r /opt/app/config.yaml
+
+# Set ACL: give developers group read+write
+setfacl -m g:developers:rw /opt/app/config.yaml
+
+# Set default ACL on directory (inherited by new files)
+setfacl -d -m g:developers:rw /opt/app/
+
+# Remove a specific ACL entry
+setfacl -x u:alice /opt/app/config.yaml
+
+# Remove all ACLs
+setfacl -b /opt/app/config.yaml
+```
+
+### ACL Indicator
+
+When a file has ACLs, `ls -l` shows a `+` at the end of the permission string:
+
+```bash
+ls -l /opt/app/config.yaml
+# -rw-rw-r--+ 1 root root 1024 ... config.yaml
+#           ^
+#           + means ACLs are set
+```
+
+### Reading ACL Output
+
+```bash
+getfacl /opt/app/config.yaml
+# # file: opt/app/config.yaml
+# # owner: root
+# # group: root
+# user::rw-           ← owner permissions
+# user:alice:r--       ← specific user ACL
+# group::r--          ← owning group permissions
+# group:developers:rw- ← specific group ACL
+# mask::rw-           ← maximum effective permissions
+# other::r--          ← everyone else
+```
+
+### ACL Use Cases
+
+```bash
+# Scenario: Multiple teams need different access to the same directory
+sudo mkdir -p /opt/shared-app
+
+# DevOps team: full access
+sudo setfacl -m g:devops:rwx /opt/shared-app
+
+# QA team: read + execute only
+sudo setfacl -m g:qa:rx /opt/shared-app
+
+# Specific developer: write access
+sudo setfacl -m u:john:rwx /opt/shared-app
+
+# Make these defaults for new files
+sudo setfacl -d -m g:devops:rwx /opt/shared-app
+sudo setfacl -d -m g:qa:rx /opt/shared-app
+
+getfacl /opt/shared-app
+```
+
+<Exercise number={2} title="ACL Configuration">
+
+Practice fine-grained access control:
+
+```bash
+# 1. Create a test directory structure
+mkdir -p ~/acl-lab/project/{code,docs,secrets}
+echo "source code" > ~/acl-lab/project/code/app.py
+echo "documentation" > ~/acl-lab/project/docs/guide.md
+echo "api_key=secret123" > ~/acl-lab/project/secrets/keys.env
+
+# 2. View current ACLs
+getfacl ~/acl-lab/project/
+
+# 3. Set specific permissions using ACLs
+# Give read to the code directory for everyone
+setfacl -R -m o:r ~/acl-lab/project/code/
+
+# 4. Remove all access to secrets
+chmod 700 ~/acl-lab/project/secrets/
+
+# 5. View the complete ACL
+getfacl -R ~/acl-lab/project/
+
+# 6. Set default ACLs so new files inherit permissions
+setfacl -d -m u::rwx ~/acl-lab/project/code/
+setfacl -d -m g::rx ~/acl-lab/project/code/
+
+# 7. Create a new file and verify it inherited ACLs
+touch ~/acl-lab/project/code/new-file.py
+getfacl ~/acl-lab/project/code/new-file.py
+
+# 8. Remove all ACLs
+setfacl -R -b ~/acl-lab/project/
+
+# 9. Clean up
+rm -rf ~/acl-lab
+```
+
+</Exercise>
+
+<MiniProject title="Security Audit: Special Permissions">
+
+Create a comprehensive security audit script for special permissions:
+
+```bash
+cat > ~/security-audit.sh << 'SCRIPT'
+#!/bin/bash
+# Security Audit: Special Permissions and ACLs
+
+echo "============================================="
+echo "  Special Permissions Security Audit"
+echo "  Host: $(hostname)"
+echo "  Date: $(date)"
+echo "============================================="
+
+echo ""
+echo "--- SUID Files ---"
+echo "Files that run with owner's privileges:"
+find / -perm -4000 -type f 2>/dev/null | while read file; do
+    ls -lh "$file"
+done
+
+echo ""
+echo "--- SGID Files ---"
+echo "Files that run with group's privileges:"
+find / -perm -2000 -type f 2>/dev/null | while read file; do
+    ls -lh "$file"
+done
+
+echo ""
+echo "--- World-Writable Directories (without sticky bit) ---"
+echo "SECURITY RISK: anyone can delete anyone's files:"
+find / -type d -perm -o+w ! -perm -1000 2>/dev/null | head -20
+
+echo ""
+echo "--- World-Writable Files ---"
+echo "Files anyone can modify:"
+find / -type f -perm -o+w 2>/dev/null | head -20
+
+echo ""
+echo "--- Files with No Owner ---"
+echo "Orphaned files (user was deleted):"
+find / -nouser -o -nogroup 2>/dev/null | head -20
+
+echo ""
+echo "--- Files with ACLs ---"
+echo "Files with extended access control:"
+find /etc /opt /var -type f -exec getfacl --absolute-names {} \; 2>/dev/null | grep -B1 "^user:" | grep "^# file:" | head -20
+
+echo ""
+echo "--- Recommendations ---"
+SUID_COUNT=$(find / -perm -4000 -type f 2>/dev/null | wc -l)
+WW_COUNT=$(find / -type f -perm -o+w 2>/dev/null | wc -l)
+echo "  SUID files found: $SUID_COUNT (review any unknown ones)"
+echo "  World-writable files: $WW_COUNT (should be 0 or very few)"
+
+echo ""
+echo "============================================="
+echo "  Audit Complete"
+echo "============================================="
+SCRIPT
+
+chmod +x ~/security-audit.sh
+~/security-audit.sh 2>/dev/null
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- SUID (`4000`): file runs as the file's owner — security-critical, audit regularly
+- SGID (`2000`): on directories, new files inherit the directory's group — essential for shared workflows
+- Sticky bit (`1000`): prevents users from deleting others' files in shared directories (like `/tmp`)
+- ACLs provide fine-grained permissions beyond the user/group/other model
+- Use `find -perm -4000` to find SUID files — review any unfamiliar ones
+- World-writable files and directories without sticky bit are security risks
+- `getfacl` and `setfacl` manage ACLs; a `+` in `ls -l` indicates ACLs are present
+
+## What's Next
+
+You've mastered the permission system that controls access to every file and directory. Next, you need to manage the software that runs on your system. In **Package Management**, you'll learn to install, update, and manage software with `apt`, `yum`, and `dnf` — the tools you'll use every day as a DevOps engineer.

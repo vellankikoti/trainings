@@ -100,7 +100,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-094: Create Linux Lessons 06-10 — File System & Permissions
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-093
 - **Estimated effort:** XL
@@ -126,7 +126,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-095: Create Linux Lessons 11-15 — Package Mgmt, Processes, Services
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-094
 - **Estimated effort:** XL
@@ -151,7 +151,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-096: Create Linux Lessons 16-20 — Networking, Storage, Security
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-095
 - **Estimated effort:** XL
