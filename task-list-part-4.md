@@ -664,7 +664,7 @@
 
 ### TASK-146: Build team dashboard for Team tier
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-122
 - **Estimated effort:** XL
@@ -684,7 +684,7 @@
 
 ### TASK-147: Create email marketing automation
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-079
 - **Estimated effort:** L
