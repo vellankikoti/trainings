@@ -1,0 +1,35 @@
+# Lab Definition Schema for DEVOPS ENGINEERS
+# Each lab directory contains a lab.yaml file following this structure.
+
+# required fields
+name: string          # Unique identifier (e.g., "linux-basics")
+title: string         # Display title
+description: string   # Brief description
+lesson_ref: string    # Reference to the lesson this lab accompanies (path/module/lesson)
+difficulty: string    # easy | medium | hard
+duration: number      # Estimated duration in minutes
+
+# environment configuration
+environment:
+  type: string        # docker-compose | devcontainer | browser
+  compose_file: string  # path to docker-compose.yml (if type is docker-compose)
+
+# exercises with validation
+exercises:
+  - id: string
+    title: string
+    description: string
+    hints:
+      - string
+    validation:
+      type: string    # command | file | service
+      # For 'command' type:
+      command: string
+      expected_output: string
+      # For 'file' type:
+      path: string
+      contains: string
+      # For 'service' type:
+      port: number
+      path: string
+      expected_status: number

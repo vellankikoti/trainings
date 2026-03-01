@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  lab:
+    image: ubuntu:22.04
+    container_name: devops-linux-lab
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+    volumes:
+      - lab-data:/root
+    environment:
+      - TERM=xterm-256color
+
+volumes:
+  lab-data:

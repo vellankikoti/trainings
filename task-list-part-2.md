@@ -131,7 +131,7 @@
 
 ### TASK-046: Create lab configuration schema
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-024
 - **Estimated effort:** M
@@ -181,7 +181,7 @@
 
 ### TASK-048: Create dev container configurations
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-046
 - **Estimated effort:** L
@@ -540,7 +540,7 @@
 
 ### TASK-063: Build About page
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-017
 - **Estimated effort:** M
@@ -926,7 +926,7 @@
 
 ### TASK-080: Set up testing infrastructure
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-003
 - **Estimated effort:** M
@@ -948,7 +948,7 @@
 
 ### TASK-081: Write tests for core libraries
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-080, TASK-036, TASK-037, TASK-025
 - **Estimated effort:** L
