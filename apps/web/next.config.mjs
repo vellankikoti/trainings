@@ -39,6 +39,35 @@ const nextConfig = {
           key: "Referrer-Policy",
           value: "strict-origin-when-cross-origin",
         },
+        {
+          key: "Strict-Transport-Security",
+          value: "max-age=63072000; includeSubDomains; preload",
+        },
+        {
+          key: "X-DNS-Prefetch-Control",
+          value: "on",
+        },
+        {
+          key: "Permissions-Policy",
+          value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+        },
+        {
+          key: "Content-Security-Policy",
+          value: [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.clerk.accounts.dev https://challenges.cloudflare.com https://va.vercel-scripts.com",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "img-src 'self' data: blob: https://img.clerk.com https://*.supabase.co https://*.gravatar.com",
+            "font-src 'self' https://fonts.gstatic.com",
+            "connect-src 'self' https://*.supabase.co https://*.clerk.accounts.dev https://api.clerk.dev https://vitals.vercel-insights.com wss://*.supabase.co",
+            "frame-src 'self' https://*.clerk.accounts.dev https://challenges.cloudflare.com",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+            "upgrade-insecure-requests",
+          ].join("; "),
+        },
       ],
     },
     {

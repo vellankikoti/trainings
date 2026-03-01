@@ -2,6 +2,8 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { getProfileId } from "@/lib/progress";
 import { updateStreak } from "@/lib/streaks";
+import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
+import { streakSchema, validateBody } from "@/lib/validations";
 
 export async function POST(request: Request) {
   const { userId: clerkId } = await auth();
@@ -9,22 +11,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Rate limit: 30 requests/minute per user
+  const rl = rateLimit(`progress:${clerkId}`, RATE_LIMITS.progress);
+  if (!rl.success) {
+    return rateLimitResponse(rl);
+  }
+
   const body = await request.json();
-  const { activityType, xpEarned } = body;
-
-  if (!activityType || xpEarned === undefined) {
-    return NextResponse.json(
-      { error: "Missing required fields: activityType, xpEarned" },
-      { status: 400 },
-    );
+  const validated = validateBody(streakSchema, body);
+  if (validated.error) {
+    return NextResponse.json({ error: validated.error }, { status: 400 });
   }
 
-  if (!["lesson", "exercise", "quiz"].includes(activityType)) {
-    return NextResponse.json(
-      { error: "activityType must be 'lesson', 'exercise', or 'quiz'" },
-      { status: 400 },
-    );
-  }
+  const { activityType, xpEarned } = validated.data;
 
   const profileId = await getProfileId(clerkId);
   if (!profileId) {

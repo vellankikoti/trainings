@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { getProfileId, updateLessonProgress } from "@/lib/progress";
+import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
+import { lessonProgressSchema, validateBody } from "@/lib/validations";
 
 export async function POST(request: Request) {
   const { userId: clerkId } = await auth();
@@ -8,22 +10,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Rate limit: 30 requests/minute per user
+  const rl = rateLimit(`progress:${clerkId}`, RATE_LIMITS.progress);
+  if (!rl.success) {
+    return rateLimitResponse(rl);
+  }
+
   const body = await request.json();
-  const { pathSlug, moduleSlug, lessonSlug, status } = body;
-
-  if (!pathSlug || !moduleSlug || !lessonSlug || !status) {
-    return NextResponse.json(
-      { error: "Missing required fields: pathSlug, moduleSlug, lessonSlug, status" },
-      { status: 400 },
-    );
+  const validated = validateBody(lessonProgressSchema, body);
+  if (validated.error) {
+    return NextResponse.json({ error: validated.error }, { status: 400 });
   }
 
-  if (status !== "in_progress" && status !== "completed") {
-    return NextResponse.json(
-      { error: "Status must be 'in_progress' or 'completed'" },
-      { status: 400 },
-    );
-  }
+  const { pathSlug, moduleSlug, lessonSlug, status } = validated.data;
 
   const profileId = await getProfileId(clerkId);
   if (!profileId) {
