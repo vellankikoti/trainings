@@ -1,0 +1,1274 @@
+---
+title: "Your First Container"
+description: "Run your first Docker containers hands-on — from hello-world to interactive shells to web servers with port mapping. Master the essential container lifecycle commands that you will use every day as a DevOps engineer."
+order: 5
+xpReward: 40
+estimatedMinutes: 55
+prerequisites:
+  - 04-installation
+objectives:
+  - Run containers in foreground, interactive, and detached modes
+  - Map ports between host and container to access containerized services
+  - Manage the full container lifecycle with ps, stop, start, rm, and restart
+  - Execute commands inside running containers with docker exec
+  - View and follow container logs with docker logs
+  - Inspect container metadata and configuration with docker inspect
+tags:
+  - docker
+  - containers
+  - cli
+  - port-mapping
+  - lifecycle
+  - hands-on
+---
+
+<Callout type="story" title="The Story">
+It is your first day with Docker installed, and your team lead gives you a challenge: "Get our company website running in a container, accessible on port 8080, by the end of the day." You know the website runs on nginx, but you have never actually run a Docker container before. You start with `docker run hello-world` to make sure everything works, then quickly discover that running real services involves port mapping, background mode, and lifecycle management. By lunch, you have nginx running, you can see its logs streaming in real-time, and you have learned to stop, start, and troubleshoot containers. By end of day, you are running multiple containers simultaneously and feeling confident. This lesson walks you through that exact journey — from your very first container to confidently managing real services.
+</Callout>
+
+## docker run hello-world: What Actually Happens
+
+The `docker run hello-world` command is the simplest Docker command, but understanding what happens behind the scenes teaches you the fundamentals of every container operation.
+
+```bash
+$ docker run hello-world
+```
+
+Here is exactly what happens, step by step:
+
+```
+What happens when you run "docker run hello-world":
+═══════════════════════════════════════════════════════════════════
+
+Step 1: Docker CLI sends "run hello-world" to the Docker daemon
+        ┌──────────┐  POST /containers/create  ┌──────────┐
+        │ docker   │ ─────────────────────────→ │ dockerd  │
+        │ CLI      │                             │          │
+        └──────────┘                             └────┬─────┘
+                                                      │
+Step 2: Daemon checks for "hello-world:latest" image locally
+        ┌──────────────────────────────────────────────────┐
+        │  Local Image Cache: hello-world NOT FOUND         │
+        └──────────────────────────────────────────────────┘
+                                                      │
+Step 3: Daemon pulls the image from Docker Hub
+        ┌──────────┐  GET /v2/library/hello-world  ┌──────────┐
+        │ dockerd  │ ────────────────────────────→ │ Docker   │
+        │          │ ←────────────────────────────  │ Hub      │
+        │          │  (downloads image layers)      │          │
+        └────┬─────┘                                └──────────┘
+             │
+Step 4: Daemon creates a container from the image
+        • Creates a writable layer on top of image layers
+        • Assigns a container ID (e.g., a1b2c3d4e5f6)
+        • Configures networking (bridge network)
+             │
+Step 5: Daemon starts the container
+        • containerd creates the OCI bundle
+        • shim starts runc
+        • runc creates namespaces and cgroups
+        • The hello-world binary executes
+             │
+Step 6: Container output is streamed to your terminal
+        "Hello from Docker!"
+        (plus explanation text)
+             │
+Step 7: The hello-world process exits (exit code 0)
+        • Container enters "Exited" state
+        • Container is NOT removed (still exists as stopped)
+```
+
+Let us run it and observe each part:
+
+```bash
+# Run hello-world:
+$ docker run hello-world
+Unable to find image 'hello-world:latest' locally      ← Step 2: not found
+latest: Pulling from library/hello-world                ← Step 3: pulling
+c1ec31eb5944: Pull complete                             ← Step 3: layer downloaded
+Digest: sha256:4bd78111b6914a99dbc560e6a20eab57ff6655aea4a80c50b0c5036dd5dc7e5b
+Status: Downloaded newer image for hello-world:latest   ← Step 3: done
+
+Hello from Docker!                                      ← Step 6: output
+This message shows that your installation appears to be working correctly.
+
+To generate this message, Docker took the following steps:
+ 1. The Docker client contacted the Docker daemon.
+ 2. The Docker daemon pulled the "hello-world" image from the Docker Hub.
+    (amd64)
+ 3. The Docker daemon created a new container from that image which runs the
+    executable that produces the output you are currently reading.
+ 4. The Docker daemon streamed that output to the Docker client, which sent it
+    to your terminal.
+
+To try something more ambitious, you can run an Ubuntu container with:
+ $ docker run -it ubuntu bash
+...
+
+# The container has exited, but still exists:
+$ docker ps -a
+CONTAINER ID   IMAGE         COMMAND    CREATED          STATUS                      NAMES
+a1b2c3d4e5f6   hello-world   "/hello"   30 seconds ago   Exited (0) 29 seconds ago   kind_tesla
+
+# Run it again — this time the image is cached (no download):
+$ docker run hello-world
+Hello from Docker!
+...
+# Notice: no "Pulling from library/hello-world" — the image was already local!
+```
+
+<Callout type="info" title="Container Names">
+Docker automatically generates a random name for each container (like `kind_tesla` above). These names are two words: an adjective and a famous scientist or hacker. They are used when you do not specify a name with `--name`.
+</Callout>
+
+## Running Interactive Containers
+
+The `hello-world` container runs a single command and exits. But Docker can also run **interactive** containers where you get a shell inside the container.
+
+### docker run -it: Interactive Mode
+
+```bash
+$ docker run -it ubuntu:22.04 bash
+root@c3d4e5f6a7b8:/#
+```
+
+Let us break down every flag:
+
+| Flag | Meaning |
+|---|---|
+| `-i` | **Interactive** — Keep STDIN open (so you can type) |
+| `-t` | **TTY** — Allocate a pseudo-terminal (so you see a prompt) |
+| `ubuntu:22.04` | The image to run |
+| `bash` | The command to run inside the container (overrides the image default) |
+
+```bash
+# You are now INSIDE the container:
+root@c3d4e5f6a7b8:/# whoami
+root
+
+root@c3d4e5f6a7b8:/# hostname
+c3d4e5f6a7b8          # The container ID IS the hostname
+
+root@c3d4e5f6a7b8:/# cat /etc/os-release
+PRETTY_NAME="Ubuntu 22.04.3 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+
+root@c3d4e5f6a7b8:/# ls /
+bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
+
+# This is a complete Ubuntu filesystem, but the container is tiny:
+root@c3d4e5f6a7b8:/# apt list --installed 2>/dev/null | wc -l
+89    # Only 89 packages — a minimal Ubuntu
+
+# The container is isolated — it only sees its own processes:
+root@c3d4e5f6a7b8:/# ps aux
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root         1  0.0  0.0   4624  3712 pts/0    Ss   10:30   0:00 bash
+root        12  0.0  0.0   7060  1536 pts/0    R+   10:31   0:00 ps aux
+
+# Only 2 processes! bash (PID 1) and the ps command we just ran.
+
+# Exit the container:
+root@c3d4e5f6a7b8:/# exit
+exit
+
+# Back on your host. The container has stopped:
+$ docker ps -a
+CONTAINER ID   IMAGE          COMMAND   STATUS                     NAMES
+c3d4e5f6a7b8   ubuntu:22.04   "bash"    Exited (0) 5 seconds ago   musing_curie
+```
+
+<Callout type="warning" title="Exit Means Stop">
+When you exit an interactive container (by typing `exit` or pressing Ctrl+D), the container stops. This is because the main process (bash) has exited. A container runs only as long as its main process (PID 1) is running.
+
+To detach from an interactive container without stopping it, press **Ctrl+P, Ctrl+Q** (press Ctrl+P first, then Ctrl+Q while still holding Ctrl).
+</Callout>
+
+### Experimenting Inside a Container
+
+Containers are disposable — you can install things, break things, and throw the container away:
+
+```bash
+# Start a fresh Ubuntu container:
+$ docker run -it --name playground ubuntu:22.04 bash
+
+# Install software inside the container:
+root@abc123:/# apt-get update && apt-get install -y curl vim
+...
+Setting up curl (7.81.0-1ubuntu1.14) ...
+Setting up vim (2:8.2.3995-1ubuntu2.13) ...
+
+# Use curl:
+root@abc123:/# curl -s https://httpbin.org/ip
+{
+  "origin": "203.0.113.42"
+}
+
+# Create files:
+root@abc123:/# echo "Hello from my container!" > /tmp/message.txt
+root@abc123:/# cat /tmp/message.txt
+Hello from my container!
+
+# Exit and stop the container:
+root@abc123:/# exit
+
+# The container and all changes still exist (but stopped):
+$ docker ps -a --filter name=playground
+CONTAINER ID   IMAGE          COMMAND   STATUS                     NAMES
+abc123def456   ubuntu:22.04   "bash"    Exited (0) 5 seconds ago   playground
+
+# Restart and reattach:
+$ docker start -ai playground
+root@abc123:/# cat /tmp/message.txt
+Hello from my container!    # Changes are preserved when restarting!
+
+# Exit and clean up:
+root@abc123:/# exit
+$ docker rm playground
+```
+
+<Callout type="tip" title="--rm Flag: Auto-Remove on Exit">
+If you want a container to be automatically deleted when it stops, use the `--rm` flag:
+
+```bash
+# Container is removed automatically when you exit:
+docker run -it --rm ubuntu:22.04 bash
+
+# After exit, docker ps -a will NOT show this container.
+# Great for quick experiments you do not need to keep.
+```
+</Callout>
+
+## Running Detached Containers
+
+Most real-world containers run in the **background** (detached mode). Web servers, databases, and APIs do not need an interactive terminal — they just need to run.
+
+### docker run -d: Detached Mode
+
+```bash
+# Run nginx in the background:
+$ docker run -d nginx
+7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b
+
+# Docker returns the container ID and gives you your terminal back.
+
+# The container is running in the background:
+$ docker ps
+CONTAINER ID   IMAGE   COMMAND                  CREATED          STATUS          PORTS     NAMES
+7a8b9c0d1e2f   nginx   "/docker-entrypoint.…"   10 seconds ago   Up 9 seconds    80/tcp    cranky_euler
+```
+
+But wait — nginx is running on port 80 inside the container. Can you access it?
+
+```bash
+# Try to access nginx on the host:
+$ curl http://localhost:80
+curl: (7) Failed to connect to localhost port 80: Connection refused
+
+# It does not work! The container's port 80 is NOT mapped to the host.
+# The container has its own network namespace — port 80 inside the
+# container is NOT the same as port 80 on your host machine.
+```
+
+To access the containerized service from outside, you need **port mapping**.
+
+## Port Mapping: -p host:container
+
+Port mapping connects a port on your **host machine** to a port inside the **container**. This is how you make containerized services accessible.
+
+```
+Port Mapping Diagram:
+═══════════════════════════════════════════════════════
+
+Your Browser                     Host Machine
+http://localhost:8080             ┌─────────────────┐
+        │                        │                  │
+        │                        │  Port 8080       │
+        └───────────────────────→│    │             │
+                                 │    │  -p 8080:80 │
+                                 │    ▼             │
+                                 │  ┌───────────┐  │
+                                 │  │ Container  │  │
+                                 │  │            │  │
+                                 │  │ nginx      │  │
+                                 │  │ Port 80    │  │
+                                 │  └───────────┘  │
+                                 └─────────────────┘
+
+Traffic flow:
+  Browser → localhost:8080 → Docker proxy → container:80 → nginx
+```
+
+```bash
+# Run nginx with port mapping:
+$ docker run -d --name web -p 8080:80 nginx
+a1b2c3d4e5f6...
+
+# Now port 8080 on the host forwards to port 80 in the container:
+$ docker ps
+CONTAINER ID   IMAGE   COMMAND                  STATUS         PORTS                  NAMES
+a1b2c3d4e5f6   nginx   "/docker-entrypoint.…"   Up 5 seconds   0.0.0.0:8080->80/tcp   web
+
+# Access nginx through the host port:
+$ curl http://localhost:8080
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+html { color-scheme: light dark; }
+body { width: 35em; margin: 0 auto;
+font-family: Tahoma, Verdana, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+...
+</body>
+</html>
+```
+
+### Port Mapping Variations
+
+```bash
+# Map host port 8080 to container port 80:
+docker run -d -p 8080:80 nginx
+
+# Map multiple ports:
+docker run -d -p 8080:80 -p 8443:443 nginx
+
+# Map to a specific host interface (bind to localhost only):
+docker run -d -p 127.0.0.1:8080:80 nginx
+
+# Let Docker choose a random host port:
+docker run -d -p 80 nginx
+# Check which port was assigned:
+$ docker port <container_id>
+80/tcp -> 0.0.0.0:49153
+
+# Map a UDP port:
+docker run -d -p 5353:53/udp my-dns-server
+
+# Map all exposed ports to random host ports:
+docker run -d -P nginx
+```
+
+<Callout type="warning" title="Port Conflicts">
+You cannot map the same host port to multiple containers:
+
+```bash
+$ docker run -d --name web1 -p 8080:80 nginx
+# Success
+
+$ docker run -d --name web2 -p 8080:80 nginx
+# Error! Port 8080 is already in use:
+# docker: Error response from daemon: driver failed programming
+# external connectivity on endpoint web2: Bind for 0.0.0.0:8080
+# failed: port is already allocated.
+
+# Solution: use different host ports:
+$ docker run -d --name web2 -p 8081:80 nginx
+# Now web1 is on :8080 and web2 is on :8081
+```
+</Callout>
+
+<Callout type="info" title="Why -p 8080:80 and Not -p 80:8080?">
+The format is always **host:container** (left is host, right is container). Think of it as "from:to" from the outside perspective:
+
+```
+-p 8080:80    → Host port 8080 forwards TO container port 80
+-p 3000:3000  → Host port 3000 forwards TO container port 3000
+-p 5432:5432  → Host port 5432 forwards TO container port 5432
+```
+
+A common pattern is to map the same port number when there is no conflict.
+</Callout>
+
+## Naming Containers: --name
+
+By default, Docker gives containers random names. Use `--name` to give them meaningful names:
+
+```bash
+# Without --name (random name):
+$ docker run -d nginx
+$ docker ps --format "{{.Names}}"
+hungry_darwin
+
+# With --name (explicit name):
+$ docker run -d --name my-website -p 8080:80 nginx
+$ docker ps --format "{{.Names}}"
+my-website
+
+# Now you can reference the container by name:
+docker stop my-website
+docker start my-website
+docker logs my-website
+docker rm my-website
+```
+
+Container naming rules:
+- Must match the regex `[a-zA-Z0-9][a-zA-Z0-9_.-]+`
+- Must be unique (no two running containers with the same name)
+- Tip: Use descriptive names related to the service, like `web`, `api`, `db`, `redis`
+
+```bash
+# Practical example — running a full stack:
+docker run -d --name web      -p 8080:80  nginx
+docker run -d --name api      -p 3000:3000 node-api:latest
+docker run -d --name database -p 5432:5432 postgres:15
+docker run -d --name cache    -p 6379:6379 redis:7
+```
+
+## Container Lifecycle Commands
+
+These are the commands you will use every day to manage containers.
+
+### docker ps: List Containers
+
+```bash
+# List running containers:
+$ docker ps
+CONTAINER ID   IMAGE     COMMAND                  CREATED         STATUS         PORTS                  NAMES
+a1b2c3d4e5f6   nginx     "/docker-entrypoint.…"   2 minutes ago   Up 2 minutes   0.0.0.0:8080->80/tcp   web
+b2c3d4e5f6a7   redis:7   "docker-entrypoint.s…"   5 minutes ago   Up 5 minutes   6379/tcp               cache
+
+# List ALL containers (including stopped):
+$ docker ps -a
+CONTAINER ID   IMAGE         COMMAND     CREATED          STATUS                     NAMES
+a1b2c3d4e5f6   nginx         "nginx…"    2 minutes ago    Up 2 minutes               web
+b2c3d4e5f6a7   redis:7       "redis…"    5 minutes ago    Up 5 minutes               cache
+c3d4e5f6a7b8   ubuntu:22.04  "bash"      10 minutes ago   Exited (0) 8 minutes ago   playground
+d4e5f6a7b8c9   hello-world   "/hello"    15 minutes ago   Exited (0) 15 minutes ago  kind_tesla
+
+# Show only container IDs (useful for scripting):
+$ docker ps -q
+a1b2c3d4e5f6
+b2c3d4e5f6a7
+
+# Show all container IDs:
+$ docker ps -aq
+a1b2c3d4e5f6
+b2c3d4e5f6a7
+c3d4e5f6a7b8
+d4e5f6a7b8c9
+
+# Format output:
+$ docker ps --format "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}"
+CONTAINER ID   IMAGE     STATUS         NAMES
+a1b2c3d4e5f6   nginx     Up 2 minutes   web
+b2c3d4e5f6a7   redis:7   Up 5 minutes   cache
+
+# Filter containers:
+$ docker ps --filter "status=exited"
+$ docker ps --filter "name=web"
+$ docker ps --filter "ancestor=nginx"
+```
+
+### docker stop: Stop a Running Container
+
+```bash
+# Stop a container gracefully (SIGTERM, then SIGKILL after 10s):
+$ docker stop web
+web
+
+# Stop with a custom timeout (wait 30 seconds before SIGKILL):
+$ docker stop -t 30 web
+web
+
+# Stop multiple containers:
+$ docker stop web cache database
+web
+cache
+database
+
+# Stop ALL running containers:
+$ docker stop $(docker ps -q)
+```
+
+```
+What docker stop does:
+═══════════════════════════════
+
+1. Sends SIGTERM to the main process (PID 1)
+   → Application should handle this and shut down cleanly
+   → Close database connections, flush buffers, etc.
+
+2. Waits for timeout (default: 10 seconds)
+   → Gives the process time to clean up
+
+3. If still running, sends SIGKILL
+   → Forcefully terminates the process
+   → No cleanup possible
+```
+
+### docker start: Start a Stopped Container
+
+```bash
+# Start a stopped container:
+$ docker start web
+web
+
+# Start and attach to it (see output):
+$ docker start -a web
+172.17.0.1 - - [15/Jan/2025:10:30:00 +0000] "GET / HTTP/1.1" 200 615
+
+# Start and attach interactively:
+$ docker start -ai playground
+root@abc123:/#
+```
+
+### docker restart: Restart a Container
+
+```bash
+# Restart a container (stop + start):
+$ docker restart web
+web
+
+# Restart with a custom stop timeout:
+$ docker restart -t 5 web
+web
+```
+
+### docker rm: Remove a Container
+
+```bash
+# Remove a stopped container:
+$ docker rm playground
+playground
+
+# Try to remove a running container (fails!):
+$ docker rm web
+Error response from daemon: You cannot remove a running container a1b2c3d4e5f6.
+Stop the container before attempting removal or force remove.
+
+# Force-remove a running container (stop + remove):
+$ docker rm -f web
+web
+
+# Remove all stopped containers:
+$ docker container prune
+WARNING! This will remove all stopped containers.
+Are you sure you want to continue? [y/N] y
+Deleted Containers:
+c3d4e5f6a7b8
+d4e5f6a7b8c9
+Total reclaimed space: 0B
+
+# Remove all stopped containers (without confirmation):
+$ docker container prune -f
+```
+
+<Callout type="tip" title="Lifecycle Command Cheat Sheet">
+
+```
+Container Lifecycle Quick Reference:
+═══════════════════════════════════════
+
+docker run -d --name X image    Create + Start (background)
+docker run -it --name X image   Create + Start (interactive)
+
+docker create --name X image    Create only (do not start)
+docker start X                  Start a stopped container
+docker stop X                   Stop a running container
+docker restart X                Stop + Start
+docker pause X                  Freeze (SIGSTOP)
+docker unpause X                Unfreeze
+
+docker rm X                     Remove a stopped container
+docker rm -f X                  Force remove (stop + remove)
+
+docker ps                       List running containers
+docker ps -a                    List ALL containers
+docker container prune          Remove all stopped containers
+```
+</Callout>
+
+## docker exec: Run Commands in Running Containers
+
+`docker exec` lets you run additional commands inside a **running** container. This is essential for debugging and administration.
+
+```bash
+# First, make sure a container is running:
+$ docker run -d --name web -p 8080:80 nginx
+
+# Run a command inside the running container:
+$ docker exec web hostname
+a1b2c3d4e5f6
+
+$ docker exec web cat /etc/nginx/nginx.conf
+user  nginx;
+worker_processes  auto;
+error_log  /var/log/nginx/error.log notice;
+pid        /var/run/nginx.pid;
+...
+
+$ docker exec web ls /usr/share/nginx/html/
+50x.html
+index.html
+
+# Get an interactive shell inside the running container:
+$ docker exec -it web bash
+root@a1b2c3d4e5f6:/# whoami
+root
+root@a1b2c3d4e5f6:/# nginx -v
+nginx version: nginx/1.25.3
+root@a1b2c3d4e5f6:/# exit
+# The container keeps running! exec does NOT affect the main process.
+
+# Run a command as a specific user:
+$ docker exec -u nginx web whoami
+nginx
+
+# Set environment variables for the exec session:
+$ docker exec -e MY_VAR=hello web env | grep MY_VAR
+MY_VAR=hello
+
+# Run a command in the background (detached exec):
+$ docker exec -d web touch /tmp/background-task-done
+```
+
+```
+docker exec vs docker run:
+═══════════════════════════════════════
+
+docker run:  Creates a NEW container from an image
+docker exec: Runs a command in an EXISTING running container
+
+docker run -it ubuntu bash    → New container, new process
+docker exec -it web bash      → Same container, additional process
+```
+
+<Callout type="warning" title="exec Only Works on Running Containers">
+You cannot `docker exec` into a stopped container:
+
+```bash
+$ docker stop web
+$ docker exec web hostname
+Error response from daemon: Container a1b2c3d4e5f6 is not running
+
+# To inspect a stopped container, start it first:
+$ docker start web
+$ docker exec web hostname
+a1b2c3d4e5f6
+```
+
+For debugging stopped containers, use `docker logs` (for output) or `docker cp` (to copy files out).
+</Callout>
+
+## docker logs: Viewing Container Output
+
+`docker logs` shows the output (STDOUT and STDERR) of a container's main process. This is your primary tool for debugging containerized applications.
+
+```bash
+# View all logs from a container:
+$ docker logs web
+/docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+/docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+/docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+10-listen-on-ipv6-by-default.sh: info: Getting the checksum of /etc/nginx/conf.d/default.conf
+10-listen-on-ipv6-by-default.sh: info: Enabled listen on [::]:80 in /etc/nginx/conf.d/default.conf
+/docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+/docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+/docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+/docker-entrypoint.sh: Configuration complete; ready for start up
+2025/01/15 10:30:00 [notice] 1#1: using the "epoll" event method
+2025/01/15 10:30:00 [notice] 1#1: nginx/1.25.3
+2025/01/15 10:30:00 [notice] 1#1: built by gcc 12.2.0 (Debian 12.2.0-14)
+2025/01/15 10:30:00 [notice] 1#1: OS: Linux 5.15.0-91-generic
+2025/01/15 10:30:00 [notice] 1#1: getrlimit(RLIMIT_NOFILE): 1048576:1048576
+2025/01/15 10:30:00 [notice] 1#1: start worker processes
+```
+
+### Log Command Options
+
+```bash
+# Show only the last N lines:
+$ docker logs --tail 5 web
+2025/01/15 10:30:00 [notice] 1#1: OS: Linux 5.15.0-91-generic
+2025/01/15 10:30:00 [notice] 1#1: getrlimit(RLIMIT_NOFILE): 1048576:1048576
+2025/01/15 10:30:00 [notice] 1#1: start worker processes
+2025/01/15 10:30:00 [notice] 1#1: start worker process 29
+2025/01/15 10:30:00 [notice] 1#1: start worker process 30
+
+# Follow logs in real-time (like tail -f):
+$ docker logs -f web
+... existing logs ...
+172.17.0.1 - - [15/Jan/2025:10:35:22 +0000] "GET / HTTP/1.1" 200 615
+172.17.0.1 - - [15/Jan/2025:10:35:25 +0000] "GET /favicon.ico HTTP/1.1" 404 153
+# New log lines appear as they happen. Press Ctrl+C to stop following.
+
+# Follow with tail (start from last 10 lines, then follow):
+$ docker logs -f --tail 10 web
+
+# Show timestamps:
+$ docker logs -t web
+2025-01-15T10:30:00.123456789Z /docker-entrypoint.sh: /docker-entrypoint.d/ is not empty...
+2025-01-15T10:30:00.234567890Z /docker-entrypoint.sh: Looking for shell scripts...
+
+# Show logs since a specific time:
+$ docker logs --since "2025-01-15T10:30:00" web
+$ docker logs --since 10m web   # Last 10 minutes
+$ docker logs --since 1h web    # Last 1 hour
+
+# Show logs until a specific time:
+$ docker logs --until "2025-01-15T10:31:00" web
+
+# Combine options:
+$ docker logs --since 5m --tail 20 -t web
+```
+
+<Callout type="tip" title="Generating Test Traffic for Logs">
+To see access logs from nginx, generate some traffic:
+
+```bash
+# In another terminal, hit the nginx container:
+$ for i in $(seq 1 10); do curl -s http://localhost:8080 > /dev/null; done
+
+# Now check the logs:
+$ docker logs --tail 10 web
+172.17.0.1 - - [15/Jan/2025:10:35:22 +0000] "GET / HTTP/1.1" 200 615
+172.17.0.1 - - [15/Jan/2025:10:35:22 +0000] "GET / HTTP/1.1" 200 615
+172.17.0.1 - - [15/Jan/2025:10:35:22 +0000] "GET / HTTP/1.1" 200 615
+...
+```
+</Callout>
+
+### Logs from Stopped Containers
+
+You can view logs from stopped containers too — this is critical for debugging crashes:
+
+```bash
+# Run a container that crashes:
+$ docker run --name crashing-app ubuntu:22.04 bash -c "echo 'Starting...'; sleep 2; echo 'Error: connection refused'; exit 1"
+Starting...
+Error: connection refused
+
+# The container has exited with code 1:
+$ docker ps -a --filter name=crashing-app
+CONTAINER ID   IMAGE          STATUS                    NAMES
+abc123def456   ubuntu:22.04   Exited (1) 5 seconds ago  crashing-app
+
+# View the logs to understand why it crashed:
+$ docker logs crashing-app
+Starting...
+Error: connection refused
+
+# Clean up:
+$ docker rm crashing-app
+```
+
+## docker inspect: Container Metadata
+
+`docker inspect` shows the complete configuration and state of a container in JSON format. It is your deep-dive debugging tool.
+
+```bash
+# Inspect a running container (full output is very long):
+$ docker inspect web
+[
+    {
+        "Id": "a1b2c3d4e5f6789...",
+        "Created": "2025-01-15T10:30:00.123456789Z",
+        "Path": "/docker-entrypoint.sh",
+        "Args": ["nginx", "-g", "daemon off;"],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Pid": 12345,
+            "ExitCode": 0,
+            "StartedAt": "2025-01-15T10:30:00.456789012Z"
+        },
+        ...
+    }
+]
+```
+
+### Extracting Specific Information
+
+Use Go template formatting to extract specific fields:
+
+```bash
+# Get the container's IP address:
+$ docker inspect web --format '{{.NetworkSettings.IPAddress}}'
+172.17.0.2
+
+# Get the container's MAC address:
+$ docker inspect web --format '{{.NetworkSettings.MacAddress}}'
+02:42:ac:11:00:02
+
+# Get the container's PID on the host:
+$ docker inspect web --format '{{.State.Pid}}'
+12345
+
+# Get the container's start time:
+$ docker inspect web --format '{{.State.StartedAt}}'
+2025-01-15T10:30:00.456789012Z
+
+# Get the container's port mappings:
+$ docker inspect web --format '{{json .NetworkSettings.Ports}}' | python3 -m json.tool
+{
+    "80/tcp": [
+        {
+            "HostIp": "0.0.0.0",
+            "HostPort": "8080"
+        }
+    ]
+}
+
+# Get the container's environment variables:
+$ docker inspect web --format '{{json .Config.Env}}' | python3 -m json.tool
+[
+    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "NGINX_VERSION=1.25.3",
+    "NJS_VERSION=0.8.2",
+    "PKG_RELEASE=1~bookworm"
+]
+
+# Get the container's mounts/volumes:
+$ docker inspect web --format '{{json .Mounts}}' | python3 -m json.tool
+
+# Get the container's log file path:
+$ docker inspect web --format '{{.LogPath}}'
+/var/lib/docker/containers/a1b2c3d4.../a1b2c3d4...-json.log
+
+# Get the image the container was created from:
+$ docker inspect web --format '{{.Config.Image}}'
+nginx
+
+# Get the container's restart policy:
+$ docker inspect web --format '{{.HostConfig.RestartPolicy.Name}}'
+no
+```
+
+<Callout type="info" title="docker inspect Is Your Best Friend for Debugging">
+When something is not working, `docker inspect` is usually the first place to look:
+
+- Container not accessible? Check `.NetworkSettings.IPAddress` and `.NetworkSettings.Ports`
+- Container crashing? Check `.State.ExitCode` and `.State.Error`
+- Wrong environment? Check `.Config.Env`
+- Storage issues? Check `.GraphDriver.Data` and `.Mounts`
+</Callout>
+
+## Additional Useful Commands
+
+### docker port: View Port Mappings
+
+```bash
+$ docker port web
+80/tcp -> 0.0.0.0:8080
+
+# Specific port:
+$ docker port web 80
+0.0.0.0:8080
+```
+
+### docker top: View Container Processes
+
+```bash
+$ docker top web
+UID    PID    PPID   C  STIME  TTY  TIME     CMD
+root   12345  12330  0  10:30  ?    00:00:00 nginx: master process nginx -g daemon off;
+nginx  12400  12345  0  10:30  ?    00:00:00 nginx: worker process
+nginx  12401  12345  0  10:30  ?    00:00:00 nginx: worker process
+```
+
+### docker stats: Live Resource Usage
+
+```bash
+# Watch resource usage in real-time:
+$ docker stats
+CONTAINER ID   NAME   CPU %   MEM USAGE / LIMIT     MEM %   NET I/O       BLOCK I/O     PIDS
+a1b2c3d4e5f6   web    0.00%   7.34MiB / 15.61GiB   0.05%   1.45kB / 0B   0B / 8.19kB   3
+b2c3d4e5f6a7   cache  0.15%   9.21MiB / 15.61GiB   0.06%   648B / 0B     0B / 0B       5
+
+# Snapshot (non-streaming):
+$ docker stats --no-stream
+CONTAINER ID   NAME   CPU %   MEM USAGE / LIMIT     MEM %   NET I/O       BLOCK I/O     PIDS
+a1b2c3d4e5f6   web    0.00%   7.34MiB / 15.61GiB   0.05%   1.45kB / 0B   0B / 8.19kB   3
+
+# Stats for specific containers:
+$ docker stats web cache
+```
+
+### docker diff: Filesystem Changes
+
+```bash
+# See what files a container has changed compared to its image:
+$ docker diff web
+C /var
+C /var/cache
+C /var/cache/nginx
+A /var/cache/nginx/client_temp
+A /var/cache/nginx/fastcgi_temp
+A /var/cache/nginx/proxy_temp
+A /var/cache/nginx/scgi_temp
+A /var/cache/nginx/uwsgi_temp
+C /run
+A /run/nginx.pid
+
+# Legend:
+# A = Added
+# C = Changed
+# D = Deleted
+```
+
+### docker cp: Copy Files To/From Containers
+
+```bash
+# Copy a file FROM a container to the host:
+$ docker cp web:/etc/nginx/nginx.conf ./nginx.conf
+Successfully copied 2.56kB to /home/user/nginx.conf
+
+# Copy a file FROM the host into a container:
+$ echo "<h1>Hello Docker!</h1>" > custom-index.html
+$ docker cp custom-index.html web:/usr/share/nginx/html/index.html
+Successfully copied 2.05kB to web:/usr/share/nginx/html/index.html
+
+# Verify:
+$ curl http://localhost:8080
+<h1>Hello Docker!</h1>
+```
+
+<Callout type="tip" title="docker cp Works on Stopped Containers">
+Unlike `docker exec`, `docker cp` works even when a container is stopped. This makes it useful for extracting log files, configuration, or crash dumps from containers that have exited.
+</Callout>
+
+## Putting It All Together: A Real Workflow
+
+Here is a realistic workflow showing how all these commands work together:
+
+```bash
+# ============================================================
+# Scenario: Deploy an nginx web server with custom content
+# ============================================================
+
+# Step 1: Run nginx with a name and port mapping
+$ docker run -d --name company-website -p 80:80 nginx
+a1b2c3d4e5f6...
+
+# Step 2: Verify it is running
+$ docker ps --filter name=company-website
+CONTAINER ID   IMAGE   STATUS         PORTS                NAMES
+a1b2c3d4e5f6   nginx   Up 5 seconds   0.0.0.0:80->80/tcp   company-website
+
+# Step 3: Test the default page
+$ curl -s http://localhost | head -5
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+
+# Step 4: Copy in custom content
+$ echo "<h1>Welcome to Acme Corp</h1><p>Powered by Docker</p>" > index.html
+$ docker cp index.html company-website:/usr/share/nginx/html/index.html
+
+# Step 5: Verify the custom content
+$ curl http://localhost
+<h1>Welcome to Acme Corp</h1><p>Powered by Docker</p>
+
+# Step 6: Check the logs
+$ docker logs company-website
+...
+172.17.0.1 - - [15/Jan/2025:10:45:00 +0000] "GET / HTTP/1.1" 200 55
+
+# Step 7: Monitor resource usage
+$ docker stats --no-stream company-website
+CONTAINER ID   NAME               CPU %   MEM USAGE    MEM %
+a1b2c3d4e5f6   company-website    0.00%   7.34MiB      0.05%
+
+# Step 8: Inspect the container
+$ docker inspect company-website --format '{{.NetworkSettings.IPAddress}}'
+172.17.0.2
+
+# Step 9: Get a shell for debugging
+$ docker exec -it company-website bash
+root@a1b2c3d4e5f6:/# nginx -t
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@a1b2c3d4e5f6:/# exit
+
+# Step 10: Clean up when done
+$ docker stop company-website
+company-website
+$ docker rm company-website
+company-website
+
+# Clean up the local file:
+$ rm index.html
+```
+
+<Exercise title="Run and Explore Your First Containers" difficulty="beginner" xpReward={30} estimatedMinutes={20}
+  objectives={["Run containers in foreground, interactive, and detached modes", "Use docker ps to list and filter containers", "Understand what happens when containers start and stop"]}
+  hints={["Use -it for interactive and -d for detached mode", "Remember docker ps shows running containers, docker ps -a shows all", "The --rm flag auto-removes containers when they exit"]}
+  validationCriteria={["Successfully run docker run hello-world and explain each step that happened", "Run an interactive Ubuntu container, install a package inside it, and exit", "Run nginx in detached mode and verify it is running with docker ps", "Use docker ps -a to show both running and stopped containers", "Stop the nginx container, verify it is stopped, then remove it"]}
+>
+
+Complete these hands-on exercises to build your container management fundamentals.
+
+**Task 1: Hello World Deep Dive**
+
+```bash
+# Run hello-world:
+docker run hello-world
+
+# Answer these questions from the output:
+# 1. Was the image pulled from Docker Hub? How can you tell?
+# 2. What is the container's status now? (use docker ps -a)
+# 3. Run it again. Is the image pulled again? Why or why not?
+```
+
+**Task 2: Interactive Container**
+
+```bash
+# Run an interactive Ubuntu container:
+docker run -it --name my-ubuntu ubuntu:22.04 bash
+
+# Inside the container:
+# 1. Check which OS version is running (cat /etc/os-release)
+# 2. Check how many processes are running (ps aux)
+# 3. Install curl: apt-get update && apt-get install -y curl
+# 4. Fetch a URL: curl -s https://httpbin.org/ip
+# 5. Create a file: echo "I was here" > /tmp/proof.txt
+# 6. Exit the container
+
+# Outside the container:
+# 7. Check the container status with docker ps -a
+# 8. Start the container again: docker start -ai my-ubuntu
+# 9. Verify your file still exists: cat /tmp/proof.txt
+# 10. Exit and remove the container
+```
+
+**Task 3: Detached Container**
+
+```bash
+# Run nginx in the background:
+docker run -d --name my-nginx nginx
+
+# 1. Verify it is running with docker ps
+# 2. Check what ports are exposed (look at the PORTS column)
+# 3. Try to access it with curl http://localhost:80 — does it work? Why or why not?
+# 4. Stop the container
+# 5. Check its status with docker ps -a (note "Exited" status)
+# 6. Start it again with docker start
+# 7. Verify it is running again
+# 8. Stop and remove it
+```
+
+**Task 4: Auto-Remove Containers**
+
+```bash
+# Run a container with --rm:
+docker run --rm ubuntu:22.04 echo "I will be removed automatically"
+
+# Check docker ps -a — is the container still there?
+# Explain why --rm is useful for one-off commands.
+```
+
+</Exercise>
+
+<Exercise title="Master Container Lifecycle Management" difficulty="intermediate" xpReward={35} estimatedMinutes={25}
+  objectives={["Use port mapping to access containerized services", "Manage multiple containers simultaneously", "Use docker exec, logs, inspect, and stats effectively"]}
+  hints={["Port mapping format is always -p host:container", "docker exec -it gives you a shell in a running container", "docker logs -f follows logs in real-time like tail -f", "docker inspect with --format extracts specific fields"]}
+  validationCriteria={["Run nginx with port mapping and successfully access it via curl from the host", "Run at least 3 containers simultaneously with different names and port mappings", "Use docker exec to modify the nginx default page and verify the change", "Use docker logs -f to follow container logs while generating traffic with curl", "Use docker inspect to find a container's IP address, PID, and environment variables", "Use docker stats to view resource usage of all running containers", "Cleanly stop and remove all containers at the end"]}
+>
+
+Build on your fundamentals by managing multiple containers and using advanced commands.
+
+**Task 1: Web Server with Port Mapping**
+
+```bash
+# Run nginx with port mapping:
+docker run -d --name webserver -p 8080:80 nginx
+
+# Access it from the host:
+curl http://localhost:8080
+
+# Modify the default page using docker exec:
+docker exec webserver bash -c 'echo "<h1>Custom Page</h1>" > /usr/share/nginx/html/index.html'
+
+# Verify:
+curl http://localhost:8080
+```
+
+**Task 2: Run Multiple Containers**
+
+```bash
+# Run three different containers:
+docker run -d --name web1 -p 8081:80 nginx
+docker run -d --name web2 -p 8082:80 httpd:2.4    # Apache HTTP Server
+docker run -d --name cache -p 6379:6379 redis:7
+
+# Verify all are running:
+docker ps
+
+# Access each web server:
+curl http://localhost:8081    # nginx
+curl http://localhost:8082    # Apache
+
+# Check resource usage of all containers:
+docker stats --no-stream
+```
+
+**Task 3: Logging Deep Dive**
+
+```bash
+# Follow nginx logs in real-time:
+# (In terminal 1)
+docker logs -f --tail 0 web1
+
+# (In terminal 2, generate traffic)
+for i in $(seq 1 20); do curl -s http://localhost:8081 > /dev/null; done
+curl http://localhost:8081/nonexistent-page    # Generate a 404
+
+# Watch the access logs appear in terminal 1
+# Press Ctrl+C to stop following
+
+# Show logs with timestamps:
+docker logs -t web1 | tail -5
+
+# Show logs from the last 2 minutes:
+docker logs --since 2m web1
+```
+
+**Task 4: Inspect and Debug**
+
+```bash
+# Find each container's IP address:
+docker inspect web1 --format '{{.NetworkSettings.IPAddress}}'
+docker inspect web2 --format '{{.NetworkSettings.IPAddress}}'
+docker inspect cache --format '{{.NetworkSettings.IPAddress}}'
+
+# Find the PID of the nginx master process:
+docker inspect web1 --format '{{.State.Pid}}'
+
+# View nginx processes:
+docker top web1
+
+# Check what files nginx has changed:
+docker diff web1
+
+# Get the full port mapping:
+docker port web1
+```
+
+**Task 5: Clean Up Everything**
+
+```bash
+# Stop all running containers:
+docker stop web1 web2 cache webserver
+
+# Remove all stopped containers:
+docker container prune -f
+
+# Verify everything is clean:
+docker ps -a
+```
+
+</Exercise>
+
+<MiniProject title="Container Management Dashboard" difficulty="intermediate" xpReward={50} estimatedMinutes={35}
+  objectives={["Deploy and manage a multi-container application stack", "Use all container lifecycle commands in a realistic workflow", "Create a monitoring and management script for running containers"]}
+  hints={["Start by planning which containers you need and their port mappings", "Use docker inspect to programmatically extract container information", "A management script can use docker ps --format to get structured output", "Think about what information an operations team needs at a glance"]}
+  validationCriteria={["Deploy at least 4 containers simulating a web application stack (web server, app server, database, cache)", "Each container has a meaningful name and appropriate port mapping", "Create a shell script that displays a dashboard showing all container names, images, status, ports, IP addresses, and resource usage", "Demonstrate the full lifecycle: deploy all containers, verify access, view logs, restart one service, then cleanly shut everything down", "The dashboard script must use docker inspect and docker stats to gather information", "Include a cleanup function in the script that stops and removes all project containers"]}
+>
+
+Create a simulated multi-container application stack and build a management dashboard for it.
+
+**Part 1: Deploy the Application Stack**
+
+Deploy a stack simulating a web application with these components:
+
+```bash
+# Web Server (nginx) — serves static content on port 8080
+docker run -d --name stack-web -p 8080:80 nginx
+
+# Application Server (Python/httpbin) — API on port 8000
+docker run -d --name stack-api -p 8000:80 kennethreitz/httpbin
+
+# Database (PostgreSQL) — on port 5432
+docker run -d --name stack-db \
+  -p 5432:5432 \
+  -e POSTGRES_PASSWORD=devpassword \
+  -e POSTGRES_DB=myapp \
+  postgres:15
+
+# Cache (Redis) — on port 6379
+docker run -d --name stack-cache -p 6379:6379 redis:7
+```
+
+Verify each service is accessible:
+
+```bash
+curl http://localhost:8080          # nginx
+curl http://localhost:8000/ip       # httpbin API
+docker exec stack-db pg_isready    # PostgreSQL
+docker exec stack-cache redis-cli ping   # Redis
+```
+
+**Part 2: Create the Dashboard Script**
+
+Write a script called `container-dashboard.sh` that displays:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║                 Container Dashboard                          ║
+║                 Generated: 2025-01-15 10:45:00              ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  Container    Image          Status    Ports        IP       ║
+║  ─────────    ─────          ──────    ─────        ──       ║
+║  stack-web    nginx          Running   8080->80     172.17.0.2║
+║  stack-api    httpbin        Running   8000->80     172.17.0.3║
+║  stack-db     postgres:15    Running   5432->5432   172.17.0.4║
+║  stack-cache  redis:7        Running   6379->6379   172.17.0.5║
+║                                                              ║
+║  Resource Usage:                                             ║
+║  Container    CPU %    Memory       PIDs                     ║
+║  ─────────    ─────    ──────       ────                     ║
+║  stack-web    0.00%    7.3 MiB     3                         ║
+║  stack-api    0.02%    32.1 MiB    4                         ║
+║  stack-db     0.05%    42.7 MiB    7                         ║
+║  stack-cache  0.10%    9.2 MiB     5                         ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+The script should:
+1. List all containers with names starting with "stack-"
+2. Show each container's name, image, status, ports, and IP
+3. Show resource usage (CPU, memory, PIDs) from docker stats
+4. Include a `--cleanup` option that stops and removes all stack containers
+
+**Part 3: Lifecycle Management**
+
+Demonstrate the following operations and capture the output:
+
+1. All 4 containers running and verified
+2. Simulate an API server crash: `docker stop stack-api`
+3. View the API server's logs before the crash: `docker logs stack-api`
+4. Restart the API server: `docker start stack-api`
+5. Verify it is back: `curl http://localhost:8000/ip`
+6. Run the dashboard script to show the current state
+7. Clean up everything: run the script with `--cleanup`
+
+Save your dashboard script as `~/container-dashboard.sh`.
+
+</MiniProject>
+
+## Key Takeaways
+
+- `docker run hello-world` involves seven steps: CLI sends request, daemon checks local images, pulls from Hub if needed, creates container, starts it, streams output, container exits
+- Interactive mode (`-it`) gives you a shell inside a container; detached mode (`-d`) runs it in the background — most production containers run detached
+- Port mapping (`-p host:container`) is required to access containerized services from outside; without it, container ports are isolated
+- Container lifecycle follows: `docker run` (create + start) → `docker stop` → `docker start` → `docker rm`; use `docker ps -a` to see all containers including stopped ones
+- `docker exec -it <name> bash` gives you a shell in a running container for debugging; `docker exec` does not affect the main container process
+- `docker logs` shows container output, with `-f` for real-time following and `--tail` for the last N lines — this is your primary debugging tool for containerized applications
+- `docker inspect` returns the complete JSON metadata for a container; use `--format` to extract specific fields like IP address, PID, ports, and environment variables
+- Containers are ephemeral by default — use `--rm` for throwaway containers and `--name` for containers you want to manage by name
+- `docker stats` provides real-time resource monitoring, `docker diff` shows filesystem changes, and `docker cp` copies files to/from containers
+
+## What's Next
+
+You are now comfortable running, managing, and debugging individual containers. In the next lesson, **Understanding Docker Images**, you will dive deeper into how images work — pulling images, understanding tags and digests, exploring image layers in detail, and learning to search Docker Hub effectively. Images are the foundation of everything you run in Docker, and understanding them thoroughly will make you a far more effective container user.

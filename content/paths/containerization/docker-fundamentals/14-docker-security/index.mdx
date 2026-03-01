@@ -1,0 +1,1695 @@
+---
+title: "Docker Security Fundamentals"
+description: "Understand the container security model, run containers as non-root users, scan images for vulnerabilities, apply resource limits, manage Linux capabilities, and follow a comprehensive security best practices checklist."
+order: 14
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - 13-container-logging
+objectives:
+  - Understand the Linux kernel features that isolate containers — namespaces, cgroups, and capabilities
+  - Build and run containers as non-root users to reduce the blast radius of a compromise
+  - Scan container images for known vulnerabilities using Docker Scout
+  - Apply resource limits and read-only filesystems to harden running containers
+  - Manage Linux capabilities to enforce the principle of least privilege
+  - Follow a comprehensive security checklist for production container deployments
+tags:
+  - docker
+  - security
+  - namespaces
+  - cgroups
+  - capabilities
+  - vulnerability-scanning
+  - devops
+---
+
+<Callout type="story" title="The Story">
+It is 2:00 AM when your phone rings. The on-call engineer explains that an attacker exploited a vulnerability in your Node.js API container. Because the container was running as root with no resource limits and full Linux capabilities, the attacker escaped the container, mounted the host filesystem, and now has access to every secret on the server — database credentials, TLS certificates, API keys. The breach affects 200,000 users. In the post-mortem, the security team identifies that every single exploit in the chain could have been prevented with basic container security practices. Today you learn those practices so this story never becomes yours.
+</Callout>
+
+## The Container Security Model
+
+Containers are not virtual machines. They share the host kernel, which means security depends on how well the kernel isolates each container. Docker relies on three Linux kernel features to create isolation boundaries.
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                         Host Operating System                      │
+│                                                                    │
+│  ┌─────────────────────────┐   ┌─────────────────────────┐        │
+│  │      Container A        │   │      Container B        │        │
+│  │                         │   │                         │        │
+│  │  ┌───────────────────┐  │   │  ┌───────────────────┐  │        │
+│  │  │   Application     │  │   │  │   Application     │  │        │
+│  │  └───────────────────┘  │   │  └───────────────────┘  │        │
+│  │                         │   │                         │        │
+│  │  Namespaces:            │   │  Namespaces:            │        │
+│  │  ├── PID  (own PID 1)   │   │  ├── PID  (own PID 1)   │        │
+│  │  ├── NET  (own eth0)    │   │  ├── NET  (own eth0)    │        │
+│  │  ├── MNT  (own /)       │   │  ├── MNT  (own /)       │        │
+│  │  ├── UTS  (own hostname)│   │  ├── UTS  (own hostname)│        │
+│  │  ├── IPC  (own shm)     │   │  ├── IPC  (own shm)     │        │
+│  │  └── USER (uid mapping) │   │  └── USER (uid mapping) │        │
+│  │                         │   │                         │        │
+│  │  Cgroups:               │   │  Cgroups:               │        │
+│  │  ├── CPU limit          │   │  ├── CPU limit          │        │
+│  │  ├── Memory limit       │   │  ├── Memory limit       │        │
+│  │  └── PID limit          │   │  └── PID limit          │        │
+│  │                         │   │                         │        │
+│  │  Capabilities:          │   │  Capabilities:          │        │
+│  │  ├── NET_BIND_SERVICE   │   │  ├── CHOWN             │        │
+│  │  └── (minimal set)      │   │  └── (minimal set)      │        │
+│  └─────────────────────────┘   └─────────────────────────┘        │
+│                                                                    │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                     Shared Linux Kernel                       │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### Linux Namespaces
+
+Namespaces provide the illusion that each container has its own isolated system. Each namespace type isolates a different aspect of the operating system.
+
+| Namespace | Flag | What It Isolates | What Container Sees |
+|-----------|------|-----------------|-------------------|
+| **PID** | `CLONE_NEWPID` | Process IDs | Its own PID 1, cannot see host processes |
+| **NET** | `CLONE_NEWNET` | Network stack | Own IP address, interfaces, routing table |
+| **MNT** | `CLONE_NEWNS` | Filesystem mounts | Own root filesystem, independent mount points |
+| **UTS** | `CLONE_NEWUTS` | Hostname and domain | Own hostname, set independently |
+| **IPC** | `CLONE_NEWIPC` | Inter-process communication | Own shared memory, semaphores, message queues |
+| **USER** | `CLONE_NEWUSER` | User and group IDs | Can map container root to unprivileged host user |
+
+```bash
+# See the namespaces of a running container
+docker run -d --name ns-demo alpine sleep 3600
+
+# Get the container's PID on the host
+CONTAINER_PID=$(docker inspect ns-demo --format '{{.State.Pid}}')
+echo "Container PID on host: $CONTAINER_PID"
+
+# List all namespaces for this process
+sudo ls -la /proc/$CONTAINER_PID/ns/
+# lrwxrwxrwx 1 root root 0 Jan 15 10:30 cgroup -> 'cgroup:[4026531835]'
+# lrwxrwxrwx 1 root root 0 Jan 15 10:30 ipc -> 'ipc:[4026532456]'
+# lrwxrwxrwx 1 root root 0 Jan 15 10:30 mnt -> 'mnt:[4026532454]'
+# lrwxrwxrwx 1 root root 0 Jan 15 10:30 net -> 'net:[4026532459]'
+# lrwxrwxrwx 1 root root 0 Jan 15 10:30 pid -> 'pid:[4026532457]'
+# lrwxrwxrwx 1 root root 0 Jan 15 10:30 user -> 'user:[4026531837]'
+# lrwxrwxrwx 1 root root 0 Jan 15 10:30 uts -> 'uts:[4026532455]'
+
+# Compare with host namespaces — different IDs mean isolation
+sudo ls -la /proc/1/ns/
+
+# PID namespace demonstration
+docker exec ns-demo ps aux
+# PID   USER     TIME  COMMAND
+# 1     root     0:00  sleep 3600      <-- PID 1 inside container
+# 7     root     0:00  ps aux
+
+# On the host, the same process has a different PID
+ps aux | grep "sleep 3600"
+# root  28456  0.0  0.0  1636  4  ?  Ss  10:30  0:00  sleep 3600
+
+docker rm -f ns-demo
+```
+
+### Control Groups (cgroups)
+
+Cgroups limit how much of the host's resources a container can use. Without cgroups, a single container could consume all available CPU, memory, or process slots and starve every other container and the host itself.
+
+```bash
+# Run a container with resource limits
+docker run -d --name cgroup-demo \
+  --memory 128m \
+  --cpus 0.5 \
+  --pids-limit 50 \
+  alpine sleep 3600
+
+# View the cgroup limits
+CONTAINER_ID=$(docker inspect cgroup-demo --format '{{.Id}}')
+
+# Memory limit (in bytes)
+docker inspect cgroup-demo --format '{{.HostConfig.Memory}}'
+# 134217728  (128 * 1024 * 1024 = 134217728 bytes)
+
+# CPU limit
+docker inspect cgroup-demo --format '{{.HostConfig.NanoCpus}}'
+# 500000000  (0.5 CPUs = 500,000,000 nanoseconds per second)
+
+# PID limit
+docker inspect cgroup-demo --format '{{.HostConfig.PidsLimit}}'
+# 50
+
+docker rm -f cgroup-demo
+```
+
+### Linux Capabilities
+
+Traditional Unix has a binary privilege model: you are either root (UID 0) with all privileges or a normal user with limited privileges. Linux capabilities break root's privileges into fine-grained units. Docker drops most capabilities by default, but the default set is still more than most applications need.
+
+```bash
+# See the default capabilities Docker grants
+docker run --rm alpine sh -c 'cat /proc/1/status | grep Cap'
+# CapInh: 0000000000000000
+# CapPrm: 00000000a80425fb
+# CapEff: 00000000a80425fb
+
+# Decode the capability bitmask
+docker run --rm alpine sh -c 'apk add -q libcap && capsh --decode=00000000a80425fb'
+# 0x00000000a80425fb=cap_chown,cap_dac_override,cap_fowner,cap_fsetid,
+# cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_net_bind_service,
+# cap_net_raw,cap_sys_chroot,cap_mknod,cap_audit_write,cap_setfcap
+```
+
+<Callout type="info" title="Default Docker Capabilities">
+Docker grants 14 capabilities by default. This is far fewer than the full set of 40+ capabilities available to root on a Linux system, but it is still more than most applications need. The principle of least privilege says you should drop all capabilities and only add back the ones your application actually requires.
+</Callout>
+
+## Running as Non-Root
+
+By default, containers run as root (UID 0). This is the single most common container security mistake. If an attacker exploits a vulnerability in your application, they gain root access inside the container. Combined with certain misconfigurations or kernel vulnerabilities, this can lead to host compromise.
+
+### Why Running as Root Is Dangerous
+
+```
+Scenario: Attacker exploits a code injection vulnerability
+
+Running as root:
+┌────────────────────────────┐
+│ Container (running as root)│
+│                            │
+│ Attacker can:              │
+│ ├── Read /etc/shadow       │
+│ ├── Install packages       │
+│ ├── Modify any file        │
+│ ├── Bind to port 80        │
+│ ├── Change network config  │
+│ ├── Mount host filesystems │ ← If --privileged or capabilities allow
+│ └── Escape container       │ ← Via kernel exploits
+└────────────────────────────┘
+
+Running as non-root:
+┌────────────────────────────┐
+│ Container (running as app) │
+│                            │
+│ Attacker can:              │
+│ ├── Read app files only    │
+│ ├── Cannot install packages│
+│ ├── Cannot modify /etc     │
+│ ├── Cannot bind port < 1024│
+│ ├── Cannot access kernel   │
+│ └── Much harder to escape  │
+└────────────────────────────┘
+```
+
+### The USER Instruction
+
+```dockerfile
+# BAD: Running as root (default)
+FROM node:20-alpine
+WORKDIR /app
+COPY . .
+RUN npm ci --only=production
+EXPOSE 3000
+CMD ["node", "server.js"]
+# Process runs as root inside the container
+```
+
+```dockerfile
+# GOOD: Running as non-root user
+FROM node:20-alpine
+
+# Create a dedicated application user and group
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+
+# Copy files and set ownership
+COPY --chown=appuser:appgroup . .
+
+# Install dependencies as root (needed for npm)
+RUN npm ci --only=production
+
+# Switch to non-root user BEFORE CMD
+USER appuser
+
+EXPOSE 3000
+CMD ["node", "server.js"]
+# Process runs as appuser (UID 1001) inside the container
+```
+
+```bash
+# Verify the user inside the container
+docker build -t secure-app .
+docker run --rm secure-app whoami
+# appuser
+
+docker run --rm secure-app id
+# uid=1001(appuser) gid=1001(appgroup) groups=1001(appgroup)
+
+# Try to write to a system directory — permission denied
+docker run --rm secure-app sh -c 'touch /etc/test'
+# touch: /etc/test: Permission denied
+
+# Try to install packages — permission denied
+docker run --rm secure-app sh -c 'apk add curl'
+# ERROR: Unable to lock database: Permission denied
+```
+
+<Callout type="warning" title="USER Instruction Placement Matters">
+Place the `USER` instruction as late as possible in your Dockerfile, but before `CMD` or `ENTRYPOINT`. Some build steps (like `npm install` or `apt-get`) require root. Switch to the non-root user after all privileged operations are complete. Everything after the `USER` instruction runs as that user, including `CMD`.
+</Callout>
+
+### Non-Root in Multi-Stage Builds
+
+```dockerfile
+# Build stage — root is fine here (temporary, discarded)
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json .
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Production stage — non-root is critical
+FROM node:20-alpine AS production
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+
+# Copy built files with correct ownership
+COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
+COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --from=builder --chown=appuser:appgroup /app/package.json .
+
+USER appuser
+
+EXPOSE 3000
+CMD ["node", "dist/server.js"]
+```
+
+### Common Non-Root Patterns for Popular Images
+
+```dockerfile
+# Node.js — built-in 'node' user (UID 1000)
+FROM node:20-alpine
+WORKDIR /app
+COPY --chown=node:node . .
+RUN npm ci --only=production
+USER node
+CMD ["node", "server.js"]
+
+# Python
+FROM python:3.12-slim
+RUN useradd --create-home --shell /bin/bash appuser
+WORKDIR /home/appuser/app
+COPY --chown=appuser:appuser . .
+RUN pip install --no-cache-dir -r requirements.txt
+USER appuser
+CMD ["python", "app.py"]
+
+# Go — scratch image, no users at all
+FROM golang:1.22 AS builder
+WORKDIR /app
+COPY . .
+RUN CGO_ENABLED=0 go build -o /server
+
+FROM scratch
+COPY --from=builder /server /server
+# In scratch, there are no users — process runs as UID 0
+# but the binary has no shell, no utilities, nothing to exploit
+USER 65534
+ENTRYPOINT ["/server"]
+
+# Nginx — official image supports non-root
+FROM nginx:alpine
+# Nginx listens on port 8080 when non-root
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx html/ /usr/share/nginx/html/
+USER nginx
+EXPOSE 8080
+```
+
+## Image Security
+
+The container image is the foundation of your application. If the image contains known vulnerabilities, your running container inherits every one of them.
+
+### Using Official and Verified Images
+
+```bash
+# GOOD: Use Docker Official Images
+docker pull node:20-alpine          # Official, maintained by Docker
+docker pull postgres:16-alpine      # Official, regularly updated
+docker pull nginx:alpine            # Official, patched quickly
+
+# GOOD: Use Docker Verified Publisher images
+docker pull bitnami/redis:7.0       # Verified publisher
+docker pull grafana/grafana:10.2    # Verified publisher
+
+# BAD: Random user images
+docker pull randomuser123/node-app  # Unknown source, no verification
+docker pull hackernews/webapp       # Could contain anything
+
+# Check if an image is official
+docker search --filter is-official=true nginx
+# NAME    DESCRIPTION                                     STARS   OFFICIAL
+# nginx   Official build of Nginx.                        19000   [OK]
+```
+
+<Callout type="tip" title="Use Minimal Base Images">
+Alpine-based images are much smaller and have a much smaller attack surface than full Debian or Ubuntu images. Fewer packages installed means fewer potential vulnerabilities.
+
+```bash
+# Compare image sizes
+docker images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}"
+# node:20           1.1GB    ← Full Debian, thousands of packages
+# node:20-slim      240MB    ← Reduced Debian
+# node:20-alpine    135MB    ← Alpine Linux, minimal packages
+
+# For Go, Rust, or static binaries — use scratch
+# scratch           0B       ← Nothing. No shell, no OS, no attack surface.
+```
+</Callout>
+
+### Scanning Images with Docker Scout
+
+Docker Scout analyzes your images for known vulnerabilities (CVEs) by checking every package against vulnerability databases.
+
+```bash
+# Scan an image for vulnerabilities
+docker scout cves nginx:latest
+
+# Example output:
+#    ✗ HIGH    CVE-2023-44487 — HTTP/2 rapid reset attack
+#              Package: nghttp2 1.55.1-1
+#              Fixed in: 1.57.0-1
+#              CVSS: 7.5
+#
+#    ✗ MEDIUM  CVE-2023-45853 — zlib integer overflow
+#              Package: zlib 1:1.2.13.dfsg-1
+#              Fixed in: 1:1.3.dfsg-1
+#              CVSS: 5.3
+#
+#    ✗ LOW     CVE-2023-50495 — ncurses memory leak
+#              Package: ncurses 6.4-4
+#              Fixed in: 6.4+20231016-1
+#              CVSS: 3.3
+#
+#  Summary:
+#    Target: nginx:latest
+#    Vulnerabilities: 3 high, 12 medium, 28 low
+
+# Scan with specific output format
+docker scout cves --format markdown nginx:latest
+
+# Compare two image versions
+docker scout compare nginx:1.24 --to nginx:1.25
+
+# Scan a local image you built
+docker build -t myapp:latest .
+docker scout cves myapp:latest
+
+# Quick overview without full details
+docker scout quickview nginx:latest
+#  Target: nginx:latest
+#  Base image: debian:bookworm-slim
+#
+#  Vulnerabilities:
+#    Critical: 0
+#    High:     3
+#    Medium:   12
+#    Low:      28
+#    Info:     5
+```
+
+### Dockerfile Security Scanning Best Practices
+
+```dockerfile
+# 1. Pin exact versions — do not use :latest
+FROM node:20.11.0-alpine3.19
+
+# 2. Pin package versions in system installs
+RUN apk add --no-cache \
+    curl=8.5.0-r0 \
+    dumb-init=1.2.5-r3
+
+# 3. Use COPY instead of ADD (ADD can auto-extract archives, fetch URLs)
+COPY package.json .
+# NOT: ADD package.json .
+# NOT: ADD https://example.com/app.tar.gz /app/
+
+# 4. Do not store secrets in the image
+# BAD:
+# ENV DATABASE_PASSWORD=mysecretpassword
+# COPY .env /app/.env
+# GOOD: Pass secrets at runtime via environment variables or Docker secrets
+
+# 5. Use .dockerignore to exclude sensitive files
+# .dockerignore:
+# .env
+# .git
+# *.pem
+# *.key
+# credentials.json
+# node_modules
+```
+
+<Callout type="warning" title="Never Embed Secrets in Images">
+Secrets added via `ENV`, `COPY`, or `ARG` in a Dockerfile are baked into the image layers. Anyone who can pull the image can extract those secrets, even if you delete them in a later layer. Use runtime environment variables, Docker secrets, or a secrets manager instead.
+</Callout>
+
+## Read-Only Containers
+
+A read-only container cannot modify its own filesystem. If an attacker gains access, they cannot install tools, modify binaries, or plant backdoors.
+
+```bash
+# Run a container with a read-only filesystem
+docker run --rm --read-only alpine sh -c 'touch /test'
+# touch: /test: Read-only file system
+
+# Most applications need some writable directories for temp files,
+# caches, or PID files. Use tmpfs mounts for those:
+docker run -d \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --tmpfs /var/run:rw,noexec,nosuid,size=1m \
+  nginx:alpine
+
+# Verify the filesystem is read-only
+docker exec $(docker ps -q -l) sh -c 'touch /usr/share/test'
+# touch: /usr/share/test: Read-only file system
+
+# But /tmp is writable
+docker exec $(docker ps -q -l) sh -c 'touch /tmp/test && echo "success"'
+# success
+```
+
+### Read-Only with Docker Compose
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=1m
+    security_opt:
+      - no-new-privileges:true
+
+  nginx:
+    image: nginx:alpine
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=1m
+      - /var/cache/nginx:rw,noexec,nosuid,size=128m
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro  # Config as read-only volume
+```
+
+<Callout type="info" title="Common tmpfs Paths by Application">
+
+| Application | Writable Paths Needed |
+|------------|---------------------|
+| Nginx | `/tmp`, `/var/run`, `/var/cache/nginx` |
+| Node.js | `/tmp` |
+| Python | `/tmp`, possibly `__pycache__` directories |
+| PostgreSQL | Cannot run read-only (needs data directory) |
+| Redis | `/data` (if persistence enabled), `/tmp` |
+
+The `noexec` flag on tmpfs prevents executing binaries from the writable directory, adding another layer of defense.
+</Callout>
+
+## Resource Limits
+
+Without resource limits, a single container can consume all available host resources — starving every other container, the Docker daemon, and the host OS itself. This enables denial-of-service attacks, both intentional and accidental.
+
+### Memory Limits
+
+```bash
+# Limit container to 256 MB of memory
+docker run -d --name mem-demo --memory 256m nginx:alpine
+
+# Set memory + swap limit (total memory available)
+docker run -d --name mem-swap-demo \
+  --memory 256m \
+  --memory-swap 512m \
+  nginx:alpine
+# Container gets 256 MB RAM + 256 MB swap = 512 MB total
+
+# Disable swap entirely
+docker run -d --name no-swap \
+  --memory 256m \
+  --memory-swap 256m \
+  nginx:alpine
+# --memory-swap equal to --memory means zero swap
+
+# Memory reservation (soft limit)
+docker run -d --name mem-soft \
+  --memory 512m \
+  --memory-reservation 256m \
+  nginx:alpine
+
+# What happens when a container exceeds its memory limit?
+docker run --rm --memory 64m alpine sh -c '
+  echo "Allocating memory..."
+  dd if=/dev/zero of=/dev/null bs=128M count=1
+  # Container is killed by the OOM killer
+'
+# The container is terminated with exit code 137 (SIGKILL from OOM)
+```
+
+### CPU Limits
+
+```bash
+# Limit to 0.5 CPUs (50% of one core)
+docker run -d --name cpu-half --cpus 0.5 nginx:alpine
+
+# Limit to 2 CPUs
+docker run -d --name cpu-two --cpus 2 nginx:alpine
+
+# CPU shares (relative weight, default 1024)
+docker run -d --name cpu-high --cpu-shares 2048 nginx:alpine
+docker run -d --name cpu-low --cpu-shares 512 nginx:alpine
+# cpu-high gets 4x more CPU than cpu-low when both compete
+
+# Pin to specific CPU cores
+docker run -d --name cpu-pinned --cpuset-cpus "0,1" nginx:alpine
+# Container can only use CPU cores 0 and 1
+```
+
+### PID Limits
+
+```bash
+# Limit the number of processes a container can create
+docker run -d --name pid-demo --pids-limit 50 nginx:alpine
+
+# Fork bomb protection
+docker run --rm --pids-limit 20 alpine sh -c '
+  # Try a fork bomb
+  :(){ :|:& };:
+'
+# Container cannot create more than 20 processes
+# Without this limit, a fork bomb crashes the entire host
+
+# Verify the limit
+docker inspect pid-demo --format '{{.HostConfig.PidsLimit}}'
+# 50
+```
+
+### Resource Limits in Docker Compose
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 100
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  worker:
+    image: myapp:latest
+    command: ["node", "worker.js"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+          pids: 50
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+  db:
+    image: postgres:16-alpine
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+          pids: 200
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+```
+
+<Callout type="warning" title="Always Set Memory Limits in Production">
+A container without a memory limit can use all available host memory. When the host runs out of memory, the Linux OOM (Out Of Memory) killer starts terminating processes — and it might kill the Docker daemon, your database, or other critical services. Always set `--memory` limits on every production container.
+</Callout>
+
+## Capability Management
+
+Instead of granting a container full root privileges, you should drop all capabilities and add back only what the application actually needs.
+
+### Default Capabilities
+
+Docker grants these capabilities by default:
+
+| Capability | Purpose |
+|-----------|---------|
+| `CHOWN` | Change file ownership |
+| `DAC_OVERRIDE` | Bypass file permission checks |
+| `FOWNER` | Bypass permission checks on file owner |
+| `FSETID` | Set SUID/SGID bits |
+| `KILL` | Send signals to processes |
+| `SETGID` | Set group ID |
+| `SETUID` | Set user ID |
+| `SETPCAP` | Modify process capabilities |
+| `NET_BIND_SERVICE` | Bind to ports below 1024 |
+| `NET_RAW` | Use raw sockets |
+| `SYS_CHROOT` | Use chroot |
+| `MKNOD` | Create special files |
+| `AUDIT_WRITE` | Write to audit log |
+| `SETFCAP` | Set file capabilities |
+
+### Dropping and Adding Capabilities
+
+```bash
+# Drop ALL capabilities, then add only what's needed
+docker run --rm \
+  --cap-drop ALL \
+  --cap-add NET_BIND_SERVICE \
+  nginx:alpine
+
+# This container can ONLY bind to privileged ports (< 1024)
+# It cannot: change file ownership, send signals, use raw sockets, etc.
+
+# For an application that needs no special privileges at all:
+docker run --rm \
+  --cap-drop ALL \
+  myapp:latest
+
+# Drop a specific dangerous capability
+docker run --rm \
+  --cap-drop NET_RAW \
+  --cap-drop SYS_CHROOT \
+  myapp:latest
+
+# Check what capabilities a container has
+docker run --rm --cap-drop ALL --cap-add NET_BIND_SERVICE alpine sh -c '
+  apk add -q libcap && capsh --print
+'
+# Current: cap_net_bind_service=eip
+# (only NET_BIND_SERVICE is available)
+```
+
+### Capability Recommendations by Application Type
+
+| Application Type | Capabilities Needed | Command |
+|-----------------|-------------------|---------|
+| Web server (port 80/443) | `NET_BIND_SERVICE` | `--cap-drop ALL --cap-add NET_BIND_SERVICE` |
+| Web server (port 8080+) | None | `--cap-drop ALL` |
+| Node.js / Python API | None | `--cap-drop ALL` |
+| Network diagnostics | `NET_RAW` | `--cap-drop ALL --cap-add NET_RAW` |
+| Process management | `KILL`, `SETUID`, `SETGID` | `--cap-drop ALL --cap-add KILL --cap-add SETUID --cap-add SETGID` |
+
+<Callout type="tip" title="The --privileged Flag Is Almost Never Needed">
+The `--privileged` flag grants ALL capabilities, disables seccomp, disables AppArmor, and gives the container access to all host devices. This essentially removes all container isolation. Very few applications genuinely need this. If you find yourself using `--privileged`, consider which specific capability you actually need and use `--cap-add` instead.
+
+```bash
+# NEVER do this in production
+docker run --privileged myapp:latest   # DANGEROUS
+
+# Instead, identify the specific capability
+docker run --cap-add SYS_PTRACE myapp:latest   # Much safer
+```
+</Callout>
+
+### The no-new-privileges Flag
+
+```bash
+# Prevent processes from gaining additional privileges via SUID binaries
+docker run --rm \
+  --security-opt no-new-privileges:true \
+  myapp:latest
+
+# In Docker Compose:
+# services:
+#   api:
+#     security_opt:
+#       - no-new-privileges:true
+```
+
+This prevents an attacker from using `setuid` binaries inside the container to escalate privileges, even if such binaries exist in the image.
+
+## Docker Content Trust
+
+Docker Content Trust (DCT) uses digital signatures to verify the integrity and publisher of images. When enabled, Docker only pulls images that have been signed by their publisher.
+
+```bash
+# Enable Docker Content Trust
+export DOCKER_CONTENT_TRUST=1
+
+# Now pulls only work for signed images
+docker pull nginx:latest
+# Pull with DCT: signed image verified ✓
+
+docker pull randomuser/unsigned-image:latest
+# Error: remote trust data does not exist
+# No valid trust data for unsigned-image
+
+# Disable for a single command
+DOCKER_CONTENT_TRUST=0 docker pull randomuser/unsigned-image:latest
+
+# Sign your own images (requires Notary setup)
+# 1. Generate a signing key
+docker trust key generate mykey
+
+# 2. Add the signer to a repository
+docker trust signer add --key mykey.pub myname registry.example.com/myapp
+
+# 3. Sign and push
+docker trust sign registry.example.com/myapp:1.0.0
+
+# 4. Verify signatures
+docker trust inspect registry.example.com/myapp:1.0.0
+```
+
+<Callout type="info" title="Docker Content Trust in CI/CD">
+Enable `DOCKER_CONTENT_TRUST=1` in your CI/CD pipelines to ensure that only signed base images are used during builds. This prevents supply chain attacks where an attacker pushes a malicious image with the same name as a trusted image.
+</Callout>
+
+## Seccomp Profiles
+
+Seccomp (Secure Computing Mode) filters which system calls a container can make. Docker applies a default seccomp profile that blocks approximately 44 of the 300+ available system calls — including dangerous ones like `reboot`, `mount`, and `kexec_load`.
+
+```bash
+# Docker's default seccomp profile blocks these dangerous syscalls:
+# - mount / umount      (filesystem manipulation)
+# - reboot              (reboot the host)
+# - kexec_load          (load a new kernel)
+# - open_by_handle_at   (bypass file permissions)
+# - init_module          (load kernel modules)
+# - delete_module        (unload kernel modules)
+# - settimeofday        (change system time)
+# - swapon / swapoff    (manage swap)
+# - ptrace              (process debugging/tracing)
+
+# Run with the default seccomp profile (automatic)
+docker run --rm nginx:alpine
+# Default seccomp profile is applied automatically
+
+# Run with a custom seccomp profile
+docker run --rm \
+  --security-opt seccomp=/path/to/custom-profile.json \
+  nginx:alpine
+
+# Disable seccomp entirely (DANGEROUS — never do this in production)
+docker run --rm \
+  --security-opt seccomp=unconfined \
+  nginx:alpine
+
+# View Docker's default seccomp profile
+# https://github.com/moby/moby/blob/master/profiles/seccomp/default.json
+```
+
+### Custom Seccomp Profile Example
+
+```json
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "defaultErrnoRet": 1,
+  "architectures": ["SCMP_ARCH_X86_64"],
+  "syscalls": [
+    {
+      "names": [
+        "accept", "accept4", "access", "bind", "brk",
+        "clone", "close", "connect", "dup", "dup2",
+        "epoll_create", "epoll_ctl", "epoll_wait",
+        "execve", "exit", "exit_group",
+        "fcntl", "fstat", "futex",
+        "getdents64", "getpid", "getsockname",
+        "ioctl", "listen", "lseek",
+        "mmap", "mprotect", "munmap",
+        "nanosleep", "open", "openat",
+        "poll", "read", "readlink",
+        "recvfrom", "recvmsg",
+        "rt_sigaction", "rt_sigprocmask",
+        "sendmsg", "sendto", "set_tid_address",
+        "setsockopt", "socket", "stat",
+        "write", "writev"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    }
+  ]
+}
+```
+
+## AppArmor Basics
+
+AppArmor is a Linux Security Module that confines programs to a limited set of resources. Docker applies a default AppArmor profile called `docker-default` to all containers.
+
+```bash
+# Check if AppArmor is enabled on your system
+sudo aa-status
+# apparmor module is loaded.
+# 24 profiles are loaded.
+
+# See the AppArmor profile applied to a container
+docker inspect mycontainer --format '{{.AppArmorProfile}}'
+# docker-default
+
+# Docker's default AppArmor profile:
+# - Prevents writing to /proc and /sys
+# - Prevents mounting filesystems
+# - Prevents accessing raw network sockets (some)
+# - Prevents changing the container's AppArmor profile
+# - Prevents ptrace on other containers' processes
+
+# Run with a custom AppArmor profile
+docker run --rm \
+  --security-opt apparmor=my-custom-profile \
+  nginx:alpine
+
+# Disable AppArmor for a container (NOT recommended)
+docker run --rm \
+  --security-opt apparmor=unconfined \
+  nginx:alpine
+```
+
+<Callout type="info" title="AppArmor vs Seccomp">
+AppArmor and seccomp are complementary, not competing, technologies. Seccomp filters system calls (what operations a process can request from the kernel). AppArmor restricts file access, network access, and capability usage (what resources a process can touch). Docker applies both by default, and you should keep both enabled.
+</Callout>
+
+## Security Best Practices Checklist
+
+Follow this checklist for every container you deploy:
+
+### Image Security
+
+1. **Use official or verified base images** — Never base your image on an unknown publisher's image
+2. **Pin image versions** — Use `node:20.11.0-alpine3.19`, never `node:latest`
+3. **Use minimal base images** — Prefer Alpine or distroless images to reduce attack surface
+4. **Scan images for vulnerabilities** — Run `docker scout cves` in CI/CD and block deploys with critical CVEs
+5. **Use multi-stage builds** — Keep build tools out of production images
+6. **Never embed secrets in images** — No passwords, API keys, or certificates in Dockerfiles
+
+### Runtime Security
+
+7. **Run as non-root** — Use the `USER` instruction in every Dockerfile
+8. **Drop all capabilities** — Use `--cap-drop ALL` and add back only what is needed
+9. **Use read-only filesystems** — `--read-only` with tmpfs for writable paths
+10. **Set resource limits** — Always set `--memory`, `--cpus`, and `--pids-limit`
+11. **Enable no-new-privileges** — `--security-opt no-new-privileges:true`
+12. **Keep seccomp and AppArmor enabled** — Never run with `seccomp=unconfined` or `apparmor=unconfined`
+
+### Network Security
+
+13. **Use user-defined networks** — Never use the default bridge network in production
+14. **Do not expose unnecessary ports** — Only publish ports that need external access
+15. **Use internal networks** — Backend services should not be reachable from outside
+
+### Operational Security
+
+16. **Enable Docker Content Trust** — `DOCKER_CONTENT_TRUST=1` to verify image signatures
+17. **Keep Docker updated** — Apply security patches to the Docker engine promptly
+18. **Audit container access** — Log who runs `docker exec` and when
+19. **Use secrets management** — Docker secrets, Vault, or cloud provider secrets managers
+20. **Never use `--privileged`** — Identify the specific capability and use `--cap-add` instead
+
+## Common Container Vulnerabilities and Mitigations
+
+### 1. Container Escape via Kernel Exploit
+
+```
+Attack: Exploit a kernel vulnerability to break out of namespace isolation
+Risk:   Critical — full host compromise
+```
+
+**Mitigations:**
+- Keep the host kernel updated
+- Run containers as non-root
+- Drop all unnecessary capabilities
+- Enable seccomp and AppArmor
+- Consider user namespace remapping
+
+### 2. Supply Chain Attack via Malicious Image
+
+```
+Attack: Pull and run an image that contains malware or backdoors
+Risk:   Critical — immediate code execution
+```
+
+**Mitigations:**
+- Only use official or verified images
+- Enable Docker Content Trust
+- Scan every image before deployment
+- Use a private registry with access controls
+
+### 3. Secrets Exposure
+
+```
+Attack: Extract secrets from image layers, environment variables, or logs
+Risk:   High — credential theft
+```
+
+**Mitigations:**
+- Never put secrets in Dockerfiles
+- Use Docker secrets or external secrets managers
+- Audit image layers: `docker history myimage`
+- Redact sensitive data from logs
+
+### 4. Denial of Service via Resource Exhaustion
+
+```
+Attack: Container consumes all CPU, memory, or PIDs on the host
+Risk:   High — service outage
+```
+
+**Mitigations:**
+- Set memory limits on every container
+- Set CPU limits on every container
+- Set PID limits to prevent fork bombs
+- Monitor resource usage with `docker stats`
+
+### 5. Network Exposure
+
+```
+Attack: Access internal services through overly permissive network configuration
+Risk:   Medium — unauthorized access to internal services
+```
+
+**Mitigations:**
+- Use user-defined bridge networks
+- Use internal networks for backend services
+- Publish only necessary ports
+- Implement application-level authentication
+
+```bash
+# Example: Properly isolated network setup
+docker network create --internal backend
+docker network create frontend
+
+# Database is ONLY on the internal network
+docker run -d --name db --network backend postgres:16-alpine
+
+# API connects to both networks
+docker run -d --name api --network frontend myapp:latest
+docker network connect backend api
+
+# Database is unreachable from outside — no published ports, internal network only
+```
+
+<Exercise title="Secure a Container with Defense in Depth" difficulty="intermediate" xpReward={30} estimatedMinutes={20}>
+
+Apply multiple layers of security to a container running a simple web application:
+
+1. Create a Dockerfile that runs as a non-root user
+2. Run the container with a read-only filesystem and tmpfs for writable paths
+3. Drop all capabilities and add back only what is needed
+4. Apply memory, CPU, and PID limits
+5. Enable no-new-privileges
+6. Verify each security measure is working
+
+**Objectives:**
+- Build an image with a non-root USER instruction
+- Run a container with `--read-only`, `--cap-drop ALL`, and resource limits
+- Verify the container cannot write to the filesystem or escalate privileges
+- Confirm resource limits are enforced
+
+**Hints:**
+- Use `alpine` or `node:20-alpine` as your base image
+- A simple HTTP server on port 8080 does not need any capabilities
+- Use `--tmpfs /tmp:rw,noexec,nosuid,size=32m` for writable temp space
+- Check limits with `docker inspect`
+
+<CollapsibleSolution>
+
+```bash
+# Create project directory
+mkdir -p ~/secure-container-demo
+
+# Create a simple web server
+cat > ~/secure-container-demo/server.js << 'EOF'
+const http = require('http');
+
+const server = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'healthy',
+      user: process.env.USER || 'unknown',
+      uid: process.getuid(),
+      pid: process.pid,
+      uptime: Math.floor(process.uptime())
+    }));
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Secure container demo\n');
+});
+
+server.listen(8080, () => {
+  console.log(`Server running as UID ${process.getuid()} on port 8080`);
+});
+EOF
+
+# Create a secure Dockerfile
+cat > ~/secure-container-demo/Dockerfile << 'EOF'
+FROM node:20-alpine
+
+# Create non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+
+# Copy application with correct ownership
+COPY --chown=appuser:appgroup server.js .
+
+# Switch to non-root user
+USER appuser
+
+EXPOSE 8080
+
+CMD ["node", "server.js"]
+EOF
+
+# Build the image
+cd ~/secure-container-demo
+docker build -t secure-demo:latest .
+
+# Run with ALL security measures applied
+docker run -d \
+  --name secure-app \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+  --cap-drop ALL \
+  --memory 128m \
+  --memory-swap 128m \
+  --cpus 0.5 \
+  --pids-limit 30 \
+  --security-opt no-new-privileges:true \
+  -p 8080:8080 \
+  secure-demo:latest
+
+# Wait for startup
+sleep 3
+
+# ============================================
+# VERIFY SECURITY MEASURES
+# ============================================
+
+echo "=== 1. Verify non-root user ==="
+docker exec secure-app whoami
+# appuser
+docker exec secure-app id
+# uid=1001(appuser) gid=1001(appgroup) groups=1001(appgroup)
+
+echo ""
+echo "=== 2. Verify read-only filesystem ==="
+docker exec secure-app sh -c 'touch /test 2>&1 || echo "BLOCKED: Cannot write to root filesystem"'
+# BLOCKED: Cannot write to root filesystem
+
+docker exec secure-app sh -c 'touch /app/test 2>&1 || echo "BLOCKED: Cannot write to app directory"'
+# BLOCKED: Cannot write to app directory
+
+echo ""
+echo "=== 3. Verify tmpfs is writable ==="
+docker exec secure-app sh -c 'touch /tmp/test && echo "OK: /tmp is writable" && rm /tmp/test'
+# OK: /tmp is writable
+
+echo ""
+echo "=== 4. Verify capabilities are dropped ==="
+docker inspect secure-app --format '{{.HostConfig.CapDrop}}'
+# [ALL]
+docker inspect secure-app --format '{{.HostConfig.CapAdd}}'
+# []
+
+echo ""
+echo "=== 5. Verify resource limits ==="
+docker inspect secure-app --format 'Memory: {{.HostConfig.Memory}}'
+# Memory: 134217728  (128 MB)
+docker inspect secure-app --format 'CPUs: {{.HostConfig.NanoCpus}}'
+# CPUs: 500000000  (0.5)
+docker inspect secure-app --format 'PIDs: {{.HostConfig.PidsLimit}}'
+# PIDs: 30
+
+echo ""
+echo "=== 6. Verify no-new-privileges ==="
+docker inspect secure-app --format '{{.HostConfig.SecurityOpt}}'
+# [no-new-privileges:true]
+
+echo ""
+echo "=== 7. Test the application works ==="
+curl -s http://localhost:8080/health | python3 -m json.tool
+# {
+#     "status": "healthy",
+#     "user": "appuser",
+#     "uid": 1001,
+#     "pid": 1,
+#     "uptime": 5
+# }
+
+echo ""
+echo "=== 8. Verify application is functional ==="
+curl -s http://localhost:8080/
+# Secure container demo
+
+# Clean up
+docker rm -f secure-app
+```
+
+This exercise applies defense in depth — multiple independent security layers. Even if one layer fails (for example, if a kernel vulnerability bypasses namespace isolation), the other layers (non-root user, dropped capabilities, read-only filesystem, resource limits) still provide protection. No single security measure is sufficient on its own.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise title="Scan Images and Remediate Vulnerabilities" difficulty="intermediate" xpReward={25} estimatedMinutes={15}>
+
+Practice the vulnerability scanning workflow:
+
+1. Build a deliberately insecure image using an outdated base
+2. Scan it for vulnerabilities with Docker Scout
+3. Rebuild with an updated base image
+4. Compare vulnerability counts before and after
+
+**Objectives:**
+- Use `docker scout cves` to identify vulnerabilities in a container image
+- Understand CVE severity levels (critical, high, medium, low)
+- Remediate vulnerabilities by updating the base image
+- Compare scan results between image versions
+
+**Hints:**
+- Use an older Node.js version like `node:18.0.0` for the vulnerable image
+- Update to the latest patch version like `node:20-alpine` for the fixed image
+- Focus on critical and high severity CVEs
+- Not all CVEs have fixes available — focus on the ones that do
+
+<CollapsibleSolution>
+
+```bash
+# Create project directory
+mkdir -p ~/vuln-scan-demo
+
+# Create a simple application
+cat > ~/vuln-scan-demo/app.js << 'EOF'
+console.log("Vulnerability scanning demo");
+console.log("Node version:", process.version);
+EOF
+
+# ============================================
+# Step 1: Build with an older base image
+# ============================================
+
+cat > ~/vuln-scan-demo/Dockerfile.vulnerable << 'EOF'
+FROM node:18.0.0
+WORKDIR /app
+COPY app.js .
+CMD ["node", "app.js"]
+EOF
+
+docker build -t vuln-demo:old -f ~/vuln-scan-demo/Dockerfile.vulnerable ~/vuln-scan-demo
+
+echo "=== Image size (old) ==="
+docker images vuln-demo:old --format "{{.Size}}"
+
+# ============================================
+# Step 2: Scan the old image
+# ============================================
+
+echo ""
+echo "=== Scanning old image for vulnerabilities ==="
+docker scout cves vuln-demo:old 2>&1 | tail -20
+# (Shows vulnerability summary with critical, high, medium, low counts)
+
+docker scout quickview vuln-demo:old
+# Shows a concise overview of vulnerability counts
+
+# ============================================
+# Step 3: Build with an updated base image
+# ============================================
+
+cat > ~/vuln-scan-demo/Dockerfile.secure << 'EOF'
+FROM node:20-alpine
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+COPY --chown=appuser:appgroup app.js .
+
+USER appuser
+
+CMD ["node", "app.js"]
+EOF
+
+docker build -t vuln-demo:new -f ~/vuln-scan-demo/Dockerfile.secure ~/vuln-scan-demo
+
+echo "=== Image size (new) ==="
+docker images vuln-demo:new --format "{{.Size}}"
+
+# ============================================
+# Step 4: Scan the new image
+# ============================================
+
+echo ""
+echo "=== Scanning new image for vulnerabilities ==="
+docker scout cves vuln-demo:new 2>&1 | tail -20
+
+docker scout quickview vuln-demo:new
+
+# ============================================
+# Step 5: Compare the two images
+# ============================================
+
+echo ""
+echo "=== Comparison ==="
+echo "Old image:"
+docker images vuln-demo:old --format "  Size: {{.Size}}"
+
+echo "New image:"
+docker images vuln-demo:new --format "  Size: {{.Size}}"
+
+echo ""
+echo "=== Side by side scan results ==="
+echo "Old image vulnerabilities:"
+docker scout quickview vuln-demo:old 2>&1 | grep -E "Critical|High|Medium|Low" || echo "  (run docker scout quickview vuln-demo:old for details)"
+
+echo ""
+echo "New image vulnerabilities:"
+docker scout quickview vuln-demo:new 2>&1 | grep -E "Critical|High|Medium|Low" || echo "  (run docker scout quickview vuln-demo:new for details)"
+
+# Clean up images
+docker rmi vuln-demo:old vuln-demo:new
+```
+
+By switching from `node:18.0.0` (full Debian-based, outdated) to `node:20-alpine` (Alpine-based, current), you typically eliminate most critical and high CVEs. The image size also drops dramatically — from over 900 MB to around 135 MB — which further reduces the attack surface. This workflow should be integrated into your CI/CD pipeline so every image is scanned before deployment.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Production-Hardened Application Stack">
+
+Build a Docker Compose stack that implements every security practice covered in this lesson:
+
+1. A Node.js API running as a non-root user with health checks
+2. A PostgreSQL database with resource limits
+3. All services running read-only where possible
+4. All capabilities dropped, with only required ones added back
+5. Network isolation between frontend and backend
+6. Resource limits on every service
+7. A security audit script that checks the configuration
+
+```bash
+# Create project structure
+mkdir -p ~/hardened-stack/{api,scripts}
+
+# ============================================
+# Create the API application
+# ============================================
+cat > ~/hardened-stack/api/server.js << 'APIEOF'
+const http = require('http');
+
+let requestCount = 0;
+
+const server = http.createServer((req, res) => {
+  requestCount++;
+
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'healthy',
+      uid: process.getuid(),
+      gid: process.getgid(),
+      pid: process.pid,
+      uptime: Math.floor(process.uptime()),
+      requests: requestCount,
+      memory_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
+    }));
+    return;
+  }
+
+  if (req.url === '/security') {
+    const fs = require('fs');
+    const checks = {};
+
+    // Check if running as non-root
+    checks.non_root = process.getuid() !== 0;
+
+    // Check if filesystem is read-only
+    try {
+      fs.writeFileSync('/test-write', 'test');
+      fs.unlinkSync('/test-write');
+      checks.read_only_fs = false;
+    } catch (e) {
+      checks.read_only_fs = true;
+    }
+
+    // Check if /tmp is writable
+    try {
+      fs.writeFileSync('/tmp/test-write', 'test');
+      fs.unlinkSync('/tmp/test-write');
+      checks.tmp_writable = true;
+    } catch (e) {
+      checks.tmp_writable = false;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      security_checks: checks,
+      user: { uid: process.getuid(), gid: process.getgid() },
+      node_version: process.version
+    }, null, 2));
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ message: 'Hardened API', request: requestCount }));
+});
+
+server.listen(8080, () => {
+  console.log(JSON.stringify({
+    event: 'server_start',
+    port: 8080,
+    uid: process.getuid(),
+    pid: process.pid,
+    timestamp: new Date().toISOString()
+  }));
+});
+APIEOF
+
+# ============================================
+# Create the secure Dockerfile
+# ============================================
+cat > ~/hardened-stack/api/Dockerfile << 'DOCKEOF'
+FROM node:20-alpine
+
+# Security: Create non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+
+# Copy with correct ownership
+COPY --chown=appuser:appgroup server.js .
+
+# Security: Run as non-root
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+EXPOSE 8080
+
+CMD ["node", "server.js"]
+DOCKEOF
+
+# ============================================
+# Create the security audit script
+# ============================================
+cat > ~/hardened-stack/scripts/security-audit.sh << 'AUDITEOF'
+#!/bin/sh
+# Security Audit Script for Docker Compose Stack
+# Checks containers against security best practices
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Container Security Audit Report                 ║"
+echo "║          $(date '+%Y-%m-%d %H:%M:%S')                    ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+PASS=0
+FAIL=0
+WARN=0
+
+check() {
+  local status=$1
+  local message=$2
+  case $status in
+    PASS) PASS=$((PASS+1)); echo "  [PASS] $message" ;;
+    FAIL) FAIL=$((FAIL+1)); echo "  [FAIL] $message" ;;
+    WARN) WARN=$((WARN+1)); echo "  [WARN] $message" ;;
+  esac
+}
+
+for CONTAINER in $(docker compose ps -q 2>/dev/null); do
+  NAME=$(docker inspect $CONTAINER --format '{{.Name}}' | sed 's/^\///')
+  IMAGE=$(docker inspect $CONTAINER --format '{{.Config.Image}}')
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  Container: $NAME"
+  echo "  Image: $IMAGE"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # Check 1: Non-root user
+  USER=$(docker inspect $CONTAINER --format '{{.Config.User}}')
+  if [ -n "$USER" ] && [ "$USER" != "root" ] && [ "$USER" != "0" ]; then
+    check PASS "Running as non-root user: $USER"
+  else
+    check FAIL "Running as root (User: '${USER:-root}')"
+  fi
+
+  # Check 2: Read-only filesystem
+  READONLY=$(docker inspect $CONTAINER --format '{{.HostConfig.ReadonlyRootfs}}')
+  if [ "$READONLY" = "true" ]; then
+    check PASS "Read-only root filesystem enabled"
+  else
+    check WARN "Root filesystem is writable"
+  fi
+
+  # Check 3: Capabilities dropped
+  CAP_DROP=$(docker inspect $CONTAINER --format '{{.HostConfig.CapDrop}}')
+  if echo "$CAP_DROP" | grep -qi "all"; then
+    check PASS "All capabilities dropped"
+  else
+    check WARN "Not all capabilities dropped: $CAP_DROP"
+  fi
+
+  # Check 4: Memory limit
+  MEMORY=$(docker inspect $CONTAINER --format '{{.HostConfig.Memory}}')
+  if [ "$MEMORY" != "0" ] && [ -n "$MEMORY" ]; then
+    MEM_MB=$((MEMORY / 1024 / 1024))
+    check PASS "Memory limit set: ${MEM_MB}MB"
+  else
+    check FAIL "No memory limit set"
+  fi
+
+  # Check 5: CPU limit
+  CPUS=$(docker inspect $CONTAINER --format '{{.HostConfig.NanoCpus}}')
+  if [ "$CPUS" != "0" ] && [ -n "$CPUS" ]; then
+    check PASS "CPU limit set: $((CPUS / 1000000000)).$((CPUS % 1000000000 / 100000000)) CPUs"
+  else
+    check WARN "No CPU limit set"
+  fi
+
+  # Check 6: PID limit
+  PIDS=$(docker inspect $CONTAINER --format '{{.HostConfig.PidsLimit}}')
+  if [ "$PIDS" != "0" ] && [ "$PIDS" != "-1" ] && [ -n "$PIDS" ]; then
+    check PASS "PID limit set: $PIDS"
+  else
+    check WARN "No PID limit set"
+  fi
+
+  # Check 7: no-new-privileges
+  SECOPT=$(docker inspect $CONTAINER --format '{{.HostConfig.SecurityOpt}}')
+  if echo "$SECOPT" | grep -q "no-new-privileges"; then
+    check PASS "no-new-privileges enabled"
+  else
+    check WARN "no-new-privileges not set"
+  fi
+
+  # Check 8: Health check
+  HEALTH=$(docker inspect $CONTAINER --format '{{if .Config.Healthcheck}}yes{{else}}no{{end}}')
+  if [ "$HEALTH" = "yes" ]; then
+    check PASS "Health check configured"
+  else
+    check WARN "No health check configured"
+  fi
+
+  # Check 9: Privileged mode
+  PRIVILEGED=$(docker inspect $CONTAINER --format '{{.HostConfig.Privileged}}')
+  if [ "$PRIVILEGED" = "false" ]; then
+    check PASS "Not running in privileged mode"
+  else
+    check FAIL "Running in PRIVILEGED mode"
+  fi
+
+  # Check 10: Log rotation
+  LOG_MAX=$(docker inspect $CONTAINER --format '{{index .HostConfig.LogConfig.Config "max-size"}}')
+  if [ -n "$LOG_MAX" ]; then
+    check PASS "Log rotation configured: max-size=$LOG_MAX"
+  else
+    check WARN "No log rotation configured"
+  fi
+
+  echo ""
+done
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║  Summary                                                 ║"
+echo "║  PASS: $PASS | FAIL: $FAIL | WARN: $WARN                ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+
+if [ $FAIL -gt 0 ]; then
+  echo ""
+  echo "  ⚠ $FAIL critical security issues found. Fix before deploying."
+  exit 1
+fi
+AUDITEOF
+
+chmod +x ~/hardened-stack/scripts/security-audit.sh
+
+# ============================================
+# Create docker-compose.yml
+# ============================================
+cat > ~/hardened-stack/docker-compose.yml << 'COMPEOF'
+services:
+  api:
+    build: ./api
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+          pids: 50
+        reservations:
+          cpus: "0.1"
+          memory: 32M
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: securapp
+      POSTGRES_PASSWORD: securpass
+      POSTGRES_DB: securdb
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 100
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U securapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
+
+volumes:
+  db-data:
+COMPEOF
+
+# ============================================
+# Deploy and audit
+# ============================================
+cd ~/hardened-stack
+
+# Build and start
+docker compose up -d --build
+
+# Wait for services to be healthy
+echo "Waiting for services to start..."
+sleep 20
+
+# Run the security audit
+bash ./scripts/security-audit.sh
+
+# Test the API
+echo ""
+echo "=== API Health Check ==="
+curl -s http://localhost:8080/health | python3 -m json.tool
+
+echo ""
+echo "=== Security Self-Check ==="
+curl -s http://localhost:8080/security | python3 -m json.tool
+
+# Verify network isolation: DB should not be reachable from outside
+echo ""
+echo "=== Network Isolation Test ==="
+echo "Attempting to reach DB from host (should fail)..."
+docker run --rm --network hardened-stack_frontend alpine sh -c \
+  'wget --timeout=3 http://db:5432/ 2>&1 || echo "PASS: Database unreachable from frontend network"'
+
+# View resource usage
+echo ""
+echo "=== Resource Usage ==="
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.PIDs}}"
+
+# Clean up
+docker compose down -v
+```
+
+This mini project brings together every security concept from this lesson into a production-style deployment. The security audit script checks each container against best practices and produces a report. The API includes a `/security` endpoint that verifies its own security posture from the inside. The network configuration ensures the database is only reachable from the API, not from the outside world. Every container has resource limits, capability restrictions, and log rotation.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Containers are isolated by three Linux kernel features: **namespaces** (separate what processes can see), **cgroups** (limit what resources they can use), and **capabilities** (restrict what privileged operations they can perform)
+- **Always run containers as non-root** — use the `USER` instruction in your Dockerfile and place it after all privileged build steps
+- **Scan every image for vulnerabilities** before deploying — use `docker scout cves` in CI/CD and block deployments with critical or high CVEs
+- **Use read-only filesystems** (`--read-only`) with `tmpfs` for the writable directories your application needs — this prevents attackers from modifying binaries or planting backdoors
+- **Set resource limits on every container** — `--memory`, `--cpus`, and `--pids-limit` prevent a single container from starving the host and other containers
+- **Drop all capabilities** with `--cap-drop ALL` and add back only the specific capabilities your application needs — most applications need zero capabilities
+- **Never use `--privileged`** — identify the specific capability or device access you need and grant only that
+- **Enable Docker Content Trust** (`DOCKER_CONTENT_TRUST=1`) to verify image signatures and prevent supply chain attacks
+- **Keep seccomp and AppArmor enabled** — they provide defense in depth even when other security measures fail
+- Container security is defense in depth — no single measure is sufficient, but each layer makes exploitation harder
+
+## What's Next
+
+In the next and final lesson, **Docker in Production**, you will learn how to take everything you have learned and run containers reliably in production environments. You will configure restart policies, implement health checks for high availability, plan image tagging strategies, understand graceful shutdown, and prepare containers for orchestration with Kubernetes or Docker Swarm. Production is where all these fundamentals come together.

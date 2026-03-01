@@ -1,0 +1,1246 @@
+---
+title: "Docker Architecture"
+description: "Dive deep into Docker's client-server architecture, understand how the Docker daemon, containerd, and runc work together to create containers, and learn how image layers and Union filesystems make Docker images efficient and portable."
+order: 3
+xpReward: 40
+estimatedMinutes: 50
+prerequisites:
+  - 02-containers-vs-vms
+objectives:
+  - Explain Docker's client-server architecture and how the CLI communicates with the daemon
+  - Identify Docker objects including images, containers, networks, and volumes
+  - Describe how Docker Engine components (containerd, runc, shim) work together
+  - Understand image layers and the Union filesystem (OverlayFS)
+  - Trace the complete container lifecycle from creation to removal
+  - Explain how Docker registries work and the role of Docker Hub
+tags:
+  - docker
+  - architecture
+  - containerd
+  - runc
+  - images
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+It is your second week at a cloud consulting firm, and a client calls in a panic. Their Docker containers keep dying on production servers, but they cannot figure out why. The logs show nothing obvious. Your senior engineer tells you to check the Docker daemon logs, examine the containerd process, and look at the shim processes. You realize you have no idea what any of these components are. You have been running `docker run` like a magic spell — it works, but you do not know what happens behind the scenes. Today that changes. You are going to open up the Docker engine and understand every component, every layer, and every step that happens when you type `docker run`. By the end of this lesson, you will be the engineer who knows what is actually happening — and that knowledge will make you the one who solves the hard problems.
+</Callout>
+
+## Docker's Client-Server Architecture
+
+Docker uses a **client-server architecture**. When you type a Docker command, you are using the **Docker client**, which sends your request to the **Docker daemon** — a separate background process that does the actual work.
+
+```
+Docker Client-Server Architecture:
+═══════════════════════════════════════════════════════════════
+
+  You (the user)
+      │
+      ▼
+┌─────────────┐         REST API          ┌──────────────────┐
+│             │  ────────────────────────→ │                  │
+│  Docker CLI │      (usually over         │  Docker Daemon   │
+│  (docker)   │   /var/run/docker.sock     │  (dockerd)       │
+│             │  ←────────────────────────  │                  │
+└─────────────┘         Response           └──────────────────┘
+                                                   │
+                                                   │ manages
+                                                   ▼
+                                           ┌──────────────────┐
+                                           │  Docker Objects   │
+                                           │                   │
+                                           │  • Images         │
+                                           │  • Containers     │
+                                           │  • Networks       │
+                                           │  • Volumes        │
+                                           └──────────────────┘
+```
+
+### The Docker Client (docker)
+
+The Docker client is the command-line tool you interact with. It does NOT build images, run containers, or manage networks — it simply translates your commands into API calls and sends them to the daemon.
+
+```bash
+# Every Docker command follows this pattern:
+docker <command> <subcommand> [options] [arguments]
+
+# Examples:
+docker run -d nginx          # Client sends "create and start container" to daemon
+docker build -t myapp .      # Client sends build context to daemon
+docker ps                    # Client asks daemon for container list
+docker network create mynet  # Client asks daemon to create a network
+```
+
+The client communicates with the daemon through the **Docker API**, which is a REST API. By default, this communication happens over a Unix socket:
+
+```bash
+# The default Docker socket:
+/var/run/docker.sock
+
+# You can actually use curl to talk to the Docker daemon directly:
+$ curl --unix-socket /var/run/docker.sock http://localhost/version
+{
+  "Platform": {"Name": "Docker Engine - Community"},
+  "Version": "24.0.7",
+  "ApiVersion": "1.43",
+  "MinAPIVersion": "1.12",
+  "Os": "linux",
+  "Arch": "amd64",
+  "KernelVersion": "5.15.0-91-generic",
+  "BuildTime": "2023-10-26T09:08:02.000000000+00:00"
+}
+
+# List containers via the API directly:
+$ curl --unix-socket /var/run/docker.sock http://localhost/containers/json
+[{"Id":"a1b2c3d4...","Names":["/my-nginx"],"Image":"nginx","State":"running"...}]
+```
+
+<Callout type="info" title="Remote Docker Daemon">
+The Docker client can connect to a remote daemon by using a TCP socket instead of the Unix socket. This is how Docker Machine and remote Docker hosts work:
+
+```bash
+# Connect to a remote Docker daemon:
+export DOCKER_HOST=tcp://remote-server:2376
+
+# Now all docker commands go to the remote server:
+docker ps    # Lists containers on the remote server, not your machine
+```
+
+Be very careful exposing the Docker daemon over TCP — anyone who can reach it has full control of the host.
+</Callout>
+
+### The Docker Daemon (dockerd)
+
+The Docker daemon (`dockerd`) is the background process that manages Docker objects. It:
+
+- Listens for Docker API requests
+- Manages images, containers, networks, and volumes
+- Communicates with other Docker daemons (for Swarm mode)
+- Delegates container execution to **containerd**
+
+```bash
+# Check if the Docker daemon is running:
+$ systemctl status docker
+● docker.service - Docker Application Container Engine
+     Loaded: loaded (/lib/systemd/system/docker.service; enabled)
+     Active: active (running) since Mon 2025-01-15 08:30:00 UTC
+       Docs: https://docs.docker.com
+   Main PID: 1234 (dockerd)
+      Tasks: 42
+     Memory: 128.5M
+
+# View Docker daemon logs:
+$ journalctl -u docker.service --no-pager -n 20
+Jan 15 08:30:00 server dockerd[1234]: Starting up
+Jan 15 08:30:00 server dockerd[1234]: Loading containers: start.
+Jan 15 08:30:01 server dockerd[1234]: Default bridge network configured
+Jan 15 08:30:01 server dockerd[1234]: Loading containers: done.
+Jan 15 08:30:01 server dockerd[1234]: Daemon has completed initialization
+Jan 15 08:30:01 server dockerd[1234]: API listen on /var/run/docker.sock
+```
+
+<Callout type="warning" title="The Docker Daemon Runs as Root">
+The Docker daemon runs with root privileges because it needs to create namespaces, configure cgroups, mount filesystems, and manage network interfaces. This is why access to the Docker socket (`/var/run/docker.sock`) must be tightly controlled — anyone who can talk to the daemon effectively has root access to the host.
+</Callout>
+
+## Docker Objects
+
+Docker manages four primary types of objects. Understanding these is essential for working effectively with Docker.
+
+### Images
+
+A **Docker image** is a read-only template used to create containers. Think of it as a blueprint or a snapshot of a filesystem plus metadata.
+
+```
+Docker Image Structure:
+═══════════════════════════════════
+
+┌─────────────────────────────────┐
+│          Image Metadata          │
+│  - Name: nginx:latest            │
+│  - Created: 2025-01-10           │
+│  - Author: NGINX Docker Maint.   │
+│  - CMD: ["nginx", "-g", "..."]   │
+│  - EXPOSE: 80                    │
+└─────────────────────────────────┘
+┌─────────────────────────────────┐
+│  Layer 4: COPY nginx.conf        │  ← Configuration
+├─────────────────────────────────┤
+│  Layer 3: RUN apt-get install    │  ← nginx binary + deps
+├─────────────────────────────────┤
+│  Layer 2: RUN apt-get update     │  ← Package index
+├─────────────────────────────────┤
+│  Layer 1: Debian Bookworm base   │  ← Base OS filesystem
+└─────────────────────────────────┘
+```
+
+```bash
+# List images on your system:
+$ docker images
+REPOSITORY   TAG       IMAGE ID       CREATED        SIZE
+nginx        latest    a1b2c3d4e5f6   2 weeks ago    187MB
+python       3.11      b2c3d4e5f6a7   3 weeks ago    1.01GB
+redis        7         c3d4e5f6a7b8   1 week ago     138MB
+
+# Inspect an image to see its layers:
+$ docker inspect nginx:latest --format '{{.RootFS.Layers}}'
+[sha256:abc123... sha256:def456... sha256:ghi789... sha256:jkl012...]
+
+# See image history (each layer and its command):
+$ docker history nginx:latest
+IMAGE          CREATED       CREATED BY                                      SIZE
+a1b2c3d4e5f6   2 weeks ago   CMD ["nginx" "-g" "daemon off;"]                0B
+<missing>      2 weeks ago   EXPOSE map[80/tcp:{}]                           0B
+<missing>      2 weeks ago   STOPSIGNAL SIGQUIT                              0B
+<missing>      2 weeks ago   RUN /bin/sh -c set -x  && groupadd...          61.1MB
+<missing>      2 weeks ago   ENV NGINX_VERSION=1.25.3                        0B
+<missing>      2 weeks ago   /bin/sh -c #(nop) ADD file:abc123...           77.8MB
+```
+
+### Containers
+
+A **container** is a running (or stopped) instance of an image. If an image is a class, a container is an object (an instance of that class).
+
+```
+Image vs Container:
+═══════════════════════════
+
+Image (read-only template):        Container (running instance):
+┌─────────────────────┐           ┌─────────────────────┐
+│                     │           │  Writable Layer      │ ← Changes go here
+│  nginx:latest       │  ──run──→ ├─────────────────────┤
+│  (read-only layers) │           │  nginx:latest        │ ← Shared, read-only
+│                     │           │  (read-only layers)  │
+└─────────────────────┘           └─────────────────────┘
+
+One image can create many containers:
+
+nginx:latest ──→ Container 1 (web-1)    ← own writable layer
+             ──→ Container 2 (web-2)    ← own writable layer
+             ──→ Container 3 (web-3)    ← own writable layer
+
+All three share the same read-only image layers!
+```
+
+```bash
+# List running containers:
+$ docker ps
+CONTAINER ID   IMAGE   COMMAND                  STATUS          PORTS     NAMES
+a1b2c3d4e5f6   nginx   "/docker-entrypoint.…"   Up 2 hours     80/tcp    web-1
+b2c3d4e5f6a7   nginx   "/docker-entrypoint.…"   Up 1 hour      80/tcp    web-2
+
+# List ALL containers (including stopped):
+$ docker ps -a
+CONTAINER ID   IMAGE    COMMAND     STATUS                     NAMES
+a1b2c3d4e5f6   nginx    "nginx…"    Up 2 hours                 web-1
+b2c3d4e5f6a7   nginx    "nginx…"    Up 1 hour                  web-2
+c3d4e5f6a7b8   ubuntu   "bash"      Exited (0) 3 hours ago     my-ubuntu
+```
+
+### Networks
+
+Docker networks allow containers to communicate with each other and with the outside world.
+
+```bash
+# List Docker networks:
+$ docker network ls
+NETWORK ID     NAME      DRIVER    SCOPE
+abc123def456   bridge    bridge    local
+def456ghi789   host      host      local
+ghi789jkl012   none      null      local
+
+# The three default networks:
+# bridge  - Default network for containers (isolated, with NAT)
+# host    - Container shares host's network stack
+# none    - Container has no network access
+```
+
+### Volumes
+
+Docker volumes provide persistent storage that survives container restarts and removal.
+
+```bash
+# List Docker volumes:
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     postgres_data
+local     redis_data
+local     app_uploads
+
+# Volumes persist data even when containers are deleted:
+# Container removed → Volume still exists → Data preserved
+```
+
+<Callout type="tip" title="Docker Objects Are Managed by the Daemon">
+All four object types (images, containers, networks, volumes) are managed by the Docker daemon. When you run commands like `docker images`, `docker ps`, `docker network ls`, or `docker volume ls`, the client asks the daemon for information about these objects. The daemon stores their metadata in `/var/lib/docker/`.
+</Callout>
+
+## Docker Engine Components: The Deep Architecture
+
+When you run `docker run nginx`, a lot happens behind the scenes. Docker Engine is not a single monolithic process — it is a collection of components that work together.
+
+```
+Docker Engine Deep Architecture:
+═══════════════════════════════════════════════════════════════════════
+
+  docker CLI ──(REST API)──→ dockerd ──(gRPC)──→ containerd ──→ runc
+                              │                      │            │
+                              │                      │            │
+                         Docker Daemon          Container       OCI
+                         • API server           Manager        Runtime
+                         • Image mgmt          • Image pull    • Creates
+                         • Network mgmt        • Container      namespaces
+                         • Volume mgmt           lifecycle     • Sets cgroups
+                         • Orchestration       • Storage       • Starts
+                         • Build engine        • Snapshots       container
+                                               • Task mgmt      process
+
+                                                    │
+                                                    ▼
+                                               containerd-shim
+                                                    │
+                                               • Keeps STDIN/OUT
+                                               • Reports exit code
+                                               • Allows daemon restart
+                                                 without killing
+                                                 containers
+```
+
+### dockerd (Docker Daemon)
+
+The Docker daemon is the top-level component. It provides the Docker API and handles high-level operations:
+
+- **API server** — Listens for client requests on the Unix socket or TCP
+- **Image management** — Building images, managing local image store
+- **Network management** — Creating and configuring Docker networks
+- **Volume management** — Creating and managing persistent volumes
+- **Build engine** — Processing Dockerfiles (using BuildKit)
+
+### containerd
+
+**containerd** is the container runtime manager. It was originally part of Docker but was extracted as a separate project and donated to the Cloud Native Computing Foundation (CNCF).
+
+containerd handles:
+- Pulling and pushing images from registries
+- Managing image storage (snapshots)
+- Container lifecycle management (create, start, stop, delete)
+- Managing container task execution
+- Providing gRPC API for clients (dockerd is one of its clients)
+
+```bash
+# containerd runs as a separate process:
+$ ps aux | grep containerd
+root      1235  0.1  0.5  /usr/bin/containerd
+root      1234  0.2  0.8  /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+
+# You can interact with containerd directly using ctr:
+$ ctr --address /run/containerd/containerd.sock namespaces list
+NAME   LABELS
+moby          # "moby" is Docker's namespace in containerd
+
+# List containers via containerd:
+$ ctr --address /run/containerd/containerd.sock -n moby containers list
+CONTAINER    IMAGE    RUNTIME
+a1b2c3...    -        io.containerd.runc.v2
+```
+
+<Callout type="info" title="containerd Beyond Docker">
+containerd is not Docker-specific. Kubernetes can use containerd directly as its container runtime (via CRI — Container Runtime Interface), bypassing Docker entirely. This is why Kubernetes dropped Docker as a runtime — it communicates with containerd directly for better performance.
+
+```
+Docker workflow:   kubectl → kubelet → dockerd → containerd → runc
+Direct workflow:   kubectl → kubelet → containerd → runc  (faster!)
+```
+</Callout>
+
+### runc
+
+**runc** is the low-level container runtime. It is the component that actually creates the container by interacting with the Linux kernel:
+
+- Creates Linux namespaces (PID, NET, MNT, UTS, IPC, USER)
+- Configures cgroups for resource limits
+- Sets up the container's root filesystem
+- Executes the container's entrypoint process
+- Follows the OCI Runtime Specification
+
+```bash
+# runc is a standalone binary:
+$ which runc
+/usr/bin/runc
+
+# Check runc version:
+$ runc --version
+runc version 1.1.10
+commit: v1.1.10-0-g18a0cb0f
+spec: 1.0.2-dev
+go: go1.21.3
+libseccomp: 2.5.4
+
+# runc creates containers from OCI bundles:
+# An OCI bundle is a directory with:
+#   config.json  — container configuration (namespaces, cgroups, etc.)
+#   rootfs/      — the container's root filesystem
+```
+
+Once runc creates and starts the container process, it exits. It does not keep running — that is the job of the **shim**.
+
+### containerd-shim
+
+The **shim** is a small process that sits between containerd and the actual container process. Every running container has its own shim process.
+
+```
+Shim Architecture:
+═══════════════════════════════════
+
+containerd
+    │
+    ├── containerd-shim (container 1)
+    │       └── nginx (PID 1 inside container)
+    │
+    ├── containerd-shim (container 2)
+    │       └── python app.py (PID 1 inside container)
+    │
+    └── containerd-shim (container 3)
+            └── redis-server (PID 1 inside container)
+```
+
+The shim serves three critical purposes:
+
+1. **Keeps STDIN/STDOUT open** — Allows `docker logs` and `docker attach` to work
+2. **Reports exit codes** — When the container process dies, the shim reports the exit code back to containerd
+3. **Daemon independence** — The shim allows Docker daemon and containerd to be restarted or upgraded without killing running containers
+
+```bash
+# See shim processes on a running system:
+$ ps aux | grep containerd-shim
+root  2001  0.0  0.1  containerd-shim-runc-v2 -namespace moby -id a1b2c3d4...
+root  2002  0.0  0.1  containerd-shim-runc-v2 -namespace moby -id b2c3d4e5...
+```
+
+<Callout type="tip" title="Why the Shim Matters">
+Before the shim architecture, restarting the Docker daemon would kill all running containers. With the shim, containers are decoupled from the daemon. You can restart dockerd and containerd without affecting running containers — critical for production environments where you need to upgrade Docker without downtime.
+</Callout>
+
+## What Happens When You Run `docker run`
+
+Let us trace the complete flow when you execute `docker run -d --name web -p 8080:80 nginx`:
+
+```
+Complete Container Creation Flow:
+═══════════════════════════════════════════════════════════════════════
+
+Step 1: CLI parses command
+┌─────────────┐
+│  docker CLI  │  Parses: run -d --name web -p 8080:80 nginx
+└──────┬──────┘
+       │ HTTP POST /containers/create
+       ▼
+Step 2: Daemon receives request
+┌─────────────┐
+│   dockerd    │  1. Checks if nginx:latest image exists locally
+│              │  2. If not, pulls from Docker Hub
+│              │  3. Creates container object with config
+│              │  4. Sets up networking (port mapping)
+│              │  5. Creates a writable layer
+└──────┬──────┘
+       │ gRPC: CreateContainer
+       ▼
+Step 3: containerd creates container
+┌─────────────┐
+│  containerd  │  1. Creates container metadata
+│              │  2. Prepares filesystem snapshot
+│              │  3. Creates OCI bundle (config.json + rootfs)
+│              │  4. Starts containerd-shim
+└──────┬──────┘
+       │ Starts shim process
+       ▼
+Step 4: Shim starts runc
+┌────────────────┐
+│containerd-shim │  1. Calls runc create
+│                │  2. runc creates namespaces and cgroups
+│                │  3. runc starts the container process
+│                │  4. runc exits (its job is done)
+│                │  5. Shim keeps running, managing I/O
+└──────┬─────────┘
+       │
+       ▼
+Step 5: Container is running
+┌─────────────┐
+│  Container   │  nginx process running as PID 1
+│  (nginx)     │  Isolated namespaces, cgroup limits applied
+│              │  Port 8080 on host mapped to port 80
+└─────────────┘
+```
+
+Here is a more concise view showing the component chain:
+
+```
+docker run nginx
+    │
+    ▼
+docker CLI ──HTTP──→ dockerd ──gRPC──→ containerd ──fork──→ shim ──exec──→ runc
+                                                              │              │
+                                                              │         creates container
+                                                              │         then exits
+                                                              │
+                                                         manages container
+                                                         I/O and lifecycle
+```
+
+<Callout type="warning" title="runc Is Ephemeral">
+A common misconception is that runc keeps running as long as the container is alive. In reality, runc creates the container and then exits immediately. The container process is reparented to the shim. This design keeps the runtime architecture clean — runc does one thing (create containers) and does it well.
+</Callout>
+
+## Image Layers and Union Filesystems
+
+One of Docker's most important architectural innovations is the **layered image system**. Understanding layers is essential for building efficient images and debugging storage issues.
+
+### How Image Layers Work
+
+Every instruction in a Dockerfile creates a new **layer**. A layer is a set of filesystem changes (files added, modified, or deleted).
+
+```dockerfile
+# Each instruction creates a layer:
+FROM ubuntu:22.04           # Layer 1: Base Ubuntu filesystem (~77 MB)
+RUN apt-get update          # Layer 2: Updated package index (~45 MB)
+RUN apt-get install -y curl # Layer 3: curl binary + dependencies (~5 MB)
+COPY app.py /app/           # Layer 4: Your application file (~1 KB)
+CMD ["python3", "/app/app.py"]  # No layer (metadata only)
+```
+
+```
+Image Layer Stack:
+═══════════════════════════════════
+
+┌──────────────────────────────────┐
+│  Layer 4: COPY app.py (1 KB)     │  ← Smallest, your code
+├──────────────────────────────────┤
+│  Layer 3: install curl (5 MB)    │
+├──────────────────────────────────┤
+│  Layer 2: apt-get update (45 MB) │
+├──────────────────────────────────┤
+│  Layer 1: Ubuntu 22.04 (77 MB)   │  ← Largest, base OS
+└──────────────────────────────────┘
+
+Each layer is:
+  • Read-only (immutable)
+  • Identified by a SHA256 hash
+  • Cached and reused across images
+  • Shared across containers
+```
+
+### Layer Sharing
+
+Multiple images that use the same base image share those layers on disk:
+
+```
+Image A (Python app):        Image B (Flask app):
+┌────────────────────┐      ┌────────────────────┐
+│ COPY app.py        │      │ COPY server.py     │  ← Different
+├────────────────────┤      ├────────────────────┤
+│ pip install flask  │      │ pip install flask   │  ← Same! Shared.
+├────────────────────┤      ├────────────────────┤
+│ python:3.11-slim   │      │ python:3.11-slim    │  ← Same! Shared.
+└────────────────────┘      └────────────────────┘
+
+Disk usage WITHOUT layer sharing:
+  Image A: 150 MB + Image B: 150 MB = 300 MB
+
+Disk usage WITH layer sharing:
+  Shared layers: 145 MB + A unique: 5 MB + B unique: 5 MB = 155 MB
+
+  Saved: 145 MB (48% reduction!)
+```
+
+```bash
+# See layer sharing in action:
+$ docker system df -v
+Images space usage:
+
+REPOSITORY   TAG          SIZE      SHARED SIZE   UNIQUE SIZE
+python       3.11-slim    145MB     145MB         0B
+myapp-a      latest       150MB     145MB         5MB
+myapp-b      latest       150MB     145MB         5MB
+
+# Total unique disk usage: 155 MB, not 450 MB!
+```
+
+### Union Filesystem (OverlayFS)
+
+Docker uses a **Union filesystem** to stack layers on top of each other and present them as a single unified filesystem. The default driver on modern Linux is **OverlayFS** (specifically `overlay2`).
+
+```
+OverlayFS Architecture:
+═══════════════════════════════════════════
+
+Container View (what the process sees):
+┌──────────────────────────────────────┐
+│  /                                    │
+│  ├── bin/    (from Layer 1)          │
+│  ├── lib/    (from Layer 1)          │
+│  ├── usr/    (from Layers 1-3)       │
+│  ├── app/    (from Layer 4)          │  ← A single, unified
+│  └── tmp/    (writable layer)        │    filesystem view
+└──────────────────────────────────────┘
+
+                    ▲
+                    │  OverlayFS merges these:
+                    │
+┌──────────────────────────────────────┐
+│  Writable Layer (container layer)     │  ← upperdir
+│  Contains all changes made by the     │
+│  running container                    │
+├──────────────────────────────────────┤
+│  Layer 4: /app/app.py                 │  ← lowerdir
+├──────────────────────────────────────┤
+│  Layer 3: /usr/bin/curl               │  ← lowerdir
+├──────────────────────────────────────┤
+│  Layer 2: /var/lib/apt/lists/*        │  ← lowerdir
+├──────────────────────────────────────┤
+│  Layer 1: /bin/* /lib/* /usr/*        │  ← lowerdir
+└──────────────────────────────────────┘
+```
+
+#### How OverlayFS Handles Operations
+
+| Operation | How OverlayFS Handles It |
+|---|---|
+| **Read a file** | Searches layers top-down, returns first match |
+| **Create a new file** | Written to the writable (upper) layer |
+| **Modify an existing file** | File is copied to writable layer, then modified (copy-on-write) |
+| **Delete a file** | A "whiteout" marker is created in the writable layer |
+
+```bash
+# Check which storage driver Docker is using:
+$ docker info --format '{{.Driver}}'
+overlay2
+
+# See the overlay mount for a running container:
+$ docker inspect web --format '{{.GraphDriver.Data.MergedDir}}'
+/var/lib/docker/overlay2/abc123.../merged
+
+# The overlay2 directory structure:
+$ ls /var/lib/docker/overlay2/abc123.../
+diff/       # This layer's unique files
+merged/     # Unified view (all layers combined)
+lower       # File listing the lower layers
+upper/      # Same as diff for the top layer
+work/       # OverlayFS internal working directory
+```
+
+<Callout type="info" title="Copy-on-Write (CoW)">
+When a container modifies a file from a read-only image layer, OverlayFS performs a **copy-on-write**: it copies the file to the writable layer first, then applies the modification. The original file in the image layer remains unchanged. This is why:
+
+1. Multiple containers can share the same image layers safely
+2. Container writes do not affect the base image
+3. Large files modified in containers increase the writable layer size
+
+```
+Copy-on-Write Example:
+═══════════════════════════
+
+Original (image layer):     After container modifies /etc/nginx/nginx.conf:
+┌─────────────────┐        ┌─────────────────┐
+│  Writable Layer  │ empty  │  Writable Layer  │ nginx.conf (modified copy)
+├─────────────────┤        ├─────────────────┤
+│  Image Layer     │ nginx  │  Image Layer     │ nginx.conf (original, hidden)
+└─────────────────┘ .conf  └─────────────────┘
+```
+</Callout>
+
+## Container Runtime Lifecycle
+
+Containers go through a well-defined lifecycle. Understanding these states helps with debugging and management.
+
+```
+Container Lifecycle State Machine:
+═══════════════════════════════════════════════════════════════
+
+                    docker create
+  (no container) ─────────────────→ CREATED
+                                       │
+                                       │ docker start
+                                       ▼
+                                    RUNNING ◄────────────────┐
+                                    │  │  │                   │
+                          docker    │  │  │  docker           │ docker
+                          pause     │  │  │  stop/kill        │ restart
+                                    │  │  │                   │
+                                    ▼  │  ▼                   │
+                                 PAUSED │ STOPPED ────────────┘
+                                    │   │  │
+                          docker    │   │  │ docker rm
+                          unpause   │   │  │
+                                    │   │  ▼
+                                    └───┘ REMOVED
+                                         (deleted)
+
+  "docker run" = "docker create" + "docker start"
+```
+
+### Lifecycle States Explained
+
+| State | Description | Docker Command |
+|---|---|---|
+| **Created** | Container exists but has never been started | `docker create nginx` |
+| **Running** | Container process is actively executing | `docker start web` |
+| **Paused** | Container process is frozen (SIGSTOP) | `docker pause web` |
+| **Stopped** | Container process has exited (exit code available) | `docker stop web` |
+| **Removed** | Container is deleted from the system | `docker rm web` |
+
+```bash
+# Create a container (does not start it):
+$ docker create --name web nginx
+a1b2c3d4e5f6789...
+
+$ docker ps -a --filter name=web
+CONTAINER ID   IMAGE   STATUS    NAMES
+a1b2c3d4e5f6   nginx   Created   web
+
+# Start the container:
+$ docker start web
+web
+
+$ docker ps --filter name=web
+CONTAINER ID   IMAGE   STATUS         NAMES
+a1b2c3d4e5f6   nginx   Up 3 seconds   web
+
+# Pause the container (freezes all processes):
+$ docker pause web
+web
+
+$ docker ps --filter name=web
+CONTAINER ID   IMAGE   STATUS                NAMES
+a1b2c3d4e5f6   nginx   Up 45 seconds (Paused) web
+
+# Unpause the container:
+$ docker unpause web
+web
+
+# Stop the container (sends SIGTERM, then SIGKILL after timeout):
+$ docker stop web
+web
+
+$ docker ps -a --filter name=web
+CONTAINER ID   IMAGE   STATUS                     NAMES
+a1b2c3d4e5f6   nginx   Exited (0) 2 seconds ago   web
+
+# Remove the container:
+$ docker rm web
+web
+```
+
+<Callout type="tip" title="docker stop vs docker kill">
+`docker stop` sends SIGTERM first, giving the process time to clean up (default 10 seconds), then sends SIGKILL if it has not exited. `docker kill` sends SIGKILL immediately — use it only when a container is truly stuck and not responding to SIGTERM.
+
+```bash
+# Graceful shutdown (preferred):
+docker stop web          # SIGTERM → wait 10s → SIGKILL
+
+# Custom timeout:
+docker stop -t 30 web    # SIGTERM → wait 30s → SIGKILL
+
+# Immediate kill (last resort):
+docker kill web          # SIGKILL immediately
+```
+</Callout>
+
+## Docker Registry
+
+A **Docker registry** is a storage and distribution system for Docker images. When you `docker pull` or `docker push`, you are interacting with a registry.
+
+```
+Docker Registry Flow:
+═══════════════════════════════════════════════════════
+
+Developer Machine                    Docker Registry
+┌─────────────────┐                 ┌─────────────────┐
+│                  │   docker push   │                  │
+│  Local Images    │ ──────────────→ │  Registry        │
+│                  │                 │                  │
+│  myapp:v1.0      │   docker pull   │  myapp:v1.0      │
+│                  │ ←────────────── │  myapp:v1.1      │
+│                  │                 │  nginx:latest    │
+└─────────────────┘                 │  python:3.11     │
+                                    └─────────────────┘
+                                           │
+                                    ┌──────┴──────┐
+                                    ▼             ▼
+                              Public          Private
+                              (Docker Hub)    (ECR, GCR, Harbor)
+```
+
+### Docker Hub
+
+**Docker Hub** is Docker's official public registry. It is the default registry — when you run `docker pull nginx`, Docker Hub is where the image comes from.
+
+```bash
+# These are equivalent (Docker Hub is the default):
+docker pull nginx
+docker pull docker.io/library/nginx
+docker pull docker.io/library/nginx:latest
+
+# Image naming convention on Docker Hub:
+# Official images:     nginx, python, redis (no username prefix)
+# User images:         username/image-name
+# Organization images: organization/image-name
+
+# Examples:
+docker pull nginx                       # Official image
+docker pull bitnami/postgresql          # Organization image
+docker pull myusername/my-custom-app    # User image
+```
+
+### Private Registries
+
+Organizations often run private registries to store proprietary images:
+
+```bash
+# Common private registry services:
+#
+# Amazon ECR:    123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp
+# Google GCR:    gcr.io/my-project/myapp
+# Azure ACR:     myregistry.azurecr.io/myapp
+# Self-hosted:   registry.company.com/myapp
+
+# Log in to a private registry:
+$ docker login registry.company.com
+Username: deploy-bot
+Password: ********
+Login Succeeded
+
+# Push to a private registry:
+$ docker tag myapp:latest registry.company.com/myapp:v1.0
+$ docker push registry.company.com/myapp:v1.0
+
+# Pull from a private registry:
+$ docker pull registry.company.com/myapp:v1.0
+```
+
+### Image Naming and Tagging
+
+Understanding image names is important for working with registries:
+
+```
+Image Name Format:
+═══════════════════════════════════
+
+[registry/][repository/]image[:tag][@digest]
+
+Examples:
+
+nginx                                    → docker.io/library/nginx:latest
+nginx:1.25                               → docker.io/library/nginx:1.25
+myuser/myapp:v2.0                        → docker.io/myuser/myapp:v2.0
+gcr.io/my-project/api:latest             → gcr.io/my-project/api:latest
+registry.company.com/team/service:abc123 → registry.company.com/team/service:abc123
+
+Tag conventions:
+  latest     → Most recent version (default, but unreliable)
+  v1.2.3     → Semantic version (recommended)
+  abc123f    → Git commit SHA (for traceability)
+  2025-01-15 → Date-based (for nightly builds)
+```
+
+<Callout type="warning" title="Never Trust 'latest'">
+The `latest` tag does not necessarily mean the newest version. It is just a default tag name. Images tagged `latest` can be overwritten at any time, making builds non-reproducible. Always use specific version tags in production:
+
+```bash
+# Bad (non-reproducible):
+FROM python:latest
+
+# Good (reproducible):
+FROM python:3.11.7-slim-bookworm
+```
+</Callout>
+
+## Putting It All Together: The Complete Architecture
+
+Here is the complete Docker architecture showing all components and their relationships:
+
+```
+Complete Docker Architecture:
+═══════════════════════════════════════════════════════════════════════════════
+
+                          Docker Hub / Private Registry
+                         ┌──────────────────────────────┐
+                         │  Images stored remotely        │
+                         │  nginx, python, myapp, etc.   │
+                         └──────────────┬───────────────┘
+                                        │ pull/push
+                                        │
+ ┌──────────────────────────────────────┼────────────────────────────────────┐
+ │  Host Machine                        │                                    │
+ │                                      │                                    │
+ │  ┌──────────┐  REST   ┌─────────────┴──────────┐                        │
+ │  │ docker   │  API    │       dockerd            │                        │
+ │  │ CLI      ├────────→│                          │                        │
+ │  │          │         │  ┌──────────────────┐   │                        │
+ │  │ docker   │         │  │  Image Store      │   │                        │
+ │  │ compose  │         │  │  /var/lib/docker/ │   │                        │
+ │  └──────────┘         │  └──────────────────┘   │                        │
+ │                       │  ┌──────────────────┐   │                        │
+ │  ┌──────────┐         │  │  Network Driver   │   │                        │
+ │  │ Docker   │         │  │  (bridge, overlay)│   │                        │
+ │  │ Desktop  │         │  └──────────────────┘   │                        │
+ │  │ (GUI)    │         │  ┌──────────────────┐   │                        │
+ │  └──────────┘         │  │  Volume Driver    │   │                        │
+ │                       │  │  (local, NFS)     │   │                        │
+ │                       │  └──────────────────┘   │                        │
+ │                       └────────────┬────────────┘                        │
+ │                                    │ gRPC                                 │
+ │                                    ▼                                      │
+ │                       ┌────────────────────────┐                         │
+ │                       │      containerd         │                         │
+ │                       │                         │                         │
+ │                       │  • Image management     │                         │
+ │                       │  • Snapshot management   │                         │
+ │                       │  • Container lifecycle   │                         │
+ │                       └──────┬──────┬───────────┘                        │
+ │                              │      │                                     │
+ │                    ┌─────────┘      └──────────┐                         │
+ │                    ▼                            ▼                          │
+ │           ┌────────────────┐          ┌────────────────┐                 │
+ │           │ shim           │          │ shim           │                 │
+ │           │    │           │          │    │           │                 │
+ │           │  runc→container│          │  runc→container│                 │
+ │           │    (nginx)     │          │    (redis)     │                 │
+ │           └────────────────┘          └────────────────┘                 │
+ │                                                                           │
+ │  ┌───────────────────────────────────────────────────────────────────┐   │
+ │  │                    Linux Kernel                                    │   │
+ │  │  Namespaces │ cgroups │ Union FS │ Networking │ Security modules  │   │
+ │  └───────────────────────────────────────────────────────────────────┘   │
+ └───────────────────────────────────────────────────────────────────────────┘
+```
+
+## Docker Storage: Where Things Live on Disk
+
+Docker stores all of its data in `/var/lib/docker/`. Understanding this directory structure helps with debugging and disk management.
+
+```bash
+# Docker's data directory:
+$ ls /var/lib/docker/
+buildkit/     # BuildKit cache and data
+containers/   # Container configuration and logs
+image/        # Image metadata and layer mappings
+network/      # Network configuration
+overlay2/     # Image and container layers (the actual files)
+plugins/      # Docker plugins
+runtimes/     # Runtime configuration
+swarm/        # Swarm mode state
+tmp/          # Temporary files
+trust/        # Content trust data
+volumes/      # Named volumes
+
+# See total disk usage:
+$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          12        5         4.213GB   2.108GB (50%)
+Containers      5         3         102.4MB   45.2MB (44%)
+Local Volumes   8         4         1.573GB   892MB (56%)
+Build Cache     23        0         1.892GB   1.892GB (100%)
+
+# Detailed disk usage:
+$ docker system df -v
+```
+
+<Callout type="tip" title="Cleaning Up Disk Space">
+Docker can consume significant disk space over time. Use these commands to reclaim space:
+
+```bash
+# Remove stopped containers:
+docker container prune
+
+# Remove unused images:
+docker image prune
+
+# Remove unused volumes (careful — data loss!):
+docker volume prune
+
+# Nuclear option — remove EVERYTHING unused:
+docker system prune -a --volumes
+```
+</Callout>
+
+## Docker Info: Your Architecture Dashboard
+
+The `docker info` command is your window into the Docker engine's configuration and state. It reveals the architecture components we have discussed.
+
+```bash
+$ docker info
+Client: Docker Engine - Community
+ Version:    24.0.7
+ Context:    default
+ Debug Mode: false
+ Plugins:
+  buildx: Docker Buildx (Docker Inc.)
+  compose: Docker Compose (Docker Inc.)
+
+Server:
+ Containers: 5
+  Running: 3
+  Paused: 0
+  Stopped: 2
+ Images: 12
+ Server Version: 24.0.7
+ Storage Driver: overlay2
+  Backing Filesystem: extfs
+  Supports d_type: true
+  Using metacopy: false
+  Native Overlay Diff: true
+  userxattr: false
+ Logging Driver: json-file
+ Cgroup Driver: systemd
+ Cgroup Version: 2
+ Plugins:
+  Volume: local
+  Network: bridge host ipvlan macvlan null overlay
+  Log: awslogs fluentd gcplogs gelf journald json-file local splunk syslog
+ Swarm: inactive
+ Runtimes: io.containerd.runc.v2 runc
+ Default Runtime: runc
+ Init Binary: docker-init
+ containerd version: 8165feabfdfe38c65b599c4993d227328c231fca
+ runc version: v1.1.10-0-g18a0cb0
+ init version: de40ad0
+ Security Options:
+  apparmor
+  seccomp
+   Profile: builtin
+  cgroupns
+ Kernel Version: 5.15.0-91-generic
+ Operating System: Ubuntu 22.04.3 LTS
+ OSType: linux
+ Architecture: x86_64
+ CPUs: 4
+ Total Memory: 15.61GiB
+ Docker Root Dir: /var/lib/docker
+ Registry: https://index.docker.io/v1/
+ Experimental: false
+ Live Restore Enabled: true
+```
+
+Key information from `docker info`:
+
+| Field | What It Tells You |
+|---|---|
+| **Storage Driver** | Which Union filesystem is in use (overlay2) |
+| **Cgroup Driver** | How resource limits are managed (systemd or cgroupfs) |
+| **Default Runtime** | Which OCI runtime creates containers (runc) |
+| **containerd version** | The container manager version |
+| **Security Options** | What security modules are active (AppArmor, seccomp) |
+| **Docker Root Dir** | Where all Docker data is stored |
+| **Live Restore Enabled** | Whether containers survive daemon restarts |
+
+<Exercise title="Explore Docker Architecture Components" difficulty="beginner" xpReward={30} estimatedMinutes={20}
+  objectives={["Use docker info to examine Docker's architecture", "Identify the storage driver, runtime, and cgroup configuration", "Understand the relationship between Docker components"]}
+  hints={["docker info shows all the architecture details discussed in this lesson", "docker version shows client and server version information separately", "Use docker inspect on a container to see its storage driver details and layer information"]}
+  validationCriteria={["Run docker info and identify: storage driver, cgroup driver, default runtime, containerd version, and runc version", "Run docker version and explain the difference between client and server versions", "Run docker inspect on a running container and locate the GraphDriver section showing overlay2 layers", "Draw a diagram showing the path from docker CLI to running container process, labeling each component (dockerd, containerd, shim, runc)"]}
+>
+
+Explore the Docker architecture on your system using the following commands:
+
+**Task 1: Docker System Information**
+
+Run `docker info` and answer these questions:
+1. What storage driver is Docker using? What backing filesystem does it use?
+2. What cgroup driver is configured? Is it systemd or cgroupfs?
+3. What is the default container runtime?
+4. What security options are enabled?
+5. How many containers exist (running, paused, stopped)?
+6. What is the Docker Root Directory?
+
+**Task 2: Version Information**
+
+Run `docker version` and note:
+1. The client version and API version
+2. The server version and API version
+3. What Go version was Docker built with?
+4. What OS and architecture is the server running on?
+
+**Task 3: Container Layer Inspection**
+
+```bash
+# Run a container:
+docker run -d --name arch-test nginx
+
+# Inspect the container's storage details:
+docker inspect arch-test --format '{{json .GraphDriver}}' | python3 -m json.tool
+
+# Find the overlay2 directories:
+# - LowerDir: read-only image layers
+# - UpperDir: writable container layer
+# - MergedDir: unified filesystem view
+# - WorkDir: OverlayFS working directory
+```
+
+Examine the output and explain what each directory contains.
+
+**Task 4: Process Inspection**
+
+```bash
+# List all Docker-related processes:
+ps aux | grep -E '(dockerd|containerd|shim)'
+
+# Identify:
+# 1. The dockerd process
+# 2. The containerd process
+# 3. Any containerd-shim processes (one per running container)
+```
+
+Clean up when done:
+```bash
+docker stop arch-test && docker rm arch-test
+```
+
+</Exercise>
+
+<Exercise title="Trace the Container Creation Process" difficulty="intermediate" xpReward={35} estimatedMinutes={25}
+  objectives={["Trace each step of container creation from CLI to running process", "Observe Docker events during container lifecycle operations", "Understand image layer structure through inspection"]}
+  hints={["Use docker events in a separate terminal to watch real-time events", "docker inspect shows the complete configuration of a container", "docker history reveals every layer in an image and the command that created it"]}
+  validationCriteria={["Capture docker events output showing the complete container lifecycle (create, start, stop, destroy)", "Run docker history on an image and explain what each layer contains", "Use docker inspect to find the container's PID on the host and verify it with ps", "Explain the 5 steps that occur between typing 'docker run nginx' and the nginx process starting"]}
+>
+
+Trace the complete container creation process step by step.
+
+**Task 1: Watch Docker Events**
+
+Open two terminal windows. In the first, start watching Docker events:
+
+```bash
+# Terminal 1: Watch events in real-time
+docker events --format '{{.Time}} {{.Type}} {{.Action}} {{.Actor.Attributes.name}}'
+```
+
+In the second terminal, run through the container lifecycle:
+
+```bash
+# Terminal 2: Create and manage a container
+docker run -d --name trace-test nginx
+docker pause trace-test
+docker unpause trace-test
+docker stop trace-test
+docker rm trace-test
+```
+
+Record all events that appeared in Terminal 1. You should see events for: create, start, pause, unpause, stop (kill, die, stop), destroy.
+
+**Task 2: Image Layer Analysis**
+
+```bash
+# Pull an image and examine its layers:
+docker pull python:3.11-slim
+
+# View the layer history:
+docker history python:3.11-slim
+
+# View detailed layer information:
+docker inspect python:3.11-slim --format '{{json .RootFS}}' | python3 -m json.tool
+```
+
+For each layer in the history, identify:
+1. What Dockerfile instruction created the layer
+2. The size of the layer
+3. Whether it adds files, modifies configuration, or is metadata-only
+
+**Task 3: Find the Container Process**
+
+```bash
+# Run a container:
+docker run -d --name pid-test nginx
+
+# Find the container's PID on the host:
+docker inspect pid-test --format '{{.State.Pid}}'
+
+# Use that PID to examine the process:
+# (replace <PID> with the actual PID)
+ps aux | grep <PID>
+
+# See the container's namespaces:
+ls -la /proc/<PID>/ns/
+```
+
+This demonstrates that a container is truly just a Linux process with namespaces applied.
+
+Clean up:
+```bash
+docker stop pid-test && docker rm pid-test
+```
+
+</Exercise>
+
+<MiniProject title="Docker Architecture Reference Guide" difficulty="intermediate" xpReward={45} estimatedMinutes={35}
+  objectives={["Create a comprehensive reference showing Docker's complete architecture", "Document the container creation flow with all components", "Demonstrate understanding of image layers and Union filesystem"]}
+  hints={["Use docker info, docker version, and docker inspect to gather real system data", "Include ASCII diagrams for each major architectural component", "Show real command output to support your explanations", "Think about what a new team member would need to understand Docker internals"]}
+  validationCriteria={["Create an architecture diagram showing all components: docker CLI, dockerd, containerd, shim, runc, and the Linux kernel", "Document the step-by-step container creation flow from 'docker run' to running process with at least 6 detailed steps", "Include a diagram showing image layers for at least one real image from docker history output", "Explain Copy-on-Write with a diagram showing what happens when a container modifies a file", "Include real docker info output annotated with explanations of each major field", "Describe the role of each component (dockerd, containerd, runc, shim) in 2-3 sentences each"]}
+>
+
+Create a Docker Architecture Reference Guide as a file named `docker-architecture-guide.md` in your home directory.
+
+Your guide should include these sections with real data from your system:
+
+**Section 1: System Architecture Diagram**
+
+Create a comprehensive ASCII diagram showing the complete Docker architecture on your system. Include all components from the CLI to the kernel, with arrows showing how they communicate.
+
+**Section 2: Component Reference Table**
+
+For each component, document:
+
+| Component | Binary Path | Purpose | Communicates With |
+|---|---|---|---|
+| docker CLI | ? | ? | ? |
+| dockerd | ? | ? | ? |
+| containerd | ? | ? | ? |
+| runc | ? | ? | ? |
+| containerd-shim | ? | ? | ? |
+
+Gather actual binary paths using `which docker`, `which dockerd`, etc.
+
+**Section 3: Container Creation Flow**
+
+Document every step that occurs when you run `docker run -d --name myapp -p 8080:80 nginx`:
+
+1. CLI parses the command and sends API request (include the API endpoint)
+2. Daemon checks for image locally (what happens if not found?)
+3. Daemon creates container object (what configuration is stored?)
+4. containerd prepares the OCI bundle (what does it contain?)
+5. shim starts runc (what does runc do with namespaces and cgroups?)
+6. Container process starts (what is PID 1 inside the container?)
+
+**Section 4: Image Layer Deep Dive**
+
+Pull a multi-layer image (like `python:3.11-slim`), run `docker history`, and create a diagram showing each layer, its size, and the command that created it.
+
+**Section 5: Storage Driver Investigation**
+
+Run `docker info` and document the storage configuration. Then run a container, modify a file, and show how OverlayFS handles the copy-on-write:
+
+```bash
+docker run -d --name cow-test nginx
+docker exec cow-test bash -c "echo 'modified' > /etc/nginx/nginx.conf"
+docker inspect cow-test --format '{{json .GraphDriver.Data}}' | python3 -m json.tool
+# Examine the UpperDir to see the modified file
+```
+
+**Section 6: Process Verification**
+
+Run `ps aux` and Docker inspect commands to prove that containers are Linux processes with namespaces. Show the dockerd, containerd, shim, and container process hierarchy.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Docker uses a client-server architecture where the CLI (`docker`) sends REST API requests to the daemon (`dockerd`), which manages all Docker objects
+- Docker manages four primary objects: images (read-only templates), containers (running instances), networks (communication), and volumes (persistent storage)
+- The Docker Engine consists of multiple components: dockerd (API and management), containerd (container lifecycle), runc (OCI runtime that creates containers), and containerd-shim (manages running containers)
+- When you run `docker run`, the command flows through: CLI → dockerd → containerd → shim → runc → container process. runc exits after creating the container; the shim keeps running
+- Docker images are built from read-only layers stacked by a Union filesystem (OverlayFS). Each Dockerfile instruction creates a new layer, and layers are shared across images to save disk space
+- Copy-on-Write (CoW) means containers share image layers safely — modifications are written to a per-container writable layer without changing the original image
+- Containers go through a lifecycle: Created → Running → Paused → Stopped → Removed. The `docker run` command combines create and start into one step
+- Docker registries (Docker Hub, ECR, GCR) store and distribute images. Always use specific version tags in production — never rely on `latest`
+
+## What's Next
+
+Now that you understand Docker's architecture from the inside out, it is time to get Docker running on your own machine. In the next lesson, **Installing Docker**, you will walk through the installation process on Linux, macOS, and Windows, configure the Docker daemon, and verify that everything works correctly. You will go from zero to a fully functional Docker environment ready for the hands-on lessons ahead.
