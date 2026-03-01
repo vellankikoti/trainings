@@ -1,0 +1,21 @@
+{
+  "id": "containerization",
+  "title": "Containerization & Orchestration",
+  "slug": "containerization",
+  "description": "Master containers and container orchestration — the backbone of modern infrastructure. From Docker basics to production Kubernetes.",
+  "order": 2,
+  "difficulty": "Intermediate",
+  "estimatedHours": 300,
+  "icon": "container",
+  "color": "blue",
+  "modules": [
+    "docker-fundamentals",
+    "docker-advanced",
+    "docker-compose",
+    "kubernetes-fundamentals",
+    "kubernetes-advanced",
+    "helm",
+    "kustomize"
+  ],
+  "capstoneProject": "Containerize a multi-service application, deploy to Kubernetes with Helm charts, configure ingress, TLS, autoscaling, and network policies."
+}

@@ -1,0 +1,20 @@
+{
+  "id": "python-automation",
+  "title": "Python for Automation",
+  "slug": "python-automation",
+  "pathSlug": "foundations",
+  "description": "Learn Python with a DevOps focus. Automate infrastructure tasks, parse logs, interact with APIs, and build tools that make your life easier.",
+  "order": 6,
+  "estimatedHours": 45,
+  "lessonsCount": 30,
+  "lessons": [
+    { "slug": "python-basics", "title": "Python Basics for DevOps", "order": 1 },
+    { "slug": "data-structures", "title": "Data Structures", "order": 2 },
+    { "slug": "file-operations", "title": "File & Directory Operations", "order": 3 },
+    { "slug": "working-with-apis", "title": "Working with APIs", "order": 4 },
+    { "slug": "subprocess-commands", "title": "Running System Commands", "order": 5 },
+    { "slug": "log-parsing", "title": "Log Parsing & Analysis", "order": 6 },
+    { "slug": "yaml-json", "title": "Working with YAML & JSON", "order": 7 },
+    { "slug": "boto3-aws", "title": "AWS Automation with Boto3", "order": 8 }
+  ]
+}

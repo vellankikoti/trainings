@@ -1,0 +1,20 @@
+{
+  "id": "kubernetes-fundamentals",
+  "title": "Kubernetes Fundamentals",
+  "slug": "kubernetes-fundamentals",
+  "pathSlug": "containerization",
+  "description": "Master container orchestration with Kubernetes. Deploy, scale, and manage containerized applications in production.",
+  "order": 4,
+  "estimatedHours": 65,
+  "lessonsCount": 40,
+  "lessons": [
+    { "slug": "why-kubernetes", "title": "Why Kubernetes?", "order": 1 },
+    { "slug": "architecture", "title": "Kubernetes Architecture", "order": 2 },
+    { "slug": "pods", "title": "Pods — The Smallest Unit", "order": 3 },
+    { "slug": "deployments", "title": "Deployments & ReplicaSets", "order": 4 },
+    { "slug": "services", "title": "Services & Networking", "order": 5 },
+    { "slug": "configmaps-secrets", "title": "ConfigMaps & Secrets", "order": 6 },
+    { "slug": "namespaces", "title": "Namespaces & Resource Isolation", "order": 7 },
+    { "slug": "persistent-volumes", "title": "Persistent Volumes", "order": 8 }
+  ]
+}

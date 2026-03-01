@@ -1,0 +1,20 @@
+{
+  "id": "platform-engineering",
+  "title": "Platform Engineering & Advanced Topics",
+  "slug": "platform-engineering",
+  "description": "Think at the platform level — design systems that serve entire engineering organizations. Security, FinOps, and career development.",
+  "order": 6,
+  "difficulty": "Advanced",
+  "estimatedHours": 175,
+  "icon": "layers",
+  "color": "purple",
+  "modules": [
+    "platform-principles",
+    "developer-platforms",
+    "distributed-systems",
+    "security-devsecops",
+    "finops",
+    "career-development"
+  ],
+  "capstoneProject": "Design and build an Internal Developer Platform with self-service portal, golden paths, service templates, security scanning, and cost dashboards."
+}

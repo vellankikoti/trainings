@@ -1,0 +1,19 @@
+{
+  "id": "networking",
+  "title": "Networking Fundamentals",
+  "slug": "networking",
+  "pathSlug": "foundations",
+  "description": "Understand how computers communicate. Master TCP/IP, DNS, HTTP, firewalls, and the networking concepts that underpin everything in DevOps.",
+  "order": 4,
+  "estimatedHours": 35,
+  "lessonsCount": 22,
+  "lessons": [
+    { "slug": "how-networks-work", "title": "How Networks Work", "order": 1 },
+    { "slug": "tcp-ip-model", "title": "The TCP/IP Model", "order": 2 },
+    { "slug": "ip-addressing", "title": "IP Addressing & Subnets", "order": 3 },
+    { "slug": "dns", "title": "DNS — The Internet's Phonebook", "order": 4 },
+    { "slug": "http-https", "title": "HTTP & HTTPS", "order": 5 },
+    { "slug": "firewalls-security", "title": "Firewalls & Network Security", "order": 6 },
+    { "slug": "load-balancing", "title": "Load Balancing", "order": 7 }
+  ]
+}

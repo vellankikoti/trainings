@@ -1,0 +1,20 @@
+{
+  "id": "git",
+  "title": "Git & Version Control",
+  "slug": "git",
+  "pathSlug": "foundations",
+  "description": "Master the version control system used by every modern team. Learn Git from first commit to complex branching strategies.",
+  "order": 5,
+  "estimatedHours": 35,
+  "lessonsCount": 27,
+  "lessons": [
+    { "slug": "git-basics", "title": "Git Basics — Your First Repository", "order": 1 },
+    { "slug": "staging-committing", "title": "Staging & Committing", "order": 2 },
+    { "slug": "branching", "title": "Branching & Merging", "order": 3 },
+    { "slug": "remote-repos", "title": "Remote Repositories & GitHub", "order": 4 },
+    { "slug": "pull-requests", "title": "Pull Requests & Code Review", "order": 5 },
+    { "slug": "merge-conflicts", "title": "Resolving Merge Conflicts", "order": 6 },
+    { "slug": "git-workflows", "title": "Git Workflows (GitFlow, Trunk-based)", "order": 7 },
+    { "slug": "advanced-git", "title": "Advanced Git (Rebase, Cherry-pick, Bisect)", "order": 8 }
+  ]
+}

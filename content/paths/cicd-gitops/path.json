@@ -1,0 +1,20 @@
+{
+  "id": "cicd-gitops",
+  "title": "CI/CD & GitOps",
+  "slug": "cicd-gitops",
+  "description": "Automate everything from code commit to production deployment. Master GitHub Actions, Jenkins, ArgoCD, and advanced pipeline patterns.",
+  "order": 3,
+  "difficulty": "Intermediate",
+  "estimatedHours": 225,
+  "icon": "git-branch",
+  "color": "red",
+  "modules": [
+    "cicd-fundamentals",
+    "github-actions",
+    "jenkins",
+    "argocd-gitops",
+    "flux",
+    "advanced-pipelines"
+  ],
+  "capstoneProject": "Build a complete CI/CD platform with GitHub Actions, ArgoCD, container registry, rollback strategies, canary deployments, and automated security scanning."
+}

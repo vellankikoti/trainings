@@ -1,0 +1,21 @@
+{
+  "id": "observability",
+  "title": "Observability & Reliability",
+  "slug": "observability",
+  "description": "Build observable systems and practice Site Reliability Engineering. Master Prometheus, Grafana, OpenTelemetry, and incident management.",
+  "order": 5,
+  "difficulty": "Advanced",
+  "estimatedHours": 225,
+  "icon": "activity",
+  "color": "yellow",
+  "modules": [
+    "observability-fundamentals",
+    "prometheus",
+    "grafana",
+    "opentelemetry",
+    "logging",
+    "alerting-incident",
+    "sre-principles"
+  ],
+  "capstoneProject": "Build a complete observability stack with Prometheus, Grafana, OpenTelemetry, and Loki. Create SLOs, error budgets, and practice incident response."
+}

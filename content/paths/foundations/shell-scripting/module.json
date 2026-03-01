@@ -1,0 +1,20 @@
+{
+  "id": "shell-scripting",
+  "title": "Shell Scripting",
+  "slug": "shell-scripting",
+  "pathSlug": "foundations",
+  "description": "Transform repetitive tasks into automated scripts. Learn Bash scripting from variables to complex automation workflows.",
+  "order": 3,
+  "estimatedHours": 45,
+  "lessonsCount": 30,
+  "lessons": [
+    { "slug": "first-script", "title": "Your First Shell Script", "order": 1 },
+    { "slug": "variables-types", "title": "Variables & Data Types", "order": 2 },
+    { "slug": "conditionals", "title": "Conditionals & Control Flow", "order": 3 },
+    { "slug": "loops", "title": "Loops & Iteration", "order": 4 },
+    { "slug": "functions", "title": "Functions & Modular Scripts", "order": 5 },
+    { "slug": "string-manipulation", "title": "String Manipulation", "order": 6 },
+    { "slug": "arrays", "title": "Arrays & Data Structures", "order": 7 },
+    { "slug": "error-handling", "title": "Error Handling & Debugging", "order": 8 }
+  ]
+}

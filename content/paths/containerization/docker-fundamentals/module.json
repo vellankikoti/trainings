@@ -1,0 +1,20 @@
+{
+  "id": "docker-fundamentals",
+  "title": "Docker Fundamentals",
+  "slug": "docker-fundamentals",
+  "pathSlug": "containerization",
+  "description": "Learn containerization from scratch. Build, run, and manage Docker containers. Understand images, Dockerfiles, and container lifecycle.",
+  "order": 1,
+  "estimatedHours": 55,
+  "lessonsCount": 35,
+  "lessons": [
+    { "slug": "what-are-containers", "title": "What Are Containers?", "order": 1 },
+    { "slug": "installing-docker", "title": "Installing Docker", "order": 2 },
+    { "slug": "first-container", "title": "Your First Container", "order": 3 },
+    { "slug": "docker-images", "title": "Understanding Docker Images", "order": 4 },
+    { "slug": "dockerfile", "title": "Writing Dockerfiles", "order": 5 },
+    { "slug": "container-lifecycle", "title": "Container Lifecycle Management", "order": 6 },
+    { "slug": "docker-volumes", "title": "Volumes & Data Persistence", "order": 7 },
+    { "slug": "docker-networking", "title": "Container Networking", "order": 8 }
+  ]
+}

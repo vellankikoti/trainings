@@ -1,0 +1,22 @@
+{
+  "id": "linux",
+  "title": "Linux Fundamentals",
+  "slug": "linux",
+  "pathSlug": "foundations",
+  "description": "Your journey begins here. Learn how Linux works, navigate the file system, manage processes, and understand the operating system that powers the internet.",
+  "order": 1,
+  "estimatedHours": 55,
+  "lessonsCount": 35,
+  "lessons": [
+    { "slug": "the-linux-story", "title": "The Linux Story", "order": 1 },
+    { "slug": "terminal-basics", "title": "Terminal Basics", "order": 2 },
+    { "slug": "file-system-navigation", "title": "File System Navigation", "order": 3 },
+    { "slug": "file-operations", "title": "File Operations", "order": 4 },
+    { "slug": "file-permissions", "title": "File Permissions & Ownership", "order": 5 },
+    { "slug": "users-and-groups", "title": "Users and Groups", "order": 6 },
+    { "slug": "process-management", "title": "Process Management", "order": 7 },
+    { "slug": "package-management", "title": "Package Management", "order": 8 },
+    { "slug": "text-processing", "title": "Text Processing Tools", "order": 9 },
+    { "slug": "io-redirection", "title": "I/O Redirection & Pipes", "order": 10 }
+  ]
+}

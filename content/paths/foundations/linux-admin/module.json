@@ -1,0 +1,20 @@
+{
+  "id": "linux-admin",
+  "title": "Linux Administration",
+  "slug": "linux-admin",
+  "pathSlug": "foundations",
+  "description": "Go deeper into Linux system administration. Configure services, manage storage, set up networking, and learn to troubleshoot production systems.",
+  "order": 2,
+  "estimatedHours": 45,
+  "lessonsCount": 30,
+  "lessons": [
+    { "slug": "system-services", "title": "System Services & systemd", "order": 1 },
+    { "slug": "disk-management", "title": "Disk & Storage Management", "order": 2 },
+    { "slug": "network-configuration", "title": "Network Configuration", "order": 3 },
+    { "slug": "firewall-security", "title": "Firewall & Security Basics", "order": 4 },
+    { "slug": "log-management", "title": "Log Management", "order": 5 },
+    { "slug": "cron-scheduling", "title": "Cron & Task Scheduling", "order": 6 },
+    { "slug": "ssh-remote-access", "title": "SSH & Remote Access", "order": 7 },
+    { "slug": "system-monitoring", "title": "System Monitoring", "order": 8 }
+  ]
+}

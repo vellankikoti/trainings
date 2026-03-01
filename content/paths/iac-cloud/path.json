@@ -1,0 +1,20 @@
+{
+  "id": "iac-cloud",
+  "title": "Infrastructure as Code & Cloud",
+  "slug": "iac-cloud",
+  "description": "Define, provision, and manage infrastructure programmatically at scale. Master AWS, Terraform, and Ansible.",
+  "order": 4,
+  "difficulty": "Intermediate",
+  "estimatedHours": 275,
+  "icon": "cloud",
+  "color": "orange",
+  "modules": [
+    "cloud-fundamentals",
+    "aws-core",
+    "aws-advanced",
+    "terraform-fundamentals",
+    "terraform-advanced",
+    "ansible"
+  ],
+  "capstoneProject": "Design and provision a complete AWS production environment using Terraform with VPC, EKS, RDS, S3, CloudFront, and configure servers with Ansible."
+}
