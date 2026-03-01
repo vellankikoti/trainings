@@ -1,0 +1,599 @@
+---
+title: "DevSecOps — Security Shifted Left"
+description: "Understand why traditional security practices fail in modern software delivery, how DevSecOps integrates security into every stage of the development lifecycle, and what shift-left security means in practice."
+order: 1
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: []
+objectives:
+  - Explain why traditional security approaches fail in fast-moving DevOps environments
+  - Define DevSecOps and the concept of shifting security left
+  - Distinguish between SAST, DAST, SCA, and other security testing methods
+  - Describe how security scanning integrates into CI/CD pipelines
+  - Identify the key principles of building a security-first development culture
+tags:
+  - platform-engineering
+  - devops
+  - security
+  - devsecops
+  - ci-cd
+---
+
+<Callout type="story" title="The Story">
+It is a Friday afternoon in 2019 at a mid-sized fintech company. The on-call engineer gets paged: their security team has discovered that a production API is leaking customer financial data. An attacker has been quietly exfiltrating records for weeks through a Server-Side Request Forgery (SSRF) vulnerability in a microservice that processes webhook callbacks.
+
+The vulnerability itself was not exotic. It was a well-known pattern — the service fetched URLs provided in user input without validating the destination. Any SAST tool would have flagged it. Any code review checklist that included "validate user-supplied URLs" would have caught it. The OWASP Top 10 had listed SSRF for years.
+
+But the company's security review process was designed for a different era. Security reviews happened once a quarter, performed by a three-person security team reviewing code from fifty development teams. By the time the security team got to this service, it had been in production for four months. The vulnerability had been in the codebase since day one — sitting in a pull request that twelve people had approved without a single security concern raised.
+
+The breach cost the company $2.3 million in incident response, regulatory fines, and customer notification. But the real cost was the realization that their security process was fundamentally broken. Security could not be a gate at the end of the pipeline. It had to be woven into every stage — from the moment a developer writes a line of code to the moment it runs in production.
+
+That realization is the foundation of DevSecOps.
+</Callout>
+
+## The Problem: Security as an Afterthought
+
+For decades, software security followed a pattern called **"test and fix"** — develop the software first, then hand it to a security team for review before release. This approach worked when software shipped quarterly. It does not work when teams deploy multiple times per day.
+
+### The Traditional Security Model
+
+```
+Traditional Security Workflow:
+══════════════════════════════
+
+  Developers                Security Team               Production
+  ──────────               ──────────────              ──────────
+  │                              │                          │
+  │  Write code for             │                          │
+  │  6-12 weeks                 │                          │
+  │         │                   │                          │
+  │         ▼                   │                          │
+  │  "Ready for release" ──────▶  Review code              │
+  │                              │  (2-4 weeks)            │
+  │                              │       │                  │
+  │  ◄────── "37 vulnerabilities │       │                  │
+  │           found. Fix them."  │       │                  │
+  │         │                    │                          │
+  │  Fix vulnerabilities         │                          │
+  │  (2-3 weeks)                │                          │
+  │         │                    │                          │
+  │  "Ready again" ─────────────▶  Re-review               │
+  │                              │  (1-2 weeks)            │
+  │                              │       │                  │
+  │  ◄────── "12 still open,    │       │                  │
+  │           5 new ones found"  │       │                  │
+  │         │                    │                          │
+  │  Repeat until deadline...    │                          │
+  │         │                    │       │                  │
+  │         └────────────────────┘───────┘──────────▶ Deploy
+  │                                                  (months late)
+  │
+  Total time: 3-6 months
+  Developer morale: destroyed
+```
+
+This model has four fatal flaws:
+
+1. **It is too slow.** Modern teams deploy daily or even multiple times per day. A two-week security review is not compatible with continuous delivery.
+2. **It is too late.** Vulnerabilities found after development is "complete" are 6-30x more expensive to fix than those caught during development.
+3. **It creates adversarial relationships.** Developers see security as a blocker. Security teams see developers as reckless. Neither side is wrong — the process is broken.
+4. **It does not scale.** A security team of five cannot meaningfully review code from two hundred developers. The math simply does not work.
+
+<Callout type="warning" title="The Cost of Late Discovery">
+IBM's System Sciences Institute found that the cost to fix a vulnerability increases exponentially the later it is discovered: $80 during development, $240 during testing, $960 during staging, and $7,600 in production. A vulnerability that costs $80 to fix in a developer's IDE costs nearly 100x more to fix after deployment.
+</Callout>
+
+### The Breach Statistics
+
+The consequences of security as an afterthought are measurable:
+
+| Statistic | Source |
+|---|---|
+| Average cost of a data breach: **$4.45 million** | IBM Cost of a Data Breach Report 2023 |
+| Average time to identify a breach: **204 days** | IBM Cost of a Data Breach Report 2023 |
+| **83%** of organizations have had more than one breach | IBM Cost of a Data Breach Report 2023 |
+| **75%** of vulnerabilities in production code come from open-source dependencies | Snyk State of Open Source Security 2023 |
+| Organizations using DevSecOps saved **$1.68 million** per breach on average | IBM Cost of a Data Breach Report 2023 |
+
+## What Is DevSecOps?
+
+**DevSecOps** is the practice of integrating security into every phase of the software development lifecycle rather than treating it as a separate phase at the end. The name itself tells the story: Development + Security + Operations, working together from the start.
+
+```
+DevOps:                          DevSecOps:
+═══════                          ══════════
+
+    ┌─── Dev ───┐                    ┌─── Dev ───┐
+    │           │                    │           │
+    │   Code    │                    │   Code    │
+    │   Build   │                    │ + SAST    │
+    │   Test    │                    │ + SCA     │
+    │           │                    │ + Secrets │
+    └─────┬─────┘                    └─────┬─────┘
+          │                                │
+          ▼                                ▼
+    ┌─── Ops ───┐                    ┌── SecOps ──┐
+    │           │                    │            │
+    │  Deploy   │                    │  Deploy    │
+    │  Monitor  │                    │ + DAST     │
+    │  Scale    │                    │ + RASP     │
+    │           │                    │ + Monitor  │
+    └───────────┘                    │ + Audit    │
+                                     └────────────┘
+    Security? Someone                Security is automated
+    else's problem.                  and continuous.
+```
+
+### The Core Principles of DevSecOps
+
+**1. Shift Left** — Move security testing as early as possible in the development lifecycle
+
+```
+The Development Lifecycle:
+──────────────────────────
+
+  Plan → Code → Build → Test → Deploy → Monitor
+  ◄──── LEFT                              RIGHT ────►
+
+  Traditional security:                    ╳ (here, too late)
+  DevSecOps:             ╳ ╳ ╳ ╳ ╳ ╳ (everywhere, from the start)
+```
+
+Shifting left means catching vulnerabilities when they are cheapest and easiest to fix — in the IDE, during code review, and in the CI pipeline, not after deployment.
+
+**2. Automate Everything** — Manual security reviews do not scale. Automated scanning does.
+
+```
+Manual Security Review:              Automated Security Scanning:
+═══════════════════════              ════════════════════════════
+
+  Reviewer looks at code              Every commit triggers:
+  once per quarter.                   ├── SAST scan (code analysis)
+                                      ├── SCA scan (dependency check)
+  Reviews 200 PRs in                  ├── Secret detection
+  a two-day sprint.                   ├── Container image scan
+                                      ├── IaC security scan
+  Misses 80% of issues               └── License compliance check
+  due to time pressure.
+                                      Results in < 5 minutes.
+  "Approved."                         Every single commit. Every time.
+```
+
+**3. Security as Code** — Security policies, scanning configurations, and compliance rules should be version-controlled, testable, and automated, just like application code.
+
+**4. Shared Responsibility** — Security is not the security team's job alone. It is everyone's responsibility. Developers write secure code. Operations deploy securely. Security teams provide tools, training, and guidance.
+
+**5. Continuous Feedback** — Developers should receive immediate, actionable feedback when they introduce a vulnerability, not a report weeks later.
+
+## Security Testing Methods
+
+DevSecOps relies on several complementary security testing approaches, each designed to catch different types of vulnerabilities at different stages:
+
+### SAST — Static Application Security Testing
+
+**SAST** analyzes source code, bytecode, or binaries **without executing the application**. It looks for patterns that indicate potential vulnerabilities.
+
+```
+How SAST Works:
+═══════════════
+
+  Source Code ──→ SAST Scanner ──→ Report
+                       │
+                  Analyzes code paths,
+                  data flows, patterns
+                       │
+                  Compares against
+                  known vulnerability
+                  patterns (CWE database)
+                       │
+                  Flags potential issues:
+                  ├── SQL Injection (CWE-89)
+                  ├── XSS (CWE-79)
+                  ├── Path Traversal (CWE-22)
+                  └── Buffer Overflow (CWE-120)
+```
+
+**When it runs:** During development (IDE plugins) and in CI/CD pipelines (on every commit or pull request)
+
+**Popular SAST tools:**
+
+| Tool | Language Support | Open Source? |
+|---|---|---|
+| **Semgrep** | 25+ languages | Yes |
+| **SonarQube** | 30+ languages | Community + Commercial |
+| **CodeQL** | 10+ languages | Yes (GitHub) |
+| **Bandit** | Python | Yes |
+| **Brakeman** | Ruby on Rails | Yes |
+| **Gosec** | Go | Yes |
+
+**Example: SAST catching a SQL injection in CI**
+
+```yaml
+# GitHub Actions workflow with SAST
+name: Security Scan
+on: [pull_request]
+
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/owasp-top-ten
+            p/security-audit
+```
+
+```python
+# Semgrep would flag this code:
+
+# VULNERABLE - SQL Injection
+def get_user(username):
+    query = f"SELECT * FROM users WHERE name = '{username}'"  # Semgrep: sql-injection
+    return db.execute(query)
+
+# SAFE - Parameterized query
+def get_user(username):
+    query = "SELECT * FROM users WHERE name = %s"
+    return db.execute(query, (username,))
+```
+
+<Callout type="tip" title="SAST in Your IDE">
+The most effective place to run SAST is in the developer's IDE. Tools like Semgrep, SonarLint, and Snyk IDE plugins give developers real-time feedback as they type, catching vulnerabilities before code is even committed. This is the ultimate shift left.
+</Callout>
+
+### DAST — Dynamic Application Security Testing
+
+**DAST** tests a **running application** by sending it malicious inputs and observing its behavior. Unlike SAST, DAST does not need access to source code — it tests the application from the outside, like an attacker would.
+
+```
+How DAST Works:
+═══════════════
+
+  Running Application ◄──── DAST Scanner
+                                 │
+                            Sends malicious
+                            requests:
+                            ├── SQL injection payloads
+                            ├── XSS payloads
+                            ├── Authentication bypass
+                            ├── SSRF attempts
+                            └── Directory traversal
+                                 │
+                            Observes responses:
+                            ├── Error messages?
+                            ├── Unexpected data?
+                            ├── Server errors?
+                            └── Timing anomalies?
+```
+
+**When it runs:** Against deployed applications in staging or pre-production environments, and sometimes in production (carefully)
+
+**Popular DAST tools:**
+
+| Tool | Type | Open Source? |
+|---|---|---|
+| **OWASP ZAP** | Full DAST scanner | Yes |
+| **Nuclei** | Template-based scanner | Yes |
+| **Burp Suite** | Comprehensive web scanner | Commercial |
+| **Nikto** | Web server scanner | Yes |
+
+### SCA — Software Composition Analysis
+
+**SCA** scans your project's **dependencies** (open-source libraries, packages, and frameworks) for known vulnerabilities. Given that modern applications are 70-90% open-source code, SCA is critical.
+
+```
+Your Application's Dependency Tree:
+════════════════════════════════════
+
+  your-app
+  ├── express@4.18.2 ........... ✓ No known vulnerabilities
+  │   ├── body-parser@1.20.1 ... ✓
+  │   └── cookie@0.5.0 ......... ✓
+  ├── lodash@4.17.20 ........... ✗ CVE-2021-23337 (HIGH)
+  │                                 Prototype pollution
+  ├── axios@0.21.1 ............. ✗ CVE-2021-3749 (MEDIUM)
+  │                                 ReDoS vulnerability
+  └── jsonwebtoken@8.5.1 ....... ✗ CVE-2022-23529 (CRITICAL)
+                                    Insecure key handling
+
+  3 vulnerabilities found in dependencies
+  you did not write but are shipping to production.
+```
+
+**Popular SCA tools:**
+
+| Tool | Ecosystem | Open Source? |
+|---|---|---|
+| **Dependabot** | Multi-language | Yes (GitHub) |
+| **Snyk** | Multi-language | Freemium |
+| **Trivy** | Containers + code | Yes |
+| **Grype** | Containers + code | Yes |
+| **npm audit** | Node.js | Built-in |
+
+### Secret Detection
+
+Secret detection scans code, configuration files, and git history for accidentally committed secrets like API keys, passwords, tokens, and certificates.
+
+```
+Common Secrets Accidentally Committed:
+══════════════════════════════════════
+
+  AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLE
+  DATABASE_URL=postgres://admin:password123@prod-db.internal:5432
+  STRIPE_SECRET_KEY=sk_live_EXAMPLE_FAKE_KEY_DO_NOT_USE
+  GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  Once committed to git, these secrets are in the history FOREVER
+  (even if you delete the file in a later commit).
+```
+
+**Popular secret detection tools:**
+
+| Tool | Open Source? | Pre-commit Support? |
+|---|---|---|
+| **Gitleaks** | Yes | Yes |
+| **TruffleHog** | Yes | Yes |
+| **detect-secrets** (Yelp) | Yes | Yes |
+| **GitHub Secret Scanning** | Free (GitHub) | N/A (server-side) |
+
+### Container Image Scanning
+
+Container image scanners analyze Docker images for vulnerabilities in the base image, installed packages, and application dependencies.
+
+```
+Container Image Scan Results:
+═════════════════════════════
+
+  Image: myapp:latest
+  Base: ubuntu:22.04
+
+  OS Packages:
+  ├── libssl3 .............. CVE-2023-0286 (HIGH)
+  ├── libcurl4 ............. CVE-2023-27534 (MEDIUM)
+  └── zlib1g ............... CVE-2022-37434 (CRITICAL)
+
+  Application Dependencies:
+  ├── flask 2.2.0 .......... CVE-2023-30861 (HIGH)
+  └── requests 2.28.0 ...... No vulnerabilities
+
+  Total: 4 vulnerabilities (1 Critical, 2 High, 1 Medium)
+```
+
+## Security in the CI/CD Pipeline
+
+The power of DevSecOps is realized when security scanning is automated into the CI/CD pipeline. Here is what a comprehensive security pipeline looks like:
+
+```
+DevSecOps CI/CD Pipeline:
+═════════════════════════
+
+  Developer pushes code
+         │
+         ▼
+  ┌─── Pre-Commit ───┐
+  │ Secret detection  │  ◄── Gitleaks, TruffleHog
+  │ Linting           │
+  └────────┬──────────┘
+           │
+           ▼
+  ┌─── Build Stage ───┐
+  │ SAST scan         │  ◄── Semgrep, CodeQL
+  │ SCA scan          │  ◄── Snyk, Trivy
+  │ License check     │  ◄── FOSSA, license-checker
+  │ Unit tests        │
+  └────────┬──────────┘
+           │
+           ▼
+  ┌── Container Build ─┐
+  │ Image build        │
+  │ Image scan         │  ◄── Trivy, Grype
+  │ Base image check   │
+  │ Dockerfile lint    │  ◄── Hadolint
+  └────────┬───────────┘
+           │
+           ▼
+  ┌── Deploy to Staging ┐
+  │ DAST scan           │  ◄── OWASP ZAP, Nuclei
+  │ Integration tests   │
+  │ IaC scan            │  ◄── Checkov, tfsec
+  └────────┬────────────┘
+           │
+           ▼
+  ┌── Gate Decision ───┐
+  │ All scans pass?    │──── No ──→ Block deployment,
+  │ No critical vulns? │            notify developer
+  │ Policies met?      │
+  └────────┬───────────┘
+           │ Yes
+           ▼
+  ┌── Production ──────┐
+  │ Deploy             │
+  │ Runtime protection │  ◄── Falco, RASP
+  │ Continuous monitor │
+  └────────────────────┘
+```
+
+<Callout type="info" title="Fail Fast, Not Fail Often">
+The goal is not to block every deployment — that recreates the old "security as a gate" model. The goal is to give developers fast, actionable feedback so they can fix issues immediately. A good DevSecOps pipeline returns results in under 10 minutes and provides clear remediation guidance, not just a list of CVE numbers.
+</Callout>
+
+### Example: A Complete Security Pipeline in GitHub Actions
+
+```yaml
+name: DevSecOps Pipeline
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks Secret Scan
+        uses: gitleaks/gitleaks-action@v2
+
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep SAST
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/owasp-top-ten
+
+  sca:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy Dependency Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          severity: 'CRITICAL,HIGH'
+
+  container-scan:
+    runs-on: ubuntu-latest
+    needs: [secret-scan, sast, sca]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Image
+        run: docker build -t myapp:${{ github.sha }} .
+      - name: Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'myapp:${{ github.sha }}'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+```
+
+## Building a Security Culture
+
+Tools alone do not create security. Culture does. The most effective DevSecOps organizations share these cultural traits:
+
+### 1. Security Champions Program
+
+Designate one developer on each team as a "security champion" — someone who receives additional security training and serves as the first point of contact for security questions.
+
+```
+Security Champions Model:
+═════════════════════════
+
+  Security Team (3 people)
+       │
+       ├── Training and guidance
+       │
+       ▼
+  Security Champions (one per team)
+       │
+       ├── Team A Champion ──→ Team A (8 developers)
+       ├── Team B Champion ──→ Team B (6 developers)
+       ├── Team C Champion ──→ Team C (10 developers)
+       └── Team D Champion ──→ Team D (7 developers)
+
+  Instead of 3 security people reviewing code from 31 developers,
+  you have 4 embedded champions who catch issues in real time.
+```
+
+### 2. Blameless Security Postmortems
+
+When a vulnerability reaches production, conduct a blameless postmortem focused on improving the system, not punishing the developer. Ask "how did our process fail?" not "who made this mistake?"
+
+### 3. Security Training That Works
+
+Replace annual compliance slide decks with practical, hands-on security training:
+
+- **Capture the Flag (CTF) events** — Gamified security challenges
+- **Secure coding workshops** — Language-specific security patterns
+- **Threat modeling sessions** — Collaborative exercises during design phase
+- **Bug bounty programs** — Internal or external incentives for finding vulnerabilities
+
+### 4. Make the Secure Way the Easy Way
+
+The most powerful security strategy is to make insecure patterns harder to write than secure ones:
+
+```
+Instead of:                         Do this:
+═══════════                         ═════════
+
+  Writing a security policy          Provide a library that
+  that says "always use              handles parameterized
+  parameterized queries"             queries by default
+
+  Training developers to             Provide a pre-configured
+  configure TLS correctly            ingress controller that
+                                     enforces TLS automatically
+
+  Telling teams to scan              Add scanning to the shared
+  their containers                   CI pipeline template so it
+                                     happens automatically
+```
+
+<Callout type="tip" title="The Paved Road Principle">
+Netflix calls this "the paved road." If you pave a secure road and make it the easiest path to follow, most developers will naturally stay on it. You do not need to build fences — you need to build better roads.
+</Callout>
+
+## Key Takeaways
+
+- **Traditional security models** that review code at the end of the development cycle are too slow, too late, and too adversarial for modern software delivery
+- **DevSecOps** integrates security into every phase of the development lifecycle — from IDE to production — making security continuous and automated
+- **Shifting left** means catching vulnerabilities as early as possible, when they are cheapest and easiest to fix
+- **SAST** scans source code for vulnerabilities without running it; **DAST** tests running applications from the outside; **SCA** checks dependencies for known vulnerabilities; **secret detection** catches accidentally committed credentials
+- A comprehensive DevSecOps pipeline includes pre-commit hooks, SAST, SCA, container scanning, DAST, and runtime protection — all automated in CI/CD
+- **Culture is more important than tools** — security champions, blameless postmortems, practical training, and making the secure path the easy path are what truly shift an organization's security posture
+
+<Quiz>
+<QuizQuestion
+  question="What does 'shift left' mean in the context of DevSecOps?"
+  options={[
+    "Moving security responsibilities from the right side of the org chart to the left",
+    "Moving security testing earlier in the development lifecycle",
+    "Replacing the security team with developers",
+    "Using only open-source security tools"
+  ]}
+  answer={1}
+  explanation="Shifting left means integrating security testing as early as possible in the development lifecycle — in the IDE, during code review, and in CI pipelines — rather than waiting until the end. On a left-to-right timeline of Plan, Code, Build, Test, Deploy, Monitor, earlier stages are 'left.'"
+/>
+<QuizQuestion
+  question="What is the key difference between SAST and DAST?"
+  options={[
+    "SAST is for web apps, DAST is for mobile apps",
+    "SAST analyzes source code without running it, DAST tests a running application",
+    "SAST is automated, DAST is manual",
+    "SAST finds more vulnerabilities than DAST"
+  ]}
+  answer={1}
+  explanation="SAST (Static Application Security Testing) analyzes source code, bytecode, or binaries without executing the application. DAST (Dynamic Application Security Testing) tests a running application by sending it malicious inputs and observing its behavior. They are complementary — SAST finds code-level issues, DAST finds runtime issues."
+/>
+<QuizQuestion
+  question="Why is Software Composition Analysis (SCA) critical in modern applications?"
+  options={[
+    "Because developers write more bugs than they used to",
+    "Because 70-90% of modern application code comes from open-source dependencies",
+    "Because SCA replaces the need for unit tests",
+    "Because SCA is required by law in all countries"
+  ]}
+  answer={1}
+  explanation="Modern applications rely heavily on open-source libraries and packages. SCA is critical because vulnerabilities in these dependencies — code you did not write but ship to production — account for a large portion of security issues."
+/>
+<QuizQuestion
+  question="What is the most effective way to improve developer security practices?"
+  options={[
+    "Mandate annual security compliance training",
+    "Block all deployments until security team approves",
+    "Make the secure way the easiest way through tooling and defaults",
+    "Hire more security engineers"
+  ]}
+  answer={2}
+  explanation="Making the secure path the easiest path — through secure defaults, pre-configured libraries, and automated scanning in shared pipelines — is far more effective than mandates, gates, or training alone. When secure patterns are easier than insecure ones, developers naturally write secure code."
+/>
+</Quiz>
+
+## What's Next?
+
+In the next lesson, **Supply Chain Security**, you will dive into one of the most critical and rapidly evolving areas of DevSecOps. You will learn how attackers target the software supply chain — from compromised open-source packages to tampered container images — and how to defend against these threats with SBOMs, signed images, and dependency pinning.

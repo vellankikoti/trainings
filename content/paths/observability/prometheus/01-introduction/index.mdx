@@ -1,0 +1,490 @@
+---
+title: "Introduction to Prometheus"
+description: "Learn how Prometheus was born at SoundCloud to solve the monitoring challenges of microservices, how its pull-based model works, and how to write your first scrape configuration to start collecting metrics."
+order: 1
+xpReward: 30
+estimatedMinutes: 35
+prerequisites:
+  - "observability-fundamentals/introduction"
+objectives:
+  - Understand why Prometheus was created and the problem it solves
+  - Explain the pull-based scraping model and why it was chosen
+  - Identify the core components of the Prometheus architecture
+  - Read and write a basic Prometheus scrape configuration
+  - Describe how Prometheus stores time-series data
+  - Compare Prometheus to other monitoring systems
+tags:
+  - observability
+  - monitoring
+  - sre
+  - prometheus
+  - metrics
+  - time-series
+---
+
+<Callout type="story" title="The Story">
+It is 2012 at SoundCloud's Berlin headquarters. The engineering team is in the middle of a massive migration — breaking their monolithic Ruby on Rails application into dozens of microservices. Their existing monitoring tool, StatsD paired with Graphite, is buckling under the pressure. It cannot handle the dynamic nature of containers spinning up and down. It has no concept of multi-dimensional labels, so querying metrics across services, instances, and regions requires ugly naming hacks like `production.eu-west.payment-service.instance3.http_requests_total`. Worse, there is no built-in alerting, so engineers are cobbling together fragile scripts that poll Graphite's API. Two engineers, Matt T. Proud and Julius Volz, look at the landscape of existing tools and decide none of them are good enough. Drawing inspiration from Google's internal monitoring system Borgmon, they begin building a new system from scratch — one designed for the world of microservices, containers, and cloud-native infrastructure. They call it Prometheus. By 2016, it becomes the second project ever accepted into the Cloud Native Computing Foundation (after Kubernetes itself). Today, Prometheus is the de facto standard for metrics monitoring in cloud-native environments.
+</Callout>
+
+## The Problem Prometheus Solves
+
+Before Prometheus, the monitoring landscape looked like this:
+
+```
+Monitoring Tools Circa 2012:
+════════════════════════════
+
+Nagios (1999):
+  ✓ Mature, widely adopted
+  ✗ Check-based (is it up or down?)
+  ✗ Poor support for dynamic targets
+  ✗ Configuration is painful XML/config files
+  ✗ Not designed for metrics over time
+
+Graphite + StatsD (2008):
+  ✓ Time-series metrics
+  ✓ Good visualization
+  ✗ Flat metric names (no labels/dimensions)
+  ✗ Push-based (apps must know where to send data)
+  ✗ No built-in alerting
+  ✗ Scaling is complex
+
+Zabbix (2001):
+  ✓ Feature-rich
+  ✗ Heavy, monolithic
+  ✗ Agent-based
+  ✗ Not designed for containers
+  ✗ Complex to operate
+```
+
+None of these tools were designed for a world where:
+- Services spin up and down dynamically
+- A single application might run as 50 containers across 10 hosts
+- You need to slice metrics by service, version, region, and instance simultaneously
+- Infrastructure is ephemeral — hosts and containers come and go constantly
+
+### The Flat Metric Naming Problem
+
+Consider how you would name metrics in Graphite:
+
+```
+# Graphite metric naming — flat strings with dots
+production.us-east.payment-service.instance1.http_requests.success
+production.us-east.payment-service.instance1.http_requests.failure
+production.us-east.payment-service.instance2.http_requests.success
+production.eu-west.payment-service.instance1.http_requests.success
+production.eu-west.cart-service.instance1.http_requests.success
+```
+
+Want to query "total HTTP requests across all payment service instances in all regions"? You need wildcard patterns that are fragile and slow:
+
+```
+production.*.payment-service.*.http_requests.*
+```
+
+Now compare Prometheus's approach with **labels**:
+
+```
+# Prometheus metric with labels — dimensional data
+http_requests_total{service="payment", region="us-east", instance="1", status="success"}
+http_requests_total{service="payment", region="us-east", instance="1", status="failure"}
+http_requests_total{service="payment", region="us-east", instance="2", status="success"}
+http_requests_total{service="payment", region="eu-west", instance="1", status="success"}
+http_requests_total{service="cart",    region="eu-west", instance="1", status="success"}
+```
+
+Query total HTTP requests for all payment instances? Simple:
+
+```promql
+sum(http_requests_total{service="payment"})
+```
+
+Break it down by region? Just add a grouping:
+
+```promql
+sum by (region) (http_requests_total{service="payment"})
+```
+
+<Callout type="info" title="Labels Are the Killer Feature">
+The multi-dimensional data model with labels is arguably Prometheus's most important innovation. It lets you slice and dice your metrics along any dimension — service, version, endpoint, region, status code, customer tier — without having to plan your metric naming hierarchy in advance. This flexibility is what makes Prometheus so powerful for exploring unknown problems.
+</Callout>
+
+## How Prometheus Works: The Pull Model
+
+Most monitoring systems before Prometheus used a **push** model — applications send metrics to a central collector. Prometheus flipped this around with a **pull** (scrape) model:
+
+```
+Push Model (StatsD/Graphite):
+─────────────────────────────
+
+App A ──push──→ ┌──────────────┐
+App B ──push──→ │  Collector   │
+App C ──push──→ │  (StatsD)    │
+App D ──push──→ └──────────────┘
+
+Apps must know where the collector is.
+If the collector is down, metrics are lost.
+Hard to tell if an app is down or just not pushing.
+
+
+Pull Model (Prometheus):
+────────────────────────
+
+                ┌──────────────┐
+                │  Prometheus  │
+                │   Server     │
+                └──────┬───────┘
+                       │
+          ┌────────────┼────────────┐
+          │ scrape     │ scrape     │ scrape
+          ▼            ▼            ▼
+       ┌─────┐     ┌─────┐     ┌─────┐
+       │App A│     │App B│     │App C│
+       │/metrics   │/metrics   │/metrics
+       └─────┘     └─────┘     └─────┘
+
+Prometheus knows what to scrape.
+If an app is unreachable, Prometheus knows immediately.
+Apps don't need to know about Prometheus.
+```
+
+### Why Pull Is Better for This Use Case
+
+The pull model provides several advantages:
+
+| Aspect | Push Model | Pull Model |
+|---|---|---|
+| **Target discovery** | Apps must be configured to push | Prometheus discovers targets |
+| **Failure detection** | Cannot distinguish "app down" from "app not pushing" | Failed scrape = target is down |
+| **Development** | Must configure push destination | Just expose `/metrics` endpoint |
+| **Testing** | Need a collector running locally | Curl the `/metrics` endpoint directly |
+| **Load control** | Apps decide how often to push | Prometheus controls scrape interval |
+
+You can test your application's metrics with a simple curl command:
+
+```bash
+# Any application exposing Prometheus metrics can be tested locally
+$ curl http://localhost:8080/metrics
+
+# HELP http_requests_total Total number of HTTP requests
+# TYPE http_requests_total counter
+http_requests_total{method="GET", endpoint="/api/users", status="200"} 1547
+http_requests_total{method="POST", endpoint="/api/orders", status="201"} 89
+http_requests_total{method="GET", endpoint="/api/users", status="500"} 3
+
+# HELP http_request_duration_seconds HTTP request duration in seconds
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{method="GET", endpoint="/api/users", le="0.01"} 1200
+http_request_duration_seconds_bucket{method="GET", endpoint="/api/users", le="0.05"} 1480
+http_request_duration_seconds_bucket{method="GET", endpoint="/api/users", le="0.1"} 1530
+http_request_duration_seconds_bucket{method="GET", endpoint="/api/users", le="+Inf"} 1547
+http_request_duration_seconds_sum{method="GET", endpoint="/api/users"} 42.3
+http_request_duration_seconds_count{method="GET", endpoint="/api/users"} 1547
+```
+
+This plain-text format is human-readable, easily debuggable, and simple to generate in any programming language.
+
+<Callout type="tip" title="Try It Yourself">
+When Prometheus is running, it exposes its own metrics at `http://localhost:9090/metrics`. Prometheus monitors itself using the same mechanism it uses to monitor everything else. This is a great way to see real Prometheus metrics in action.
+</Callout>
+
+## Prometheus Architecture
+
+Prometheus is not a single binary — it is an ecosystem of components that work together:
+
+```
+Prometheus Architecture
+═══════════════════════
+
+                                    ┌─────────────────┐
+                                    │   Alertmanager   │
+                                    │                  │
+                                    │  Deduplication   │
+                                    │  Grouping        │
+                                    │  Routing         │──→ Email
+                                    │  Silencing       │──→ Slack
+                                    └────────▲─────────┘──→ PagerDuty
+                                             │
+                                        alert rules
+                                             │
+┌──────────────┐   discover   ┌──────────────┴──────────┐
+│   Service    │◄─────────────│                         │
+│   Discovery  │              │    Prometheus Server     │
+│              │──────────────│                         │
+│ Kubernetes   │   targets    │  ┌───────────────────┐  │
+│ Consul       │              │  │   Time-Series DB  │  │
+│ DNS          │              │  │   (TSDB)          │  │
+│ File-based   │              │  │                   │  │
+└──────────────┘              │  │   Stores all      │  │
+                              │  │   scraped metrics │  │
+┌──────────────┐              │  └───────────────────┘  │
+│              │   scrape     │                         │
+│  Targets     │◄─────────────│  ┌───────────────────┐  │
+│              │   /metrics   │  │   PromQL Engine   │  │
+│  App A       │              │  │                   │  │
+│  App B       │              │  │   Query language  │  │
+│  App C       │              │  │   for metrics     │  │
+│  Node        │              │  └───────────────────┘  │
+│  Exporters   │              │                         │
+└──────────────┘              └──────────┬──────────────┘
+                                         │
+                                    PromQL queries
+                                         │
+                              ┌──────────▼──────────┐
+                              │      Grafana         │
+                              │   (Visualization)    │
+                              └─────────────────────┘
+```
+
+### Core Components
+
+**Prometheus Server** — The central component. It discovers targets, scrapes metrics, stores them in its time-series database (TSDB), evaluates alerting rules, and serves PromQL queries.
+
+**Time-Series Database (TSDB)** — Prometheus includes its own purpose-built storage engine optimized for time-series data. It stores data on local disk with efficient compression.
+
+```
+Time-Series Data:
+─────────────────
+A time series is a metric name + labels + timestamped values
+
+http_requests_total{service="payment", status="200"}
+  → (t1, 100), (t2, 142), (t3, 198), (t4, 267), ...
+
+Each unique combination of metric name + labels
+is a separate time series.
+```
+
+**Service Discovery** — Prometheus can automatically find targets to scrape. In Kubernetes, it discovers pods and services. It also supports Consul, DNS, EC2, and many other discovery mechanisms.
+
+**Alertmanager** — A separate component that receives alerts from Prometheus, deduplicates them, groups related alerts, and routes notifications to the right channels (Slack, PagerDuty, email).
+
+**PromQL** — Prometheus Query Language. A powerful, purpose-built language for querying time-series data. You will learn PromQL in depth in a later lesson.
+
+```promql
+# Example PromQL queries:
+
+# Request rate over the last 5 minutes
+rate(http_requests_total[5m])
+
+# 99th percentile latency
+histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+
+# Error rate as a percentage
+sum(rate(http_requests_total{status=~"5.."}[5m]))
+/
+sum(rate(http_requests_total[5m]))
+* 100
+```
+
+**Exporters** — Libraries and sidecar processes that expose metrics from third-party systems (databases, hardware, web servers) in Prometheus format.
+
+```
+Common Exporters:
+─────────────────
+node_exporter        → Linux host metrics (CPU, memory, disk, network)
+mysqld_exporter      → MySQL database metrics
+postgres_exporter    → PostgreSQL database metrics
+blackbox_exporter    → Probe endpoints (HTTP, TCP, DNS, ICMP)
+cadvisor             → Container metrics
+kube-state-metrics   → Kubernetes object state
+redis_exporter       → Redis metrics
+nginx_exporter       → NGINX metrics
+```
+
+## Your First Scrape Configuration
+
+Prometheus is configured through a YAML file called `prometheus.yml`. Here is a minimal but complete configuration:
+
+```yaml
+# prometheus.yml — Prometheus configuration file
+
+# Global settings apply to all scrape jobs
+global:
+  scrape_interval: 15s     # How often to scrape targets (default)
+  evaluation_interval: 15s  # How often to evaluate alerting rules
+  scrape_timeout: 10s       # Timeout for each scrape attempt
+
+# Alerting configuration — where to send alerts
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "alertmanager:9093"
+
+# Rule files for recording rules and alerts
+rule_files:
+  - "rules/*.yml"
+
+# Scrape configurations — what to monitor
+scrape_configs:
+  # Prometheus monitors itself
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Monitor a web application
+  - job_name: "web-app"
+    metrics_path: "/metrics"         # default, shown for clarity
+    scheme: "http"                    # default, shown for clarity
+    scrape_interval: 10s              # override global for this job
+    static_configs:
+      - targets:
+          - "web-app-1:8080"
+          - "web-app-2:8080"
+          - "web-app-3:8080"
+        labels:
+          environment: "production"
+          team: "platform"
+
+  # Monitor Linux hosts via node_exporter
+  - job_name: "node"
+    static_configs:
+      - targets:
+          - "node1:9100"
+          - "node2:9100"
+          - "node3:9100"
+```
+
+### Understanding the Configuration
+
+Let us walk through each section:
+
+**`global`** — Default settings applied to all scrape jobs unless overridden.
+
+```yaml
+global:
+  scrape_interval: 15s    # Prometheus will scrape every target every 15 seconds
+  evaluation_interval: 15s # Alerting rules are checked every 15 seconds
+```
+
+**`scrape_configs`** — The most important section. Each entry defines a "job" — a set of targets that Prometheus will scrape.
+
+```yaml
+scrape_configs:
+  - job_name: "web-app"          # A label added to all metrics from this job
+    static_configs:
+      - targets: ["app:8080"]    # host:port to scrape
+```
+
+When Prometheus scrapes `app:8080`, it makes an HTTP GET request to `http://app:8080/metrics` and parses the response. Every metric it collects gets a `job="web-app"` label automatically.
+
+**`static_configs`** — The simplest way to define targets. You list them explicitly. For dynamic environments, you would use service discovery instead:
+
+```yaml
+# Static targets (simple but manual)
+static_configs:
+  - targets: ["app1:8080", "app2:8080"]
+
+# Kubernetes service discovery (automatic)
+kubernetes_sd_configs:
+  - role: pod
+```
+
+<Callout type="warning" title="Static vs Dynamic">
+Static configurations are great for learning and small deployments. In production Kubernetes environments, you will use service discovery so that Prometheus automatically finds new pods as they are created. We will cover service discovery in detail in a later lesson.
+</Callout>
+
+### Running Prometheus Locally
+
+You can run Prometheus quickly using Docker:
+
+```bash
+# Create a minimal configuration file
+cat > prometheus.yml << 'EOF'
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+EOF
+
+# Run Prometheus with Docker
+docker run -d \
+  --name prometheus \
+  -p 9090:9090 \
+  -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml \
+  prom/prometheus
+
+# Prometheus UI is now at http://localhost:9090
+# Try querying: up
+# This shows which targets are being scraped successfully
+```
+
+Once Prometheus is running, you can access its built-in web UI:
+
+```
+Prometheus Web UI (http://localhost:9090):
+══════════════════════════════════════════
+
+┌─────────────────────────────────────────────────┐
+│  Prometheus    Graph  Alerts  Status  Help      │
+├─────────────────────────────────────────────────┤
+│                                                  │
+│  Expression: [ up                            ]   │
+│  [Execute]                                       │
+│                                                  │
+│  ┌─────────────────────────────────────────┐    │
+│  │ up{instance="localhost:9090",            │    │
+│  │    job="prometheus"}              = 1    │    │
+│  └─────────────────────────────────────────┘    │
+│                                                  │
+│  Result: 1 (target is up and being scraped)     │
+└─────────────────────────────────────────────────┘
+```
+
+## Where Prometheus Fits in the Ecosystem
+
+Prometheus is the metrics pillar of the observability stack:
+
+```
+Complete Observability Stack:
+═════════════════════════════
+
+Visualization:     Grafana
+                   (dashboards for all data sources)
+                      │
+         ┌────────────┼──────────────┐
+         │            │              │
+      Metrics       Logs          Traces
+         │            │              │
+    Prometheus      Loki          Jaeger/Tempo
+         │            │              │
+    PromQL         LogQL         TraceQL
+         │            │              │
+    Alertmanager     Alerting      Alerting
+         │            │              │
+    node_exporter  Promtail      OpenTelemetry
+    app SDKs       Fluentd       app SDKs
+```
+
+Prometheus focuses on one thing and does it well: **collecting, storing, and querying numeric time-series data**. It deliberately does not try to be a log aggregator, a tracing system, or a visualization tool. Instead, it integrates with purpose-built tools for each concern.
+
+### What Prometheus Is and Is Not
+
+| Prometheus Is | Prometheus Is Not |
+|---|---|
+| A metrics collection and storage system | A log aggregation system |
+| A powerful query engine (PromQL) | A distributed tracing system |
+| An alerting evaluation engine | A visualization tool (use Grafana) |
+| Built for reliability (simple, standalone) | A long-term metrics archive |
+| Optimized for real-time operational metrics | A general-purpose database |
+
+<Callout type="info" title="Designed for Reliability">
+Prometheus is intentionally simple and standalone. Each Prometheus server operates independently with its own local storage. There are no distributed consensus protocols or external dependencies. This means that even when everything else is on fire, Prometheus keeps working — which is exactly when you need your monitoring the most.
+</Callout>
+
+## Key Takeaways
+
+- Prometheus was created at SoundCloud in 2012 to solve the monitoring challenges of microservices, inspired by Google's internal Borgmon system
+- Its **multi-dimensional data model** with labels replaced the flat metric naming schemes of older tools, enabling flexible and powerful queries
+- Prometheus uses a **pull (scrape) model** — it fetches metrics from targets via HTTP rather than having applications push metrics to it
+- The architecture includes the Prometheus server, a time-series database, PromQL query engine, Alertmanager, service discovery, and exporters
+- Configuration is done through a YAML file (`prometheus.yml`) that defines global settings and scrape jobs
+- Prometheus was the second project accepted into the CNCF (after Kubernetes) and is the de facto standard for cloud-native metrics monitoring
+- Prometheus focuses on metrics and integrates with other tools (Grafana for visualization, Loki for logs, Jaeger for traces) for complete observability
+
+## What's Next
+
+Now that you understand what Prometheus is and how it works at a high level, the next lesson covers **Metrics Types & Instrumentation**. You will learn about the four Prometheus metric types — counters, gauges, histograms, and summaries — and how to instrument your applications to expose meaningful metrics.

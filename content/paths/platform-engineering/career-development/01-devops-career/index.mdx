@@ -1,0 +1,548 @@
+---
+title: "The DevOps Career Landscape"
+description: "Explore the DevOps career landscape — from entry-level roles to principal engineers. Understand the skills you need, the roles available, salary expectations, and the certifications that matter."
+order: 1
+xpReward: 30
+estimatedMinutes: 30
+prerequisites: []
+objectives:
+  - Map out the major DevOps career paths and role specializations
+  - Identify the technical and soft skills required at each career level
+  - Understand salary ranges and compensation structures for DevOps roles
+  - Evaluate which certifications provide genuine career value
+  - Create a personal skills assessment and growth plan
+tags:
+  - platform-engineering
+  - devops
+  - career
+  - professional-development
+---
+
+<Callout type="story" title="The Story">
+Maria spent eight years as a systems administrator at a mid-sized manufacturing company. She managed Windows and Linux servers, handled backups, configured firewalls, and was the person everyone called at 3 AM when something broke. She was good at her job. But every year, she watched the job listings change. The postings stopped asking for "system administrators" and started asking for "DevOps engineers." The required skills shifted from Active Directory and VMware to Terraform, Kubernetes, and CI/CD pipelines. One day, she found that her exact role had been reposted — but with "DevOps Engineer" as the title and a salary $35,000 higher than what she was earning.
+
+Maria felt stuck. She had deep Linux knowledge, strong troubleshooting skills, and years of operational experience — but she did not know Docker, had never written a Terraform file, and had no experience with cloud platforms. She wondered if she needed to start over.
+
+She did not. Maria spent twelve months learning systematically. She started with Docker and containers, leveraging the Linux knowledge she already had. She moved to AWS, discovering that cloud concepts mapped naturally to the physical infrastructure she had managed for years. She learned Terraform by rewriting the infrastructure she already understood as code. She practiced CI/CD by automating the deployments she had been doing manually.
+
+Eighteen months after starting her transition, Maria accepted a Senior DevOps Engineer role at a cloud-native startup. Her salary increased by 45%. More importantly, she discovered that her years of operational experience were not baggage — they were her greatest advantage. She understood production in a way that engineers who had only worked with cloud-native tools never could.
+
+Maria's story is not unusual. It is the most common path into DevOps.
+</Callout>
+
+## The DevOps Role Landscape
+
+"DevOps Engineer" is the most common job title, but the DevOps ecosystem encompasses a wide range of specialized roles. Understanding this landscape helps you chart a path that matches your interests and strengths.
+
+### Core DevOps Roles
+
+```
+The DevOps Role Family:
+═══════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │                                                             │
+  │  DevOps Engineer                                            │
+  │  The generalist. Builds and maintains CI/CD pipelines,      │
+  │  manages infrastructure as code, automates deployments.     │
+  │                                                             │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  Site Reliability Engineer (SRE)                            │
+  │  Focuses on production reliability. Error budgets, SLOs,    │
+  │  incident response, capacity planning, chaos engineering.   │
+  │                                                             │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  Cloud Engineer                                             │
+  │  Specializes in cloud platforms. Architecture, networking,  │
+  │  cost optimization, migration, multi-cloud strategy.        │
+  │                                                             │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  Platform Engineer                                          │
+  │  Builds Internal Developer Platforms. Developer experience, │
+  │  golden paths, self-service tooling, service catalogs.      │
+  │                                                             │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  Infrastructure Engineer                                    │
+  │  Deep infrastructure focus. Terraform, networking, storage, │
+  │  compute, bare metal, hybrid cloud.                         │
+  │                                                             │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  Release Engineer / Build Engineer                          │
+  │  Owns the build and release pipeline. Artifact management,  │
+  │  versioning, release orchestration, environment management. │
+  │                                                             │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  DevSecOps Engineer                                         │
+  │  Security integrated into DevOps. SAST, DAST, supply chain │
+  │  security, policy as code, compliance automation.           │
+  │                                                             │
+  └─────────────────────────────────────────────────────────────┘
+```
+
+### How Roles Differ
+
+| Role | Primary Focus | Key Tools | Reports To |
+|---|---|---|---|
+| **DevOps Engineer** | Automation and delivery pipelines | Jenkins, GitHub Actions, Terraform, Docker | Engineering or Ops Director |
+| **SRE** | Production reliability and performance | Prometheus, PagerDuty, Kubernetes, custom tooling | VP Engineering or CTO |
+| **Cloud Engineer** | Cloud infrastructure and architecture | AWS/GCP/Azure, Terraform, CloudFormation | Cloud or Infrastructure Director |
+| **Platform Engineer** | Developer experience and self-service | Backstage, Crossplane, Kubernetes, custom tools | Platform or Engineering Director |
+| **DevSecOps Engineer** | Security in the development lifecycle | Snyk, Trivy, OPA, Semgrep | Security or Engineering Director |
+
+<Callout type="info" title="Titles Vary Widely">
+Job titles in DevOps are notoriously inconsistent. One company's "DevOps Engineer" is another company's "SRE" or "Infrastructure Engineer." Focus on the skills and responsibilities described in the job posting, not the title. Two roles with identical titles at different companies can have completely different scopes.
+</Callout>
+
+## Career Progression
+
+DevOps career paths generally follow this progression, though the exact titles and levels vary by company:
+
+### The Career Ladder
+
+```
+DevOps Career Ladder:
+═════════════════════
+
+  Years of Experience (approximate)
+
+  15+ │  ┌─────────────────────────────────┐
+      │  │ VP of Infrastructure / Platform │
+      │  │ CTO / Distinguished Engineer    │
+      │  └─────────────────────────────────┘
+      │              │
+  10+ │  ┌─────────────────────────────────┐
+      │  │ Principal Engineer              │
+      │  │ Director of Platform Eng        │
+      │  │ Staff SRE                       │
+      │  └─────────────────────────────────┘
+      │              │
+  7+  │  ┌─────────────────────────────────┐
+      │  │ Staff DevOps Engineer           │
+      │  │ Engineering Manager             │
+      │  │ Senior SRE                      │
+      │  └─────────────────────────────────┘
+      │              │
+  4+  │  ┌─────────────────────────────────┐
+      │  │ Senior DevOps Engineer          │
+      │  │ Senior Cloud Engineer           │
+      │  │ Senior Platform Engineer        │
+      │  └─────────────────────────────────┘
+      │              │
+  2+  │  ┌─────────────────────────────────┐
+      │  │ DevOps Engineer                 │
+      │  │ Cloud Engineer                  │
+      │  │ SRE                             │
+      │  └─────────────────────────────────┘
+      │              │
+  0+  │  ┌─────────────────────────────────┐
+      │  │ Junior DevOps Engineer          │
+      │  │ Systems Administrator           │
+      │  │ Junior Cloud Engineer           │
+      │  └─────────────────────────────────┘
+```
+
+### Individual Contributor vs. Management Track
+
+At the senior level, you typically choose between two tracks:
+
+```
+The Fork in the Road:
+═════════════════════
+
+                    Senior DevOps Engineer
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+     IC (Technical) Track       Management Track
+              │                         │
+     Staff Engineer             Engineering Manager
+              │                         │
+     Principal Engineer         Director of Engineering
+              │                         │
+     Distinguished Engineer     VP of Engineering
+              │                         │
+     Fellow / CTO               CTO / SVP
+```
+
+**Individual Contributor (IC) Track** — You remain hands-on technical but operate at increasingly higher scope. A principal engineer might define the technical strategy for an entire organization.
+
+**Management Track** — You move from writing code to leading people. An engineering manager might oversee a platform team of six engineers, handling hiring, mentoring, and project prioritization.
+
+Neither track is "better." The right choice depends on whether you get more energy from solving deep technical problems or from growing people and organizations.
+
+<Callout type="tip" title="You Can Switch Tracks">
+Choosing one track does not lock you in forever. Many successful engineering leaders have switched between IC and management tracks multiple times throughout their careers. The skills from each track make you stronger in the other.
+</Callout>
+
+## The DevOps Skills Map
+
+DevOps roles require a combination of technical skills, tooling knowledge, and soft skills. Here is a comprehensive map organized by proficiency level:
+
+### Technical Skills by Level
+
+```
+Junior (0-2 years):                  Mid-Level (2-5 years):
+═══════════════════                  ═════════════════════
+
+  Linux fundamentals                   Advanced Linux (systemd, networking)
+  Basic networking (DNS, HTTP)         Infrastructure as Code (Terraform)
+  Git and version control              Container orchestration (Kubernetes)
+  One scripting language (Python/Bash) CI/CD pipeline design
+  Docker basics                        Cloud platform (AWS/GCP/Azure)
+  Basic CI/CD usage                    Monitoring and observability
+  Command-line proficiency             Security fundamentals
+
+Senior (5-8 years):                  Staff/Principal (8+ years):
+══════════════════                   ═══════════════════════════
+
+  System design and architecture       Organizational technical strategy
+  Multi-cloud and hybrid               Cross-team platform design
+  Advanced Kubernetes (operators)      FinOps and cost architecture
+  Service mesh and networking          Vendor evaluation and selection
+  Performance tuning                   Technical due diligence
+  Incident management leadership       Industry thought leadership
+  Mentoring junior engineers           Defining engineering standards
+```
+
+### The Skills Map (Visual)
+
+| Skill Domain | Essential Tools and Technologies |
+|---|---|
+| **Operating Systems** | Linux (Ubuntu, RHEL), command line, systemd, shell scripting |
+| **Networking** | TCP/IP, DNS, HTTP/S, load balancers, firewalls, VPNs, service mesh |
+| **Version Control** | Git, GitHub/GitLab, branching strategies, code review |
+| **Containers** | Docker, Podman, container registries, image optimization |
+| **Orchestration** | Kubernetes, Helm, Kustomize, operators |
+| **CI/CD** | GitHub Actions, GitLab CI, Jenkins, ArgoCD, Flux |
+| **Infrastructure as Code** | Terraform, Pulumi, CloudFormation, Ansible |
+| **Cloud Platforms** | AWS, GCP, Azure (at least one deeply, ideally two) |
+| **Monitoring** | Prometheus, Grafana, Datadog, ELK stack, OpenTelemetry |
+| **Security** | SAST/DAST, container scanning, secrets management, IAM |
+| **Scripting** | Python, Bash, Go (increasingly) |
+
+<Callout type="warning" title="You Do Not Need to Know Everything">
+No single engineer masters all of these. The key is to have **T-shaped skills**: broad familiarity across many areas and deep expertise in two or three. A cloud engineer might go deep on AWS and Terraform while having working knowledge of Kubernetes and CI/CD. A platform engineer might go deep on Kubernetes and developer experience while having working knowledge of cloud and security.
+</Callout>
+
+### Soft Skills That Matter
+
+Technical skills get you interviews. Soft skills determine your career ceiling:
+
+| Soft Skill | Why It Matters |
+|---|---|
+| **Communication** | Explaining complex systems to non-technical stakeholders, writing clear documentation, presenting architectural decisions |
+| **Collaboration** | DevOps is inherently cross-functional. You work with developers, security, product, and leadership daily |
+| **Problem Solving** | Production incidents require calm, systematic debugging under pressure |
+| **Empathy** | Understanding developer pain points is essential for platform and tooling work |
+| **Teaching** | Senior roles require mentoring others. The ability to explain complex concepts clearly is invaluable |
+| **Business Awareness** | Understanding how infrastructure decisions impact the business (cost, revenue, risk) distinguishes senior engineers |
+
+## Salary Ranges
+
+DevOps salaries vary significantly by geography, company size, and specialization. The following ranges represent the United States market as of 2025, based on data from levels.fyi, Glassdoor, and industry surveys:
+
+### By Role and Level
+
+```
+US DevOps Salary Ranges (2025, Total Compensation):
+════════════════════════════════════════════════════
+
+  Junior DevOps Engineer (0-2 years)
+  ├── Base: $80,000 - $120,000
+  └── Total Comp: $85,000 - $135,000
+
+  DevOps Engineer (2-5 years)
+  ├── Base: $120,000 - $165,000
+  └── Total Comp: $130,000 - $190,000
+
+  Senior DevOps Engineer (5-8 years)
+  ├── Base: $155,000 - $200,000
+  └── Total Comp: $170,000 - $260,000
+
+  Staff / Principal Engineer (8+ years)
+  ├── Base: $190,000 - $280,000
+  └── Total Comp: $230,000 - $400,000+
+
+  Engineering Manager (DevOps/Platform)
+  ├── Base: $175,000 - $250,000
+  └── Total Comp: $200,000 - $350,000
+```
+
+### By Specialization
+
+| Specialization | Median Total Comp (Mid-Level) | Premium Over Generalist |
+|---|---|---|
+| **DevOps Engineer (Generalist)** | $155,000 | Baseline |
+| **Site Reliability Engineer** | $175,000 | +13% |
+| **Cloud Engineer (AWS/GCP)** | $165,000 | +6% |
+| **Platform Engineer** | $175,000 | +13% |
+| **DevSecOps Engineer** | $170,000 | +10% |
+| **Kubernetes Specialist** | $180,000 | +16% |
+
+<Callout type="info" title="Geographic Variation">
+These ranges reflect US-based salaries, which are among the highest globally. Remote roles from US companies often pay 80-100% of these ranges regardless of location. Salaries in Europe typically range from 60-80% of US levels, while roles in Southeast Asia, Latin America, and Eastern Europe range from 30-60%. However, cost of living differences mean that purchasing power can be comparable.
+</Callout>
+
+### What Drives Higher Compensation
+
+The factors that most influence DevOps compensation:
+
+1. **Company tier** — FAANG and top-tier tech companies pay 2-3x market rate through equity and bonuses
+2. **Specialization depth** — Deep Kubernetes or cloud security expertise commands premiums
+3. **Scope of impact** — Managing infrastructure for 1,000 engineers pays more than for 10
+4. **On-call responsibility** — Roles with production on-call duty typically pay 10-20% more
+5. **Certifications** — Relevant certifications can increase offers by 5-15%, especially early in career
+
+## Certifications That Matter
+
+Not all certifications are created equal. Here is an honest assessment of the most relevant DevOps certifications, ranked by industry impact:
+
+### Tier 1: High Value
+
+These certifications are widely recognized and actively sought by hiring managers:
+
+| Certification | Provider | Cost | Value |
+|---|---|---|---|
+| **AWS Solutions Architect (Associate + Professional)** | Amazon | $150-300 | The most in-demand cloud cert. Nearly universally recognized. |
+| **Certified Kubernetes Administrator (CKA)** | CNCF/Linux Foundation | $395 | Hands-on exam. Proves real Kubernetes skills. Highly respected. |
+| **Google Cloud Professional Cloud Architect** | Google | $200 | Strong for GCP-focused roles. Rigorous exam. |
+
+### Tier 2: Solid Value
+
+These add credibility and fill specific knowledge gaps:
+
+| Certification | Provider | Cost | Value |
+|---|---|---|---|
+| **Terraform Associate** | HashiCorp | $70 | Affordable, proves IaC fundamentals. Good entry-level cert. |
+| **AWS DevOps Professional** | Amazon | $300 | Specifically validates CI/CD and automation on AWS. |
+| **Certified Kubernetes Security Specialist (CKS)** | CNCF/Linux Foundation | $395 | Niche but highly valued for security-focused roles. |
+| **Azure Administrator / DevOps Engineer** | Microsoft | $165 | Important if targeting Microsoft ecosystem shops. |
+
+### Tier 3: Situationally Useful
+
+These are helpful in specific contexts but not universally valued:
+
+| Certification | Provider | Cost | Value |
+|---|---|---|---|
+| **CompTIA Linux+** | CompTIA | $369 | Good for career changers proving Linux basics. |
+| **Docker Certified Associate** | Docker (discontinued) | N/A | Was useful. Docker skills are now validated through CKA and practical experience. |
+| **RHCSA / RHCE** | Red Hat | $400-500 | Excellent hands-on Linux certs. Valued in enterprise environments. |
+
+<Callout type="tip" title="Certifications vs. Experience">
+Certifications are most valuable early in your career or when transitioning into a new area. They signal baseline competence to hiring managers who cannot yet verify your skills through a track record. As you gain experience, your project portfolio and professional reputation matter more than certifications. A senior engineer with five years of Kubernetes production experience does not need a CKA to prove their skills — but a junior engineer absolutely benefits from one.
+</Callout>
+
+## Common Entry Paths Into DevOps
+
+People enter DevOps from many different backgrounds. Here are the most common transitions:
+
+### From Systems Administration
+
+```
+Sysadmin → DevOps Transition:
+═════════════════════════════
+
+  Skills You Already Have:          Skills to Add:
+  ─────────────────────────         ──────────────
+  Linux administration              Docker and containers
+  Networking fundamentals           Infrastructure as Code (Terraform)
+  Troubleshooting                   CI/CD pipelines
+  Monitoring and alerting           Cloud platform (AWS/GCP/Azure)
+  Scripting (Bash)                  Version control workflows (Git)
+  Security basics                   Programming (Python)
+  Hardware knowledge                Kubernetes
+
+  Timeline: 6-12 months of focused learning
+  Advantage: Deep operational intuition
+```
+
+### From Software Development
+
+```
+Developer → DevOps Transition:
+══════════════════════════════
+
+  Skills You Already Have:          Skills to Add:
+  ─────────────────────────         ──────────────
+  Programming (Python, Go, etc.)    Linux system administration
+  Version control (Git)             Networking (TCP/IP, DNS, LB)
+  CI/CD usage                       Cloud infrastructure
+  Testing practices                 Container orchestration
+  Debugging skills                  Monitoring and observability
+  Agile methodology                 Security operations
+  Code review                       Infrastructure as Code
+
+  Timeline: 6-12 months of focused learning
+  Advantage: Strong automation and coding skills
+```
+
+### From QA/Testing
+
+```
+QA → DevOps Transition:
+═══════════════════════
+
+  Skills You Already Have:          Skills to Add:
+  ─────────────────────────         ──────────────
+  Test automation                   Linux administration
+  CI/CD pipeline usage              Cloud platform
+  Scripting                         Docker and Kubernetes
+  Quality mindset                   Infrastructure as Code
+  Process thinking                  Monitoring and alerting
+  Bug tracking and analysis         Networking fundamentals
+
+  Timeline: 8-14 months of focused learning
+  Advantage: Testing and quality-first mindset
+```
+
+### From Scratch (Career Changers)
+
+```
+Career Changer → DevOps:
+════════════════════════
+
+  Recommended Learning Order:
+  ───────────────────────────
+  1. Linux fundamentals (2-3 months)
+  2. Networking basics (1-2 months)
+  3. Git and version control (2 weeks)
+  4. Python scripting (1-2 months)
+  5. Docker and containers (1-2 months)
+  6. Cloud platform - AWS (2-3 months)
+  7. Infrastructure as Code - Terraform (1-2 months)
+  8. CI/CD pipelines (1-2 months)
+  9. Kubernetes (2-3 months)
+  10. Monitoring and observability (1-2 months)
+
+  Timeline: 12-18 months of dedicated learning
+  Key: Build projects that demonstrate each skill
+```
+
+## Building Your Career Strategy
+
+### 1. Assess Where You Are
+
+Start by honestly evaluating your current skills:
+
+```
+Self-Assessment Framework:
+══════════════════════════
+
+Rate yourself 1-5 for each skill:
+
+  1 = No experience
+  2 = Conceptual understanding
+  3 = Can use with guidance
+  4 = Proficient and independent
+  5 = Expert, can teach others
+
+  Linux:            [ ]    Cloud (AWS/GCP):     [ ]
+  Networking:       [ ]    Terraform:           [ ]
+  Docker:           [ ]    CI/CD:               [ ]
+  Kubernetes:       [ ]    Monitoring:          [ ]
+  Python/Bash:      [ ]    Security:            [ ]
+  Git:              [ ]    Soft skills:         [ ]
+```
+
+### 2. Pick a Direction
+
+Based on your assessment and interests, choose one of these paths to focus on:
+
+```
+Path A: Cloud-Native DevOps
+  Focus: AWS/GCP + Terraform + Kubernetes
+  Best for: Generalists who want maximum job market appeal
+
+Path B: Platform Engineering
+  Focus: Kubernetes + Developer Experience + Internal Tooling
+  Best for: Engineers who enjoy building tools for other engineers
+
+Path C: Site Reliability Engineering
+  Focus: Observability + Incident Response + Performance
+  Best for: Engineers who enjoy keeping complex systems running
+
+Path D: DevSecOps
+  Focus: Security Automation + Compliance + Policy as Code
+  Best for: Engineers interested in the intersection of security and automation
+```
+
+### 3. Learn in Public
+
+The most effective career accelerator in DevOps is **learning in public**:
+
+- **Write blog posts** about what you learn — even as a beginner
+- **Build open-source projects** that demonstrate your skills
+- **Contribute to existing projects** (documentation counts)
+- **Share on social media** — LinkedIn and Twitter are where the DevOps community congregates
+- **Speak at meetups** — Local DevOps and cloud meetups are always looking for speakers
+
+<Callout type="warning" title="Avoid Tutorial Hell">
+Do not spend twelve months watching courses without building anything. The most valuable learning happens when you build real projects. After learning a concept, immediately apply it: deploy something to AWS, write a Terraform module, set up a CI/CD pipeline for a personal project. A portfolio of working projects is worth more than a list of completed courses.
+</Callout>
+
+## Key Takeaways
+
+- The DevOps ecosystem includes many specialized roles — DevOps Engineer, SRE, Cloud Engineer, Platform Engineer, and DevSecOps Engineer — each with different focuses but overlapping skills
+- Career progression follows a ladder from junior to principal/staff, with a fork between individual contributor (technical depth) and management (people leadership) tracks
+- DevOps requires **T-shaped skills**: broad knowledge across Linux, networking, containers, cloud, CI/CD, and monitoring, with deep expertise in two or three areas
+- US DevOps salaries range from $85,000 for juniors to $400,000+ for staff-level engineers at top companies, with SRE and platform engineering commanding the highest premiums
+- The most valuable certifications are AWS Solutions Architect, CKA, and cloud-specific professional certs — but experience and projects matter more at senior levels
+- People enter DevOps from many backgrounds (sysadmin, development, QA, career change), and each background provides unique advantages
+- The best career strategy combines honest self-assessment, a focused learning path, real projects, and learning in public
+
+<Quiz>
+<QuizQuestion
+  question="What distinguishes a Platform Engineer from a DevOps Engineer?"
+  options={[
+    "Platform Engineers only work at large companies",
+    "Platform Engineers focus on building self-service tooling and developer experience",
+    "Platform Engineers do not need to know Kubernetes",
+    "Platform Engineers are just DevOps Engineers with a different title"
+  ]}
+  answer={1}
+  explanation="Platform Engineers specifically focus on building Internal Developer Platforms — self-service tooling, golden paths, service catalogs, and developer experience. While DevOps Engineers tend to be generalists focused on CI/CD and infrastructure automation, Platform Engineers build products that abstract complexity for other developers."
+/>
+<QuizQuestion
+  question="What does 'T-shaped skills' mean in the context of DevOps?"
+  options={[
+    "Only knowing tools that start with the letter T (Terraform, Traefik)",
+    "Having deep expertise in every DevOps technology",
+    "Having broad knowledge across many areas and deep expertise in two or three",
+    "Having only theoretical knowledge without practical experience"
+  ]}
+  answer={2}
+  explanation="T-shaped skills means having broad familiarity across many domains (the horizontal bar of the T) and deep expertise in two or three areas (the vertical bar). No one can master every DevOps tool, so the key is to have working knowledge broadly and go deep where it matters most for your role."
+/>
+<QuizQuestion
+  question="When are certifications most valuable for a DevOps career?"
+  options={[
+    "Always — certifications are the most important factor in hiring",
+    "Never — experience is all that matters",
+    "Early in your career or when transitioning to a new specialization",
+    "Only at the principal engineer level"
+  ]}
+  answer={2}
+  explanation="Certifications are most valuable early in your career or when transitioning into a new area because they signal baseline competence to hiring managers who cannot yet verify your skills through a track record. As you gain experience, your project portfolio and reputation matter more."
+/>
+<QuizQuestion
+  question="What is the biggest advantage of transitioning to DevOps from a sysadmin background?"
+  options={[
+    "Sysadmins already know Kubernetes",
+    "Sysadmins have deep operational intuition and production experience",
+    "Sysadmins do not need to learn any new tools",
+    "Sysadmins automatically qualify for senior DevOps roles"
+  ]}
+  answer={1}
+  explanation="Systems administrators bring deep operational intuition — they understand production environments, troubleshooting, on-call, and the consequences of infrastructure failures in ways that engineers who have only worked with cloud-native tools may not. This operational experience is an invaluable foundation for DevOps work."
+/>
+</Quiz>
+
+## What's Next?
+
+In the next lesson, **Technical Interview Preparation**, you will learn how to prepare for DevOps interviews — from system design questions to live troubleshooting scenarios. You will practice common interview formats, learn what interviewers are actually evaluating, and build a preparation plan that covers both technical depth and communication skills.
