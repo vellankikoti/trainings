@@ -1,0 +1,837 @@
+---
+title: "Debugging Shell Scripts"
+description: "Find and fix bugs in shell scripts using tracing, syntax checking, ShellCheck, and systematic debugging strategies. Avoid the most common bash pitfalls."
+order: 12
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 11-error-handling
+objectives:
+  - Use set -x and PS4 for execution tracing
+  - Check scripts for syntax errors with bash -n
+  - Lint scripts with ShellCheck to catch common mistakes
+  - Apply systematic debugging strategies
+  - Recognize and avoid common bash pitfalls
+tags:
+  - shell-scripting
+  - debugging
+  - shellcheck
+  - bash
+---
+
+<Callout type="story" title="The Story">
+Your CI pipeline script works perfectly on your laptop but fails silently in the build server. The log shows no errors — just wrong results. A variable that should contain a server hostname is mysteriously empty. A loop that should process 10 files processes zero. You stare at the code for 20 minutes and everything looks correct. You need debugging tools — ways to see what bash actually does, not what you think it does.
+</Callout>
+
+## Tracing with `set -x`
+
+`set -x` is the most important debugging tool in bash. It prints every command before it executes, showing you exactly what bash is doing:
+
+```bash
+#!/bin/bash
+set -x    # Enable tracing
+
+NAME="production"
+echo "Deploying to $NAME"
+ls /tmp > /dev/null
+
+set +x    # Disable tracing
+echo "Tracing is off now"
+```
+
+Output:
+
+```
++ NAME=production
++ echo 'Deploying to production'
+Deploying to production
++ ls /tmp
++ set +x
+Tracing is off now
+```
+
+Every line prefixed with `+` is a trace line showing the command after variable expansion. This is how you see what bash actually executed versus what you wrote.
+
+### Tracing a Specific Section
+
+You do not have to trace the entire script. Wrap the suspicious section:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+echo "Starting deployment..."
+
+# Something is wrong in this section — trace it
+set -x
+SERVERS=("web01" "web02" "web03")
+for server in "${SERVERS[@]}"; do
+    RESULT="deployed-$server"
+    echo "$RESULT"
+done
+set +x
+
+echo "Continuing without trace..."
+```
+
+### Tracing from the Command Line
+
+You can trace any script without modifying it:
+
+```bash
+# Trace entire script
+bash -x ./deploy.sh
+
+# Combine with other flags
+bash -xeuo pipefail ./deploy.sh
+```
+
+## Better Trace Output with PS4
+
+The default trace prefix `+` is not very informative. `PS4` customizes it:
+
+```bash
+#!/bin/bash
+# Show script name, line number, and function name in traces
+export PS4='+${BASH_SOURCE}:${LINENO}:${FUNCNAME[0]:-main}: '
+set -x
+
+deploy() {
+    local env="$1"
+    echo "Deploying to $env"
+}
+
+check_health() {
+    echo "Health check..."
+    return 0
+}
+
+deploy "production"
+check_health
+```
+
+Output:
+
+```
++./script.sh:9:deploy: local env=production
++./script.sh:10:deploy: echo 'Deploying to production'
+Deploying to production
++./script.sh:14:check_health: echo 'Health check...'
+Health check...
++./script.sh:15:check_health: return 0
+```
+
+Now you can see exactly which file, line, and function produced each trace line.
+
+### Common PS4 Patterns
+
+```bash
+# Simple: line number
+export PS4='+(${LINENO}): '
+
+# Detailed: file, line, function
+export PS4='+${BASH_SOURCE##*/}:${LINENO}:${FUNCNAME[0]:-main}: '
+
+# With timestamp (useful for performance debugging)
+export PS4='+[$(date +%H:%M:%S)] ${BASH_SOURCE##*/}:${LINENO}: '
+```
+
+## Syntax Checking with `bash -n`
+
+`bash -n` parses the script without executing it, catching syntax errors:
+
+```bash
+# Check syntax only — does not run the script
+bash -n ./deploy.sh
+
+# If there are errors:
+# ./deploy.sh: line 15: syntax error near unexpected token `done'
+# ./deploy.sh: line 15: `done'
+```
+
+This catches mismatched quotes, missing `fi`/`done`/`esac`, and other structural problems. It is fast and safe because the script never executes.
+
+<Callout type="warning" title="Limits of bash -n">
+Syntax checking only catches structural errors. It will NOT catch: wrong variable names, logic errors, missing files, incorrect command arguments, or unquoted variables. For those, you need ShellCheck and runtime tracing.
+</Callout>
+
+## ShellCheck — The Shell Script Linter
+
+ShellCheck is a static analysis tool that catches hundreds of common bash mistakes. It is the single most valuable tool for writing correct shell scripts.
+
+```bash
+# Install ShellCheck (if not present)
+# Ubuntu/Debian: apt-get install shellcheck
+# macOS: brew install shellcheck
+# Or use the web version: https://www.shellcheck.net
+
+# Run ShellCheck
+shellcheck ./deploy.sh
+```
+
+### What ShellCheck Catches
+
+```bash
+#!/bin/bash
+
+# SC2086: Double quote to prevent globbing and word splitting
+echo $UNQUOTED_VAR           # ShellCheck warns: quote it
+echo "$QUOTED_VAR"           # Correct
+
+# SC2046: Quote this to prevent word splitting
+files=$(ls *.log)            # ShellCheck warns
+files=( *.log )              # Correct: use an array
+
+# SC2006: Use $(...) instead of backticks
+DATE=`date`                  # ShellCheck warns
+DATE=$(date)                 # Correct
+
+# SC2164: Use cd ... || exit
+cd /some/dir                 # ShellCheck warns: cd can fail
+cd /some/dir || exit 1       # Correct
+
+# SC2155: Declare and assign separately
+local result=$(some_command) # ShellCheck warns: masks return code
+local result                 # Correct: declare first
+result=$(some_command)       # Then assign (return code preserved)
+
+# SC2034: Variable appears unused
+UNUSED="hello"               # ShellCheck warns if never referenced
+
+# SC2162: read without -r mangles backslashes
+read line                    # ShellCheck warns
+read -r line                 # Correct
+
+# SC2129: Consider using { } to group redirections
+echo "line 1" >> file        # ShellCheck suggests grouping
+echo "line 2" >> file
+{                            # Correct: group for efficiency
+    echo "line 1"
+    echo "line 2"
+} >> file
+```
+
+### ShellCheck in CI/CD
+
+Add ShellCheck to your pipeline to catch bugs before they reach production:
+
+```bash
+# Check all shell scripts in a project
+find . -name "*.sh" -exec shellcheck {} +
+
+# Check with specific severity (-S style/info/warning/error)
+shellcheck -S warning ./deploy.sh
+
+# Exclude specific rules
+shellcheck --exclude=SC2086,SC2034 ./script.sh
+
+# Output as JSON (for CI integration)
+shellcheck -f json ./deploy.sh
+```
+
+<Exercise number={1} title="Finding and Fixing Bugs">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# This exercise creates a buggy script, then shows how to find
+# and fix each bug using debugging techniques.
+
+# --- Create the BUGGY script ---
+cat > "$TEMP_DIR/buggy.sh" << 'BUGGY'
+#!/bin/bash
+# This script has several common bugs. We'll find them all.
+
+# Bug 1: No strict mode — errors pass silently
+# Missing: set -euo pipefail
+
+# Bug 2: Unquoted variable with spaces
+APP_DIR="/tmp/my application"
+mkdir -p $APP_DIR          # Breaks: creates /tmp/my AND application/
+
+# Bug 3: Using [ ] instead of [[ ]] for string with spaces
+if [ $APP_DIR = "/tmp/test" ]; then
+    echo "match"
+fi
+
+# Bug 4: Variable used before assignment (typo in name)
+SERVER_HOST="prod.example.com"
+echo "Connecting to $SEVER_HOST"    # Typo: SEVER vs SERVER
+
+# Bug 5: cd without error check
+cd /nonexistent/path
+echo "We are now in $(pwd)"
+
+# Bug 6: Unquoted glob in variable assignment
+LOG_FILES=$(ls /var/log/*.log)      # Word splitting, glob issues
+
+# Bug 7: Using echo for data that might start with -
+DATA="-n this has a flag-like start"
+echo $DATA                           # -n is interpreted as echo flag
+
+# Bug 8: Command substitution hides return code
+local result=$(failing_command)      # 'local' masks the exit code
+BUGGY
+
+echo "=== The Buggy Script ==="
+cat -n "$TEMP_DIR/buggy.sh"
+
+# --- Create the FIXED script ---
+cat > "$TEMP_DIR/fixed.sh" << 'FIXED'
+#!/bin/bash
+set -euo pipefail    # Fix 1: Enable strict mode
+
+# Fix 2: Quote all variable expansions
+APP_DIR="/tmp/my-application"    # Also: avoid spaces in paths when possible
+mkdir -p "$APP_DIR"
+
+# Fix 3: Use [[ ]] for string comparisons (handles spaces safely)
+if [[ "$APP_DIR" = "/tmp/test" ]]; then
+    echo "match"
+fi
+
+# Fix 4: Variable name typo — fixed
+SERVER_HOST="prod.example.com"
+echo "Connecting to $SERVER_HOST"
+
+# Fix 5: Check cd or use subshell
+cd /tmp || { echo "Cannot cd to /tmp" >&2; exit 1; }
+echo "We are now in $(pwd)"
+
+# Fix 6: Use arrays for file lists
+LOG_FILES=( /var/log/*.log )
+echo "Found ${#LOG_FILES[@]} log files"
+
+# Fix 7: Use printf for arbitrary data
+DATA="-n this has a flag-like start"
+printf '%s\n' "$DATA"
+
+# Fix 8: Declare and assign separately
+local_example() {
+    local result
+    result=$(echo "success")    # Now the exit code is not masked
+    echo "$result"
+}
+local_example
+
+echo "All fixed!"
+FIXED
+
+echo ""
+echo "=== The Fixed Script ==="
+cat -n "$TEMP_DIR/fixed.sh"
+
+# --- Show the differences ---
+echo ""
+echo "=== Bug Summary ==="
+echo "Bug 1: Missing 'set -euo pipefail' — errors go unnoticed"
+echo "Bug 2: Unquoted variable — word splitting on spaces"
+echo "Bug 3: [ ] with unquoted var — syntax error on spaces"
+echo "Bug 4: Variable name typo — silent empty string"
+echo "Bug 5: cd without error check — script continues in wrong dir"
+echo "Bug 6: Command substitution for file list — breaks on spaces"
+echo "Bug 7: echo with data starting with - — flag misinterpretation"
+echo "Bug 8: local + assignment — masks command exit code"
+
+# --- Run the fixed script ---
+echo ""
+echo "=== Running Fixed Script ==="
+bash "$TEMP_DIR/fixed.sh"
+
+# Clean up
+rm -rf "/tmp/my-application"
+```
+
+</Exercise>
+
+## Debugging Strategies
+
+### Strategy 1: Binary Search
+
+When a long script produces wrong output, narrow down the failure point:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+echo "Checkpoint 1: starting"
+# ... 20 lines of code ...
+
+echo "Checkpoint 2: after data load"
+# ... 20 lines of code ...
+
+echo "Checkpoint 3: after transformation"
+# ... 20 lines of code ...
+
+echo "Checkpoint 4: after output"
+```
+
+Run the script. If Checkpoint 2 prints but Checkpoint 3 does not, the bug is between them. Add more checkpoints in that section to pinpoint the exact line.
+
+### Strategy 2: Variable Inspection
+
+Print variables at key points to verify they contain what you expect:
+
+```bash
+debug() {
+    if [ "${DEBUG:-0}" = "1" ]; then
+        echo "[DEBUG] $*" >&2
+    fi
+}
+
+SERVERS=("web01" "web02" "web03")
+debug "SERVERS count: ${#SERVERS[@]}"
+debug "SERVERS content: ${SERVERS[*]}"
+
+for server in "${SERVERS[@]}"; do
+    debug "Processing server: '$server'"
+    RESULT=$(echo "$server" | tr '[:lower:]' '[:upper:]')
+    debug "Result: '$RESULT'"
+done
+```
+
+Run with `DEBUG=1 ./script.sh` to see the debug output.
+
+### Strategy 3: Trace to a File
+
+When trace output is too verbose for the terminal, redirect it to a file:
+
+```bash
+#!/bin/bash
+exec 2>/tmp/trace.log    # Redirect stderr (where trace goes) to a file
+set -x
+
+# ... script body ...
+
+set +x
+exec 2>&2    # Restore stderr
+echo "Trace saved to /tmp/trace.log"
+```
+
+Then search the trace file for the problem:
+
+```bash
+# Find where a variable became empty
+grep "RESULT=" /tmp/trace.log
+
+# Find where an error occurred
+grep -n "command not found\|No such file" /tmp/trace.log
+```
+
+### Strategy 4: Trap DEBUG for Step-by-Step
+
+The `DEBUG` trap runs before every command — like a breakpoint:
+
+```bash
+#!/bin/bash
+
+step_through() {
+    echo "NEXT: $BASH_COMMAND" >&2
+    read -p "Press Enter to continue..." < /dev/tty
+}
+trap step_through DEBUG
+
+# Every command will pause and show what's about to execute
+X=10
+Y=20
+echo $((X + Y))
+
+trap - DEBUG    # Remove the trap
+```
+
+## Common Pitfalls
+
+### Pitfall 1: Quoting
+
+The number one source of shell script bugs:
+
+```bash
+# WRONG: Word splitting breaks this
+FILE="my report.txt"
+cat $FILE           # Tries to cat "my" and "report.txt" separately
+
+# RIGHT: Always quote
+cat "$FILE"         # Cats "my report.txt" as one argument
+
+# WRONG: Glob expansion
+PATTERN="*.log"
+echo $PATTERN       # Expands to actual filenames in current dir
+
+# RIGHT: Quote to prevent expansion
+echo "$PATTERN"     # Prints literal *.log
+```
+
+### Pitfall 2: Word Splitting in Loops
+
+```bash
+# WRONG: Breaks on filenames with spaces
+for file in $(find . -name "*.txt"); do
+    echo "$file"
+done
+
+# RIGHT: Use a while loop with null delimiter
+find . -name "*.txt" -print0 | while IFS= read -r -d '' file; do
+    echo "$file"
+done
+```
+
+### Pitfall 3: Variables in Subshells
+
+Pipes create subshells. Variables set inside a pipe are lost:
+
+```bash
+# WRONG: COUNT is always 0 after the loop
+COUNT=0
+cat /etc/passwd | while IFS= read -r line; do
+    COUNT=$((COUNT + 1))
+done
+echo "Lines: $COUNT"    # Always 0!
+
+# RIGHT: Redirect instead of pipe (avoids subshell)
+COUNT=0
+while IFS= read -r line; do
+    COUNT=$((COUNT + 1))
+done < /etc/passwd
+echo "Lines: $COUNT"    # Correct count
+```
+
+### Pitfall 4: Testing Empty Variables
+
+```bash
+# WRONG: If VAR is empty, this becomes [ = "value" ] — syntax error
+if [ $VAR = "value" ]; then echo "match"; fi
+
+# RIGHT: Quote it, or use [[ ]]
+if [ "$VAR" = "value" ]; then echo "match"; fi
+if [[ $VAR = "value" ]]; then echo "match"; fi
+```
+
+### Pitfall 5: Arithmetic with Empty or Non-Numeric Values
+
+```bash
+# WRONG: If RETRIES is empty, this errors out
+RETRIES=$((RETRIES + 1))
+
+# RIGHT: Provide a default
+RETRIES=$(( ${RETRIES:-0} + 1 ))
+```
+
+<Exercise number={2} title="Debugging a Broken Pipeline Script">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# This exercise presents a broken script, shows how to debug it
+# step by step, and demonstrates the fix.
+
+# --- The broken script ---
+cat > "$TEMP_DIR/broken.sh" << 'BROKEN'
+#!/bin/bash
+# Pipeline monitor — BROKEN VERSION
+# This script has 4 bugs. Can you spot them?
+
+SERVICES="web api database cache"
+STATUS_FILE=/tmp/status.txt
+
+# Bug A: No strict mode — issues hide silently
+
+check_services() {
+    local total=0
+    local failed=0
+
+    for svc in $SERVICES; do
+        total=$((total + 1))
+        # Bug B: Simulated check — but result captured wrong
+        if ping -c1 -W1 $svc.internal > /dev/null 2>&1; then
+            echo "$svc:healthy" >> $STATUS_FILE
+        else
+            echo "$svc:unhealthy" >> $STATUS_FILE
+            # Bug C: Variable modified inside pipe subshell won't persist
+            failed=$((failed + 1))
+        fi
+    done
+
+    echo "Checked $total services, $failed failed"
+}
+
+generate_report() {
+    echo "=== Service Report ==="
+    # Bug D: Using cat in a useless way, and unquoted variable
+    cat $STATUS_FILE | while read line; do
+        name=$(echo $line | cut -d: -f1)
+        status=$(echo $line | cut -d: -f2)
+        echo "  $name: $status"
+    done
+}
+
+check_services
+generate_report
+rm -f $STATUS_FILE
+BROKEN
+
+echo "=== Broken Script ==="
+cat -n "$TEMP_DIR/broken.sh"
+
+# --- Debug it with bash -x ---
+echo ""
+echo "=== Running with bash -x (trace) ==="
+export PS4='+line ${LINENO}: '
+bash -x "$TEMP_DIR/broken.sh" 2>&1 | head -30 || true
+
+# --- The fixed version ---
+cat > "$TEMP_DIR/fixed.sh" << 'FIXED'
+#!/bin/bash
+set -euo pipefail    # Fix A: Strict mode enabled
+
+SERVICES=("web" "api" "database" "cache")    # Use array, not string
+STATUS_FILE=$(mktemp)                          # Use mktemp for temp files
+trap 'rm -f "$STATUS_FILE"' EXIT
+
+check_services() {
+    local total=0
+    local failed=0
+
+    for svc in "${SERVICES[@]}"; do     # Fix: Proper array iteration
+        total=$((total + 1))
+        # Simulated check (always fails for demo — services don't exist)
+        if ping -c1 -W1 "$svc.internal" > /dev/null 2>&1; then
+            echo "$svc:healthy" >> "$STATUS_FILE"
+        else
+            echo "$svc:unhealthy" >> "$STATUS_FILE"
+            failed=$((failed + 1))      # Fix C: No subshell, variable persists
+        fi
+    done
+
+    echo "Checked $total services, $failed failed"
+}
+
+generate_report() {
+    echo "=== Service Report ==="
+    # Fix D: Read from file directly, quote variables, use -r
+    while IFS=: read -r name status; do
+        echo "  $name: $status"
+    done < "$STATUS_FILE"
+}
+
+check_services
+generate_report
+FIXED
+
+echo ""
+echo "=== Fixed Script ==="
+cat -n "$TEMP_DIR/fixed.sh"
+
+echo ""
+echo "=== Running Fixed Script ==="
+bash "$TEMP_DIR/fixed.sh"
+
+echo ""
+echo "=== Bugs Found ==="
+echo "Bug A: Missing 'set -euo pipefail' — failures went unnoticed"
+echo "Bug B: Unquoted variables — would break on names with spaces"
+echo "Bug C: Variable in pipe subshell — 'failed' count was lost"
+echo "       (In this case it actually worked because the loop wasn't"
+echo "        in a pipe, but the cat | while read pattern below was)"
+echo "Bug D: 'cat file | while read' creates a subshell AND"
+echo "       'read' without -r mangles backslashes"
+```
+
+</Exercise>
+
+<MiniProject title="Script Quality Checker">
+
+```bash
+cat > ~/script-checker.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Script Quality Checker
+# Analyzes shell scripts for common issues without relying on external
+# tools (a simplified ShellCheck-like analysis using grep and awk).
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+ISSUES_FILE="$TEMP_DIR/issues.txt"
+SCRIPT_FILE="$TEMP_DIR/sample.sh"
+> "$ISSUES_FILE"
+
+add_issue() {
+    local severity="$1"
+    local line="$2"
+    local message="$3"
+    echo "$severity|$line|$message" >> "$ISSUES_FILE"
+}
+
+# --- Create a sample script to analyze ---
+cat > "$SCRIPT_FILE" << 'SAMPLE'
+#!/bin/bash
+
+# This script has several style and correctness issues
+
+files=`ls *.txt`
+cd /opt/app
+echo $USER is deploying $APP to $ENV
+cat data.txt | grep "error"
+for f in $(find . -name "*.log"); do
+    echo $f
+done
+if [ $STATUS = "ok" ]; then
+    echo "all good"
+fi
+read line < /etc/config
+result=`curl -s http://api.example.com/status`
+[ -f /tmp/lock ] && echo found || echo "not found"
+SAMPLE
+
+echo "=== Script Under Analysis ==="
+cat -n "$SCRIPT_FILE"
+echo ""
+
+# --- Analysis Rules ---
+
+echo "=== Running Quality Checks ==="
+echo ""
+
+LINE_NUM=0
+HAS_STRICT_MODE=0
+HAS_SHEBANG=0
+
+while IFS= read -r line; do
+    LINE_NUM=$((LINE_NUM + 1))
+
+    # Skip empty lines and comments (except shebang)
+    if [ "$LINE_NUM" -eq 1 ]; then
+        if [[ "$line" == "#!/bin/bash"* ]] || [[ "$line" == "#!/usr/bin/env bash"* ]]; then
+            HAS_SHEBANG=1
+        fi
+    fi
+
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+
+    # Check for strict mode
+    if [[ "$line" == *"set -e"* ]] || [[ "$line" == *"set -euo pipefail"* ]]; then
+        HAS_STRICT_MODE=1
+    fi
+
+    # Rule 1: Backtick command substitution
+    if [[ "$line" == *'`'* ]] && [[ "$line" != *'#'* ]]; then
+        add_issue "WARN" "$LINE_NUM" "Use \$(command) instead of backticks: $line"
+    fi
+
+    # Rule 2: Unquoted variables in echo/assignments (simplified check)
+    if [[ "$line" =~ echo[[:space:]]+\$[A-Z_] ]] && [[ "$line" != *'"'* ]]; then
+        add_issue "WARN" "$LINE_NUM" "Unquoted variable expansion — use double quotes: $line"
+    fi
+
+    # Rule 3: cd without error handling
+    if [[ "$line" =~ ^[[:space:]]*cd[[:space:]] ]] && [[ "$line" != *"||"* ]] && [[ "$line" != *"&&"* ]]; then
+        add_issue "ERROR" "$LINE_NUM" "cd without error handling — use: cd path || exit 1"
+    fi
+
+    # Rule 4: Useless use of cat
+    if [[ "$line" =~ cat[[:space:]]+[^|]+\|[[:space:]]*(grep|awk|sed|sort|head|tail|wc) ]]; then
+        add_issue "STYLE" "$LINE_NUM" "Useless use of cat — pipe directly: $line"
+    fi
+
+    # Rule 5: for loop with $(find ...)
+    if [[ "$line" =~ for[[:space:]]+.*in[[:space:]]+\$\(find ]]; then
+        add_issue "ERROR" "$LINE_NUM" "for + find breaks on spaces — use: find ... | while read -r"
+    fi
+
+    # Rule 6: Single bracket test with unquoted variable
+    if [[ "$line" =~ \[[[:space:]]+\$[A-Z_]+[[:space:]]+=  ]]; then
+        add_issue "WARN" "$LINE_NUM" "Unquoted variable in [ ] test — use [[ ]] or quote it"
+    fi
+
+    # Rule 7: read without -r
+    if [[ "$line" =~ ^[[:space:]]*read[[:space:]] ]] && [[ "$line" != *"-r"* ]]; then
+        add_issue "WARN" "$LINE_NUM" "read without -r — backslashes will be mangled"
+    fi
+
+done < "$SCRIPT_FILE"
+
+# Global checks
+if [ "$HAS_SHEBANG" -eq 0 ]; then
+    add_issue "ERROR" "1" "Missing shebang (#!/bin/bash)"
+fi
+
+if [ "$HAS_STRICT_MODE" -eq 0 ]; then
+    add_issue "ERROR" "-" "Missing strict mode: set -euo pipefail"
+fi
+
+# --- Display Results ---
+
+ERRORS=0
+WARNINGS=0
+STYLE=0
+
+echo "Issues found:"
+echo ""
+
+while IFS='|' read -r severity line message; do
+    case "$severity" in
+        ERROR) ERRORS=$((ERRORS + 1));   marker="[ERROR]" ;;
+        WARN)  WARNINGS=$((WARNINGS + 1)); marker="[WARN] " ;;
+        STYLE) STYLE=$((STYLE + 1));     marker="[STYLE]" ;;
+        *)     marker="[?]" ;;
+    esac
+    printf "  %s Line %-3s %s\n" "$marker" "$line" "$message"
+done < "$ISSUES_FILE"
+
+TOTAL=$((ERRORS + WARNINGS + STYLE))
+
+echo ""
+echo "=== Summary ==="
+echo "  Errors:   $ERRORS"
+echo "  Warnings: $WARNINGS"
+echo "  Style:    $STYLE"
+echo "  Total:    $TOTAL issues"
+echo ""
+
+if [ "$ERRORS" -gt 0 ]; then
+    echo "RESULT: FAIL — $ERRORS error(s) must be fixed"
+    echo ""
+    echo "Tip: Install ShellCheck for comprehensive analysis:"
+    echo "  apt-get install shellcheck   # Debian/Ubuntu"
+    echo "  brew install shellcheck      # macOS"
+    echo "  shellcheck ./your-script.sh"
+elif [ "$WARNINGS" -gt 0 ]; then
+    echo "RESULT: PASS with warnings — consider fixing $WARNINGS warning(s)"
+else
+    echo "RESULT: PASS — no issues found"
+fi
+SCRIPT
+
+chmod +x ~/script-checker.sh
+~/script-checker.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `set -x` traces every command as bash executes it — the most powerful debugging tool
+- Customize `PS4` to include file name, line number, and function name in traces
+- `bash -n script.sh` catches syntax errors without running the script
+- ShellCheck catches hundreds of common mistakes — run it on every script in CI
+- Use the binary search strategy: add checkpoints to narrow down where the bug occurs
+- Always quote your variables: `"$var"` prevents word splitting and glob expansion
+- Pipe subshells lose variable changes — redirect from a file instead of piping from cat
+- Use `[[ ]]` instead of `[ ]` for safer string comparisons
+- `printf '%s\n' "$data"` is safer than `echo "$data"` for arbitrary content
+- Declare `local` variables separately from assignment to preserve exit codes
+- Add `DEBUG=1` environment variable support for toggleable verbose output
+
+## What's Next
+
+You now have a complete shell scripting toolkit: variables, control flow, functions, data structures, file operations, text processing, error handling, and debugging. These skills form the foundation for every DevOps automation task you'll encounter — from CI/CD pipelines to infrastructure management. The next step is to apply these skills to real-world projects and combine them with tools like Git, Docker, and Kubernetes.

@@ -1,0 +1,619 @@
+---
+title: "Merging"
+description: "Combine branches with confidence. Understand fast-forward vs three-way merges, resolve conflicts, and use merge strategies that keep history clean."
+order: 8
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 07-branching-basics
+objectives:
+  - Perform fast-forward and three-way merges
+  - Understand merge commits vs linear history
+  - Choose appropriate merge strategies
+  - Use git merge --no-ff for explicit merge commits
+tags:
+  - git
+  - merge
+  - workflow
+  - collaboration
+---
+
+<Callout type="story" title="The Story">
+Your feature branch has 15 commits over two weeks. Main has moved forward with 30 other commits from your teammates. Now it's time to bring your feature into main. Will it merge cleanly? What kind of merge should you use? A fast-forward keeps history linear but loses the context of the feature branch. A merge commit preserves the fact that work happened in parallel. A squash merge collapses everything into one tidy commit. Understanding merge mechanics means you'll never fear the "merge" button again. And when there IS a conflict, you'll know exactly what Git is asking you to resolve.
+</Callout>
+
+## What Is a Merge?
+
+A merge combines work from two (or more) branches into one. Git finds the common ancestor, calculates the differences, and produces a result that includes changes from both sides.
+
+```
+Before merge:
+  main ──── C1 ──── C2 ──── C3
+                     │
+                     └── C4 ──── C5 (feature)
+
+After merge:
+  main ──── C1 ──── C2 ──── C3 ──── M1 (merge commit)
+                     │               │
+                     └── C4 ──── C5 ─┘ (feature)
+```
+
+The merge commit M1 has **two parents**: C3 (from main) and C5 (from feature). This is what makes it a merge commit.
+
+## Fast-Forward Merge
+
+A fast-forward merge happens when the target branch hasn't diverged — it just moves the pointer forward:
+
+```
+Before (main hasn't moved since feature branched off):
+  main ──── C1 ──── C2
+                     │
+                     └── C3 ──── C4 (feature)
+
+After fast-forward merge:
+  main ──── C1 ──── C2 ──── C3 ──── C4
+                                      └── main (pointer moved forward)
+```
+
+No merge commit is created. The history looks like all the work happened on main.
+
+```bash
+# Start on main
+git switch main
+
+# Merge feature (Git auto-detects fast-forward is possible)
+git merge feature/add-readme
+# Updating a3f2b1c..8d4e2a1
+# Fast-forward
+#  README.md | 10 ++++++++++
+#  1 file changed, 10 insertions(+)
+```
+
+### Forcing Fast-Forward Only
+
+```bash
+# Only merge if fast-forward is possible (fail otherwise)
+git merge --ff-only feature/add-readme
+
+# If main has diverged, this fails:
+# fatal: Not possible to fast-forward, aborting.
+```
+
+This is useful in CI/CD pipelines where you want to guarantee linear history.
+
+## Three-Way Merge
+
+When both branches have new commits, Git performs a three-way merge using three points:
+
+1. **Merge base** — the common ancestor
+2. **Ours** — the tip of the current branch
+3. **Theirs** — the tip of the branch being merged
+
+```
+Before:
+  main ──── C1 ──── C2 ──── C5 ──── C6 (main moved forward)
+                     │
+                     └── C3 ──── C4 (feature also moved forward)
+
+Merge base = C2 (common ancestor)
+
+After three-way merge:
+  main ──── C1 ──── C2 ──── C5 ──── C6 ──── M1 (merge commit)
+                     │                        │
+                     └── C3 ──── C4 ──────────┘
+```
+
+```bash
+git switch main
+git merge feature/payment-gateway
+# Merge made by the 'ort' strategy.
+#  src/payment.js | 45 +++++++++++++++++++++++
+#  src/config.js  |  3 +++
+#  2 files changed, 48 insertions(+)
+```
+
+Git creates a merge commit with a default message like "Merge branch 'feature/payment-gateway'".
+
+## Explicit Merge Commits with --no-ff
+
+Even when a fast-forward is possible, you might want a merge commit to preserve the context that work was done on a branch:
+
+```bash
+# Force a merge commit even when fast-forward is possible
+git merge --no-ff feature/add-tests -m "Merge feature/add-tests into main"
+```
+
+```
+Without --no-ff (fast-forward):
+  main ──── C1 ──── C2 ──── C3 ──── C4
+  (linear, no evidence of branch)
+
+With --no-ff:
+  main ──── C1 ──── C2 ────────── M1
+                     │             │
+                     └── C3 ── C4 ─┘
+  (merge commit preserves branch history)
+```
+
+<Callout type="tip" title="When to Use --no-ff">
+Many teams enforce `--no-ff` for all merges into main. The merge commit acts as a "bookmark" — you can see exactly which commits were part of a feature. It also makes reverting an entire feature trivial: just revert the merge commit. GitHub and GitLab "merge" buttons create merge commits by default, which is equivalent to `--no-ff`.
+</Callout>
+
+## Squash Merge
+
+A squash merge takes all the commits from a branch and combines them into a single commit on the target branch:
+
+```bash
+git merge --squash feature/messy-history
+# Squash commit -- not updating HEAD
+# Automatic merge went well; stopped before committing
+
+# Now commit as a single clean commit
+git commit -m "Add user authentication feature"
+```
+
+```
+Before:
+  feature ──── "wip" ──── "fix typo" ──── "oops" ──── "actually fix" ──── "done"
+
+After squash merge into main:
+  main ──── "Add user authentication feature" (one clean commit)
+```
+
+<Callout type="warning" title="Squash Merge Caveats">
+After a squash merge, the original branch's commits are NOT recorded as merged. Git doesn't know the work was incorporated. This means `git branch --merged` won't list the branch, and if you try to merge the branch again later, Git will try to re-apply all the changes. Always delete the source branch after a squash merge.
+</Callout>
+
+## Merge vs Rebase Philosophy
+
+This is one of the great debates in Git:
+
+```
+Merge preserves true history:
+  main ──── C1 ──── C3 ──── M1
+                │            │
+                └── C2 ──── C4 ─┘
+
+Rebase rewrites for clean history:
+  main ──── C1 ──── C3 ──── C2' ──── C4'
+  (C2 and C4 are replayed after C3)
+```
+
+| Aspect | Merge | Rebase |
+|---|---|---|
+| History | Preserves true timeline | Creates linear history |
+| Merge commits | Yes (with --no-ff) | No |
+| Safe for shared branches | Yes | No (rewrites history) |
+| Traceability | Shows parallel development | Shows sequential development |
+| Conflict resolution | Once per merge | Once per replayed commit |
+
+<Callout type="tip" title="A Common Workflow">
+Many teams use **rebase** to keep feature branches up-to-date with main, and **merge --no-ff** to bring completed features into main. This gives you clean feature branch history AND clear merge points on main. You'll learn rebase in a later lesson.
+</Callout>
+
+## Aborting a Merge
+
+If a merge goes wrong or you change your mind mid-merge, you can abort:
+
+```bash
+# During a merge (before committing)
+git merge --abort
+# Restores everything to the state before the merge started
+
+# After committing a merge (use reset or revert)
+git revert -m 1 HEAD    # revert the merge commit
+```
+
+## Viewing Merged and Unmerged Branches
+
+```bash
+# Which branches have been merged into main?
+git branch --merged main
+#   bugfix/fixed-typo
+#   feature/completed-auth
+# * main
+
+# Which branches have NOT been merged into main?
+git branch --no-merged main
+#   feature/in-progress-payment
+#   feature/experimental-ui
+
+# Same for remote branches
+git branch -r --merged main
+git branch -r --no-merged main
+```
+
+## Merge Commit Anatomy
+
+A merge commit has two (or more) parents. You can inspect them:
+
+```bash
+# View a merge commit
+git show HEAD
+# commit abc123...
+# Merge: a1b2c3 d4e5f6    ← two parent hashes
+# Author: ...
+# Date: ...
+#     Merge branch 'feature/payment' into main
+
+# See the first parent (main's last commit before merge)
+git show HEAD^1
+
+# See the second parent (feature's last commit)
+git show HEAD^2
+
+# View just the changes introduced by the merge
+git diff HEAD^1..HEAD
+```
+
+## Octopus Merges
+
+Git can merge more than two branches at once. This is called an octopus merge:
+
+```bash
+# Merge three branches at once
+git merge feature/auth feature/payments feature/notifications
+# This creates a single merge commit with four parents
+```
+
+<Callout type="tip" title="Octopus Merges in Practice">
+Octopus merges are rare in daily work but useful for release branches where you need to combine multiple independent features. They only work if there are no conflicts — Git won't attempt conflict resolution with more than two branches at once.
+</Callout>
+
+## Common Merge Scenarios
+
+### Bringing Main into Your Feature Branch
+
+```bash
+# Keep your feature branch up-to-date with main
+git switch feature/payment
+git merge main
+# This creates a merge commit on your feature branch
+# Now your feature branch has all the latest main changes
+```
+
+### Release Branch Merge
+
+```bash
+# Create a release branch
+git switch -c release/v2.1.0 main
+
+# Cherry-pick or merge specific features
+git merge feature/ready-feature-1 --no-ff -m "Include feature 1 in v2.1.0"
+git merge feature/ready-feature-2 --no-ff -m "Include feature 2 in v2.1.0"
+
+# When release is done, merge back to main
+git switch main
+git merge release/v2.1.0 --no-ff -m "Release v2.1.0"
+```
+
+<Exercise number={1} title="Fast-Forward vs Three-Way">
+
+```bash
+# Create a test repository
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+echo "# Project" > README.md
+git add README.md && git commit -q -m "Initial commit"
+
+# === Scenario 1: Fast-Forward Merge ===
+echo ""
+echo "=== Scenario 1: Fast-Forward Merge ==="
+echo ""
+
+# Create a branch and add commits (main stays put)
+git switch -c feature/fast-forward
+echo "feature code" > feature.js
+git add feature.js && git commit -q -m "Add feature code"
+echo "feature tests" > feature.test.js
+git add feature.test.js && git commit -q -m "Add feature tests"
+
+echo "Branches before merge:"
+git log --all --oneline --graph --decorate
+
+# Merge into main (will fast-forward)
+git switch main
+git merge feature/fast-forward
+
+echo ""
+echo "After fast-forward merge:"
+git log --all --oneline --graph --decorate
+echo ""
+echo "Notice: no merge commit, history is linear"
+
+# === Scenario 2: Three-Way Merge ===
+echo ""
+echo "=== Scenario 2: Three-Way Merge ==="
+echo ""
+
+# Create a branch
+git switch -c feature/three-way
+
+# Add commits on the feature branch
+echo "new feature" > new-feature.js
+git add new-feature.js && git commit -q -m "Add new feature on branch"
+
+# Go back to main and add commits (main diverges)
+git switch main
+echo "hotfix" > hotfix.js
+git add hotfix.js && git commit -q -m "Apply hotfix on main"
+
+echo "Branches before merge (diverged):"
+git log --all --oneline --graph --decorate
+
+# Merge (will create a merge commit)
+git merge feature/three-way -m "Merge feature/three-way into main"
+
+echo ""
+echo "After three-way merge:"
+git log --all --oneline --graph --decorate
+echo ""
+echo "Notice: merge commit with two parents"
+
+# Show the merge commit's parents
+echo ""
+echo "Merge commit parents:"
+git cat-file -p HEAD | grep parent
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Merge Strategies">
+
+```bash
+# Create a test repository
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+echo "# Merge Strategies Demo" > README.md
+git add README.md && git commit -q -m "Initial commit"
+
+# === Strategy 1: Default merge (fast-forward when possible) ===
+echo "=== Strategy 1: Default (fast-forward) ==="
+git switch -c feature/default-merge
+echo "default feature" > default.js
+git add default.js && git commit -q -m "Add default feature"
+git switch main
+git merge feature/default-merge
+echo "Result:"
+git log --oneline --graph -5
+echo ""
+
+# === Strategy 2: --no-ff (always create merge commit) ===
+echo "=== Strategy 2: --no-ff ==="
+git switch -c feature/no-ff-merge
+echo "no-ff feature" > noff.js
+git add noff.js && git commit -q -m "Add no-ff feature"
+echo "more no-ff work" >> noff.js
+git add noff.js && git commit -q -m "Enhance no-ff feature"
+git switch main
+git merge --no-ff feature/no-ff-merge -m "Merge feature/no-ff-merge"
+echo "Result:"
+git log --oneline --graph -5
+echo ""
+
+# === Strategy 3: --squash (collapse to single commit) ===
+echo "=== Strategy 3: --squash ==="
+git switch -c feature/squash-merge
+echo "squash step 1" > squash.js
+git add squash.js && git commit -q -m "WIP: start squash feature"
+echo "squash step 2" >> squash.js
+git add squash.js && git commit -q -m "WIP: continue squash feature"
+echo "squash step 3" >> squash.js
+git add squash.js && git commit -q -m "WIP: finish squash feature"
+git switch main
+git merge --squash feature/squash-merge
+git commit -m "Add squash feature (collapsed from 3 commits)"
+echo "Result:"
+git log --oneline --graph -5
+echo ""
+
+# === Compare all histories ===
+echo "=== Full History Comparison ==="
+git log --oneline --graph --all
+echo ""
+
+# Show which branches Git considers "merged"
+echo "=== Merged branches ==="
+git branch --merged main
+echo ""
+echo "=== NOT merged (squash doesn't register!) ==="
+git branch --no-merged main
+echo ""
+echo "Notice: feature/squash-merge shows as NOT merged"
+echo "because squash merge doesn't create a merge relationship."
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Merge Report Tool">
+
+```bash
+cat > ~/merge-report.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Merge Report Tool — shows branch merge status relative to main
+
+REPO="${1:-.}"
+
+if [ ! -d "$REPO/.git" ]; then
+    echo "Error: $REPO is not a git repository"
+    exit 1
+fi
+
+cd "$REPO"
+
+# Detect main branch name
+MAIN_BRANCH="main"
+git rev-parse --verify main &>/dev/null || MAIN_BRANCH="master"
+
+echo "============================================"
+echo "  Merge Report"
+echo "  Repository: $(basename "$(pwd)")"
+echo "  Main branch: $MAIN_BRANCH"
+echo "  Generated: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "============================================"
+echo ""
+
+# Section 1: Merged branches
+echo "--- Branches MERGED into $MAIN_BRANCH ---"
+echo ""
+MERGED_COUNT=0
+while IFS= read -r branch; do
+    branch_name=$(echo "$branch" | xargs)
+    [ -z "$branch_name" ] && continue
+    [ "$branch_name" = "$MAIN_BRANCH" ] && continue
+
+    merge_commit=$(git log --oneline --merges "$MAIN_BRANCH" --grep="$branch_name" -1 2>/dev/null || echo "")
+    last_date=$(git log -1 --format="%cr" "$branch_name" 2>/dev/null || echo "unknown")
+
+    if [ -n "$merge_commit" ]; then
+        echo "  $branch_name"
+        echo "    Merged via: $merge_commit"
+        echo "    Last activity: $last_date"
+    else
+        echo "  $branch_name"
+        echo "    Merged (fast-forward or squash)"
+        echo "    Last activity: $last_date"
+    fi
+    echo ""
+    MERGED_COUNT=$((MERGED_COUNT + 1))
+done < <(git branch --merged "$MAIN_BRANCH" 2>/dev/null | grep -v "^\*" | grep -v "^\s*${MAIN_BRANCH}$")
+
+if [ "$MERGED_COUNT" -eq 0 ]; then
+    echo "  No merged branches found."
+    echo ""
+fi
+
+# Section 2: Unmerged branches with divergence info
+echo "--- Branches NOT MERGED into $MAIN_BRANCH ---"
+echo ""
+UNMERGED_COUNT=0
+while IFS= read -r branch; do
+    branch_name=$(echo "$branch" | xargs)
+    [ -z "$branch_name" ] && continue
+    [ "$branch_name" = "$MAIN_BRANCH" ] && continue
+
+    # Count commits behind and ahead
+    BEHIND=$(git rev-list --count "$branch_name".."$MAIN_BRANCH" 2>/dev/null || echo "?")
+    AHEAD=$(git rev-list --count "$MAIN_BRANCH".."$branch_name" 2>/dev/null || echo "?")
+    last_date=$(git log -1 --format="%cr" "$branch_name" 2>/dev/null || echo "unknown")
+    last_author=$(git log -1 --format="%an" "$branch_name" 2>/dev/null || echo "unknown")
+
+    echo "  $branch_name"
+    echo "    Ahead: $AHEAD commits | Behind: $BEHIND commits"
+    echo "    Last activity: $last_date by $last_author"
+
+    # Check for potential conflicts
+    if git merge-base --is-ancestor "$MAIN_BRANCH" "$branch_name" 2>/dev/null; then
+        echo "    Merge type: Fast-forward possible"
+    else
+        echo "    Merge type: Three-way merge required"
+    fi
+    echo ""
+    UNMERGED_COUNT=$((UNMERGED_COUNT + 1))
+done < <(git branch --no-merged "$MAIN_BRANCH" 2>/dev/null | grep -v "^\*")
+
+if [ "$UNMERGED_COUNT" -eq 0 ]; then
+    echo "  No unmerged branches found."
+    echo ""
+fi
+
+# Section 3: Recent merge history on main
+echo "--- Recent Merge History on $MAIN_BRANCH ---"
+echo ""
+MERGE_COMMITS=$(git log --merges --oneline "$MAIN_BRANCH" -10 2>/dev/null || echo "")
+if [ -n "$MERGE_COMMITS" ]; then
+    echo "$MERGE_COMMITS" | while IFS= read -r line; do
+        echo "  $line"
+    done
+else
+    echo "  No merge commits found (history may be linear)."
+fi
+
+# Section 4: Summary
+echo ""
+echo "--- Summary ---"
+TOTAL=$(git branch | wc -l | xargs)
+echo "  Total branches: $TOTAL"
+echo "  Merged into $MAIN_BRANCH: $MERGED_COUNT"
+echo "  Not merged: $UNMERGED_COUNT"
+
+if [ "$UNMERGED_COUNT" -gt 0 ]; then
+    TOTAL_BEHIND=0
+    while IFS= read -r branch; do
+        branch_name=$(echo "$branch" | xargs)
+        [ -z "$branch_name" ] && continue
+        [ "$branch_name" = "$MAIN_BRANCH" ] && continue
+        behind=$(git rev-list --count "$branch_name".."$MAIN_BRANCH" 2>/dev/null || echo "0")
+        TOTAL_BEHIND=$((TOTAL_BEHIND + behind))
+    done < <(git branch --no-merged "$MAIN_BRANCH" 2>/dev/null | grep -v "^\*")
+    echo "  Total commits behind across unmerged: $TOTAL_BEHIND"
+fi
+SCRIPT
+
+chmod +x ~/merge-report.sh
+
+# Test with a sample repository
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Build a test repo with various merge states
+echo "init" > README.md && git add . && git commit -q -m "Initial commit"
+
+# Create and merge a feature
+git switch -c feature/auth &>/dev/null
+echo "auth" > auth.js && git add . && git commit -q -m "Add auth"
+echo "auth v2" > auth.js && git add . && git commit -q -m "Improve auth"
+git switch main &>/dev/null
+git merge --no-ff feature/auth -q -m "Merge branch 'feature/auth'"
+
+# Create another merged feature
+git switch -c bugfix/typo &>/dev/null
+echo "fix" > fix.txt && git add . && git commit -q -m "Fix typo"
+git switch main &>/dev/null
+git merge --no-ff bugfix/typo -q -m "Merge branch 'bugfix/typo'"
+
+# Create an unmerged feature (ahead and behind)
+git switch -c feature/payments &>/dev/null
+echo "pay v1" > pay.js && git add . && git commit -q -m "Start payments"
+echo "pay v2" >> pay.js && git add . && git commit -q -m "Add payment processing"
+echo "pay v3" >> pay.js && git add . && git commit -q -m "Add payment validation"
+git switch main &>/dev/null
+echo "main work" > main-work.txt && git add . && git commit -q -m "Main branch work"
+echo "more main" >> main-work.txt && git add . && git commit -q -m "More main work"
+
+# Create another unmerged branch
+git switch -c feature/notifications &>/dev/null
+echo "notify" > notify.js && git add . && git commit -q -m "Add notifications"
+
+git switch main &>/dev/null
+
+~/merge-report.sh "$REPO"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- A fast-forward merge moves the branch pointer forward when there's no divergence
+- A three-way merge creates a merge commit with two parents when branches have diverged
+- `--no-ff` forces a merge commit even when fast-forward is possible — useful for preserving branch context
+- `--squash` collapses all branch commits into one, but doesn't record a merge relationship
+- `--ff-only` ensures only fast-forward merges happen — useful in CI/CD pipelines
+- `git merge --abort` cancels a merge in progress and restores the previous state
+- `git branch --merged` and `--no-merged` help identify which branches are safe to delete
+- Merge commits have two parents and can be inspected with `HEAD^1` and `HEAD^2`
+- Octopus merges combine multiple branches at once but cannot handle conflicts
+
+## What's Next
+
+Merges don't always go smoothly. When two branches change the same lines, Git can't decide which version to keep. In **Resolving Conflicts**, you'll learn to read conflict markers, resolve conflicts manually and with tools, and prevent conflicts before they happen.

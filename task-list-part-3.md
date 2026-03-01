@@ -267,7 +267,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-101: Create Shell Scripting Lessons 09-16 — Advanced
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-100
 - **Estimated effort:** XL
@@ -312,7 +312,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-103: Create Git Lessons 01-10 — Fundamentals
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-102
 - **Estimated effort:** XL

@@ -1,0 +1,1180 @@
+---
+title: "Resolving Conflicts"
+description: "Face merge conflicts head-on. Learn to read conflict markers, resolve conflicts manually and with tools, and prevent conflicts before they happen."
+order: 9
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 08-merging
+objectives:
+  - Read and understand conflict markers
+  - Resolve conflicts manually
+  - Use merge tools for complex conflicts
+  - Prevent conflicts with good practices
+  - Handle special conflict cases (binary files, deleted files)
+tags:
+  - git
+  - conflicts
+  - merge
+  - resolution
+---
+
+<Callout type="story" title="The Story">
+You open your terminal and see the dreaded message: "CONFLICT (content): Merge conflict in payment.js". Your heart rate goes up. But here's the truth: a merge conflict is just Git saying "two people changed the same lines and I need a human to decide which version is correct." Once you understand the markers, resolution is straightforward. Every developer hits conflicts. The ones who resolve them in five minutes instead of five hours are the ones who understand the mechanics. Conflicts aren't scary — they're communication.
+</Callout>
+
+## What Causes Conflicts?
+
+Git can automatically merge most changes. Conflicts only happen when Git can't decide which version is correct:
+
+### Same Lines Changed
+
+```bash
+# On main: line 10 of app.js says
+const timeout = 3000;
+
+# On feature: line 10 of app.js says
+const timeout = 5000;
+
+# Git: "Both branches changed line 10. Which timeout value is correct?"
+```
+
+### File Deleted vs Modified
+
+```bash
+# On main: someone deletes old-utils.js
+git rm old-utils.js
+
+# On feature: someone adds a function to old-utils.js
+echo "function newHelper() {}" >> old-utils.js
+
+# Git: "Main deleted the file but feature modified it. What do you want?"
+```
+
+### Both Branches Add at the Same Location
+
+```bash
+# Both branches add a new function after line 50
+# Main adds: function validateEmail() {}
+# Feature adds: function validatePhone() {}
+
+# Git: "Both added content at the same spot. What order should they be in?"
+```
+
+### What Doesn't Cause Conflicts
+
+```bash
+# Different files — Git handles this automatically
+# Main edits: src/auth.js
+# Feature edits: src/payment.js
+# Result: both changes are included, no conflict
+
+# Same file, different sections — Git handles this too
+# Main edits line 10
+# Feature edits line 90
+# Result: both changes are included, no conflict
+```
+
+## Reading Conflict Markers
+
+When a conflict occurs, Git marks the conflicting sections in the file:
+
+```
+<<<<<<< HEAD
+const timeout = 3000;
+const retries = 3;
+=======
+const timeout = 5000;
+const retries = 5;
+>>>>>>> feature/increase-timeouts
+```
+
+Here's what each marker means:
+
+```
+<<<<<<< HEAD
+(your current branch's version — what you're merging INTO)
+=======
+(the incoming branch's version — what you're merging FROM)
+>>>>>>> feature/increase-timeouts
+```
+
+With `merge.conflictStyle = diff3`, you also see the common ancestor:
+
+```
+<<<<<<< HEAD
+const timeout = 3000;
+||||||| merged common ancestors
+const timeout = 1000;
+=======
+const timeout = 5000;
+>>>>>>> feature/increase-timeouts
+```
+
+<Callout type="tip" title="Enable diff3 for Better Context">
+The `diff3` conflict style shows the original version (common ancestor) alongside both branches. This makes it much easier to understand what each side changed. Enable it globally:
+```bash
+git config --global merge.conflictStyle diff3
+```
+</Callout>
+
+## Resolving Conflicts Step by Step
+
+### Step 1: Identify Conflicting Files
+
+```bash
+# After a merge conflict, git status shows you exactly what's wrong
+git status
+# On branch main
+# You have unmerged paths.
+#   (fix conflicts and run "git add")
+#
+# Unmerged paths:
+#   (use "git add <file>..." to mark resolution)
+#       both modified:   src/payment.js
+#       both modified:   src/config.js
+```
+
+### Step 2: Open the File and Find Markers
+
+```bash
+# Search for conflict markers
+grep -rn "<<<<<<" src/
+# src/payment.js:10:<<<<<<< HEAD
+# src/config.js:5:<<<<<<< HEAD
+```
+
+### Step 3: Edit the File — Choose the Resolution
+
+You have several options:
+
+```javascript
+// Option A: Keep your version (HEAD / current branch)
+const timeout = 3000;
+const retries = 3;
+
+// Option B: Keep their version (incoming branch)
+const timeout = 5000;
+const retries = 5;
+
+// Option C: Combine both (often the right answer)
+const timeout = 5000;   // Use the longer timeout
+const retries = 3;      // Keep the original retry count
+
+// Option D: Write something completely new
+const timeout = parseInt(process.env.TIMEOUT) || 5000;
+const retries = parseInt(process.env.RETRIES) || 3;
+```
+
+**Remove ALL conflict markers** (`<<<<<<<`, `=======`, `>>>>>>>`). The file should look like normal code when you're done.
+
+### Step 4: Mark as Resolved and Commit
+
+```bash
+# Stage the resolved file
+git add src/payment.js
+git add src/config.js
+
+# Commit the merge
+git commit
+# Git opens your editor with a pre-filled merge commit message
+# Merge branch 'feature/increase-timeouts' into main
+#
+# Conflicts:
+#   src/payment.js
+#   src/config.js
+```
+
+## Using Merge Tools
+
+For complex conflicts, visual merge tools make resolution easier:
+
+### Configure a Merge Tool
+
+```bash
+# Use VS Code as your merge tool
+git config --global merge.tool vscode
+git config --global mergetool.vscode.cmd 'code --wait --merge $REMOTE $LOCAL $BASE $MERGED'
+
+# Use vimdiff (built-in, no setup needed)
+git config --global merge.tool vimdiff
+
+# Use meld (popular GUI tool)
+git config --global merge.tool meld
+```
+
+### Launch the Merge Tool
+
+```bash
+# After a conflict occurs, launch the tool
+git mergetool
+# Opens each conflicting file in the configured tool
+
+# The tool shows:
+# LOCAL  — your branch's version
+# REMOTE — the incoming branch's version
+# BASE   — the common ancestor
+# MERGED — the result you're creating
+```
+
+<Callout type="tip" title="Clean Up .orig Files">
+`git mergetool` creates `.orig` backup files. To prevent them:
+```bash
+git config --global mergetool.keepBackup false
+```
+Or clean them up after resolving:
+```bash
+find . -name "*.orig" -delete
+```
+</Callout>
+
+### Using git checkout for Specific Sides
+
+Sometimes you know you want one entire side of the conflict:
+
+```bash
+# Accept all of their changes for a specific file
+git checkout --theirs src/payment.js
+git add src/payment.js
+
+# Accept all of your changes for a specific file
+git checkout --ours src/config.js
+git add src/config.js
+```
+
+## Aborting a Merge
+
+If you're overwhelmed or need to rethink, abort the merge entirely:
+
+```bash
+# Cancel the merge and go back to the state before it started
+git merge --abort
+
+# Everything is back to normal — no changes, no conflicts
+git status
+# On branch main
+# nothing to commit, working tree clean
+```
+
+<Callout type="warning" title="Abort Loses Resolution Progress">
+`git merge --abort` discards ALL conflict resolution work you've done. If you've resolved 9 out of 10 files, aborting means you'll redo all of them. Consider carefully before aborting a partially-resolved merge.
+</Callout>
+
+## Preventing Conflicts
+
+The best conflict is the one that never happens:
+
+### 1. Merge Main into Your Branch Frequently
+
+```bash
+# Every day (or more often), pull main into your feature branch
+git switch feature/payment
+git merge main
+# Small conflicts now instead of massive conflicts later
+```
+
+### 2. Keep Branches Short-Lived
+
+```bash
+# Bad: 3-month feature branch diverging from main
+# Good: small branches that merge within days
+
+# Break big features into smaller pieces
+git switch -c feature/payment-step-1   # Add payment model
+git switch -c feature/payment-step-2   # Add payment API
+git switch -c feature/payment-step-3   # Add payment UI
+```
+
+### 3. Communicate with Your Team
+
+```bash
+# If you know someone is editing the same file:
+# - Talk about it
+# - Divide the file into sections
+# - One person merges first, the other rebases
+```
+
+### 4. Pull Before You Push
+
+```bash
+# Always pull the latest before pushing
+git pull origin main
+# If there are conflicts, resolve them locally
+# Then push your clean merge
+git push origin main
+```
+
+## Reuse Recorded Resolution (rerere)
+
+Git can remember how you resolved a conflict and automatically apply the same resolution next time:
+
+```bash
+# Enable rerere globally
+git config --global rerere.enabled true
+
+# Now when you resolve a conflict, Git records the resolution
+# Next time the same conflict appears, Git auto-resolves it
+
+# See recorded resolutions
+git rerere status
+
+# Forget a specific resolution
+git rerere forget src/payment.js
+```
+
+<Callout type="tip" title="rerere Saves Time with Rebase">
+If you regularly rebase your feature branch onto main, you'll often see the same conflicts repeatedly. With `rerere` enabled, you resolve the conflict once and Git remembers the resolution for all future occurrences. This is especially valuable for long-running branches.
+</Callout>
+
+## Special Conflict Cases
+
+### Binary File Conflicts
+
+Git can't merge binary files (images, PDFs, compiled files):
+
+```bash
+# Conflict on a binary file
+git merge feature/new-logo
+# warning: Cannot merge binary files: logo.png
+
+# You must choose one version or the other
+git checkout --theirs logo.png    # use their version
+# OR
+git checkout --ours logo.png      # use our version
+
+git add logo.png
+git commit
+```
+
+### Deleted vs Modified Conflicts
+
+```bash
+# One branch deletes a file, the other modifies it
+git merge feature/refactor
+# CONFLICT (modify/delete): old-utils.js deleted in feature/refactor
+# and modified in HEAD.
+
+# To keep the file (with your modifications):
+git add old-utils.js
+
+# To accept the deletion:
+git rm old-utils.js
+
+git commit
+```
+
+### Rename Conflicts
+
+```bash
+# Both branches rename the same file differently
+git merge feature/reorganize
+# CONFLICT (rename/rename): src/utils.js renamed to
+# src/helpers.js in HEAD and src/lib/utils.js in feature/reorganize
+
+# Resolve by choosing the correct path and content
+git add src/helpers.js     # or whichever path you want
+git rm src/lib/utils.js    # remove the other
+git commit
+```
+
+<Exercise number={1} title="Resolve Your First Conflict">
+
+```bash
+# Create a test repository
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Set up the base file
+cat > app.js << 'EOF'
+// Application Configuration
+const config = {
+    appName: "MyApp",
+    version: "1.0.0",
+    timeout: 1000,
+    retries: 1,
+    logLevel: "info"
+};
+
+// Application Entry Point
+function startApp() {
+    console.log("Starting " + config.appName);
+    return config;
+}
+
+module.exports = { startApp, config };
+EOF
+
+git add app.js && git commit -q -m "Initial app setup"
+
+# === Create conflicting changes on two branches ===
+
+# Branch 1: performance team increases timeouts
+git switch -c feature/performance-tuning
+cat > app.js << 'EOF'
+// Application Configuration
+const config = {
+    appName: "MyApp",
+    version: "1.0.0",
+    timeout: 5000,
+    retries: 5,
+    logLevel: "info",
+    maxConnections: 100
+};
+
+// Application Entry Point
+function startApp() {
+    console.log("Starting " + config.appName + " v" + config.version);
+    return config;
+}
+
+module.exports = { startApp, config };
+EOF
+git add app.js && git commit -q -m "Increase timeouts and add connection pool"
+
+# Branch 2: security team adds authentication
+git switch main
+git switch -c feature/security-hardening
+cat > app.js << 'EOF'
+// Application Configuration
+const config = {
+    appName: "MyApp",
+    version: "1.1.0",
+    timeout: 3000,
+    retries: 3,
+    logLevel: "warn",
+    requireAuth: true
+};
+
+// Application Entry Point
+function startApp() {
+    if (!config.requireAuth) {
+        throw new Error("Authentication required");
+    }
+    console.log("Starting " + config.appName + " (secure mode)");
+    return config;
+}
+
+module.exports = { startApp, config };
+EOF
+git add app.js && git commit -q -m "Add security requirements and auth check"
+
+# === Merge the first branch into main ===
+git switch main
+git merge feature/performance-tuning -m "Merge performance tuning"
+echo "First merge succeeded (no conflict)"
+
+# === Now merge the second branch — this will conflict! ===
+echo ""
+echo "=== Attempting second merge ==="
+git merge feature/security-hardening || true
+
+echo ""
+echo "=== Conflict detected! Let's examine it ==="
+echo ""
+echo "--- git status ---"
+git status
+
+echo ""
+echo "--- Conflict markers in app.js ---"
+cat app.js
+
+# === Resolve the conflict ===
+echo ""
+echo "=== Resolving the conflict ==="
+
+# Create the merged version that combines both changes
+cat > app.js << 'EOF'
+// Application Configuration
+const config = {
+    appName: "MyApp",
+    version: "1.1.0",
+    timeout: 5000,
+    retries: 5,
+    logLevel: "warn",
+    maxConnections: 100,
+    requireAuth: true
+};
+
+// Application Entry Point
+function startApp() {
+    if (!config.requireAuth) {
+        throw new Error("Authentication required");
+    }
+    console.log("Starting " + config.appName + " v" + config.version + " (secure mode)");
+    return config;
+}
+
+module.exports = { startApp, config };
+EOF
+
+# Mark as resolved
+git add app.js
+git commit -m "Merge security-hardening: combine performance and security configs"
+
+echo ""
+echo "=== Conflict resolved! Final history ==="
+git log --oneline --graph --all
+
+echo ""
+echo "=== Final file content ==="
+cat app.js
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Complex Conflict Resolution">
+
+```bash
+# Create a test repository
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Set up a multi-file project
+mkdir -p src tests
+
+cat > src/database.js << 'EOF'
+class Database {
+    constructor(host, port) {
+        this.host = host;
+        this.port = port;
+    }
+
+    connect() {
+        return `Connected to ${this.host}:${this.port}`;
+    }
+
+    query(sql) {
+        return `Executing: ${sql}`;
+    }
+}
+
+module.exports = Database;
+EOF
+
+cat > src/server.js << 'EOF'
+const Database = require('./database');
+
+class Server {
+    constructor(port) {
+        this.port = port;
+        this.db = new Database('localhost', 5432);
+    }
+
+    start() {
+        this.db.connect();
+        console.log(`Server running on port ${this.port}`);
+    }
+}
+
+module.exports = Server;
+EOF
+
+cat > tests/database.test.js << 'EOF'
+const Database = require('../src/database');
+
+test('connects to database', () => {
+    const db = new Database('localhost', 5432);
+    expect(db.connect()).toContain('Connected');
+});
+EOF
+
+git add . && git commit -q -m "Initial project with database and server"
+
+# === Branch A: Database team adds connection pooling ===
+git switch -c feature/connection-pool
+
+cat > src/database.js << 'EOF'
+class Database {
+    constructor(host, port, poolSize = 10) {
+        this.host = host;
+        this.port = port;
+        this.poolSize = poolSize;
+        this.connections = [];
+    }
+
+    connect() {
+        for (let i = 0; i < this.poolSize; i++) {
+            this.connections.push({ id: i, active: true });
+        }
+        return `Pool of ${this.poolSize} connections to ${this.host}:${this.port}`;
+    }
+
+    getConnection() {
+        return this.connections.find(c => c.active);
+    }
+
+    query(sql) {
+        const conn = this.getConnection();
+        return `[conn-${conn.id}] Executing: ${sql}`;
+    }
+}
+
+module.exports = Database;
+EOF
+
+cat > tests/database.test.js << 'EOF'
+const Database = require('../src/database');
+
+test('connects to database with pool', () => {
+    const db = new Database('localhost', 5432, 5);
+    expect(db.connect()).toContain('Pool of 5');
+});
+
+test('gets connection from pool', () => {
+    const db = new Database('localhost', 5432, 3);
+    db.connect();
+    expect(db.getConnection()).toBeDefined();
+});
+EOF
+
+git add . && git commit -q -m "Add connection pooling to database"
+
+# === Branch B: API team adds authentication and logging ===
+git switch main
+git switch -c feature/auth-and-logging
+
+cat > src/database.js << 'EOF'
+class Database {
+    constructor(host, port, credentials = null) {
+        this.host = host;
+        this.port = port;
+        this.credentials = credentials;
+        this.queryLog = [];
+    }
+
+    connect() {
+        if (this.credentials) {
+            return `Authenticated connection to ${this.host}:${this.port}`;
+        }
+        return `Connected to ${this.host}:${this.port}`;
+    }
+
+    query(sql) {
+        this.queryLog.push({ sql, timestamp: Date.now() });
+        return `Executing: ${sql}`;
+    }
+
+    getQueryLog() {
+        return this.queryLog;
+    }
+}
+
+module.exports = Database;
+EOF
+
+cat > src/server.js << 'EOF'
+const Database = require('./database');
+
+class Server {
+    constructor(port, dbCredentials) {
+        this.port = port;
+        this.db = new Database('localhost', 5432, dbCredentials);
+    }
+
+    start() {
+        this.db.connect();
+        console.log(`Server running on port ${this.port} (authenticated)`);
+    }
+
+    getAuditLog() {
+        return this.db.getQueryLog();
+    }
+}
+
+module.exports = Server;
+EOF
+
+cat > tests/database.test.js << 'EOF'
+const Database = require('../src/database');
+
+test('connects to database with auth', () => {
+    const db = new Database('localhost', 5432, { user: 'admin' });
+    expect(db.connect()).toContain('Authenticated');
+});
+
+test('logs queries', () => {
+    const db = new Database('localhost', 5432);
+    db.query('SELECT * FROM users');
+    expect(db.getQueryLog().length).toBe(1);
+});
+EOF
+
+git add . && git commit -q -m "Add authentication and query logging"
+
+# === Merge first branch into main ===
+git switch main
+git merge feature/connection-pool -m "Merge connection pooling"
+
+# === Attempt second merge — conflicts! ===
+echo "=== Attempting merge of auth-and-logging ==="
+echo ""
+git merge feature/auth-and-logging 2>&1 || true
+
+echo ""
+echo "=== Files with conflicts ==="
+git diff --name-only --diff-filter=U
+
+echo ""
+echo "=== Resolving conflicts file by file ==="
+
+# File 1: src/database.js — combine both features
+echo ""
+echo "--- Resolving src/database.js ---"
+cat > src/database.js << 'EOF'
+class Database {
+    constructor(host, port, { poolSize = 10, credentials = null } = {}) {
+        this.host = host;
+        this.port = port;
+        this.poolSize = poolSize;
+        this.credentials = credentials;
+        this.connections = [];
+        this.queryLog = [];
+    }
+
+    connect() {
+        for (let i = 0; i < this.poolSize; i++) {
+            this.connections.push({ id: i, active: true });
+        }
+        const authStatus = this.credentials ? 'authenticated ' : '';
+        return `${authStatus}Pool of ${this.poolSize} connections to ${this.host}:${this.port}`;
+    }
+
+    getConnection() {
+        return this.connections.find(c => c.active);
+    }
+
+    query(sql) {
+        const conn = this.getConnection();
+        this.queryLog.push({ sql, connId: conn.id, timestamp: Date.now() });
+        return `[conn-${conn.id}] Executing: ${sql}`;
+    }
+
+    getQueryLog() {
+        return this.queryLog;
+    }
+}
+
+module.exports = Database;
+EOF
+git add src/database.js
+echo "  Resolved: Combined pooling + auth + logging"
+
+# File 2: tests/database.test.js — combine both test suites
+echo ""
+echo "--- Resolving tests/database.test.js ---"
+cat > tests/database.test.js << 'EOF'
+const Database = require('../src/database');
+
+test('connects to database with pool', () => {
+    const db = new Database('localhost', 5432, { poolSize: 5 });
+    expect(db.connect()).toContain('Pool of 5');
+});
+
+test('connects with authentication', () => {
+    const db = new Database('localhost', 5432, {
+        poolSize: 3,
+        credentials: { user: 'admin' }
+    });
+    expect(db.connect()).toContain('authenticated');
+});
+
+test('gets connection from pool', () => {
+    const db = new Database('localhost', 5432, { poolSize: 3 });
+    db.connect();
+    expect(db.getConnection()).toBeDefined();
+});
+
+test('logs queries with connection info', () => {
+    const db = new Database('localhost', 5432);
+    db.connect();
+    db.query('SELECT * FROM users');
+    const log = db.getQueryLog();
+    expect(log.length).toBe(1);
+    expect(log[0].connId).toBeDefined();
+});
+EOF
+git add tests/database.test.js
+echo "  Resolved: Combined both test suites"
+
+# File 3: src/server.js — may or may not conflict
+if git diff --name-only --diff-filter=U | grep -q "src/server.js"; then
+    echo ""
+    echo "--- Resolving src/server.js ---"
+    cat > src/server.js << 'EOF'
+const Database = require('./database');
+
+class Server {
+    constructor(port, dbCredentials) {
+        this.port = port;
+        this.db = new Database('localhost', 5432, {
+            poolSize: 10,
+            credentials: dbCredentials
+        });
+    }
+
+    start() {
+        this.db.connect();
+        console.log(`Server running on port ${this.port} (pooled, authenticated)`);
+    }
+
+    getAuditLog() {
+        return this.db.getQueryLog();
+    }
+}
+
+module.exports = Server;
+EOF
+    git add src/server.js
+    echo "  Resolved: Combined pooling config with auth"
+fi
+
+# Complete the merge
+git commit -m "Merge auth-and-logging: combine pooling, auth, and logging features"
+
+echo ""
+echo "=== All conflicts resolved! ==="
+echo ""
+echo "--- Final project structure ---"
+find src tests -type f | sort
+
+echo ""
+echo "--- Commit history ---"
+git log --oneline --graph --all
+
+echo ""
+echo "--- Final database.js ---"
+cat src/database.js
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Conflict Simulator">
+
+```bash
+cat > ~/conflict-simulator.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Conflict Simulator — creates a repo with various conflict scenarios for practice
+
+PRACTICE_DIR="${1:-$HOME/conflict-practice}"
+
+if [ -d "$PRACTICE_DIR" ]; then
+    echo "Directory $PRACTICE_DIR already exists. Remove it first."
+    exit 1
+fi
+
+mkdir -p "$PRACTICE_DIR"
+cd "$PRACTICE_DIR"
+git init -q
+
+echo "============================================"
+echo "  Conflict Simulator"
+echo "  Practice directory: $PRACTICE_DIR"
+echo "============================================"
+echo ""
+
+# === Setup: Create the base project ===
+cat > config.json << 'JSONEOF'
+{
+    "appName": "ConflictPractice",
+    "version": "1.0.0",
+    "port": 3000,
+    "database": {
+        "host": "localhost",
+        "port": 5432
+    }
+}
+JSONEOF
+
+cat > app.py << 'PYEOF'
+class App:
+    def __init__(self, name):
+        self.name = name
+        self.plugins = []
+
+    def register_plugin(self, plugin):
+        self.plugins.append(plugin)
+
+    def start(self):
+        print(f"Starting {self.name}")
+        for plugin in self.plugins:
+            plugin.activate()
+        return True
+PYEOF
+
+cat > utils.py << 'PYEOF'
+def format_date(date):
+    return date.strftime("%Y-%m-%d")
+
+def validate_email(email):
+    return "@" in email
+
+def generate_id():
+    import random
+    return random.randint(1000, 9999)
+PYEOF
+
+echo "# Conflict Practice Project" > README.md
+
+# Create a binary-like file (simulates images)
+dd if=/dev/urandom bs=64 count=1 > logo.bin 2>/dev/null
+
+git add . && git commit -q -m "Initial project setup"
+
+# === Scenario 1: Simple content conflict ===
+echo "Setting up Scenario 1: Simple content conflict..."
+
+git switch -c scenario1/team-a
+cat > config.json << 'JSONEOF'
+{
+    "appName": "ConflictPractice",
+    "version": "2.0.0",
+    "port": 8080,
+    "database": {
+        "host": "db.production.com",
+        "port": 5432,
+        "poolSize": 20
+    }
+}
+JSONEOF
+git add config.json && git commit -q -m "Team A: update config for production"
+
+git switch main
+git switch -c scenario1/team-b
+cat > config.json << 'JSONEOF'
+{
+    "appName": "ConflictPractice",
+    "version": "1.5.0",
+    "port": 3000,
+    "database": {
+        "host": "localhost",
+        "port": 5432,
+        "ssl": true
+    },
+    "logging": {
+        "level": "debug"
+    }
+}
+JSONEOF
+git add config.json && git commit -q -m "Team B: add SSL and logging config"
+
+git switch main
+
+# === Scenario 2: Multi-file conflict ===
+echo "Setting up Scenario 2: Multi-file conflict..."
+
+git switch -c scenario2/refactor
+cat > app.py << 'PYEOF'
+class Application:
+    """Refactored Application class with better naming."""
+
+    def __init__(self, name, version="1.0"):
+        self.name = name
+        self.version = version
+        self.plugins = []
+        self.middleware = []
+
+    def use(self, middleware):
+        self.middleware.append(middleware)
+
+    def register_plugin(self, plugin):
+        self.plugins.append(plugin)
+
+    def start(self):
+        print(f"Starting {self.name} v{self.version}")
+        for mw in self.middleware:
+            mw.process()
+        for plugin in self.plugins:
+            plugin.activate()
+        return True
+PYEOF
+
+cat > utils.py << 'PYEOF'
+from datetime import datetime
+
+def format_date(date, fmt="%Y-%m-%d"):
+    """Format a date with configurable format string."""
+    return date.strftime(fmt)
+
+def validate_email(email):
+    """Basic email validation."""
+    import re
+    return bool(re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email))
+
+def generate_id(prefix=""):
+    """Generate a unique ID with optional prefix."""
+    import uuid
+    return f"{prefix}{uuid.uuid4().hex[:8]}"
+PYEOF
+git add . && git commit -q -m "Refactor: improve class naming and function signatures"
+
+git switch main
+git switch -c scenario2/features
+cat > app.py << 'PYEOF'
+class App:
+    def __init__(self, name):
+        self.name = name
+        self.plugins = []
+        self.running = False
+
+    def register_plugin(self, plugin):
+        self.plugins.append(plugin)
+
+    def start(self):
+        if self.running:
+            raise RuntimeError("App already running")
+        print(f"Starting {self.name}")
+        for plugin in self.plugins:
+            plugin.activate()
+        self.running = True
+        return True
+
+    def stop(self):
+        if not self.running:
+            return False
+        print(f"Stopping {self.name}")
+        self.running = False
+        return True
+
+    def restart(self):
+        self.stop()
+        self.start()
+PYEOF
+
+cat > utils.py << 'PYEOF'
+def format_date(date):
+    return date.strftime("%Y-%m-%d")
+
+def validate_email(email):
+    return "@" in email and "." in email.split("@")[1]
+
+def generate_id():
+    import random
+    return random.randint(1000, 9999)
+
+def retry(func, max_attempts=3):
+    """Retry a function up to max_attempts times."""
+    for attempt in range(max_attempts):
+        try:
+            return func()
+        except Exception as e:
+            if attempt == max_attempts - 1:
+                raise
+            print(f"Attempt {attempt + 1} failed: {e}")
+PYEOF
+git add . && git commit -q -m "Add app lifecycle methods and retry utility"
+
+git switch main
+
+# === Scenario 3: Delete vs modify conflict ===
+echo "Setting up Scenario 3: Delete vs modify conflict..."
+
+git switch -c scenario3/cleanup
+git rm utils.py
+git commit -q -m "Remove utils.py (functionality moved to separate modules)"
+
+git switch main
+git switch -c scenario3/enhance
+cat >> utils.py << 'PYEOF'
+
+def sanitize_input(text):
+    """Remove potentially dangerous characters."""
+    return text.replace("<", "&lt;").replace(">", "&gt;")
+
+def hash_password(password):
+    """Simple password hashing (use bcrypt in production)."""
+    import hashlib
+    return hashlib.sha256(password.encode()).hexdigest()
+PYEOF
+git add utils.py && git commit -q -m "Add security utilities to utils.py"
+
+git switch main
+
+# === Scenario 4: Binary file conflict ===
+echo "Setting up Scenario 4: Binary file conflict..."
+
+git switch -c scenario4/new-logo
+dd if=/dev/urandom bs=64 count=1 > logo.bin 2>/dev/null
+git add logo.bin && git commit -q -m "Update logo (marketing redesign)"
+
+git switch main
+git switch -c scenario4/alt-logo
+dd if=/dev/urandom bs=64 count=1 > logo.bin 2>/dev/null
+git add logo.bin && git commit -q -m "Update logo (engineering version)"
+
+git switch main
+
+# === Print instructions ===
+echo ""
+echo "============================================"
+echo "  PRACTICE SCENARIOS READY!"
+echo "============================================"
+echo ""
+echo "Your practice repo is at: $PRACTICE_DIR"
+echo ""
+echo "--- Scenario 1: Simple Content Conflict ---"
+echo "  Merge scenario1/team-a into main, then merge scenario1/team-b"
+echo "  cd $PRACTICE_DIR"
+echo "  git merge scenario1/team-a"
+echo "  git merge scenario1/team-b"
+echo "  (Resolve the config.json conflict by combining both changes)"
+echo ""
+echo "--- Scenario 2: Multi-File Conflict ---"
+echo "  Merge scenario2/refactor into main, then merge scenario2/features"
+echo "  (Both app.py and utils.py will conflict — resolve each)"
+echo ""
+echo "--- Scenario 3: Delete vs Modify ---"
+echo "  Merge scenario3/cleanup into main, then merge scenario3/enhance"
+echo "  (One branch deleted utils.py, the other modified it — decide!)"
+echo ""
+echo "--- Scenario 4: Binary File ---"
+echo "  Merge scenario4/new-logo into main, then merge scenario4/alt-logo"
+echo "  (Binary files can't be merged — pick one version)"
+echo ""
+echo "--- Available branches ---"
+git branch
+
+echo ""
+echo "--- Tips ---"
+echo "  - Use 'git status' to see conflicting files"
+echo "  - Use 'grep -rn \"<<<<<<<\" .' to find conflict markers"
+echo "  - Use 'git merge --abort' to start over"
+echo "  - Use 'git checkout --ours file' or 'git checkout --theirs file'"
+echo "  - Use 'git log --all --oneline --graph' to see the full picture"
+echo ""
+echo "When done practicing, clean up with:"
+echo "  rm -rf $PRACTICE_DIR"
+SCRIPT
+
+chmod +x ~/conflict-simulator.sh
+
+# Run it to demonstrate
+~/conflict-simulator.sh /tmp/conflict-practice-demo
+
+# Clean up the demo
+rm -rf /tmp/conflict-practice-demo
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- A merge conflict is Git asking a human to decide between two valid changes to the same lines
+- Conflict markers: `<<<<<<<` (yours), `=======` (divider), `>>>>>>>` (theirs)
+- Resolution process: edit file, remove markers, `git add`, `git commit`
+- Use `git merge --abort` to cancel a merge entirely and start over
+- `git checkout --ours` and `--theirs` accept one entire side of a conflict
+- Enable `diff3` conflict style for better context showing the common ancestor
+- `git mergetool` opens a visual tool for complex multi-file conflicts
+- Enable `rerere` to have Git remember and replay your conflict resolutions
+- Prevent conflicts by merging main into your branch frequently, keeping branches short-lived, and communicating with your team
+- Special cases: binary files (choose one side), deleted vs modified (keep or remove), renamed files (choose the path)
+
+## What's Next
+
+Conflicts are resolved, but what about mistakes? What if you committed the wrong thing, or need to go back in time? In **Undoing Changes**, you'll master `git restore`, `git reset`, `git revert`, and the reflog — the safety net that makes Git fearless experimentation possible.

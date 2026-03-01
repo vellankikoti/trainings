@@ -1,0 +1,1005 @@
+---
+title: "Real-World Automation Scripts"
+description: "Build complete, production-style automation scripts: deployment pipelines, backup systems, health checkers, and log analyzers. Apply everything you've learned to real DevOps problems."
+order: 15
+xpReward: 150
+estimatedMinutes: 45
+prerequisites:
+  - 14-advanced-patterns
+objectives:
+  - Build a deployment script with rollback capability
+  - Create an incremental backup script with rotation
+  - Write a multi-service health check with alerting
+  - Develop a log analyzer that parses, aggregates, and reports
+tags:
+  - shell-scripting
+  - automation
+  - devops
+  - real-world
+---
+
+<Callout type="story" title="The Story">
+You've learned the syntax, patterns, and techniques. Now it's time to build real things. Your team needs a deployment script that pulls code, builds, restarts services, and verifies health — with rollback if anything fails. They need backups that rotate and notify. They need health checks that run every minute and page on-call when something is down. These are the scripts that keep infrastructure running at 3 AM when you're asleep. Let's build them.
+</Callout>
+
+## Script 1: Deployment Automation
+
+A real deployment script handles: pulling code, building, stopping the old version, starting the new one, verifying health, and rolling back if verification fails.
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# --- Configuration ---
+APP_NAME="webapp"
+DEPLOY_DIR="/opt/$APP_NAME"
+RELEASE_DIR="/opt/$APP_NAME/releases"
+SHARED_DIR="/opt/$APP_NAME/shared"
+CURRENT_LINK="/opt/$APP_NAME/current"
+KEEP_RELEASES=5
+HEALTH_URL="http://localhost:8080/health"
+HEALTH_TIMEOUT=30
+LOG_FILE="/var/log/${APP_NAME}-deploy.log"
+
+# --- Logging ---
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
+die() { log "FATAL: $*"; exit 1; }
+
+# --- Deployment functions ---
+
+prepare_release() {
+    local release_id="$1"
+    local release_path="$RELEASE_DIR/$release_id"
+
+    log "Preparing release $release_id"
+    mkdir -p "$release_path"
+
+    # Clone or pull from git
+    git clone --depth 1 --branch main "$GIT_REPO" "$release_path/src" \
+        || die "Git clone failed"
+
+    # Build
+    log "Building..."
+    (cd "$release_path/src" && make build) || die "Build failed"
+
+    # Link shared resources (logs, uploads, config)
+    ln -sf "$SHARED_DIR/config" "$release_path/src/config"
+    ln -sf "$SHARED_DIR/logs" "$release_path/src/logs"
+
+    log "Release $release_id prepared"
+}
+
+switch_release() {
+    local release_id="$1"
+    local release_path="$RELEASE_DIR/$release_id"
+
+    # Atomic symlink switch
+    local tmp_link="${CURRENT_LINK}.tmp"
+    ln -sf "$release_path/src" "$tmp_link"
+    mv -Tf "$tmp_link" "$CURRENT_LINK"
+
+    log "Switched to release $release_id"
+}
+
+verify_health() {
+    log "Verifying health at $HEALTH_URL"
+    local elapsed=0
+
+    while [ "$elapsed" -lt "$HEALTH_TIMEOUT" ]; do
+        if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
+            log "Health check passed after ${elapsed}s"
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    log "Health check failed after ${HEALTH_TIMEOUT}s"
+    return 1
+}
+
+rollback() {
+    log "Rolling back to previous release..."
+    local previous
+    previous=$(ls -1t "$RELEASE_DIR" | sed -n '2p')
+
+    if [ -z "$previous" ]; then
+        die "No previous release to roll back to"
+    fi
+
+    switch_release "$previous"
+    systemctl restart "$APP_NAME"
+
+    if verify_health; then
+        log "Rollback successful (now on $previous)"
+    else
+        die "Rollback also failed — manual intervention required"
+    fi
+}
+
+cleanup_old_releases() {
+    local releases
+    releases=$(ls -1t "$RELEASE_DIR" | tail -n +$((KEEP_RELEASES + 1)))
+
+    for release in $releases; do
+        log "Removing old release: $release"
+        rm -rf "${RELEASE_DIR:?}/$release"
+    done
+}
+```
+
+This is the structure real deployment tools like Capistrano use: timestamped releases, a `current` symlink, shared resources, and atomic switches.
+
+## Script 2: Backup with Rotation
+
+Production backups need incremental copies, rotation policies, and failure notifications:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# --- Configuration ---
+BACKUP_SOURCE="/var/lib/app/data"
+BACKUP_DEST="/backup/app"
+BACKUP_RETENTION_DAYS=30
+SNAPSHOT_LINK="$BACKUP_DEST/latest"
+LOG_FILE="/var/log/backup.log"
+ALERT_EMAIL="ops@example.com"
+
+# --- Functions ---
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [BACKUP] $*" | tee -a "$LOG_FILE"; }
+
+send_alert() {
+    local subject="$1"
+    local body="$2"
+    echo "$body" | mail -s "$subject" "$ALERT_EMAIL" 2>/dev/null || \
+        log "WARNING: Could not send alert email"
+}
+
+check_disk_space() {
+    local dest_mount
+    dest_mount=$(df "$BACKUP_DEST" | awk 'NR==2 {print $5}' | tr -d '%')
+    if [ "$dest_mount" -gt 85 ]; then
+        log "WARNING: Backup disk is ${dest_mount}% full"
+        send_alert "[WARN] Backup disk space" \
+            "Backup disk is ${dest_mount}% full on $(hostname)"
+    fi
+}
+
+perform_backup() {
+    local timestamp
+    timestamp=$(date '+%Y%m%d-%H%M%S')
+    local backup_path="$BACKUP_DEST/$timestamp"
+
+    log "Starting backup: $BACKUP_SOURCE -> $backup_path"
+
+    # Incremental backup using rsync with hard links
+    # --link-dest creates hard links to unchanged files from the previous backup
+    rsync -az --delete \
+        --link-dest="$SNAPSHOT_LINK" \
+        "$BACKUP_SOURCE/" \
+        "$backup_path/" \
+        || return 1
+
+    # Update the "latest" symlink
+    rm -f "$SNAPSHOT_LINK"
+    ln -sf "$backup_path" "$SNAPSHOT_LINK"
+
+    # Record backup metadata
+    cat > "$backup_path/.backup-meta" << EOF
+timestamp=$timestamp
+source=$BACKUP_SOURCE
+hostname=$(hostname)
+size=$(du -sh "$backup_path" | cut -f1)
+EOF
+
+    log "Backup complete: $(du -sh "$backup_path" | cut -f1)"
+}
+
+rotate_backups() {
+    log "Rotating backups older than $BACKUP_RETENTION_DAYS days"
+    local count=0
+
+    find "$BACKUP_DEST" -maxdepth 1 -type d -mtime +${BACKUP_RETENTION_DAYS} \
+        -not -name "$(basename "$BACKUP_DEST")" | while read -r old_backup; do
+        log "Removing: $old_backup"
+        rm -rf "$old_backup"
+        count=$((count + 1))
+    done
+
+    log "Rotation complete: removed $count old backup(s)"
+}
+```
+
+The `--link-dest` flag in rsync is the key to efficient incremental backups. Unchanged files become hard links to the previous backup, so they consume no extra disk space.
+
+<Exercise number={1} title="Build a Health Check System">
+
+```bash
+cat > ~/health-checker.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Multi-service health checker with alerting
+
+# --- Configuration ---
+CHECK_INTERVAL=5
+ALERT_THRESHOLD=2  # Alert after N consecutive failures
+RESULTS_DIR="/tmp/health-checks"
+mkdir -p "$RESULTS_DIR"
+trap 'rm -rf "$RESULTS_DIR"' EXIT
+
+declare -A FAIL_COUNTS
+declare -A SERVICE_STATUS
+
+# --- Service definitions ---
+# Each check function returns 0 for healthy, non-zero for unhealthy
+
+check_disk() {
+    local usage
+    usage=$(df / | awk 'NR==2 {print $5}' | tr -d '%')
+    if [ "$usage" -lt 90 ]; then
+        echo "OK: ${usage}% used"
+        return 0
+    else
+        echo "CRITICAL: ${usage}% used (threshold: 90%)"
+        return 1
+    fi
+}
+
+check_memory() {
+    local available
+    available=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo "0")
+    if [ "$available" -gt 100 ]; then
+        echo "OK: ${available}MB available"
+        return 0
+    else
+        echo "WARNING: Only ${available}MB available"
+        return 1
+    fi
+}
+
+check_load() {
+    local load
+    load=$(awk '{printf "%.0f", $1}' /proc/loadavg 2>/dev/null || echo "0")
+    local cores
+    cores=$(nproc 2>/dev/null || echo "1")
+    if [ "$load" -lt "$((cores * 2))" ]; then
+        echo "OK: load=$load (cores=$cores)"
+        return 0
+    else
+        echo "HIGH: load=$load exceeds threshold (cores=$cores)"
+        return 1
+    fi
+}
+
+check_dns() {
+    if host google.com > /dev/null 2>&1 || \
+       nslookup google.com > /dev/null 2>&1 || \
+       getent hosts google.com > /dev/null 2>&1; then
+        echo "OK: DNS resolution working"
+        return 0
+    else
+        echo "FAILED: DNS resolution broken"
+        return 1
+    fi
+}
+
+check_tmp_space() {
+    local tmp_usage
+    tmp_usage=$(df /tmp 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%')
+    if [ -n "$tmp_usage" ] && [ "$tmp_usage" -lt 95 ]; then
+        echo "OK: /tmp at ${tmp_usage}%"
+        return 0
+    else
+        echo "CRITICAL: /tmp at ${tmp_usage:-unknown}%"
+        return 1
+    fi
+}
+
+# --- Alerting ---
+
+send_alert() {
+    local service="$1"
+    local status="$2"
+    local message="$3"
+
+    # In production, this would page PagerDuty, send Slack, etc.
+    echo ""
+    echo "  *** ALERT: $service is $status ***"
+    echo "  Message: $message"
+    echo "  Host: $(hostname)"
+    echo "  Time: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo ""
+}
+
+send_recovery() {
+    local service="$1"
+    echo "  >>> RECOVERY: $service is back to healthy <<<"
+}
+
+# --- Health check runner ---
+
+SERVICES=("disk" "memory" "load" "dns" "tmp_space")
+
+run_checks() {
+    local timestamp
+    timestamp=$(date '+%H:%M:%S')
+    echo "[$timestamp] Running health checks..."
+
+    for service in "${SERVICES[@]}"; do
+        local check_func="check_${service}"
+        local output
+        local exit_code
+
+        output=$($check_func 2>&1)
+        exit_code=$?
+
+        # Track consecutive failures
+        local current_fails="${FAIL_COUNTS[$service]:-0}"
+        local prev_status="${SERVICE_STATUS[$service]:-healthy}"
+
+        if [ "$exit_code" -ne 0 ]; then
+            FAIL_COUNTS[$service]=$((current_fails + 1))
+            SERVICE_STATUS[$service]="unhealthy"
+
+            printf "  [FAIL] %-12s %s (failures: %d)\n" "$service" "$output" "${FAIL_COUNTS[$service]}"
+
+            # Alert if we hit the threshold
+            if [ "${FAIL_COUNTS[$service]}" -eq "$ALERT_THRESHOLD" ]; then
+                send_alert "$service" "DOWN" "$output"
+            fi
+        else
+            # Was it previously failing? If so, send recovery
+            if [ "$prev_status" = "unhealthy" ]; then
+                send_recovery "$service"
+            fi
+
+            FAIL_COUNTS[$service]=0
+            SERVICE_STATUS[$service]="healthy"
+            printf "  [ OK ] %-12s %s\n" "$service" "$output"
+        fi
+    done
+}
+
+# --- Main loop ---
+
+echo "=== Health Check System ==="
+echo "Services: ${SERVICES[*]}"
+echo "Check interval: ${CHECK_INTERVAL}s"
+echo "Alert threshold: $ALERT_THRESHOLD consecutive failures"
+echo ""
+
+# Run 3 check cycles for the demo
+for cycle in 1 2 3; do
+    run_checks
+    echo ""
+    [ "$cycle" -lt 3 ] && sleep "$CHECK_INTERVAL"
+done
+
+# --- Summary report ---
+echo "=== Final Status Report ==="
+printf "%-14s %-10s %s\n" "SERVICE" "STATUS" "FAIL_COUNT"
+printf "%-14s %-10s %s\n" "-------" "------" "----------"
+for service in "${SERVICES[@]}"; do
+    printf "%-14s %-10s %s\n" \
+        "$service" \
+        "${SERVICE_STATUS[$service]:-unknown}" \
+        "${FAIL_COUNTS[$service]:-0}"
+done
+SCRIPT
+
+chmod +x ~/health-checker.sh
+~/health-checker.sh
+```
+
+</Exercise>
+
+## Script 3: Log Analyzer
+
+Real log analysis involves parsing structured and unstructured logs, aggregating by dimension, and producing reports:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# --- Log Analysis Functions ---
+
+# Parse Apache/Nginx access logs
+# Format: IP - - [date] "METHOD /path HTTP/1.1" STATUS SIZE
+parse_access_log() {
+    local log_file="$1"
+
+    echo "=== Access Log Analysis: $log_file ==="
+    echo ""
+
+    # Top 10 IPs by request count
+    echo "--- Top 10 Client IPs ---"
+    awk '{print $1}' "$log_file" | sort | uniq -c | sort -rn | head -10
+
+    echo ""
+
+    # HTTP status code distribution
+    echo "--- Status Code Distribution ---"
+    awk '{print $9}' "$log_file" | sort | uniq -c | sort -rn
+
+    echo ""
+
+    # Top 10 most requested paths
+    echo "--- Top 10 Requested Paths ---"
+    awk '{print $7}' "$log_file" | sort | uniq -c | sort -rn | head -10
+
+    echo ""
+
+    # Requests per hour
+    echo "--- Requests Per Hour ---"
+    awk -F'[\\[/:]' '{print $5}' "$log_file" | sort | uniq -c
+
+    echo ""
+
+    # Total bandwidth
+    echo "--- Bandwidth ---"
+    awk '{sum += $10} END {
+        if (sum > 1073741824) printf "Total: %.2f GB\n", sum/1073741824
+        else if (sum > 1048576) printf "Total: %.2f MB\n", sum/1048576
+        else printf "Total: %.2f KB\n", sum/1024
+    }' "$log_file"
+}
+
+# Analyze application logs for errors
+analyze_errors() {
+    local log_file="$1"
+    local period="${2:-1 hour ago}"
+
+    echo "=== Error Analysis ==="
+
+    # Count errors by type
+    echo "--- Error Types ---"
+    grep -i "error\|exception\|fatal\|critical" "$log_file" 2>/dev/null | \
+        sed 's/.*\(ERROR\|Exception\|FATAL\|CRITICAL\).*/\1/' | \
+        sort | uniq -c | sort -rn
+
+    echo ""
+
+    # Most common error messages
+    echo "--- Top Error Messages ---"
+    grep -i "error" "$log_file" 2>/dev/null | \
+        sed 's/^.*ERROR[: ]*//' | \
+        sort | uniq -c | sort -rn | head -10
+}
+```
+
+<Exercise number={2} title="Complete Log Analyzer">
+
+```bash
+cat > ~/log-analyzer.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Full-featured log analyzer with report generation
+
+LOG_DIR="/tmp/log-analyzer-demo"
+REPORT_FILE="/tmp/log-report.txt"
+mkdir -p "$LOG_DIR"
+trap 'rm -rf "$LOG_DIR" "$REPORT_FILE"' EXIT
+
+# --- Generate sample log data ---
+
+generate_sample_logs() {
+    local log_file="$LOG_DIR/app.log"
+    local ips=("10.0.1.5" "10.0.1.12" "192.168.1.100" "10.0.2.30" "172.16.0.5"
+               "10.0.1.5" "10.0.1.5" "192.168.1.100" "10.0.3.8" "10.0.1.12")
+    local methods=("GET" "GET" "GET" "POST" "PUT" "GET" "DELETE" "GET" "POST" "GET")
+    local paths=("/api/users" "/api/orders" "/health" "/api/login" "/api/users/42"
+                 "/api/products" "/api/sessions" "/" "/api/orders" "/api/users")
+    local statuses=("200" "200" "200" "201" "200" "500" "204" "301" "400" "200")
+    local levels=("INFO" "INFO" "DEBUG" "INFO" "WARN" "ERROR" "INFO" "INFO" "ERROR" "INFO")
+    local messages=(
+        "Request processed successfully"
+        "Order #1234 retrieved"
+        "Health check passed"
+        "User authenticated: john@example.com"
+        "Slow query detected: 2.3s"
+        "Database connection pool exhausted"
+        "Session cleanup completed"
+        "Redirect to /dashboard"
+        "Invalid JSON in request body"
+        "Cache hit for user profile"
+    )
+
+    # Generate 50 log lines
+    for i in $(seq 0 49); do
+        local idx=$((i % 10))
+        local hour=$((8 + i / 6))
+        local minute=$(( (i * 7) % 60 ))
+        printf "2025-01-15 %02d:%02d:%02d %s [%s] %s %s %s - %s\n" \
+            "$hour" "$minute" "$((RANDOM % 60))" \
+            "${ips[$idx]}" \
+            "${levels[$idx]}" \
+            "${methods[$idx]}" \
+            "${paths[$idx]}" \
+            "${statuses[$idx]}" \
+            "${messages[$idx]}"
+    done > "$log_file"
+
+    echo "$log_file"
+}
+
+# --- Analysis functions ---
+
+analyze_traffic() {
+    local log_file="$1"
+
+    echo "=== Traffic Analysis ==="
+    echo ""
+
+    # Total requests
+    local total
+    total=$(wc -l < "$log_file")
+    echo "Total Requests: $total"
+    echo ""
+
+    # Requests by HTTP method
+    echo "--- By HTTP Method ---"
+    awk '{print $6}' "$log_file" | sort | uniq -c | sort -rn | \
+        while read -r count method; do
+            local pct=$((count * 100 / total))
+            printf "  %-8s %4d (%d%%)\n" "$method" "$count" "$pct"
+        done
+    echo ""
+
+    # Requests by status code
+    echo "--- By Status Code ---"
+    awk '{print $8}' "$log_file" | sort | uniq -c | sort -rn | \
+        while read -r count status; do
+            local category
+            case "$status" in
+                2*) category="SUCCESS" ;;
+                3*) category="REDIRECT" ;;
+                4*) category="CLIENT_ERROR" ;;
+                5*) category="SERVER_ERROR" ;;
+                *)  category="UNKNOWN" ;;
+            esac
+            printf "  %-4s %-14s %4d\n" "$status" "($category)" "$count"
+        done
+    echo ""
+
+    # Requests by path
+    echo "--- Top Endpoints ---"
+    awk '{print $7}' "$log_file" | sort | uniq -c | sort -rn | head -5 | \
+        while read -r count path; do
+            printf "  %-25s %4d\n" "$path" "$count"
+        done
+}
+
+analyze_clients() {
+    local log_file="$1"
+
+    echo ""
+    echo "=== Client Analysis ==="
+    echo ""
+
+    # Top client IPs
+    echo "--- Top Client IPs ---"
+    awk '{print $4}' "$log_file" | sort | uniq -c | sort -rn | head -5 | \
+        while read -r count ip; do
+            # Check if this IP has any errors
+            local errors
+            errors=$(awk -v ip="$ip" '$4==ip && $8>=400 {count++} END {print count+0}' "$log_file")
+            printf "  %-18s %4d requests" "$ip" "$count"
+            [ "$errors" -gt 0 ] && printf "  (%d errors)" "$errors"
+            echo ""
+        done
+}
+
+analyze_errors() {
+    local log_file="$1"
+
+    echo ""
+    echo "=== Error Analysis ==="
+    echo ""
+
+    local error_count
+    error_count=$(grep -c "ERROR\|WARN" "$log_file" || echo "0")
+    local total
+    total=$(wc -l < "$log_file")
+    local error_rate=$((error_count * 100 / total))
+
+    echo "Error/Warning Count: $error_count / $total ($error_rate%)"
+    echo ""
+
+    if [ "$error_count" -gt 0 ]; then
+        echo "--- Error Details ---"
+        grep "ERROR\|WARN" "$log_file" | awk -F' - ' '{print $2}' | sort | uniq -c | sort -rn | \
+            while read -r count message; do
+                printf "  %4d x %s\n" "$count" "$message"
+            done
+        echo ""
+
+        echo "--- Error Timeline ---"
+        grep "ERROR" "$log_file" | awk '{print substr($2, 1, 5)}' | sort | uniq -c | \
+            while read -r count time; do
+                printf "  %s  %s\n" "$time" "$(printf '%*s' "$count" '' | tr ' ' '#')"
+            done
+    fi
+}
+
+analyze_performance() {
+    local log_file="$1"
+
+    echo ""
+    echo "=== Hourly Distribution ==="
+    echo ""
+
+    awk '{print substr($2, 1, 2) ":00"}' "$log_file" | sort | uniq -c | \
+        while read -r count hour; do
+            local bar
+            bar=$(printf '%*s' "$((count / 2))" '' | tr ' ' '|')
+            printf "  %s  %4d %s\n" "$hour" "$count" "$bar"
+        done
+}
+
+# --- Report generation ---
+
+generate_report() {
+    local log_file="$1"
+    local report_file="$2"
+
+    {
+        echo "============================================="
+        echo "  LOG ANALYSIS REPORT"
+        echo "  Generated: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "  Source: $log_file"
+        echo "  Lines Analyzed: $(wc -l < "$log_file")"
+        echo "============================================="
+        echo ""
+        analyze_traffic "$log_file"
+        analyze_clients "$log_file"
+        analyze_errors "$log_file"
+        analyze_performance "$log_file"
+        echo ""
+        echo "============================================="
+        echo "  END OF REPORT"
+        echo "============================================="
+    } | tee "$report_file"
+}
+
+# --- Main ---
+
+echo "Generating sample log data..."
+LOG_FILE=$(generate_sample_logs)
+echo "Log file: $LOG_FILE ($(wc -l < "$LOG_FILE") lines)"
+echo ""
+
+generate_report "$LOG_FILE" "$REPORT_FILE"
+
+echo ""
+echo "Report saved to: $REPORT_FILE"
+SCRIPT
+
+chmod +x ~/log-analyzer.sh
+~/log-analyzer.sh
+```
+
+</Exercise>
+
+<MiniProject title="Deployment Script with Rollback">
+
+```bash
+cat > ~/deploy-full.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Full deployment script with: prepare, deploy, verify, rollback
+# Simulates a real blue/green style deployment
+
+DEPLOY_ROOT="/tmp/deploy-demo"
+RELEASES_DIR="$DEPLOY_ROOT/releases"
+CURRENT_LINK="$DEPLOY_ROOT/current"
+SHARED_DIR="$DEPLOY_ROOT/shared"
+LOG_FILE="$DEPLOY_ROOT/deploy.log"
+KEEP_RELEASES=3
+VERSION="${1:-1.0.$((RANDOM % 100))}"
+
+# --- Utility functions ---
+
+log() {
+    local level="$1"
+    shift
+    local msg="[$(date '+%H:%M:%S')] [$level] $*"
+    echo "$msg"
+    echo "$msg" >> "$LOG_FILE" 2>/dev/null
+}
+
+info()  { log "INFO" "$@"; }
+warn()  { log "WARN" "$@"; }
+error() { log "ERROR" "$@"; }
+
+die() {
+    error "$@"
+    exit 1
+}
+
+banner() {
+    echo ""
+    echo "========================================="
+    echo "  $*"
+    echo "========================================="
+    echo ""
+}
+
+confirm_deploy() {
+    info "Deployment plan:"
+    info "  Version: $VERSION"
+    info "  Target:  $DEPLOY_ROOT"
+    info "  Time:    $(date)"
+    echo ""
+}
+
+# --- Setup ---
+
+setup_dirs() {
+    mkdir -p "$RELEASES_DIR" "$SHARED_DIR"/{config,logs,data}
+    touch "$LOG_FILE"
+
+    # Create shared config if it doesn't exist
+    if [ ! -f "$SHARED_DIR/config/app.conf" ]; then
+        cat > "$SHARED_DIR/config/app.conf" << EOF
+APP_PORT=8080
+APP_ENV=production
+DB_HOST=localhost
+DB_PORT=5432
+LOG_LEVEL=info
+EOF
+    fi
+}
+
+# --- Deployment steps ---
+
+step_prepare() {
+    local release_id="$1"
+    local release_path="$RELEASES_DIR/$release_id"
+
+    banner "Step 1/5: Prepare Release"
+
+    if [ -d "$release_path" ]; then
+        warn "Release directory already exists, cleaning"
+        rm -rf "$release_path"
+    fi
+
+    mkdir -p "$release_path"/{bin,config,logs}
+
+    # Simulate: git clone + build
+    info "Simulating git clone..."
+    echo "#!/bin/bash" > "$release_path/bin/app"
+    echo "echo 'App $VERSION running on port \${APP_PORT:-8080}'" >> "$release_path/bin/app"
+    chmod +x "$release_path/bin/app"
+
+    # Create version file
+    cat > "$release_path/VERSION" << EOF
+version=$VERSION
+release_id=$release_id
+built_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+built_by=$(whoami)
+git_sha=$(head -c 8 /dev/urandom | od -A n -t x1 | tr -d ' \n' | head -c 12)
+EOF
+
+    # Link shared resources
+    ln -sf "$SHARED_DIR/config/app.conf" "$release_path/config/app.conf"
+    ln -sf "$SHARED_DIR/logs" "$release_path/logs/shared"
+
+    info "Release prepared: $release_path"
+    info "Version info:"
+    cat "$release_path/VERSION" | sed 's/^/  /'
+}
+
+step_pre_checks() {
+    banner "Step 2/5: Pre-deployment Checks"
+
+    local checks_passed=0
+    local checks_failed=0
+
+    # Check disk space
+    local disk_pct
+    disk_pct=$(df "$DEPLOY_ROOT" | awk 'NR==2 {print $5}' | tr -d '%')
+    if [ "$disk_pct" -lt 90 ]; then
+        info "[PASS] Disk space: ${disk_pct}% used"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "[FAIL] Disk space: ${disk_pct}% used (too high)"
+        checks_failed=$((checks_failed + 1))
+    fi
+
+    # Check config exists
+    if [ -f "$SHARED_DIR/config/app.conf" ]; then
+        info "[PASS] Config file exists"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "[FAIL] Config file missing"
+        checks_failed=$((checks_failed + 1))
+    fi
+
+    # Check release artifact exists
+    local release_id="$1"
+    if [ -x "$RELEASES_DIR/$release_id/bin/app" ]; then
+        info "[PASS] Application binary is executable"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "[FAIL] Application binary not found or not executable"
+        checks_failed=$((checks_failed + 1))
+    fi
+
+    info "Pre-checks: $checks_passed passed, $checks_failed failed"
+
+    if [ "$checks_failed" -gt 0 ]; then
+        die "Pre-deployment checks failed"
+    fi
+}
+
+step_switch() {
+    local release_id="$1"
+    local release_path="$RELEASES_DIR/$release_id"
+
+    banner "Step 3/5: Switch Release"
+
+    # Record previous release for rollback
+    local previous_release=""
+    if [ -L "$CURRENT_LINK" ]; then
+        previous_release=$(readlink -f "$CURRENT_LINK")
+        info "Previous release: $previous_release"
+    fi
+    echo "$previous_release" > "$DEPLOY_ROOT/.previous_release"
+
+    # Atomic symlink switch
+    local tmp_link="${CURRENT_LINK}.tmp.$$"
+    ln -sf "$release_path" "$tmp_link"
+    mv -Tf "$tmp_link" "$CURRENT_LINK"
+
+    info "Switched current -> $release_path"
+}
+
+step_verify() {
+    banner "Step 4/5: Verify Deployment"
+
+    # Verify the symlink points to the right place
+    if [ ! -L "$CURRENT_LINK" ]; then
+        error "Current link does not exist"
+        return 1
+    fi
+
+    local target
+    target=$(readlink -f "$CURRENT_LINK")
+    info "Current points to: $target"
+
+    # Verify the app runs
+    if [ -x "$CURRENT_LINK/bin/app" ]; then
+        local output
+        output=$("$CURRENT_LINK/bin/app" 2>&1)
+        info "App output: $output"
+    else
+        error "App binary not executable"
+        return 1
+    fi
+
+    # Verify version
+    if [ -f "$CURRENT_LINK/VERSION" ]; then
+        local deployed_version
+        deployed_version=$(grep "^version=" "$CURRENT_LINK/VERSION" | cut -d= -f2)
+        if [ "$deployed_version" = "$VERSION" ]; then
+            info "Version verified: $deployed_version"
+        else
+            error "Version mismatch! Expected $VERSION, got $deployed_version"
+            return 1
+        fi
+    fi
+
+    info "All verifications passed"
+    return 0
+}
+
+step_cleanup() {
+    banner "Step 5/5: Cleanup Old Releases"
+
+    local release_count
+    release_count=$(ls -1 "$RELEASES_DIR" | wc -l)
+
+    if [ "$release_count" -gt "$KEEP_RELEASES" ]; then
+        local to_remove
+        to_remove=$(ls -1t "$RELEASES_DIR" | tail -n +$((KEEP_RELEASES + 1)))
+
+        for release in $to_remove; do
+            info "Removing old release: $release"
+            rm -rf "${RELEASES_DIR:?}/$release"
+        done
+    else
+        info "No cleanup needed ($release_count releases, keeping $KEEP_RELEASES)"
+    fi
+}
+
+rollback() {
+    banner "ROLLBACK"
+
+    if [ ! -f "$DEPLOY_ROOT/.previous_release" ]; then
+        die "No previous release recorded — cannot rollback"
+    fi
+
+    local previous
+    previous=$(cat "$DEPLOY_ROOT/.previous_release")
+
+    if [ -z "$previous" ] || [ ! -d "$previous" ]; then
+        die "Previous release not found: $previous"
+    fi
+
+    warn "Rolling back to: $previous"
+
+    local tmp_link="${CURRENT_LINK}.tmp.$$"
+    ln -sf "$previous" "$tmp_link"
+    mv -Tf "$tmp_link" "$CURRENT_LINK"
+
+    info "Rollback complete. Current now points to: $previous"
+}
+
+# --- Main ---
+
+main() {
+    banner "Deploying $VERSION"
+    confirm_deploy
+
+    setup_dirs
+
+    local release_id
+    release_id="$(date '+%Y%m%d%H%M%S')-${VERSION}"
+
+    step_prepare "$release_id"
+    step_pre_checks "$release_id"
+    step_switch "$release_id"
+
+    if step_verify; then
+        step_cleanup
+
+        banner "Deployment SUCCESSFUL"
+        info "Version $VERSION is now live"
+        info "Release: $release_id"
+    else
+        warn "Verification failed — initiating rollback"
+        rollback
+        die "Deployment FAILED — rolled back to previous version"
+    fi
+
+    # Show release history
+    echo ""
+    info "Release history:"
+    ls -1t "$RELEASES_DIR" | head -5 | while read -r rel; do
+        local marker=" "
+        [ "$RELEASES_DIR/$rel" = "$(readlink -f "$CURRENT_LINK")" ] && marker="*"
+        echo "  $marker $rel"
+    done
+
+    # Cleanup demo
+    rm -rf "$DEPLOY_ROOT"
+}
+
+main "$@"
+SCRIPT
+
+chmod +x ~/deploy-full.sh
+~/deploy-full.sh v2.1.0
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Real deployment scripts use timestamped releases with an atomic symlink switch for zero-downtime deploys
+- Always include health verification after deployment and automatic rollback on failure
+- Incremental backups with `rsync --link-dest` save disk space by hard-linking unchanged files
+- Health checkers should track consecutive failures before alerting to avoid false alarms
+- Log analyzers use `awk`, `sort`, `uniq -c`, and `sort -rn` as their core pipeline
+- Every production script needs: logging, error handling, cleanup traps, and clear exit codes
+- Structure scripts as small functions called from a `main` function for readability and testability
+- Always record enough state (previous release, timestamps, versions) to enable rollback and debugging
+
+## What's Next
+
+These scripts work, but are they production-grade? In **Production-Grade Scripting**, you'll learn the final polish: argument parsing with getopts, configuration file loading, structured logging, lock files, idempotency, security practices, and knowing when to graduate to Python.

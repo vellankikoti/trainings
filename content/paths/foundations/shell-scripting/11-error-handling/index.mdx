@@ -1,0 +1,1090 @@
+---
+title: "Error Handling and Defensive Scripting"
+description: "Write scripts that fail gracefully. Master exit codes, set options, trap signals, validate inputs, and build scripts that handle the unexpected without causing damage."
+order: 11
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 10-text-processing
+objectives:
+  - Understand and use exit codes effectively
+  - Use set -euo pipefail correctly
+  - Trap signals for cleanup on failure
+  - Validate inputs and preconditions
+  - Create meaningful error messages
+tags:
+  - shell-scripting
+  - error-handling
+  - defensive
+  - bash
+---
+
+<Callout type="story" title="The Story">
+It's 3AM. Your backup script failed halfway through. It deleted the old backup before confirming the new one was complete. Now there's no backup at all. If the script had proper error handling — checking each step, cleaning up on failure, validating preconditions — you'd still be sleeping.
+</Callout>
+
+## Exit Codes
+
+Every command in bash returns an exit code when it finishes. Zero means success. Anything else means failure. This is the foundation of all error handling in shell scripts.
+
+```bash
+# Check exit code of the last command with $?
+ls /etc/hostname
+echo "Exit code: $?"    # 0 (success)
+
+ls /nonexistent/path 2>/dev/null
+echo "Exit code: $?"    # 2 (failure — no such file)
+
+grep -q "root" /etc/passwd
+echo "Exit code: $?"    # 0 (pattern found)
+
+grep -q "zzzzz" /etc/passwd
+echo "Exit code: $?"    # 1 (pattern not found)
+```
+
+### Exit Code Conventions
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Misuse of shell command (bad syntax, missing argument) |
+| 126 | Command found but not executable (permission denied) |
+| 127 | Command not found |
+| 128+N | Killed by signal N (e.g., 130 = Ctrl+C / SIGINT, 137 = SIGKILL, 143 = SIGTERM) |
+
+### Custom Exit Codes in Your Scripts
+
+Use specific exit codes to communicate different failure modes to the caller:
+
+```bash
+#!/bin/bash
+
+# Define exit codes at the top of your script
+readonly EXIT_SUCCESS=0
+readonly EXIT_GENERAL_ERROR=1
+readonly EXIT_BAD_ARGS=2
+readonly EXIT_FILE_NOT_FOUND=3
+readonly EXIT_PERMISSION_DENIED=4
+
+check_config() {
+    local config_file="$1"
+
+    if [ -z "$config_file" ]; then
+        echo "Error: No config file specified" >&2
+        return "$EXIT_BAD_ARGS"
+    fi
+
+    if [ ! -f "$config_file" ]; then
+        echo "Error: Config file not found: $config_file" >&2
+        return "$EXIT_FILE_NOT_FOUND"
+    fi
+
+    if [ ! -r "$config_file" ]; then
+        echo "Error: Cannot read config file: $config_file" >&2
+        return "$EXIT_PERMISSION_DENIED"
+    fi
+
+    echo "Config OK: $config_file"
+    return "$EXIT_SUCCESS"
+}
+
+check_config "$@"
+```
+
+<Callout type="tip" title="Use return in Functions, exit in Scripts">
+`return N` exits a function with code N. `exit N` exits the entire script. Using `exit` inside a function terminates the whole script, which is almost never what you want. Use `return` and let the caller decide how to handle the failure.
+</Callout>
+
+## The set Builtin: Strict Mode
+
+Bash is lenient by default — it silently ignores failed commands, undefined variables, and broken pipes. The `set` builtin changes that behavior.
+
+### `set -e` — Exit on Error
+
+Without `set -e`, a script continues past failed commands as if nothing happened:
+
+```bash
+#!/bin/bash
+set -e
+
+echo "Step 1: Creating directory"
+mkdir /tmp/deploy-staging
+
+echo "Step 2: Copying files"
+cp /nonexistent/source/* /tmp/deploy-staging/    # FAILS — script exits here
+
+echo "Step 3: Never reached"
+# Without set -e, this WOULD run, possibly deploying incomplete files
+```
+
+### `set -u` — Error on Undefined Variables
+
+Without `set -u`, a typo in a variable name silently expands to an empty string — potentially catastrophic:
+
+```bash
+#!/bin/bash
+set -u
+
+BACKUP_DIR="/backups/daily"
+echo "Backing up to: $BACKUP_DIR"    # Fine
+
+# Without set -u, this typo would silently become: rm -rf /
+# With set -u, it triggers an error: BAKUP_DIR: unbound variable
+rm -rf "$BAKUP_DIR/old"
+```
+
+### `set -o pipefail` — Catch Pipe Failures
+
+By default, a pipeline's exit code is the exit code of the **last** command. This hides failures in earlier stages:
+
+```bash
+#!/bin/bash
+set -o pipefail
+
+# Without pipefail: exit code = grep's exit code (success if pattern found)
+# With pipefail: exit code = cat's exit code (failure — file not found)
+cat /nonexistent/file 2>/dev/null | grep "pattern"
+echo "Exit code: $?"    # 1 (cat failed)
+```
+
+### `set -x` — Debug Trace
+
+Prints every command before executing it. Invaluable for debugging:
+
+```bash
+#!/bin/bash
+set -x
+
+NAME="world"
+echo "Hello, $NAME"
+# Output:
+# + NAME=world
+# + echo 'Hello, world'
+# Hello, world
+```
+
+### The Standard Strict Mode Header
+
+Every production script should start with this:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+```
+
+This single line catches three of the most common sources of silent failures:
+- `-e`: Stop on the first error instead of charging blindly ahead
+- `-u`: Stop on undefined variables instead of treating typos as empty strings
+- `-o pipefail`: Report failures in pipe stages instead of hiding them
+
+### When `set -e` Gets in the Way
+
+Sometimes you expect a command to fail. Handle it explicitly without disabling strict mode for the whole script:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Method 1: || true — suppress the exit
+grep -q "optional_feature" /etc/config 2>/dev/null || true
+# The script continues regardless of whether grep found anything
+
+# Method 2: if statement — set -e does NOT trigger inside conditions
+if grep -q "optional_feature" /etc/config 2>/dev/null; then
+    echo "Feature is enabled"
+else
+    echo "Feature not available (this is fine)"
+fi
+
+# Method 3: Temporarily disable set -e for one command
+set +e
+risky_command_that_might_fail
+RESULT=$?
+set -e
+
+if [ "$RESULT" -ne 0 ]; then
+    echo "Command failed with code $RESULT, but we continue"
+fi
+```
+
+<Callout type="warning" title="set -e Pitfalls">
+`set -e` does not trigger inside command substitutions in some bash versions: `result=$(failing_command)` may not exit the script. It also does not trigger in commands preceding `&&` or `||`. Know these edge cases and add explicit checks for critical operations.
+</Callout>
+
+## Trapping Signals for Cleanup
+
+`trap` registers a command or function to run when the script receives a signal or exits. This is how you guarantee cleanup happens regardless of how the script ends.
+
+### Basic EXIT Trap
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+TEMP_DIR=$(mktemp -d)
+
+cleanup() {
+    echo "Cleaning up temp dir: $TEMP_DIR"
+    rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
+
+echo "Working in $TEMP_DIR..."
+echo "important data" > "$TEMP_DIR/work.txt"
+
+# Even if the script fails here, cleanup() still runs
+ls /nonexistent/path    # set -e makes this exit...
+                         # ...but trap EXIT fires before the process ends
+
+echo "This line is never reached"
+```
+
+### ERR Trap with Line Numbers
+
+The `ERR` trap fires when a command fails (in conjunction with `set -e`). Combined with `$LINENO` and `$BASH_COMMAND`, it gives you precise error reporting:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+on_error() {
+    local exit_code=$?
+    local line_no=$1
+    echo "" >&2
+    echo "ERROR: Command failed (exit code $exit_code)" >&2
+    echo "  Script: $0" >&2
+    echo "  Line:   $line_no" >&2
+    echo "  Command: $BASH_COMMAND" >&2
+}
+trap 'on_error $LINENO' ERR
+
+echo "Starting deployment..."
+mkdir -p /tmp/deploy-test
+cp /nonexistent/source /tmp/deploy-test/    # This fails — on_error fires
+echo "Never reached"
+```
+
+### Signal Traps: INT and TERM
+
+Handle Ctrl+C (SIGINT) and `kill` (SIGTERM) gracefully:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+LOCK_FILE="/tmp/myapp.lock"
+TEMP_DIR=$(mktemp -d)
+
+cleanup() {
+    local exit_code=$?
+    echo ""
+    echo "Performing cleanup..."
+    rm -f "$LOCK_FILE"
+    rm -rf "$TEMP_DIR"
+    echo "Cleanup complete (exit code: $exit_code)"
+}
+
+# trap EXIT covers all cases: normal exit, errors, and signals
+trap cleanup EXIT
+
+# trap INT and TERM for custom messages before cleanup runs
+trap 'echo ""; echo "Caught SIGINT (Ctrl+C). Shutting down..."; exit 130' INT
+trap 'echo ""; echo "Caught SIGTERM. Shutting down..."; exit 143' TERM
+
+echo $$ > "$LOCK_FILE"
+echo "Running (PID: $$). Press Ctrl+C to stop."
+echo "Working..."
+sleep 30    # Simulate long-running work
+echo "Done."
+```
+
+### Combining EXIT and ERR Traps
+
+A production-ready error handling setup:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+TEMP_DIR=$(mktemp -d)
+LOG_FILE="$TEMP_DIR/script.log"
+STEPS_COMPLETED=0
+
+cleanup() {
+    local exit_code=$?
+    if [ "$exit_code" -ne 0 ]; then
+        echo "[CLEANUP] Script failed at step $STEPS_COMPLETED" >&2
+    fi
+    rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
+
+on_error() {
+    echo "[ERROR] Line $1: $BASH_COMMAND (exit code: $?)" >&2
+    echo "[ERROR] $(date '+%H:%M:%S') Line $1: $BASH_COMMAND" >> "$LOG_FILE"
+}
+trap 'on_error $LINENO' ERR
+```
+
+## Validating Inputs and Preconditions
+
+Defensive scripts check everything before doing anything destructive.
+
+### Check Argument Count
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <source_dir> <target_dir>" >&2
+    echo "" >&2
+    echo "Arguments:" >&2
+    echo "  source_dir   Directory to back up" >&2
+    echo "  target_dir   Where to store the backup" >&2
+    exit 2
+fi
+
+SOURCE_DIR="$1"
+TARGET_DIR="$2"
+```
+
+### Validate Files and Directories
+
+```bash
+# Check if a file exists
+[ -f "$CONFIG_FILE" ] || { echo "Error: Config not found: $CONFIG_FILE" >&2; exit 1; }
+
+# Check if a file is readable
+[ -r "$CONFIG_FILE" ] || { echo "Error: Cannot read: $CONFIG_FILE" >&2; exit 1; }
+
+# Check if a directory exists
+[ -d "$DEPLOY_DIR" ] || { echo "Error: Directory not found: $DEPLOY_DIR" >&2; exit 1; }
+
+# Check if a directory is writable
+[ -w "$LOG_DIR" ] || { echo "Error: Cannot write to: $LOG_DIR" >&2; exit 1; }
+
+# Check if a file is not empty
+[ -s "$INPUT_FILE" ] || { echo "Error: File is empty: $INPUT_FILE" >&2; exit 1; }
+```
+
+### Validate Numeric Input
+
+```bash
+validate_port() {
+    local port="$1"
+
+    # Check if it's a number
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        echo "Error: Port must be a number, got '$port'" >&2
+        return 1
+    fi
+
+    # Check range
+    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo "Error: Port must be between 1 and 65535, got $port" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+validate_port "$1" || exit 1
+```
+
+### Check Required Commands
+
+```bash
+check_dependencies() {
+    local missing=()
+
+    for cmd in curl jq docker kubectl; do
+        if ! command -v "$cmd" &>/dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "Error: Missing required commands: ${missing[*]}" >&2
+        echo "Install them and try again." >&2
+        return 1
+    fi
+}
+
+check_dependencies || exit 1
+```
+
+## Error Helper Functions
+
+### The die() Pattern
+
+A `die()` function centralizes fatal error handling:
+
+```bash
+die() {
+    echo "FATAL: $*" >&2
+    exit 1
+}
+
+# Usage — concise guard clauses
+[ -f "$CONFIG_FILE" ] || die "Config not found: $CONFIG_FILE"
+[ -n "${API_KEY:-}" ] || die "API_KEY environment variable is not set"
+command -v docker &>/dev/null || die "Docker is required but not installed"
+```
+
+### Structured Logging to stderr
+
+```bash
+log()       { echo "[$(date '+%H:%M:%S')] [INFO]  $*" | tee -a "$LOG_FILE"; }
+log_warn()  { echo "[$(date '+%H:%M:%S')] [WARN]  $*" | tee -a "$LOG_FILE" >&2; }
+log_error() { echo "[$(date '+%H:%M:%S')] [ERROR] $*" | tee -a "$LOG_FILE" >&2; }
+
+die() {
+    log_error "$*"
+    exit 1
+}
+
+log "Deployment starting..."
+log_warn "Running in degraded mode"
+log_error "Connection refused"
+die "Cannot continue without database"
+```
+
+<Callout type="tip" title="Always Write Errors to stderr">
+Regular output goes to stdout (file descriptor 1). Error messages go to stderr (file descriptor 2) using `>&2`. This allows callers to separate normal output from error messages: `./script.sh > output.txt 2> errors.txt`. If you mix errors into stdout, callers cannot filter them.
+</Callout>
+
+## Defensive Patterns
+
+### Check Before Delete
+
+Never delete without verifying what you're deleting:
+
+```bash
+# DANGEROUS: If $DEPLOY_DIR is empty, this runs: rm -rf /
+rm -rf "$DEPLOY_DIR/"
+
+# SAFE: Validate the variable is set and non-empty first
+if [ -z "${DEPLOY_DIR:-}" ]; then
+    die "DEPLOY_DIR is not set"
+fi
+
+if [ "$DEPLOY_DIR" = "/" ]; then
+    die "DEPLOY_DIR is set to /. Refusing to delete."
+fi
+
+rm -rf "$DEPLOY_DIR/"
+```
+
+### Use `||` for Fallback Values
+
+```bash
+# Default values with ${var:-default}
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
+WORKERS="${WORKERS:-$(nproc)}"
+
+# Fallback commands with ||
+CONFIG=$(cat /etc/myapp/config.yml 2>/dev/null) || CONFIG="default_config: true"
+
+# Try primary, fall back to secondary
+BACKUP_TARGET="${PRIMARY_BACKUP:-}"
+[ -d "$BACKUP_TARGET" ] || BACKUP_TARGET="${SECONDARY_BACKUP:-/tmp/backup}"
+[ -d "$BACKUP_TARGET" ] || die "No valid backup target found"
+```
+
+### Retry with Exponential Backoff
+
+Network operations fail transiently. Retrying with increasing delays handles most transient failures:
+
+```bash
+retry() {
+    local max_attempts="$1"
+    local delay="$2"
+    shift 2
+    local attempt=1
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if "$@"; then
+            return 0
+        fi
+
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            echo "  Attempt $attempt/$max_attempts failed. Retrying in ${delay}s..." >&2
+            sleep "$delay"
+            delay=$((delay * 2))
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "  All $max_attempts attempts failed." >&2
+    return 1
+}
+
+# Usage
+retry 4 2 curl -sf http://localhost:8080/health
+retry 3 5 ssh deploy@server "systemctl restart myapp"
+```
+
+### Guard the Entire Script with Preconditions
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# --- Preconditions: fail fast before doing any work ---
+
+die() { echo "FATAL: $*" >&2; exit 1; }
+
+# Must run as root
+[ "$(id -u)" -eq 0 ] || die "This script must be run as root"
+
+# Required env vars
+[ -n "${DEPLOY_ENV:-}" ] || die "DEPLOY_ENV is not set (expected: staging|production)"
+[ -n "${APP_VERSION:-}" ] || die "APP_VERSION is not set"
+
+# Required files
+[ -f "/etc/deploy/config.yml" ] || die "Config not found: /etc/deploy/config.yml"
+
+# Required commands
+for cmd in docker kubectl aws; do
+    command -v "$cmd" &>/dev/null || die "Required command not found: $cmd"
+done
+
+# Disk space check (need at least 1GB)
+AVAIL_KB=$(df /opt --output=avail | tail -1)
+[ "$AVAIL_KB" -gt 1048576 ] || die "Insufficient disk space on /opt (need 1GB, have ${AVAIL_KB}KB)"
+
+echo "All preconditions met. Proceeding with deployment..."
+```
+
+<Exercise number={1} title="Bulletproof Script">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Bulletproof Backup Script
+# Demonstrates comprehensive error handling for file backup operations.
+
+TEMP_DIR=$(mktemp -d)
+LOG_FILE="$TEMP_DIR/backup.log"
+STEPS_COMPLETED=0
+
+# --- Error handling setup ---
+
+log()       { echo "[$(date '+%H:%M:%S')] INFO:  $*" | tee -a "$LOG_FILE"; }
+log_error() { echo "[$(date '+%H:%M:%S')] ERROR: $*" | tee -a "$LOG_FILE" >&2; }
+die()       { log_error "$*"; exit 1; }
+
+cleanup() {
+    local exit_code=$?
+    echo ""
+    if [ "$exit_code" -ne 0 ]; then
+        log_error "Backup FAILED at step $STEPS_COMPLETED"
+        # Rollback: remove partial backup if it exists
+        if [ -d "$TEMP_DIR/backup-staging" ]; then
+            rm -rf "$TEMP_DIR/backup-staging"
+            log "Rolled back: removed partial backup"
+        fi
+    fi
+    log "Cleanup complete (exit code: $exit_code)"
+    echo ""
+    echo "=== Backup Log ==="
+    cat "$LOG_FILE"
+    rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
+
+on_error() {
+    log_error "Command failed at line $1: $BASH_COMMAND"
+}
+trap 'on_error $LINENO' ERR
+
+# --- Setup test files to back up ---
+SOURCE_DIR="$TEMP_DIR/source"
+BACKUP_DIR="$TEMP_DIR/backups"
+
+mkdir -p "$SOURCE_DIR"
+echo "config: production" > "$SOURCE_DIR/config.yml"
+echo "data: important" > "$SOURCE_DIR/data.txt"
+echo "#!/bin/bash" > "$SOURCE_DIR/app.sh"
+chmod +x "$SOURCE_DIR/app.sh"
+
+# --- Step 1: Validate preconditions ---
+log "=== Step 1: Validating preconditions ==="
+
+[ -d "$SOURCE_DIR" ] || die "Source directory not found: $SOURCE_DIR"
+[ -r "$SOURCE_DIR" ] || die "Source directory not readable: $SOURCE_DIR"
+
+FILE_COUNT=$(find "$SOURCE_DIR" -type f | wc -l)
+[ "$FILE_COUNT" -gt 0 ] || die "Source directory is empty: $SOURCE_DIR"
+log "Source directory has $FILE_COUNT files"
+
+STEPS_COMPLETED=1
+log "Step 1 complete: preconditions met"
+
+# --- Step 2: Create backup destination ---
+log ""
+log "=== Step 2: Creating backup destination ==="
+
+mkdir -p "$BACKUP_DIR" || die "Cannot create backup directory: $BACKUP_DIR"
+[ -w "$BACKUP_DIR" ] || die "Backup directory not writable: $BACKUP_DIR"
+
+STEPS_COMPLETED=2
+log "Step 2 complete: destination ready"
+
+# --- Step 3: Create backup in staging area ---
+log ""
+log "=== Step 3: Creating backup ==="
+
+BACKUP_NAME="backup-$(date +%Y%m%d-%H%M%S)"
+STAGING="$TEMP_DIR/backup-staging"
+mkdir -p "$STAGING"
+
+cp -a "$SOURCE_DIR/"* "$STAGING/" || die "Failed to copy files to staging"
+
+# Verify all files were copied
+STAGED_COUNT=$(find "$STAGING" -type f | wc -l)
+if [ "$STAGED_COUNT" -ne "$FILE_COUNT" ]; then
+    die "File count mismatch: source=$FILE_COUNT, staged=$STAGED_COUNT"
+fi
+log "Copied $STAGED_COUNT files to staging"
+
+STEPS_COMPLETED=3
+log "Step 3 complete: files staged"
+
+# --- Step 4: Create compressed archive ---
+log ""
+log "=== Step 4: Compressing backup ==="
+
+ARCHIVE="$BACKUP_DIR/${BACKUP_NAME}.tar.gz"
+tar czf "$ARCHIVE" -C "$TEMP_DIR" "backup-staging" || die "Failed to create archive"
+
+# Verify archive is valid
+tar tzf "$ARCHIVE" > /dev/null 2>&1 || die "Archive verification failed"
+
+ARCHIVE_SIZE=$(wc -c < "$ARCHIVE")
+log "Archive created: $ARCHIVE ($ARCHIVE_SIZE bytes)"
+
+STEPS_COMPLETED=4
+log "Step 4 complete: archive created and verified"
+
+# --- Step 5: Finalize ---
+log ""
+log "=== Step 5: Finalizing ==="
+
+rm -rf "$STAGING"
+
+# Write backup manifest
+cat > "$BACKUP_DIR/${BACKUP_NAME}.manifest" << EOF
+backup_name=$BACKUP_NAME
+source=$SOURCE_DIR
+files=$FILE_COUNT
+size=$ARCHIVE_SIZE
+date=$(date '+%Y-%m-%d %H:%M:%S')
+user=$(whoami)
+host=$(hostname)
+EOF
+
+STEPS_COMPLETED=5
+log "Step 5 complete: backup finalized"
+
+log ""
+log "Backup SUCCESSFUL: $ARCHIVE"
+log "Manifest: $BACKUP_DIR/${BACKUP_NAME}.manifest"
+
+echo ""
+echo "=== Backup Contents ==="
+tar tzf "$ARCHIVE"
+
+echo ""
+echo "=== Manifest ==="
+cat "$BACKUP_DIR/${BACKUP_NAME}.manifest"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Signal Handler">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Signal Handler Exercise
+# Demonstrates graceful handling of SIGINT and SIGTERM with cleanup.
+# Simulates a long-running data processing job that can be
+# safely interrupted at any point.
+
+TEMP_DIR=$(mktemp -d)
+PROGRESS_FILE="$TEMP_DIR/progress.txt"
+RESULT_FILE="$TEMP_DIR/results.txt"
+PID_FILE="$TEMP_DIR/processor.pid"
+SHUTDOWN_REQUESTED=0
+
+# --- Logging ---
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+# --- Cleanup function ---
+cleanup() {
+    local exit_code=$?
+    echo ""
+    log "Running cleanup..."
+
+    # Save progress so the job could theoretically be resumed
+    if [ -f "$PROGRESS_FILE" ]; then
+        local progress
+        progress=$(cat "$PROGRESS_FILE")
+        log "Progress at shutdown: $progress items processed"
+    fi
+
+    # Remove PID file
+    rm -f "$PID_FILE"
+
+    # Show partial results if they exist
+    if [ -f "$RESULT_FILE" ] && [ -s "$RESULT_FILE" ]; then
+        log "Partial results saved:"
+        cat "$RESULT_FILE"
+    fi
+
+    rm -rf "$TEMP_DIR"
+    log "Cleanup complete (exit code: $exit_code)"
+}
+trap cleanup EXIT
+
+# --- Signal handlers ---
+handle_sigint() {
+    echo ""
+    log "Caught SIGINT (Ctrl+C)"
+    log "Finishing current item before shutting down..."
+    SHUTDOWN_REQUESTED=1
+    # Don't exit here — let the loop finish its current iteration
+}
+trap handle_sigint INT
+
+handle_sigterm() {
+    echo ""
+    log "Caught SIGTERM"
+    log "Initiating graceful shutdown..."
+    SHUTDOWN_REQUESTED=1
+}
+trap handle_sigterm TERM
+
+# --- Main processing loop ---
+log "Data processor started (PID: $$)"
+echo "$$" > "$PID_FILE"
+echo "0" > "$PROGRESS_FILE"
+echo "=== Processing Results ===" > "$RESULT_FILE"
+
+TOTAL_ITEMS=10
+PROCESSED=0
+
+log "Processing $TOTAL_ITEMS items..."
+log "(Press Ctrl+C to gracefully stop)"
+echo ""
+
+for i in $(seq 1 "$TOTAL_ITEMS"); do
+    # Check if shutdown was requested
+    if [ "$SHUTDOWN_REQUESTED" -eq 1 ]; then
+        log "Shutdown requested. Stopping after item $((i - 1))."
+        break
+    fi
+
+    # Simulate processing work
+    log "Processing item $i/$TOTAL_ITEMS..."
+    sleep 0.3    # Simulate work
+
+    # Record result
+    echo "  Item $i: processed at $(date '+%H:%M:%S')" >> "$RESULT_FILE"
+    PROCESSED=$i
+    echo "$PROCESSED" > "$PROGRESS_FILE"
+done
+
+echo "" >> "$RESULT_FILE"
+echo "Processed: $PROCESSED / $TOTAL_ITEMS" >> "$RESULT_FILE"
+
+echo ""
+if [ "$SHUTDOWN_REQUESTED" -eq 1 ]; then
+    log "Graceful shutdown complete. Processed $PROCESSED of $TOTAL_ITEMS items."
+    exit 0    # Clean exit — partial work is saved
+else
+    log "All $TOTAL_ITEMS items processed successfully."
+fi
+```
+
+</Exercise>
+
+<MiniProject title="Safe Deployment Script">
+
+```bash
+cat > ~/safe-deploy.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# ==============================================================
+# Safe Deployment Script
+# Deploys application files with full rollback capability.
+# If any step fails, all changes are automatically reverted.
+#
+# Usage: ./safe-deploy.sh [--dry-run]
+# ==============================================================
+
+DRY_RUN=0
+[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+
+# --- Configuration ---
+DEPLOY_ROOT="/tmp/safe-deploy-demo"
+APP_DIR="$DEPLOY_ROOT/app"
+BACKUP_DIR="$DEPLOY_ROOT/backups"
+RELEASES_DIR="$DEPLOY_ROOT/releases"
+LOCK_FILE="$DEPLOY_ROOT/deploy.lock"
+LOG_FILE="$DEPLOY_ROOT/deploy.log"
+RELEASE_ID="release-$(date +%s)"
+STEPS_COMPLETED=0
+TOTAL_STEPS=6
+
+# --- Logging ---
+log()       { echo "[$(date '+%H:%M:%S')] INFO:  $*" | tee -a "$LOG_FILE"; }
+log_warn()  { echo "[$(date '+%H:%M:%S')] WARN:  $*" | tee -a "$LOG_FILE" >&2; }
+log_error() { echo "[$(date '+%H:%M:%S')] ERROR: $*" | tee -a "$LOG_FILE" >&2; }
+die()       { log_error "FATAL: $*"; exit 1; }
+
+# --- Rollback ---
+rollback() {
+    log_warn "=== ROLLING BACK ==="
+    log_warn "Steps completed before failure: $STEPS_COMPLETED"
+
+    # Step 5 rollback: restore previous version from backup
+    if [ "$STEPS_COMPLETED" -ge 4 ] && [ -d "$BACKUP_DIR/pre-deploy" ]; then
+        log_warn "Restoring previous version from backup..."
+        rm -rf "$APP_DIR"
+        cp -a "$BACKUP_DIR/pre-deploy" "$APP_DIR"
+        log_warn "Previous version restored."
+    fi
+
+    # Step 3 rollback: remove staged release
+    if [ "$STEPS_COMPLETED" -ge 3 ] && [ -d "$RELEASES_DIR/$RELEASE_ID" ]; then
+        rm -rf "$RELEASES_DIR/$RELEASE_ID"
+        log_warn "Staged release removed."
+    fi
+
+    # Clean up backup
+    rm -rf "$BACKUP_DIR/pre-deploy"
+
+    log_warn "Rollback complete."
+}
+
+# --- Cleanup ---
+cleanup() {
+    local exit_code=$?
+
+    # Release the lock
+    rm -f "$LOCK_FILE"
+
+    if [ "$exit_code" -ne 0 ]; then
+        rollback
+        log_error "Deployment FAILED. See log: $LOG_FILE"
+    fi
+}
+trap cleanup EXIT
+
+on_error() {
+    log_error "Command failed at line $1: $BASH_COMMAND"
+}
+trap 'on_error $LINENO' ERR
+
+trap 'echo ""; log_warn "Interrupted by user"; exit 130' INT TERM
+
+# === DEPLOYMENT STEPS ===
+
+log "============================================"
+log "  Safe Deployment: $RELEASE_ID"
+log "  Dry run: $([ "$DRY_RUN" -eq 1 ] && echo "YES" || echo "no")"
+log "============================================"
+log ""
+
+# --- Step 1: Acquire deployment lock ---
+log "[$((STEPS_COMPLETED + 1))/$TOTAL_STEPS] Acquiring deployment lock..."
+
+mkdir -p "$DEPLOY_ROOT"
+
+if [ -f "$LOCK_FILE" ]; then
+    LOCK_PID=$(cat "$LOCK_FILE" 2>/dev/null || echo "unknown")
+    if [ "$LOCK_PID" != "unknown" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
+        die "Another deployment is running (PID: $LOCK_PID)"
+    else
+        log_warn "Stale lock found (PID: $LOCK_PID). Removing."
+        rm -f "$LOCK_FILE"
+    fi
+fi
+
+echo "$$" > "$LOCK_FILE"
+STEPS_COMPLETED=1
+log "Lock acquired (PID: $$)"
+log ""
+
+# --- Step 2: Validate environment ---
+log "[$((STEPS_COMPLETED + 1))/$TOTAL_STEPS] Validating environment..."
+
+# Create directory structure if this is the first deploy
+mkdir -p "$APP_DIR" "$BACKUP_DIR" "$RELEASES_DIR"
+
+# Verify we can write to all required directories
+for dir in "$APP_DIR" "$BACKUP_DIR" "$RELEASES_DIR"; do
+    [ -w "$dir" ] || die "Cannot write to: $dir"
+done
+
+# Simulate: create an existing "app" if this is first run
+if [ ! -f "$APP_DIR/app.conf" ]; then
+    log "First deployment — creating initial app state"
+    echo "version=1.0.0" > "$APP_DIR/app.conf"
+    echo "status=running" >> "$APP_DIR/app.conf"
+    echo '#!/bin/bash' > "$APP_DIR/app.sh"
+    echo 'echo "App v1.0.0"' >> "$APP_DIR/app.sh"
+    chmod +x "$APP_DIR/app.sh"
+fi
+
+log "Current app version: $(grep 'version=' "$APP_DIR/app.conf" | cut -d= -f2)"
+
+STEPS_COMPLETED=2
+log "Environment validated"
+log ""
+
+# --- Step 3: Build new release ---
+log "[$((STEPS_COMPLETED + 1))/$TOTAL_STEPS] Building release $RELEASE_ID..."
+
+RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
+mkdir -p "$RELEASE_DIR"
+
+# Simulate building new application version
+cat > "$RELEASE_DIR/app.conf" << EOF
+version=2.0.0
+status=running
+deployed=$(date '+%Y-%m-%d %H:%M:%S')
+deployed_by=$(whoami)
+release_id=$RELEASE_ID
+EOF
+
+cat > "$RELEASE_DIR/app.sh" << 'APPEOF'
+#!/bin/bash
+echo "App v2.0.0"
+APPEOF
+chmod +x "$RELEASE_DIR/app.sh"
+
+# Validate release artifacts
+[ -f "$RELEASE_DIR/app.conf" ] || die "Build failed: app.conf not generated"
+[ -x "$RELEASE_DIR/app.sh" ] || die "Build failed: app.sh not executable"
+
+STEPS_COMPLETED=3
+log "Release built: $(ls "$RELEASE_DIR/" | tr '\n' ' ')"
+log ""
+
+# --- Step 4: Backup current version ---
+log "[$((STEPS_COMPLETED + 1))/$TOTAL_STEPS] Backing up current version..."
+
+cp -a "$APP_DIR" "$BACKUP_DIR/pre-deploy"
+BACKUP_FILES=$(find "$BACKUP_DIR/pre-deploy" -type f | wc -l)
+log "Backup created: $BACKUP_FILES files"
+
+# Verify backup integrity
+if ! diff -r "$APP_DIR" "$BACKUP_DIR/pre-deploy" > /dev/null 2>&1; then
+    die "Backup verification failed: backup does not match source"
+fi
+
+STEPS_COMPLETED=4
+log "Backup verified"
+log ""
+
+# --- Step 5: Deploy new version ---
+log "[$((STEPS_COMPLETED + 1))/$TOTAL_STEPS] Deploying new version..."
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    log "DRY RUN: Would copy $RELEASE_DIR/* to $APP_DIR/"
+else
+    cp -a "$RELEASE_DIR/"* "$APP_DIR/"
+
+    # Verify deployment
+    NEW_VERSION=$(grep 'version=' "$APP_DIR/app.conf" | cut -d= -f2)
+    if [ "$NEW_VERSION" != "2.0.0" ]; then
+        die "Deployment verification failed: expected version 2.0.0, got $NEW_VERSION"
+    fi
+
+    # Simulate health check
+    log "Running health check..."
+    if "$APP_DIR/app.sh" > /dev/null 2>&1; then
+        log "Health check passed"
+    else
+        die "Health check failed after deployment"
+    fi
+fi
+
+STEPS_COMPLETED=5
+log "Deployment successful"
+log ""
+
+# --- Step 6: Finalize ---
+log "[$((STEPS_COMPLETED + 1))/$TOTAL_STEPS] Finalizing..."
+
+# Clean up backup (deployment succeeded, no rollback needed)
+rm -rf "$BACKUP_DIR/pre-deploy"
+
+# Keep only last 3 releases
+RELEASE_COUNT=$(ls -1 "$RELEASES_DIR" | wc -l)
+if [ "$RELEASE_COUNT" -gt 3 ]; then
+    ls -1t "$RELEASES_DIR" | tail -n +4 | while read -r old_release; do
+        rm -rf "$RELEASES_DIR/$old_release"
+        log "Cleaned up old release: $old_release"
+    done
+fi
+
+STEPS_COMPLETED=6
+log "Finalized"
+log ""
+
+# --- Summary ---
+log "============================================"
+log "  Deployment SUCCESSFUL"
+log "============================================"
+log "  Release:  $RELEASE_ID"
+log "  Version:  $(grep 'version=' "$APP_DIR/app.conf" | cut -d= -f2)"
+log "  Steps:    $STEPS_COMPLETED/$TOTAL_STEPS completed"
+log "  Log:      $LOG_FILE"
+log "============================================"
+
+echo ""
+echo "=== Deployed App ==="
+cat "$APP_DIR/app.conf"
+
+echo ""
+echo "=== Releases on Disk ==="
+ls -1 "$RELEASES_DIR"
+
+echo ""
+echo "=== Full Deployment Log ==="
+cat "$LOG_FILE"
+SCRIPT
+
+chmod +x ~/safe-deploy.sh
+~/safe-deploy.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Every command returns an exit code: 0 = success, non-zero = failure. Use `$?` to check it.
+- Start every production script with `set -euo pipefail` to catch errors, undefined variables, and pipe failures automatically.
+- `trap cleanup EXIT` guarantees cleanup runs whether the script succeeds, fails, or is interrupted by a signal.
+- `trap 'handler $LINENO' ERR` gives you the exact line number and command that failed.
+- Use `|| true` or `if` statements when you expect a command might fail — do not disable `set -e` globally.
+- Trap `INT` and `TERM` signals to handle Ctrl+C and `kill` gracefully with proper shutdown sequences.
+- Validate all inputs and preconditions at the top of your script before doing any destructive work.
+- Use `die()` and structured logging functions to centralize error reporting to stderr.
+- Use `${var:-default}` for default values, `${var:?error message}` for required variables.
+- Implement rollback logic for multi-step operations: track which steps completed and undo them in reverse order on failure.
+
+## What's Next
+
+You can handle errors when they happen. But how do you find bugs before they cause errors in production? In **Debugging Scripts**, you'll learn execution tracing with `set -x`, stepping through scripts with `trap DEBUG`, static analysis with ShellCheck, and systematic strategies for tracking down the most elusive shell scripting bugs.
