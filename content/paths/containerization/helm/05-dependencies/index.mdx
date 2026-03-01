@@ -1,0 +1,308 @@
+---
+title: "Chart Dependencies"
+description: "Learn how to compose complex applications from multiple Helm charts using dependencies, conditions, aliases, and the charts/ directory."
+order: 5
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["values"]
+objectives:
+  - Declare chart dependencies in Chart.yaml
+  - Use conditions and tags to enable or disable sub-charts
+  - Override sub-chart values from the parent chart
+  - Manage the charts/ directory and Chart.lock
+tags:
+  - helm
+  - kubernetes
+  - dependencies
+  - chart-composition
+---
+
+<Callout type="story" title="The Story">
+Your application has grown beyond a single service. The main API needs a Redis cache, a PostgreSQL database, and a metrics exporter. You could write Kubernetes manifests for all of these from scratch, but each of these components already has a well-maintained Helm chart. Instead of reinventing the wheel, you declare them as dependencies in your chart. Now `helm install` deploys your entire stack -- API, database, cache, and monitoring -- in one command, and upgrading any component is a one-line version bump.
+</Callout>
+
+## How Dependencies Work
+
+Helm charts can depend on other charts. When you install a parent chart, all its dependencies are installed alongside it as **sub-charts**. Dependencies are declared in `Chart.yaml` and stored in the `charts/` directory.
+
+```
+my-app/
+├── Chart.yaml          # Declares dependencies here
+├── Chart.lock          # Locked dependency versions
+├── charts/             # Downloaded dependency archives
+│   ├── redis-18.4.0.tgz
+│   └── postgresql-13.2.0.tgz
+├── values.yaml
+└── templates/
+```
+
+## Declaring Dependencies
+
+Add a `dependencies` section to your `Chart.yaml`:
+
+```yaml
+# Chart.yaml
+apiVersion: v2
+name: my-app
+version: 1.0.0
+appVersion: "2.0.0"
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+  - name: postgresql
+    version: "13.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+  - name: prometheus-redis-exporter
+    version: "6.x.x"
+    repository: "https://prometheus-community.github.io/helm-charts"
+```
+
+### Version Ranges
+
+Helm uses semantic versioning ranges:
+
+| Range | Matches |
+|-------|---------|
+| `"18.4.0"` | Exactly 18.4.0 |
+| `"18.x.x"` | Any 18.y.z (>= 18.0.0, < 19.0.0) |
+| `">=18.0.0"` | 18.0.0 or higher |
+| `"~18.4.0"` | Patch-level changes (>= 18.4.0, < 18.5.0) |
+| `"^18.4.0"` | Minor-level changes (>= 18.4.0, < 19.0.0) |
+
+## Managing Dependencies
+
+```bash
+# Download dependencies into charts/
+helm dependency update ./my-app
+
+# List current dependencies
+helm dependency list ./my-app
+
+# Rebuild the charts/ directory from Chart.lock
+helm dependency build ./my-app
+```
+
+### Chart.lock
+
+When you run `helm dependency update`, Helm resolves versions and creates `Chart.lock`:
+
+```yaml
+# Chart.lock — auto-generated, do not edit manually
+dependencies:
+  - name: redis
+    repository: https://charts.bitnami.com/bitnami
+    version: 18.4.0
+  - name: postgresql
+    repository: https://charts.bitnami.com/bitnami
+    version: 13.2.27
+digest: sha256:abc123...
+generated: "2024-01-15T10:30:00Z"
+```
+
+Commit `Chart.lock` to version control. It ensures reproducible builds -- every team member and CI pipeline gets the exact same dependency versions.
+
+## Conditional Dependencies
+
+Not every environment needs every dependency. Use `condition` or `tags` to make dependencies optional.
+
+### Using condition
+
+```yaml
+# Chart.yaml
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: postgresql
+    version: "13.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+```
+
+```yaml
+# values.yaml
+redis:
+  enabled: true
+postgresql:
+  enabled: true
+```
+
+```bash
+# Deploy without PostgreSQL
+helm install my-app ./my-app --set postgresql.enabled=false
+```
+
+### Using tags
+
+Tags let you group multiple dependencies under a single toggle:
+
+```yaml
+# Chart.yaml
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    tags:
+      - caching
+  - name: memcached
+    version: "6.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    tags:
+      - caching
+```
+
+```yaml
+# values.yaml
+tags:
+  caching: true
+```
+
+## Dependency Aliases
+
+Install multiple instances of the same chart using aliases:
+
+```yaml
+# Chart.yaml
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    alias: cache-redis
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    alias: session-redis
+```
+
+Each alias becomes its own sub-chart instance with independent values:
+
+```yaml
+# values.yaml
+cache-redis:
+  architecture: standalone
+  master:
+    persistence:
+      size: 8Gi
+
+session-redis:
+  architecture: standalone
+  master:
+    persistence:
+      size: 2Gi
+```
+
+## Overriding Sub-Chart Values
+
+The parent chart can override any sub-chart value by nesting under the dependency name:
+
+```yaml
+# values.yaml
+redis:
+  architecture: replication
+  replica:
+    replicaCount: 3
+  auth:
+    enabled: true
+    password: "my-secret-password"
+  master:
+    persistence:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+postgresql:
+  auth:
+    username: myapp
+    database: myapp_db
+  primary:
+    persistence:
+      size: 20Gi
+```
+
+### Global Values
+
+Values under the `global` key are available to all charts and sub-charts:
+
+```yaml
+# values.yaml
+global:
+  imageRegistry: myregistry.company.com
+  imagePullSecrets:
+    - name: registry-credentials
+  storageClass: fast-ssd
+```
+
+In any sub-chart template, access these via `.Values.global`:
+
+```yaml
+image: "{{ .Values.global.imageRegistry }}/redis:{{ .Values.image.tag }}"
+```
+
+## Local Dependencies
+
+You can depend on charts in the local filesystem instead of a repository:
+
+```yaml
+# Chart.yaml
+dependencies:
+  - name: common-library
+    version: "1.0.0"
+    repository: "file://../common-library"
+```
+
+This is useful for shared library charts within a monorepo.
+
+## Import Values
+
+Pull specific values from a sub-chart into the parent:
+
+```yaml
+# Chart.yaml
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    import-values:
+      - child: master.service
+        parent: redisService
+```
+
+Now `.Values.redisService.port` in the parent chart contains the Redis service port.
+
+## Practical Workflow
+
+```bash
+# 1. Add dependency to Chart.yaml
+# 2. Download it
+helm dependency update ./my-app
+
+# 3. Check what was downloaded
+ls ./my-app/charts/
+
+# 4. See available values for the dependency
+helm show values bitnami/redis
+
+# 5. Configure in values.yaml and test
+helm template my-release ./my-app
+
+# 6. Install
+helm install my-release ./my-app -f values-production.yaml
+```
+
+## Summary
+
+- Dependencies are declared in `Chart.yaml` and downloaded to the `charts/` directory
+- `helm dependency update` resolves and downloads dependencies; `Chart.lock` pins exact versions
+- Use `condition` and `tags` to make dependencies optional per environment
+- Override sub-chart values by nesting under the dependency name in `values.yaml`
+- `global` values are shared across all parent and sub-charts
+- Aliases let you install multiple instances of the same chart
+- Local file paths (`file://`) support monorepo development workflows
+
+## What's Next
+
+Your charts need to come from somewhere. Next, you'll explore **chart repositories and Artifact Hub** -- how to find, share, and publish Helm charts.

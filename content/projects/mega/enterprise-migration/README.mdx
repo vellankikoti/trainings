@@ -1,0 +1,96 @@
+---
+title: "Mega Project: Enterprise Cloud Migration"
+description: "Plan and execute a migration from on-premise infrastructure to AWS. Handle legacy applications, data migration, and organizational change."
+difficulty: "Expert"
+estimatedHours: 60
+technologies:
+  - AWS
+  - Terraform
+  - Docker
+  - Kubernetes
+  - Ansible
+prerequisites:
+  - cloud-fundamentals
+  - terraform-fundamentals
+  - kubernetes-fundamentals
+  - ansible
+xpReward: 450
+---
+
+# Enterprise Cloud Migration
+
+## Overview
+
+A mid-size company with 50 engineers is running everything on-premise: bare metal servers, a legacy monolith, and several newer microservices. Leadership has decided to migrate to AWS. You're leading the migration. The challenge: migrate without disrupting business operations, handle legacy code that nobody fully understands, and bring the team along on the cloud journey.
+
+## Phases
+
+### Phase 1: Assessment & Planning (10 hours)
+
+1. Inventory existing infrastructure (servers, databases, services)
+2. Categorize applications using the 6 R's framework:
+   - Rehost (lift and shift)
+   - Replatform (lift, tinker, and shift)
+   - Refactor (re-architect for cloud)
+   - Repurchase (switch to SaaS)
+   - Retire (decommission)
+   - Retain (keep on-premise)
+3. Identify dependencies between applications
+4. Create migration wave plan (which services move first)
+5. Define success criteria and rollback procedures
+6. Estimate costs (on-prem vs. cloud TCO)
+
+### Phase 2: Landing Zone (12 hours)
+
+1. Design AWS account structure (multi-account with AWS Organizations)
+2. Set up networking: Transit Gateway, VPC peering, VPN to on-prem
+3. Implement identity: AWS SSO, IAM roles, permission boundaries
+4. Configure logging: CloudTrail, Config, centralized CloudWatch
+5. Set up security baseline: GuardDuty, SecurityHub
+6. Create Terraform modules for standard infrastructure patterns
+
+### Phase 3: Database Migration (10 hours)
+
+1. Set up AWS DMS (Database Migration Service)
+2. Migrate PostgreSQL to RDS with minimal downtime
+3. Migrate MongoDB to DocumentDB
+4. Validate data integrity post-migration
+5. Switch application connection strings
+6. Decommission on-prem databases after validation period
+
+### Phase 4: Application Migration (15 hours)
+
+1. Containerize the monolith (Docker)
+2. Deploy to ECS Fargate (rehost phase)
+3. Migrate microservices to EKS
+4. Set up service discovery and load balancing
+5. Configure DNS cutover with Route 53
+6. Implement blue-green deployment for the cutover
+7. Monitor for issues during traffic migration
+
+### Phase 5: Optimization & Modernization (8 hours)
+
+1. Right-size instances based on actual usage
+2. Implement auto-scaling for variable workloads
+3. Set up Reserved Instances for baseline capacity
+4. Begin breaking the monolith into microservices
+5. Implement CI/CD pipelines for all services
+
+### Phase 6: Documentation & Handoff (5 hours)
+
+1. Document new architecture
+2. Create operational runbooks
+3. Train development teams on cloud workflows
+4. Establish cloud governance policies
+5. Create cost management dashboards
+
+## Validation Criteria
+
+- [ ] All target applications running in AWS
+- [ ] Zero data loss during migration
+- [ ] Application downtime < 30 minutes total
+- [ ] On-prem to cloud VPN connectivity established
+- [ ] CI/CD pipelines operational for all migrated services
+- [ ] Cost is within 20% of pre-migration estimate
+- [ ] Disaster recovery tested and documented
+- [ ] Team trained on cloud operations

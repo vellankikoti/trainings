@@ -1,0 +1,145 @@
+---
+title: "StatefulSets"
+description: "Deploy stateful applications like databases and message queues with stable network identities, ordered scaling, and persistent storage per replica."
+order: 14
+xpReward: 40
+estimatedMinutes: 45
+prerequisites: ["daemonsets"]
+objectives:
+  - Understand why stateful applications need StatefulSets
+  - Create StatefulSets with stable pod identities
+  - Configure per-replica persistent storage
+  - Manage ordered startup, scaling, and updates
+tags:
+  - kubernetes
+  - statefulsets
+  - databases
+  - stateful-applications
+---
+
+<Callout type="story" title="The Story">
+You're deploying a 3-node PostgreSQL cluster with streaming replication. The primary needs to start first, then replicas connect to it. Each node needs its own persistent volume. If a replica restarts, it must rejoin with the same hostname and the same data. A Deployment can't guarantee any of this — pod names are random, storage isn't per-replica, and there's no startup order. StatefulSets were designed for exactly these requirements.
+</Callout>
+
+## StatefulSets vs. Deployments
+
+| Feature | Deployment | StatefulSet |
+|---------|-----------|-------------|
+| Pod names | Random (web-app-x7k9f) | Ordered (web-0, web-1, web-2) |
+| Startup order | All at once | Sequential (0 → 1 → 2) |
+| Storage | Shared or none | Per-replica PVC |
+| DNS | Via Service only | Per-pod DNS name |
+| Scaling | Random order | Ordered (add/remove from end) |
+
+## Creating a StatefulSet
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres-headless   # Required headless service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-secret
+                  key: password
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+```
+
+### Headless Service
+
+StatefulSets require a headless service (ClusterIP: None) for DNS:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+```
+
+## Stable Network Identities
+
+Each pod gets a predictable DNS name:
+
+```
+postgres-0.postgres-headless.default.svc.cluster.local
+postgres-1.postgres-headless.default.svc.cluster.local
+postgres-2.postgres-headless.default.svc.cluster.local
+```
+
+These DNS names persist across pod restarts. A restarted `postgres-1` will always be reachable at the same address.
+
+## Per-Replica Storage
+
+The `volumeClaimTemplates` section creates a unique PVC for each replica:
+
+```
+postgres-0 → data-postgres-0 (PVC)
+postgres-1 → data-postgres-1 (PVC)
+postgres-2 → data-postgres-2 (PVC)
+```
+
+When `postgres-1` is deleted and recreated, it reattaches to `data-postgres-1` — preserving its data.
+
+## Ordered Operations
+
+- **Startup**: Pods start in order (0, then 1, then 2)
+- **Scaling up**: New pods added at the end (add 3, then 4)
+- **Scaling down**: Pods removed from the end (remove 4, then 3)
+- **Updates**: By default, updated in reverse order (2, then 1, then 0)
+
+## When to Use StatefulSets
+
+- Databases: PostgreSQL, MySQL, MongoDB
+- Message queues: Kafka, RabbitMQ
+- Distributed caches: Redis Cluster, Elasticsearch
+- Any workload needing stable identity or per-replica storage
+
+<Callout type="tip" title="Consider Operators">
+For production databases, consider using Kubernetes Operators (e.g., CloudNativePG for PostgreSQL, Strimzi for Kafka) which automate backup, failover, and scaling beyond what a basic StatefulSet provides.
+</Callout>
+
+## Summary
+
+- StatefulSets provide stable pod names, ordered operations, and per-replica storage
+- Required for databases, message queues, and distributed systems
+- Pods get predictable DNS names via a headless service
+- Each replica gets its own PersistentVolumeClaim
+- Consider Operators for production-grade stateful workloads
+
+## What's Next
+
+Securing your cluster is critical. **RBAC** (Role-Based Access Control) controls who can do what in your Kubernetes cluster.

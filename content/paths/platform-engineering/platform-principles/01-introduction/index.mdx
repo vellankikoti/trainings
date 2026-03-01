@@ -1,0 +1,380 @@
+---
+title: "What Is Platform Engineering?"
+description: "Learn what platform engineering is, why it emerged as a discipline, and how Internal Developer Platforms enable engineering organizations to ship faster with fewer bottlenecks."
+order: 1
+xpReward: 30
+estimatedMinutes: 30
+prerequisites: []
+objectives:
+  - Define platform engineering and explain how it differs from traditional DevOps
+  - Describe the concept of an Internal Developer Platform (IDP)
+  - Explain why treating your platform as a product leads to better outcomes
+  - Identify the key capabilities that a mature developer platform provides
+  - Understand the relationship between platform engineering and developer experience
+tags:
+  - platform-engineering
+  - devops
+  - internal-developer-platform
+  - developer-experience
+---
+
+<Callout type="story" title="The Story">
+In 2016, Spotify's engineering organization had grown to hundreds of teams and thousands of engineers. Every team needed the same things: a way to create new services, a way to deploy them, a way to monitor them, and a way to find documentation. But there was no standard approach. Each team built its own deployment scripts, its own monitoring dashboards, and its own onboarding guides. Engineers joining a new team spent weeks just learning that team's custom tooling before writing a single line of product code.
+
+The duplication was staggering. Spotify estimated that hundreds of engineering hours per week were lost to teams independently solving the same infrastructure problems. So a small group of engineers asked a radical question: what if we built one platform that every team could use? What if creating a new microservice, deploying it, and monitoring it were as simple as filling out a form and clicking a button?
+
+That question led to **Backstage** — an Internal Developer Platform that Spotify open-sourced in 2020. It became the fastest-growing project in the Cloud Native Computing Foundation. And it proved something the industry had been slowly realizing: the next evolution of DevOps was not more tools. It was a platform that made those tools disappear behind a self-service experience.
+</Callout>
+
+## The Problem Platform Engineering Solves
+
+As organizations adopt microservices, cloud infrastructure, and DevOps practices, something unexpected happens: **the cognitive load on developers becomes unsustainable**.
+
+Consider what a typical developer needs to know just to ship a feature in a modern organization:
+
+```
+To deploy a single feature, a developer must:
+────────────────────────────────────────────────
+1. Write the application code
+2. Write a Dockerfile
+3. Configure a CI/CD pipeline (GitHub Actions, Jenkins, etc.)
+4. Set up Kubernetes manifests (Deployment, Service, Ingress)
+5. Configure monitoring (Prometheus metrics, Grafana dashboards)
+6. Set up logging (ELK stack, Datadog)
+7. Configure alerting rules
+8. Manage secrets (Vault, AWS Secrets Manager)
+9. Set up networking (service mesh, DNS)
+10. Handle security scanning (container images, dependencies)
+11. Manage database migrations
+12. Configure autoscaling policies
+13. Set up cost tagging for FinOps
+14. Write infrastructure as code (Terraform)
+15. Update the service catalog documentation
+```
+
+That is fifteen different systems and tools — most of which have nothing to do with the feature itself. This is the **cognitive load problem**, and it is the central challenge platform engineering exists to solve.
+
+<Callout type="warning" title="The Cognitive Load Crisis">
+A 2023 survey by Puppet found that 60% of developers spend more time on infrastructure and tooling than on writing product code. The average developer context-switches between 10+ tools per day. This is not a productivity problem — it is an organizational design failure.
+</Callout>
+
+### The DevOps Paradox
+
+DevOps promised that giving developers ownership of the full lifecycle — build, deploy, run — would make teams faster. And it did, at first. But as infrastructure grew more complex, "you build it, you run it" became "you build it, you struggle with Kubernetes YAML, you debug Terraform state files, you configure Prometheus alerts at 2 AM, and somewhere in there you also run it."
+
+```
+The DevOps Promise:              The DevOps Reality:
+──────────────────               ──────────────────
+
+  Developer                        Developer
+     │                                │
+     ▼                                ▼
+  Write Code                       Write Code
+     │                                │
+     ▼                                ▼
+  Deploy It                     Learn Kubernetes
+     │                                │
+     ▼                           Learn Terraform
+  Done!                               │
+                                 Learn Prometheus
+                                      │
+                                 Debug CI pipeline
+                                      │
+                                 Fix Helm charts
+                                      │
+                                 Configure networking
+                                      │
+                                 Maybe deploy it?
+                                      │
+                                 It is 3 AM.
+```
+
+Platform engineering does not reject DevOps. It is the **next evolution** of DevOps. It recognizes that expecting every developer to be an infrastructure expert is neither realistic nor efficient.
+
+## What Is Platform Engineering?
+
+**Platform engineering** is the discipline of designing and building self-service toolchains and workflows that enable software engineering organizations to ship software quickly, safely, and at scale.
+
+A platform engineering team builds and maintains an **Internal Developer Platform (IDP)** — a layer of abstraction that sits between developers and the underlying infrastructure:
+
+```
+Without a Platform:                 With a Platform:
+────────────────────               ─────────────────
+
+Developer ──→ Kubernetes           Developer ──→ Platform ──→ Kubernetes
+Developer ──→ Terraform            Developer ──→ Platform ──→ Terraform
+Developer ──→ CI/CD                Developer ──→ Platform ──→ CI/CD
+Developer ──→ Monitoring           Developer ──→ Platform ──→ Monitoring
+Developer ──→ Secrets              Developer ──→ Platform ──→ Secrets
+
+Every developer must learn         Developers interact with
+every tool directly.               a simplified, self-service
+                                   interface. The platform
+                                   handles the complexity.
+```
+
+<Callout type="info" title="The Gartner Prediction">
+Gartner predicted that by 2026, 80% of software engineering organizations will establish platform teams as internal providers of reusable services, components, and tools for application delivery. Platform engineering is not a trend — it is becoming the standard operating model for engineering organizations.
+</Callout>
+
+### Platform Engineering vs. DevOps vs. SRE
+
+These disciplines are complementary, not competing:
+
+| Discipline | Focus | Key Question |
+|---|---|---|
+| **DevOps** | Culture and practices for collaboration between dev and ops | "How do we break down silos?" |
+| **SRE** | Reliability of production systems through engineering | "How do we keep it running?" |
+| **Platform Engineering** | Self-service toolchains and developer experience | "How do we make the right thing the easy thing?" |
+
+Think of it this way:
+- **DevOps** is the philosophy — collaborate, automate, measure, improve
+- **SRE** is the discipline — error budgets, SLOs, incident response
+- **Platform Engineering** is the product — the actual tools and workflows that developers use every day
+
+## The Internal Developer Platform (IDP)
+
+An **Internal Developer Platform** is the collection of tools, services, and workflows that a platform team builds and maintains to serve developers. It is not a single product you buy — it is a curated, opinionated set of capabilities assembled to meet your organization's needs.
+
+### Core Capabilities of an IDP
+
+A mature IDP typically provides these capabilities through a self-service interface:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Internal Developer Platform                 │
+│                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │ Service       │  │ Infrastructure│  │ Deployment    │      │
+│  │ Catalog       │  │ Provisioning  │  │ Pipelines     │      │
+│  │               │  │               │  │               │      │
+│  │ What services │  │ "I need a     │  │ Push to main  │      │
+│  │ exist? Who    │  │  database"    │  │ and it ships  │      │
+│  │ owns them?    │  │  → Done.      │  │ automatically │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │ Observability │  │ Security      │  │ Documentation │      │
+│  │               │  │ Guardrails    │  │               │      │
+│  │ Logs, metrics │  │ Scanning,     │  │ API docs,     │      │
+│  │ traces — one  │  │ policies,     │  │ runbooks,     │      │
+│  │ place for all │  │ compliance    │  │ onboarding    │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │ Secrets       │  │ Environment   │  │ Cost          │      │
+│  │ Management    │  │ Management    │  │ Visibility    │      │
+│  │               │  │               │  │               │      │
+│  │ Inject        │  │ Dev, staging, │  │ "Your service │      │
+│  │ secrets       │  │ prod — all    │  │  costs $47/mo"│      │
+│  │ securely      │  │ self-service  │  │               │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Real-World IDP Examples
+
+Some of the most well-known Internal Developer Platforms include:
+
+| Company | Platform | Key Innovation |
+|---|---|---|
+| **Spotify** | Backstage | Service catalog, software templates, TechDocs, plugin ecosystem |
+| **Netflix** | Various internal tools | Fully automated deployment, chaos engineering built in |
+| **Airbnb** | OneTouch | One-click service creation with all infrastructure provisioned |
+| **Mercado Libre** | Fury | 8,000+ developers, 20,000+ microservices, fully self-service |
+| **Zalando** | Internal platform | Kubernetes-native, developer self-service for 200+ teams |
+
+<Callout type="tip" title="You Do Not Need to Be Spotify">
+You do not need thousands of engineers to benefit from platform engineering. Even a team of 20 developers benefits from standardized templates, automated pipelines, and a single place to find documentation. Start small — a good Dockerfile template and a well-configured CI pipeline is already the beginning of a platform.
+</Callout>
+
+## Platform as a Product
+
+The single most important mindset shift in platform engineering is this: **treat your platform as a product, and your developers as customers**.
+
+This means:
+
+### 1. Understand Your Users
+
+Just as a product team conducts user research, a platform team should understand developer pain points:
+
+```
+Developer Pain Point Survey:
+────────────────────────────
+"What takes you the longest when deploying a new service?"
+
+  ████████████████████████████████  42%  CI/CD configuration
+  ██████████████████████           30%  Kubernetes setup
+  ████████████████                 21%  Monitoring/alerting
+  ████                              7%  Other
+
+"What is your biggest frustration?"
+
+  ████████████████████████████████  38%  Too many tools to learn
+  ████████████████████████         32%  Inconsistency between teams
+  ██████████████████               22%  Waiting for ops team
+  ██████                            8%  Documentation is outdated
+```
+
+### 2. Build What Developers Actually Need
+
+Do not build a platform in isolation. Collaborate with your users:
+
+- **Talk to developers** — Conduct regular interviews and surveys
+- **Measure adoption** — If developers are not using your platform, it is not solving their problems
+- **Iterate quickly** — Ship small improvements frequently rather than big-bang releases
+- **Provide escape hatches** — Developers should be able to deviate from the platform when they have a genuine need
+
+### 3. Measure Success
+
+A platform team should track metrics that reflect developer productivity:
+
+| Metric | What It Measures | Target Direction |
+|---|---|---|
+| **Time to first deploy** | How long for a new service to reach production | Decrease |
+| **Deployment frequency** | How often teams deploy | Increase |
+| **Lead time for changes** | Code commit to production | Decrease |
+| **Developer satisfaction** | NPS or survey scores | Increase |
+| **Platform adoption rate** | % of teams using the platform | Increase |
+| **Support ticket volume** | How often developers need help | Decrease |
+
+<Callout type="warning" title="The Mandatory Platform Anti-Pattern">
+Never force developers to use your platform by mandate. If you have to mandate it, the platform is not good enough. A great platform attracts users because it genuinely makes their lives easier. Mandating a bad platform creates resentment and shadow IT — teams will build workarounds and ignore the platform entirely.
+</Callout>
+
+### 4. Build a Product Roadmap
+
+Just like any product, your platform needs a roadmap:
+
+```
+Platform Roadmap Example:
+═════════════════════════
+
+Q1: Foundation
+  ├── Service template (create new service in < 5 min)
+  ├── Standardized CI/CD pipeline
+  └── Basic service catalog
+
+Q2: Self-Service
+  ├── Database provisioning (click to create)
+  ├── Environment management (dev/staging/prod)
+  └── Secrets management integration
+
+Q3: Observability
+  ├── Unified logging across all services
+  ├── Standard metrics dashboards
+  └── Alerting templates
+
+Q4: Advanced
+  ├── Cost visibility per service
+  ├── Security scanning in pipeline
+  └── API documentation generation
+```
+
+## The Platform Team
+
+A platform engineering team typically consists of:
+
+```
+Platform Team Structure:
+════════════════════════
+
+  Platform Product Manager
+  │
+  ├── Platform Engineers (2-5)
+  │   ├── Build and maintain the IDP
+  │   ├── Create golden paths and templates
+  │   └── Integrate tools into the platform
+  │
+  ├── Developer Advocate / DX Engineer (1)
+  │   ├── Gather feedback from dev teams
+  │   ├── Write documentation and tutorials
+  │   └── Onboard teams to the platform
+  │
+  └── SRE / Reliability Engineer (1-2)
+      ├── Ensure the platform itself is reliable
+      ├── Define SLOs for platform services
+      └── On-call for platform infrastructure
+```
+
+The ratio varies, but a common guideline is **one platform engineer per 15-25 application developers**. A 100-person engineering org might have a platform team of four to six people.
+
+## Where Platform Engineering Is Heading
+
+Platform engineering is evolving rapidly:
+
+### 1. Platform Orchestrators
+
+Tools like Humanitec, Kratix, and Score are emerging as purpose-built platform orchestrators that dynamically configure infrastructure based on developer intent rather than explicit resource definitions.
+
+### 2. AI-Assisted Platforms
+
+Platforms are beginning to integrate AI to help developers debug issues, generate configurations, and answer questions about their services — reducing the need for documentation lookup.
+
+### 3. Platform as Code
+
+The platform itself is increasingly defined as code, using tools like Crossplane and Terraform to manage platform capabilities as declarative resources.
+
+### 4. FinOps Integration
+
+Cost visibility and optimization are being built directly into platforms, giving developers real-time feedback on the cost implications of their infrastructure choices.
+
+## Key Takeaways
+
+- **Platform engineering** is the discipline of building self-service toolchains that enable developers to ship software faster with less cognitive load
+- It is the **next evolution of DevOps**, not a replacement — it builds on DevOps principles by abstracting infrastructure complexity behind developer-friendly interfaces
+- An **Internal Developer Platform (IDP)** provides capabilities like service catalogs, automated deployments, infrastructure provisioning, and observability through a unified self-service experience
+- The most critical mindset shift is **treating your platform as a product** — understand your developer-users, measure adoption, iterate on feedback, and never mandate usage of a platform that does not genuinely help
+- Spotify's **Backstage** is the most prominent open-source example, but platform engineering principles apply at any scale, from small teams to enterprises with thousands of developers
+- Platform teams should track metrics like time to first deploy, deployment frequency, and developer satisfaction to measure their impact
+
+<Quiz>
+<QuizQuestion
+  question="What is the primary problem that platform engineering solves?"
+  options={[
+    "Replacing operations teams with automation",
+    "Reducing cognitive load on developers by abstracting infrastructure complexity",
+    "Eliminating the need for Kubernetes",
+    "Moving all infrastructure to the cloud"
+  ]}
+  answer={1}
+  explanation="Platform engineering exists to reduce cognitive load on developers. As infrastructure has grown more complex, developers are expected to understand too many tools and systems. A platform abstracts that complexity behind self-service interfaces."
+/>
+<QuizQuestion
+  question="What is an Internal Developer Platform (IDP)?"
+  options={[
+    "A commercial SaaS product that replaces your infrastructure",
+    "A curated set of tools, services, and workflows built by a platform team to serve developers",
+    "A Kubernetes distribution designed for internal use",
+    "A documentation wiki for developer onboarding"
+  ]}
+  answer={1}
+  explanation="An IDP is not a single product you buy. It is a curated, opinionated collection of tools and workflows that a platform team assembles and maintains to provide self-service capabilities to developers."
+/>
+<QuizQuestion
+  question="What does 'platform as a product' mean?"
+  options={[
+    "Selling your internal platform to other companies",
+    "Using only commercial products to build your platform",
+    "Treating developers as customers and iterating on the platform based on their feedback",
+    "Building the platform before hiring any developers"
+  ]}
+  answer={2}
+  explanation="Platform as a product means applying product management practices to your platform: understanding user needs, measuring adoption, iterating based on feedback, and never mandating usage of a platform that does not genuinely help developers."
+/>
+<QuizQuestion
+  question="How does platform engineering relate to DevOps?"
+  options={[
+    "It replaces DevOps entirely",
+    "It is unrelated to DevOps",
+    "It is the next evolution of DevOps, building on its principles",
+    "It is a subset of DevOps focused only on CI/CD"
+  ]}
+  answer={2}
+  explanation="Platform engineering builds on DevOps principles (collaboration, automation, measurement, continuous improvement) by adding a self-service product layer. It does not reject DevOps — it extends it by recognizing that abstracting complexity is essential for scaling."
+/>
+</Quiz>
+
+## What's Next?
+
+In the next lesson, **Golden Paths and Paved Roads**, you will learn how to design opinionated, well-supported workflows that guide developers toward best practices without restricting their autonomy. You will see how golden paths reduce decision fatigue and ensure consistency across teams while still allowing flexibility when teams have genuine needs to deviate.

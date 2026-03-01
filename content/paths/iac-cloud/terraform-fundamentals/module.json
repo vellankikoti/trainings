@@ -1,0 +1,17 @@
+{
+  "id": "terraform-fundamentals",
+  "title": "Terraform Fundamentals",
+  "slug": "terraform-fundamentals",
+  "pathSlug": "iac-cloud",
+  "description": "Master Infrastructure as Code with Terraform. Define, provision, and manage cloud infrastructure declaratively.",
+  "order": 4,
+  "estimatedHours": 45,
+  "lessonsCount": 5,
+  "lessons": [
+    { "slug": "introduction", "title": "Introduction to Terraform", "order": 1 },
+    { "slug": "hcl-syntax", "title": "HCL — HashiCorp Configuration Language", "order": 2 },
+    { "slug": "providers-resources", "title": "Providers & Resources", "order": 3 },
+    { "slug": "state-management", "title": "State Management", "order": 4 },
+    { "slug": "modules", "title": "Terraform Modules", "order": 5 }
+  ]
+}

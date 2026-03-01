@@ -1,0 +1,173 @@
+---
+title: "Services & Networking"
+description: "Learn how Kubernetes Services provide stable networking for your pods. Master ClusterIP, NodePort, and LoadBalancer service types."
+order: 5
+xpReward: 40
+estimatedMinutes: 45
+prerequisites: ["deployments"]
+objectives:
+  - Explain why pods need Services for stable networking
+  - Create and use ClusterIP, NodePort, and LoadBalancer services
+  - Understand Kubernetes DNS and service discovery
+  - Debug networking issues between pods and services
+tags:
+  - kubernetes
+  - services
+  - networking
+  - dns
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+Your web application is running beautifully with three replicas managed by a Deployment. A frontend pod needs to call the backend API. You hardcode the backend pod's IP address: `10.244.1.5`. It works — until the pod restarts and gets a new IP: `10.244.2.8`. The frontend breaks. You update the IP. It works again — until the next restart. You need a stable address that doesn't change, even as pods come and go. That's exactly what Kubernetes Services provide: a fixed virtual IP and DNS name that automatically routes to healthy pod replicas.
+</Callout>
+
+## The Problem: Ephemeral Pod IPs
+
+Every pod gets its own IP address, but these IPs are **ephemeral** — they change when pods restart, scale, or get rescheduled. You cannot rely on pod IPs for communication.
+
+Services solve this by providing:
+- A **stable IP address** (ClusterIP) that never changes
+- A **DNS name** for service discovery
+- **Load balancing** across all matching pods
+
+## Creating a Service
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-api
+spec:
+  selector:
+    app: backend    # Routes to pods with this label
+  ports:
+    - port: 80          # Service port (what clients connect to)
+      targetPort: 8080   # Pod port (where the app listens)
+  type: ClusterIP       # Default type
+```
+
+```bash
+kubectl apply -f service.yaml
+kubectl get services
+```
+
+The selector `app: backend` means this Service routes traffic to any pod with the label `app: backend`. As pods are created and destroyed, the Service automatically updates its routing.
+
+## Service Types
+
+### ClusterIP (Default)
+
+Accessible only from **within the cluster**. Perfect for internal services.
+
+```yaml
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+```bash
+# From another pod in the cluster:
+curl http://backend-api:80
+curl http://backend-api.default.svc.cluster.local:80
+```
+
+### NodePort
+
+Exposes the service on a **static port on every node**. Accessible from outside the cluster.
+
+```yaml
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 30080    # Port on the node (30000-32767)
+```
+
+```bash
+# From outside the cluster:
+curl http://<node-ip>:30080
+```
+
+### LoadBalancer
+
+Creates an **external load balancer** (on cloud providers). The standard way to expose services to the internet.
+
+```yaml
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+The cloud provider provisions a load balancer and assigns an external IP.
+
+## DNS-Based Service Discovery
+
+Kubernetes runs a DNS server (CoreDNS) that automatically creates DNS records for Services. Every service gets a DNS name:
+
+```
+<service-name>.<namespace>.svc.cluster.local
+```
+
+Within the same namespace, you can use just the service name:
+
+```bash
+# From a pod in the "default" namespace, calling "backend-api" in "default":
+curl http://backend-api
+
+# Full DNS name (works from any namespace):
+curl http://backend-api.default.svc.cluster.local
+
+# Cross-namespace call:
+curl http://backend-api.production.svc.cluster.local
+```
+
+## Endpoints
+
+Behind every Service is an **Endpoints** object that lists the actual pod IPs:
+
+```bash
+kubectl get endpoints backend-api
+# NAME          ENDPOINTS                                   AGE
+# backend-api   10.244.1.5:8080,10.244.2.8:8080,10.244.3.2:8080   5m
+```
+
+As pods come and go, Kubernetes automatically updates the Endpoints list. The Service routes traffic only to pods that are **Ready** (passing readiness probes).
+
+## Debugging Services
+
+```bash
+# Check if service exists and has endpoints
+kubectl get svc backend-api
+kubectl get endpoints backend-api
+
+# Test from inside the cluster
+kubectl run debug --rm -it --image=busybox -- /bin/sh
+# Then: wget -qO- http://backend-api
+
+# Check DNS resolution
+kubectl run debug --rm -it --image=busybox -- nslookup backend-api
+```
+
+Common issues:
+- **No endpoints**: Check that pod labels match the service selector
+- **Connection refused**: Check that targetPort matches the port your app listens on
+- **DNS not resolving**: Verify CoreDNS pods are running
+
+## Summary
+
+- Services provide stable IPs and DNS names for ephemeral pods
+- **ClusterIP**: Internal-only (default)
+- **NodePort**: Exposed on every node's IP
+- **LoadBalancer**: External load balancer (cloud)
+- DNS format: `<service>.<namespace>.svc.cluster.local`
+- Endpoints automatically track healthy pod IPs
+
+## What's Next
+
+You know how to run and network pods. Next, you'll learn how to manage application configuration and sensitive data with **ConfigMaps and Secrets**.

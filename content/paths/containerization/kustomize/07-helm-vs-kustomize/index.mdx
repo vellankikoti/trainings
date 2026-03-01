@@ -1,0 +1,94 @@
+---
+title: "Helm vs Kustomize — When to Use Which"
+description: "A practical comparison of Helm and Kustomize. Understand the trade-offs and learn when to use each tool, or both together."
+order: 7
+xpReward: 30
+estimatedMinutes: 30
+prerequisites: ["components"]
+objectives:
+  - Compare Helm and Kustomize across key dimensions
+  - Identify scenarios where each tool excels
+  - Understand how to use Helm and Kustomize together
+  - Make informed tooling decisions for your team
+tags:
+  - helm
+  - kustomize
+  - comparison
+  - best-practices
+---
+
+<Callout type="story" title="The Story">
+Your team is debating: Helm or Kustomize? The platform team loves Helm's packaging and repository ecosystem. The application team finds Kustomize simpler. The truth is, this isn't an either/or decision. Many successful teams use both: Helm for third-party applications (databases, monitoring stacks) and Kustomize for their own services where they need per-environment variations. Let's break down when each tool shines.
+</Callout>
+
+## Feature Comparison
+
+| Feature | Helm | Kustomize |
+|---------|------|-----------|
+| **Templating** | Go templates (powerful, complex) | None (patches only) |
+| **Learning curve** | Moderate to steep | Low |
+| **Packaging** | Chart archives (.tgz) | Directories |
+| **Versioning** | Built-in chart versioning | Via Git |
+| **Sharing** | Chart repositories, Artifact Hub | Git repositories |
+| **Third-party apps** | Excellent (thousands of charts) | Manual |
+| **Environment config** | Values files per environment | Overlays per environment |
+| **Validation** | `helm lint`, `helm template` | `kubectl kustomize` |
+| **GitOps** | Works with ArgoCD, Flux | Native support |
+| **Built into kubectl** | No (separate binary) | Yes |
+
+## When to Use Helm
+
+1. **Deploying third-party software**: Prometheus, PostgreSQL, Redis, NGINX Ingress — use the community charts
+2. **Creating reusable packages**: Internal microservice templates used by multiple teams
+3. **Complex conditional logic**: When you need if/else, loops, and computed values
+4. **Release management**: Tracking versions, rollbacks, upgrade history
+
+## When to Use Kustomize
+
+1. **Per-environment customization**: Same app, different settings for dev/staging/prod
+2. **Simple overlays**: Changing replica counts, resource limits, image tags
+3. **GitOps workflows**: Overlays map naturally to Git branches or directories
+4. **Teams that prefer simplicity**: No templating language to learn
+
+## Using Both Together
+
+The most common pattern: Helm charts rendered with Kustomize overlays.
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: prometheus
+    repo: https://prometheus-community.github.io/helm-charts
+    version: 25.0.0
+    releaseName: monitoring
+    valuesFile: values.yaml
+patches:
+  - path: prometheus-resources-patch.yaml
+```
+
+This lets you use Helm for the base chart and Kustomize for environment-specific patches.
+
+## Decision Framework
+
+```
+Is it a third-party application?
+  → Yes: Use Helm (community chart)
+  → No: Is it a reusable internal template?
+    → Yes: Use Helm (internal chart)
+    → No: Do you need per-environment variations?
+      → Yes: Use Kustomize (overlays)
+      → No: Use plain kubectl apply
+```
+
+## Summary
+
+- **Helm**: Best for packaging, sharing, and complex templating
+- **Kustomize**: Best for environment-specific customization with simplicity
+- **Both together**: Helm for the base, Kustomize for environment overlays
+- The "right" choice depends on your team's needs and workflow
+
+## What's Next
+
+The final lesson covers **Kustomize in Production** — patterns and practices for running Kustomize at scale.

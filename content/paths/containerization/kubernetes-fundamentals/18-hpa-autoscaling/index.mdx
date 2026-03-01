@@ -1,0 +1,136 @@
+---
+title: "Horizontal Pod Autoscaler (HPA)"
+description: "Automatically scale your applications based on CPU usage, memory, or custom metrics. Handle traffic spikes without manual intervention."
+order: 18
+xpReward: 35
+estimatedMinutes: 35
+prerequisites: ["ingress"]
+objectives:
+  - Configure HPA for CPU and memory-based autoscaling
+  - Understand scaling behavior and cooldown periods
+  - Set min/max replica counts appropriately
+  - Use custom metrics for application-specific scaling
+tags:
+  - kubernetes
+  - autoscaling
+  - hpa
+  - scalability
+---
+
+<Callout type="story" title="The Story">
+Black Friday arrives and your e-commerce site's traffic jumps from 100 to 10,000 requests per second in 15 minutes. Your backend API is running 3 replicas. CPU usage spikes to 95%. Response times climb from 50ms to 5 seconds. You scramble to manually scale: `kubectl scale deployment/api --replicas=20`. But by the time you react, thousands of users have already seen errors. With HPA configured, Kubernetes would have automatically scaled from 3 to 20 replicas within minutes — no human intervention needed. After the traffic subsides, it would scale back down, saving costs.
+</Callout>
+
+## What Is HPA?
+
+The Horizontal Pod Autoscaler automatically adjusts the number of pod replicas based on observed metrics:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70    # Scale when CPU > 70%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80    # Scale when memory > 80%
+```
+
+```bash
+# Or create imperatively
+kubectl autoscale deployment backend-api --cpu-percent=70 --min=3 --max=20
+```
+
+## How HPA Works
+
+Every 15 seconds (default), HPA:
+
+1. Collects current metrics from Metrics Server
+2. Calculates desired replicas: `desired = current * (currentMetric / targetMetric)`
+3. Scales up or down toward the desired count
+
+Example: 3 replicas at 90% CPU, target 70%:
+```
+desired = 3 * (90 / 70) = 3.86 → 4 replicas
+```
+
+## Prerequisites
+
+HPA requires the **Metrics Server** to be installed:
+
+```bash
+# Check if metrics-server is running
+kubectl get deployment metrics-server -n kube-system
+
+# Verify metrics are available
+kubectl top pods
+kubectl top nodes
+```
+
+Pods must have **resource requests** defined — HPA uses requests as the baseline for percentage calculations.
+
+## Scaling Behavior
+
+Control how fast scaling happens:
+
+```yaml
+spec:
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100        # Can double the replica count
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300    # Wait 5 min before scaling down
+      policies:
+        - type: Percent
+          value: 25         # Scale down by 25% at a time
+          periodSeconds: 60
+```
+
+<Callout type="tip" title="Scale Up Fast, Scale Down Slow">
+Scale up aggressively to handle traffic spikes. Scale down conservatively to avoid flapping (scaling up and down repeatedly).
+</Callout>
+
+## Monitoring HPA
+
+```bash
+# View HPA status
+kubectl get hpa
+
+# Detailed view
+kubectl describe hpa api-hpa
+
+# NAME      REFERENCE             TARGETS        MINPODS   MAXPODS   REPLICAS
+# api-hpa   Deployment/backend    45%/70%        3         20        3
+```
+
+## Summary
+
+- HPA automatically scales pods based on CPU, memory, or custom metrics
+- Set min/max replicas and target utilization percentages
+- Requires Metrics Server and resource requests on pods
+- Scale up fast, scale down slowly to prevent flapping
+- Essential for handling variable traffic patterns
+
+## What's Next
+
+Where pods run matters. **Scheduling** lets you control pod placement with node selectors, affinity rules, taints, and tolerations.

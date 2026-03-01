@@ -1,0 +1,15 @@
+{
+  "id": "platform-principles",
+  "title": "Platform Engineering Principles",
+  "slug": "platform-principles",
+  "pathSlug": "platform-engineering",
+  "description": "Understand the principles of platform engineering — golden paths, developer experience, and internal developer platforms.",
+  "order": 1,
+  "estimatedHours": 15,
+  "lessonsCount": 3,
+  "lessons": [
+    { "slug": "introduction", "title": "What Is Platform Engineering?", "order": 1 },
+    { "slug": "golden-paths", "title": "Golden Paths & Paved Roads", "order": 2 },
+    { "slug": "developer-experience", "title": "Developer Experience (DevEx)", "order": 3 }
+  ]
+}

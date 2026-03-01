@@ -1,0 +1,129 @@
+---
+title: "Network Policies"
+description: "Control pod-to-pod traffic with Network Policies. Define firewall rules that restrict which pods can communicate with each other."
+order: 16
+xpReward: 35
+estimatedMinutes: 35
+prerequisites: ["rbac"]
+objectives:
+  - Understand default Kubernetes networking (all pods can talk to all pods)
+  - Create ingress and egress Network Policies
+  - Implement zero-trust networking with deny-all policies
+  - Test and debug Network Policies
+tags:
+  - kubernetes
+  - network-policies
+  - security
+  - networking
+---
+
+<Callout type="story" title="The Story">
+A security audit reveals that any pod in your cluster can communicate with any other pod — the database pod is accessible from every service, including the public-facing web frontend. An attacker who compromises the frontend could directly query the database. Network Policies let you define microsegmentation rules: only the backend API can reach the database, the frontend can only reach the backend, and nothing else is allowed.
+</Callout>
+
+## Default Behavior
+
+By default, Kubernetes allows **all** pod-to-pod communication. No restrictions. Every pod can talk to every other pod across any namespace.
+
+Network Policies change this by defining explicit allow rules. Once you apply a Network Policy to a pod, all traffic not explicitly allowed is **denied**.
+
+## Ingress Policy (Incoming Traffic)
+
+Allow the backend to receive traffic only from the frontend:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-frontend
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: backend          # Apply to backend pods
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend   # Only allow from frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+```
+
+## Egress Policy (Outgoing Traffic)
+
+Restrict what the frontend can connect to:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: backend
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:                    # Allow DNS
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+```
+
+## Default Deny All
+
+Start with deny-all and add specific allows (zero-trust approach):
+
+```yaml
+# Deny all ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# Deny all egress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-egress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+```
+
+Then explicitly allow the connections you need.
+
+<Callout type="warning" title="CNI Requirement">
+Network Policies require a CNI (Container Network Interface) plugin that supports them. Calico, Cilium, and Weave Net support Network Policies. The default kubenet does not. Verify your CNI supports policies before relying on them.
+</Callout>
+
+## Summary
+
+- By default, all pods can communicate — Network Policies restrict this
+- Apply policies to pods using `podSelector`
+- Start with deny-all, then add specific allows (zero-trust)
+- Always allow DNS (UDP port 53) in egress rules
+- Requires a CNI plugin that supports Network Policies
+
+## What's Next
+
+Your services are running and secured. Now you need to expose them to the internet properly. **Ingress** provides HTTP/HTTPS routing, TLS termination, and path-based routing.

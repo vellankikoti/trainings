@@ -1,0 +1,134 @@
+---
+title: "Namespaces & Resource Isolation"
+description: "Learn how Kubernetes Namespaces provide logical isolation, resource quotas, and multi-tenant separation within a single cluster."
+order: 7
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["configmaps-secrets"]
+objectives:
+  - Understand the purpose of Namespaces
+  - Create and manage Namespaces
+  - Apply ResourceQuotas and LimitRanges
+  - Work across multiple Namespaces
+tags:
+  - kubernetes
+  - namespaces
+  - resource-management
+  - multi-tenancy
+---
+
+<Callout type="story" title="The Story">
+Your company runs a single Kubernetes cluster. The development team wants to deploy experimental features. The staging team needs an environment that mirrors production. The production workloads need guaranteed resources. Without isolation, a runaway staging pod could consume all cluster resources and crash production. Namespaces give you virtual clusters within a cluster — separate environments with independent resource quotas, RBAC policies, and network rules.
+</Callout>
+
+## What Are Namespaces?
+
+Namespaces are logical partitions within a cluster. Resources in one namespace are isolated from resources in another.
+
+```bash
+# Default namespaces
+kubectl get namespaces
+# NAME              STATUS   AGE
+# default           Active   1d
+# kube-system       Active   1d     # K8s system components
+# kube-public       Active   1d     # Publicly accessible data
+# kube-node-lease   Active   1d     # Node heartbeats
+```
+
+### Creating Namespaces
+
+```bash
+kubectl create namespace staging
+kubectl create namespace production
+```
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    environment: staging
+```
+
+### Deploying to a Namespace
+
+```bash
+# Specify namespace in the command
+kubectl apply -f deployment.yaml -n staging
+
+# Or in the manifest
+metadata:
+  name: web-app
+  namespace: staging
+```
+
+## Resource Quotas
+
+Prevent any one namespace from consuming all cluster resources:
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: staging-quota
+  namespace: staging
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "20"
+    services: "10"
+```
+
+With this quota, the staging namespace can never use more than 8 CPUs, 16Gi memory, or 20 pods.
+
+## LimitRanges
+
+Set default and maximum resource limits for individual pods:
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limits
+  namespace: staging
+spec:
+  limits:
+    - default:
+        cpu: "500m"
+        memory: "256Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      max:
+        cpu: "2"
+        memory: "2Gi"
+      type: Container
+```
+
+Pods without explicit resource limits will automatically get the defaults.
+
+## Working Across Namespaces
+
+```bash
+# Set default namespace for kubectl
+kubectl config set-context --current --namespace=staging
+
+# Access service in another namespace
+curl http://backend-api.production.svc.cluster.local
+```
+
+## Summary
+
+- Namespaces provide logical isolation within a cluster
+- Use them for separating environments (dev/staging/prod) or teams
+- ResourceQuotas limit total resources per namespace
+- LimitRanges set defaults for individual pods
+- Cross-namespace communication uses full DNS names
+
+## What's Next
+
+Pods need persistent data that survives restarts. Next, you'll learn about **Persistent Volumes** — Kubernetes' storage system.

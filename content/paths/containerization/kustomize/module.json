@@ -1,0 +1,20 @@
+{
+  "id": "kustomize",
+  "title": "Kustomize — Template-Free Configuration",
+  "slug": "kustomize",
+  "pathSlug": "containerization",
+  "description": "Customize Kubernetes manifests without templates using Kustomize. Master bases, overlays, patches, and environment-specific configurations.",
+  "order": 7,
+  "estimatedHours": 20,
+  "lessonsCount": 8,
+  "lessons": [
+    { "slug": "introduction", "title": "Introduction to Kustomize", "order": 1 },
+    { "slug": "bases-overlays", "title": "Bases & Overlays", "order": 2 },
+    { "slug": "patches", "title": "Strategic Merge & JSON Patches", "order": 3 },
+    { "slug": "generators", "title": "ConfigMap & Secret Generators", "order": 4 },
+    { "slug": "transformers", "title": "Transformers — Labels, Annotations & Prefixes", "order": 5 },
+    { "slug": "components", "title": "Reusable Components", "order": 6 },
+    { "slug": "helm-vs-kustomize", "title": "Helm vs Kustomize — When to Use Which", "order": 7 },
+    { "slug": "production-patterns", "title": "Kustomize in Production", "order": 8 }
+  ]
+}

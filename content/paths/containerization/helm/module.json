@@ -1,0 +1,22 @@
+{
+  "id": "helm",
+  "title": "Helm — The Kubernetes Package Manager",
+  "slug": "helm",
+  "pathSlug": "containerization",
+  "description": "Master Helm charts for packaging, deploying, and managing Kubernetes applications. From basic charts to advanced templating and chart repositories.",
+  "order": 6,
+  "estimatedHours": 30,
+  "lessonsCount": 10,
+  "lessons": [
+    { "slug": "introduction", "title": "Introduction to Helm", "order": 1 },
+    { "slug": "chart-structure", "title": "Helm Chart Structure", "order": 2 },
+    { "slug": "templates", "title": "Go Templates & Template Functions", "order": 3 },
+    { "slug": "values", "title": "Values Files & Overrides", "order": 4 },
+    { "slug": "dependencies", "title": "Chart Dependencies", "order": 5 },
+    { "slug": "repositories", "title": "Chart Repositories & Artifact Hub", "order": 6 },
+    { "slug": "hooks", "title": "Helm Hooks & Lifecycle", "order": 7 },
+    { "slug": "testing", "title": "Testing Helm Charts", "order": 8 },
+    { "slug": "best-practices", "title": "Helm Best Practices", "order": 9 },
+    { "slug": "chart-museum", "title": "Running Your Own Chart Repository", "order": 10 }
+  ]
+}

@@ -1,0 +1,313 @@
+---
+title: "Go Templates & Template Functions"
+description: "Master Go templating in Helm charts — control structures, pipelines, built-in functions, and the Sprig library to build dynamic, flexible Kubernetes manifests."
+order: 3
+xpReward: 35
+estimatedMinutes: 40
+prerequisites: ["chart-structure"]
+objectives:
+  - Understand Go template syntax and how Helm uses it
+  - Use control structures like if/else, range, and with
+  - Build pipelines and use built-in template functions
+  - Leverage the Sprig function library for advanced transformations
+tags:
+  - helm
+  - kubernetes
+  - templates
+  - go-templates
+---
+
+<Callout type="story" title="The Story">
+Your team's microservice chart works great — for one environment. But production needs TLS, staging needs debug logging, and development needs mock services. Hard-coding these differences into separate YAML files means triple the maintenance. You need templates that adapt. With Go templates and Helm's rich function library, you can write one chart that intelligently generates the right manifests for every environment.
+</Callout>
+
+## Go Template Basics
+
+Helm templates use Go's `text/template` package. Everything between `{{ }}` is evaluated as a template action.
+
+### Accessing Values
+
+```yaml
+# Simple value access
+image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+
+# Chart metadata
+app: {{ .Chart.Name }}
+version: {{ .Chart.AppVersion }}
+
+# Release information
+name: {{ .Release.Name }}
+namespace: {{ .Release.Namespace }}
+```
+
+### The Dot Context
+
+The `.` (dot) is the current scope. At the top level, it contains:
+
+| Object | Description |
+|--------|-------------|
+| `.Values` | Values from values.yaml and overrides |
+| `.Chart` | Contents of Chart.yaml |
+| `.Release` | Release metadata (name, namespace, revision) |
+| `.Template` | Current template file info |
+| `.Files` | Access to non-template files in the chart |
+| `.Capabilities` | Kubernetes cluster capabilities |
+
+## Control Structures
+
+### Conditionals with if/else
+
+```yaml
+# templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "my-app.fullname" . }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      {{- if eq .Values.service.type "NodePort" }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
+```
+
+Common comparison functions:
+
+```yaml
+{{- if eq .Values.env "production" }}       # equals
+{{- if ne .Values.env "development" }}      # not equals
+{{- if gt .Values.replicaCount 1.0 }}       # greater than
+{{- if and .Values.ingress.enabled .Values.tls.enabled }}  # logical AND
+{{- if or .Values.monitoring .Values.logging }}             # logical OR
+{{- if not .Values.debug }}                 # negation
+```
+
+### Iterating with range
+
+```yaml
+# Loop over a list
+env:
+{{- range .Values.env }}
+  - name: {{ .name }}
+    value: {{ .value | quote }}
+{{- end }}
+
+# Loop over a map
+labels:
+{{- range $key, $value := .Values.customLabels }}
+  {{ $key }}: {{ $value | quote }}
+{{- end }}
+```
+
+### Scoping with with
+
+```yaml
+{{- with .Values.resources }}
+resources:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+```
+
+Inside `with`, the dot `.` is re-scoped to `.Values.resources`. To access the root context, use `$`:
+
+```yaml
+{{- with .Values.resources }}
+resources:
+  {{- toYaml . | nindent 2 }}
+# Access root context with $
+app: {{ $.Chart.Name }}
+{{- end }}
+```
+
+## Whitespace Control
+
+The `-` inside template delimiters trims whitespace:
+
+```yaml
+# Without whitespace control — produces blank lines
+{{ if .Values.debug }}
+  debug: true
+{{ end }}
+
+# With whitespace control — clean output
+{{- if .Values.debug }}
+  debug: true
+{{- end }}
+```
+
+Use `{{-` to trim leading whitespace and `-}}` to trim trailing whitespace.
+
+## Pipelines and Functions
+
+Pipelines chain functions together, passing the output of one as the last argument to the next — like Unix pipes.
+
+```yaml
+# Pipeline: value -> quote -> indent
+{{ .Values.config | toYaml | indent 4 }}
+
+# Multiple pipes
+{{ .Values.name | upper | quote }}
+# Result: "MY-APP"
+```
+
+### Essential Built-in Functions
+
+```yaml
+# Type conversion
+{{ .Values.port | int }}
+{{ .Values.enabled | toString }}
+
+# String functions
+{{ .Values.name | quote }}          # "my-app"
+{{ .Values.name | upper }}          # MY-APP
+{{ .Values.name | lower }}          # my-app
+{{ .Values.name | title }}          # My-App
+{{ .Values.name | trim }}           # removes whitespace
+{{ .Values.name | replace "-" "_" }}  # my_app
+
+# Default values — critical for optional fields
+{{ .Values.timeout | default "30s" }}
+{{ .Values.logLevel | default "info" }}
+
+# YAML/JSON helpers
+{{ .Values.resources | toYaml | nindent 4 }}
+{{ .Values.config | toJson }}
+```
+
+### The Sprig Library
+
+Helm includes the [Sprig function library](https://masterminds.github.io/sprig/) with over 100 functions:
+
+```yaml
+# String manipulation
+{{ "hello world" | snakecase }}     # hello_world
+{{ "hello world" | camelcase }}     # HelloWorld
+{{ "hello" | repeat 3 }}            # hellohellohello
+{{ "abcdef" | trunc 3 }}            # abc
+
+# Lists
+{{ list "a" "b" "c" | join "," }}   # a,b,c
+{{ .Values.hosts | first }}         # first element
+{{ .Values.hosts | last }}          # last element
+{{ list 1 2 3 | has 2 }}            # true
+
+# Dictionaries
+{{ dict "key1" "val1" "key2" "val2" | toYaml }}
+
+# Crypto
+{{ "my-secret" | sha256sum }}
+{{ randAlphaNum 16 }}               # random string
+
+# Date
+{{ now | date "2006-01-02" }}       # current date
+```
+
+## Named Templates and Partials
+
+Define reusable template snippets in `_helpers.tpl`:
+
+```yaml
+# templates/_helpers.tpl
+
+{{- define "my-app.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name .Chart.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{- define "my-app.labels" -}}
+helm.sh/chart: {{ include "my-app.chart" . }}
+app.kubernetes.io/name: {{ include "my-app.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+```
+
+Use them with `include` (preferred) or `template`:
+
+```yaml
+metadata:
+  name: {{ include "my-app.fullname" . }}
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+```
+
+`include` is preferred over `template` because it can be piped through functions like `nindent`.
+
+## Practical Example: Conditional Ingress
+
+```yaml
+# templates/ingress.yaml
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "my-app.fullname" . }}
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- range .Values.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "ImplementationSpecific" }}
+            backend:
+              service:
+                name: {{ include "my-app.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+```
+
+## Debugging Templates
+
+```bash
+# Render templates to see output
+helm template my-release ./my-app
+
+# Render a specific template
+helm template my-release ./my-app -s templates/deployment.yaml
+
+# Dry-run with server-side validation
+helm install my-release ./my-app --dry-run --debug
+
+# Lint for common errors
+helm lint ./my-app
+```
+
+## Summary
+
+- Go templates use `{{ }}` delimiters for dynamic content
+- Control flow with `if/else`, `range`, and `with` handles conditional and iterative logic
+- Pipelines chain functions for transformation: `{{ .Values.name | upper | quote }}`
+- The Sprig library adds 100+ functions for strings, lists, math, and cryptography
+- Named templates in `_helpers.tpl` promote reuse across manifests
+- Use `{{-` and `-}}` to control whitespace in rendered output
+
+## What's Next
+
+Templates are only as powerful as the data you feed them. Next, you'll explore **values files and overrides** — how to structure, layer, and manage configuration across environments.

@@ -1,0 +1,93 @@
+---
+title: "Mega Project: Startup Infrastructure from Scratch"
+description: "Design and build the complete cloud infrastructure for a startup — from VPC design to production deployment, using Terraform and AWS."
+difficulty: "Advanced"
+estimatedHours: 60
+technologies:
+  - AWS
+  - Terraform
+  - Docker
+  - GitHub Actions
+  - Ansible
+prerequisites:
+  - cloud-fundamentals
+  - terraform-fundamentals
+  - docker-fundamentals
+  - cicd-fundamentals
+xpReward: 400
+---
+
+# Startup Infrastructure from Scratch
+
+## Overview
+
+You're the first DevOps hire at a fast-growing startup. The application is running on a single EC2 instance that the CTO set up manually. Your mission: design and build production-grade infrastructure that can scale from 100 to 100,000 users, using infrastructure as code.
+
+## Phases
+
+### Phase 1: Infrastructure Design (8 hours)
+
+1. Design a VPC with public/private subnets across 2 availability zones
+2. Plan the networking: NAT Gateway, Internet Gateway, route tables
+3. Choose compute strategy: ECS Fargate vs. EKS vs. EC2
+4. Design the database tier: RDS PostgreSQL with read replicas
+5. Plan caching: ElastiCache Redis
+6. Design CDN and static asset delivery: CloudFront + S3
+7. Document the architecture with diagrams
+
+### Phase 2: Terraform Foundation (15 hours)
+
+1. Set up Terraform backend (S3 + DynamoDB for state locking)
+2. Create reusable modules: VPC, Security Groups, IAM
+3. Provision networking infrastructure
+4. Set up RDS PostgreSQL with automated backups
+5. Configure S3 buckets for static assets and backups
+6. Implement security: IAM roles, security groups, NACLs
+7. Create environments: staging and production using workspaces
+
+### Phase 3: Application Infrastructure (12 hours)
+
+1. Create ECS Fargate cluster
+2. Define task definitions and services
+3. Set up Application Load Balancer with HTTPS
+4. Configure auto-scaling policies
+5. Set up ElastiCache Redis cluster
+6. Configure CloudFront distribution
+7. Set up Route 53 DNS
+
+### Phase 4: CI/CD Pipeline (10 hours)
+
+1. Build GitHub Actions workflow for application
+2. Push Docker images to ECR
+3. Automated ECS deployment on merge to main
+4. Blue-green deployment strategy
+5. Database migration as part of deployment
+6. Slack notifications for deployment status
+
+### Phase 5: Monitoring & Alerting (8 hours)
+
+1. CloudWatch dashboards for key metrics
+2. CloudWatch alarms for critical thresholds
+3. Log aggregation with CloudWatch Logs
+4. SNS topics for alert routing
+5. Cost monitoring with AWS Budgets
+
+### Phase 6: Security & Compliance (7 hours)
+
+1. AWS Config rules for compliance
+2. GuardDuty for threat detection
+3. Secrets Manager for application secrets
+4. KMS for encryption at rest
+5. WAF rules on CloudFront
+6. Security audit checklist
+
+## Validation Criteria
+
+- [ ] All infrastructure defined in Terraform (no manual resources)
+- [ ] Staging and production environments are identical in structure
+- [ ] Application deploys automatically on git push
+- [ ] Database has automated backups with point-in-time recovery
+- [ ] Auto-scaling handles traffic spikes without manual intervention
+- [ ] All secrets stored in AWS Secrets Manager (not in code)
+- [ ] Monthly AWS cost under $200 for the staging environment
+- [ ] Infrastructure can be destroyed and recreated in under 30 minutes

@@ -1,0 +1,170 @@
+---
+title: "Persistent Volumes"
+description: "Master Kubernetes storage: PersistentVolumes, PersistentVolumeClaims, StorageClasses, and patterns for stateful applications."
+order: 8
+xpReward: 40
+estimatedMinutes: 45
+prerequisites: ["namespaces"]
+objectives:
+  - Explain the Kubernetes storage model (PV, PVC, StorageClass)
+  - Create and use PersistentVolumes and PersistentVolumeClaims
+  - Understand access modes and reclaim policies
+  - Use StorageClasses for dynamic provisioning
+tags:
+  - kubernetes
+  - storage
+  - persistent-volumes
+  - stateful
+---
+
+<Callout type="story" title="The Story">
+Your team deploys a PostgreSQL database in a Kubernetes pod. It runs great for a week — until the pod crashes. Kubernetes restarts it automatically (self-healing!), but there's a problem: the database is empty. All the data was stored inside the container's filesystem, which was destroyed when the pod died. You need storage that persists across pod restarts, rescheduling, and even node failures. That's what PersistentVolumes provide.
+</Callout>
+
+## The Storage Model
+
+Kubernetes separates storage into three concepts:
+
+```
+PersistentVolume (PV)     — A piece of storage in the cluster (the disk)
+PersistentVolumeClaim (PVC) — A request for storage (the request)
+StorageClass              — A template for dynamic provisioning
+```
+
+Think of it like renting an apartment:
+- **PV** = the actual apartment
+- **PVC** = your rental application ("I need a 2-bedroom, 1000sqft")
+- **StorageClass** = the apartment complex ("we build apartments on demand")
+
+## PersistentVolumes
+
+A PV represents a piece of storage provisioned by an admin:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: database-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /data/database    # For local development only
+```
+
+### Access Modes
+
+| Mode | Abbreviation | Description |
+|------|-------------|-------------|
+| ReadWriteOnce | RWO | Mounted read-write by a single node |
+| ReadOnlyMany | ROX | Mounted read-only by many nodes |
+| ReadWriteMany | RWX | Mounted read-write by many nodes |
+
+## PersistentVolumeClaims
+
+A PVC is how pods request storage:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+```
+
+Kubernetes matches the PVC to an available PV that satisfies the requirements.
+
+### Using a PVC in a Pod
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: postgres
+spec:
+  containers:
+    - name: postgres
+      image: postgres:16
+      env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: password
+      volumeMounts:
+        - name: db-storage
+          mountPath: /var/lib/postgresql/data
+  volumes:
+    - name: db-storage
+      persistentVolumeClaim:
+        claimName: database-pvc
+```
+
+Now the database data survives pod restarts. The PVC keeps the volume bound even when the pod is deleted and recreated.
+
+## StorageClasses (Dynamic Provisioning)
+
+Instead of pre-creating PVs, StorageClasses automatically provision storage on demand:
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+provisioner: kubernetes.io/aws-ebs
+parameters:
+  type: gp3
+  iopsPerGB: "50"
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+```
+
+With a StorageClass, PVCs automatically create the underlying storage:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-pvc
+spec:
+  storageClassName: fast-ssd
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+```
+
+## Reclaim Policies
+
+What happens to the PV when the PVC is deleted:
+
+| Policy | Behavior |
+|--------|----------|
+| **Retain** | PV is kept, data preserved, manual cleanup needed |
+| **Delete** | PV and underlying storage are deleted |
+| **Recycle** | Data is deleted, PV is made available (deprecated) |
+
+<Callout type="tip" title="Production Tip">
+Use `Retain` for databases and important data. Use `Delete` for ephemeral workloads. Always have backups regardless.
+</Callout>
+
+## Summary
+
+- PersistentVolumes provide storage that survives pod lifecycle
+- PersistentVolumeClaims are how pods request storage
+- StorageClasses enable automatic, on-demand storage provisioning
+- Access modes control single vs. multi-node mounting
+- Always use `Retain` reclaim policy for critical data
+
+## What's Next
+
+Now that you understand core Kubernetes concepts, let's explore **Labels and Selectors** — the powerful tagging system that ties everything together.

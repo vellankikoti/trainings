@@ -1,0 +1,102 @@
+---
+title: "What Is CI/CD?"
+description: "Understand Continuous Integration and Continuous Delivery — the practices that enable teams to ship software faster, safer, and more reliably."
+order: 1
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["git"]
+objectives:
+  - Define Continuous Integration, Continuous Delivery, and Continuous Deployment
+  - Explain the problems CI/CD solves
+  - Describe a typical CI/CD pipeline
+  - Understand the cultural shift CI/CD requires
+tags:
+  - cicd
+  - devops
+  - automation
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+It's 2005 at a large financial services company. Deployment day happens once a quarter. The process takes three days. Developers submit code changes weeks in advance. An integration team spends days merging conflicting changes. The QA team runs manual tests for a week. On deployment night, the ops team works until 3 AM, rolling back twice before finally getting the release to stick. Fifteen years later, companies like Netflix deploy thousands of times per day. Amazon deploys every 11.7 seconds. The difference? CI/CD — a set of practices and tools that automate the journey from code commit to production deployment.
+</Callout>
+
+## The Three Pillars
+
+### Continuous Integration (CI)
+
+Developers merge code changes to a shared branch **frequently** — at least daily. Every merge triggers an automated build and test suite.
+
+The goal: catch integration problems early, when they're small and cheap to fix.
+
+```
+Developer pushes code
+    → Automated build
+    → Unit tests run
+    → Integration tests run
+    → Code quality checks
+    → Build artifact created
+    → Team notified of results
+```
+
+### Continuous Delivery (CD)
+
+Every code change that passes CI is **automatically prepared for release**. The software is always in a deployable state. Deployment to production requires a manual approval.
+
+### Continuous Deployment
+
+Takes CD one step further: every change that passes all tests is **automatically deployed to production**. No human approval needed.
+
+```
+CI → CD → Production (automated)
+     ↑
+     Manual gate (Continuous Delivery)
+     No gate (Continuous Deployment)
+```
+
+## Why CI/CD Matters
+
+| Without CI/CD | With CI/CD |
+|--------------|------------|
+| Deploy monthly or quarterly | Deploy daily or on-demand |
+| Manual testing takes weeks | Automated tests in minutes |
+| Integration problems discovered late | Issues caught immediately |
+| Deployments are risky, stressful events | Deployments are routine, boring |
+| Rollback is painful | Rollback is one click |
+
+## Anatomy of a Pipeline
+
+```
+┌─────────┐   ┌──────┐   ┌──────────┐   ┌─────────┐   ┌──────────┐
+│  Source  │──▶│Build │──▶│   Test   │──▶│ Stage   │──▶│Production│
+│  Code   │   │      │   │          │   │         │   │          │
+└─────────┘   └──────┘   └──────────┘   └─────────┘   └──────────┘
+  git push     compile     unit tests    deploy to      deploy to
+               lint        integration   staging env    production
+               build       e2e tests     smoke tests    monitor
+               image       security      approval gate
+```
+
+Each stage is a **gate**: if any stage fails, the pipeline stops and the team is notified.
+
+## The Cultural Shift
+
+CI/CD isn't just tooling — it requires cultural changes:
+
+1. **Commit small, commit often**: Large, infrequent changes are the enemy
+2. **Fix broken builds immediately**: A failing pipeline blocks everyone
+3. **Automate everything**: Manual processes are bottlenecks and error sources
+4. **Test everything**: Untested code is broken code waiting to happen
+5. **Monitor deployments**: Know immediately if a release causes problems
+
+## Summary
+
+- **CI** catches integration problems early through automated builds and tests
+- **CD** ensures code is always ready for production deployment
+- Pipelines are sequences of automated stages with quality gates
+- CI/CD enables faster, safer, more reliable software delivery
+- It requires both tools and cultural commitment
+
+## What's Next
+
+Now that you understand the principles, let's dive into **pipeline architecture** — the stages, jobs, and artifacts that make up a CI/CD pipeline.

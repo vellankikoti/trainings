@@ -1,0 +1,524 @@
+---
+title: "Kustomize in Production"
+description: "Battle-tested patterns for running Kustomize at scale — GitOps integration, CI/CD pipelines, multi-cluster deployments, secret management, and organizational best practices."
+order: 8
+xpReward: 35
+estimatedMinutes: 35
+prerequisites: ["helm-vs-kustomize"]
+objectives:
+  - Structure Kustomize repositories for GitOps workflows
+  - Integrate Kustomize into CI/CD pipelines with validation and drift detection
+  - Manage secrets safely alongside Kustomize manifests
+  - Deploy across multiple clusters and regions
+  - Apply organizational conventions and guard rails
+tags:
+  - kustomize
+  - kubernetes
+  - production
+  - gitops
+  - best-practices
+---
+
+<Callout type="story" title="The Story">
+Your team has learned Kustomize — bases, overlays, patches, generators, transformers, and components. The development workflow is smooth. But production is different. You need CI/CD pipelines that validate manifests before they reach the cluster. You need GitOps controllers that reconcile state automatically. You need secrets that are never committed in plain text. You need to deploy the same application to three regions, each with its own cluster. And you need conventions that 30 engineers can follow without breaking each other's deployments. This lesson covers the patterns that bridge the gap between "Kustomize works on my laptop" and "Kustomize runs our production infrastructure."
+</Callout>
+
+## Repository Structure for GitOps
+
+A GitOps workflow stores the desired state of your cluster in Git. A GitOps controller (ArgoCD, Flux) watches the repository and applies changes automatically.
+
+### Mono-Repo Pattern
+
+All services and environments in a single repository:
+
+```
+k8s-manifests/
+├── bases/
+│   ├── order-service/
+│   │   ├── kustomization.yaml
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── hpa.yaml
+│   ├── payment-service/
+│   │   ├── kustomization.yaml
+│   │   ├── deployment.yaml
+│   │   └── service.yaml
+│   └── notification-service/
+│       ├── kustomization.yaml
+│       └── deployment.yaml
+├── components/
+│   ├── monitoring/
+│   ├── network-policy/
+│   └── external-dns/
+└── overlays/
+    ├── development/
+    │   ├── kustomization.yaml       # references all bases
+    │   └── patches/
+    ├── staging/
+    │   ├── kustomization.yaml
+    │   └── patches/
+    └── production/
+        ├── us-east/
+        │   ├── kustomization.yaml   # region-specific
+        │   └── patches/
+        ├── eu-west/
+        │   ├── kustomization.yaml
+        │   └── patches/
+        └── ap-southeast/
+            ├── kustomization.yaml
+            └── patches/
+```
+
+**Pros**: Single source of truth, easy to search and cross-reference, simple CI/CD.
+**Cons**: Large diffs, broad blast radius, permissions are coarse-grained.
+
+### Per-Service Repos with a Deploy Repo
+
+Each service has its own repository with its base manifests. A separate deployment repository contains overlays:
+
+```
+# In each service repo (e.g., order-service)
+k8s/
+├── base/
+│   ├── kustomization.yaml
+│   ├── deployment.yaml
+│   └── service.yaml
+
+# Centralized deploy repo
+k8s-deploy/
+├── order-service/
+│   └── overlays/
+│       ├── development/
+│       │   └── kustomization.yaml   # references order-service repo
+│       └── production/
+│           └── kustomization.yaml
+├── payment-service/
+│   └── overlays/
+│       └── ...
+└── components/
+    └── ...
+```
+
+**Pros**: Service teams own their manifests, deploy repo controls what reaches the cluster.
+**Cons**: More moving parts, remote base references need pinning.
+
+## CI/CD Pipeline Integration
+
+### Validation Step
+
+Always validate manifests before merging or deploying:
+
+```yaml
+# .github/workflows/validate.yaml
+name: Validate Kustomize
+on:
+  pull_request:
+    paths:
+      - 'overlays/**'
+      - 'base/**'
+      - 'components/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all overlays
+        run: |
+          for overlay in overlays/*/; do
+            echo "Building ${overlay}..."
+            kubectl kustomize "${overlay}" > /dev/null
+          done
+
+      - name: Validate against Kubernetes schemas
+        run: |
+          for overlay in overlays/*/; do
+            kubectl kustomize "${overlay}" | \
+              kubeconform -strict -kubernetes-version 1.29.0
+          done
+
+      - name: Diff against live cluster (dry-run)
+        run: |
+          kubectl kustomize overlays/staging | \
+            kubectl diff -f - || true
+```
+
+This pipeline runs three checks:
+1. **Build** — Does `kubectl kustomize` succeed without errors?
+2. **Schema validation** — Are the generated manifests valid Kubernetes resources? (`kubeconform` validates against OpenAPI schemas.)
+3. **Diff** — What will change in the cluster? Reviewers see the exact diff in the PR.
+
+### Image Update Automation
+
+When a new container image is built, update the kustomization automatically:
+
+```bash
+#!/bin/bash
+# update-image.sh — called by CI after image build
+SERVICE=$1
+TAG=$2
+OVERLAY=$3
+
+cd "overlays/${OVERLAY}"
+kustomize edit set image "myregistry/${SERVICE}:${TAG}"
+
+git add kustomization.yaml
+git commit -m "deploy: ${SERVICE}:${TAG} to ${OVERLAY}"
+git push
+```
+
+In a GitOps workflow, pushing this commit triggers the controller to deploy the new image.
+
+## GitOps Controller Configuration
+
+### ArgoCD with Kustomize
+
+ArgoCD natively supports Kustomize. Point an Application at an overlay directory:
+
+```yaml
+# argocd-application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: order-service-production
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/my-org/k8s-manifests.git
+    targetRevision: main
+    path: overlays/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+```
+
+ArgoCD runs `kubectl kustomize overlays/production` and applies the result. The `selfHeal` option reverts manual changes — the Git repo is the single source of truth.
+
+### Flux with Kustomize
+
+Flux uses a Kustomization custom resource:
+
+```yaml
+# flux-kustomization.yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: order-service
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./overlays/production
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: k8s-manifests
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: prod-order-service
+      namespace: production
+  timeout: 3m
+```
+
+Flux reconciles every 5 minutes. If the Deployment health check fails after apply, Flux reports the error.
+
+## Secret Management
+
+Kustomize Secret generators store values in plain text. For production, combine Kustomize with a secret management solution.
+
+### SOPS (Secrets OPerationS)
+
+SOPS encrypts files in place. You store encrypted files in Git and decrypt at build time:
+
+```bash
+# Encrypt a secrets file
+sops --encrypt --age age1abc123... secrets.env > secrets.enc.env
+
+# Decrypt at build time (CI/CD has the private key)
+sops --decrypt secrets.enc.env > secrets.env
+kubectl kustomize . | kubectl apply -f -
+rm secrets.env   # clean up
+```
+
+### KSOPS (Kustomize + SOPS)
+
+KSOPS is a Kustomize plugin that decrypts SOPS files during the build:
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+generators:
+  - secret-generator.yaml
+```
+
+```yaml
+# secret-generator.yaml
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: db-credentials
+files:
+  - secrets.enc.yaml
+```
+
+The encrypted file is committed to Git. KSOPS decrypts it during `kustomize build`, generating the Secret.
+
+### External Secrets Operator
+
+For organizations using AWS Secrets Manager, HashiCorp Vault, or Azure Key Vault:
+
+```yaml
+# components/external-secrets/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - external-secret.yaml
+```
+
+```yaml
+# components/external-secrets/external-secret.yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: db-credentials
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: db-credentials
+    creationPolicy: Owner
+  data:
+    - secretKey: username
+      remoteRef:
+        key: production/order-service/db
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: production/order-service/db
+        property: password
+```
+
+The External Secrets Operator fetches credentials from the vault and creates a native Kubernetes Secret. No secrets in Git at all.
+
+## Multi-Cluster Deployments
+
+When deploying to multiple clusters (regions, availability zones), use a layered overlay structure:
+
+```
+overlays/
+└── production/
+    ├── base/                        # shared production config
+    │   ├── kustomization.yaml
+    │   └── patches/
+    ├── us-east-1/
+    │   ├── kustomization.yaml       # references production/base
+    │   └── region-patch.yaml
+    ├── eu-west-1/
+    │   ├── kustomization.yaml
+    │   └── region-patch.yaml
+    └── ap-southeast-1/
+        ├── kustomization.yaml
+        └── region-patch.yaml
+```
+
+```yaml
+# overlays/production/base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../base
+
+namespace: production
+namePrefix: prod-
+
+commonLabels:
+  environment: production
+
+images:
+  - name: myregistry/order-service
+    newTag: v2.5.0
+
+components:
+  - ../../../components/monitoring
+  - ../../../components/network-policy
+```
+
+```yaml
+# overlays/production/us-east-1/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+
+commonAnnotations:
+  region: us-east-1
+  cluster: prod-us-east-1
+
+patches:
+  - path: region-patch.yaml
+```
+
+```yaml
+# overlays/production/us-east-1/region-patch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 10
+  template:
+    spec:
+      containers:
+        - name: order-service
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: DB_HOST
+              value: orders-db.us-east-1.rds.amazonaws.com
+```
+
+Each region overlay inherits all production settings and adds region-specific configuration. A GitOps controller for each cluster points to the corresponding overlay directory.
+
+## Organizational Best Practices
+
+### Enforce Conventions with a Validation Script
+
+```bash
+#!/bin/bash
+# validate-conventions.sh — run in CI
+set -euo pipefail
+
+for overlay in overlays/*/; do
+  output=$(kubectl kustomize "${overlay}")
+
+  # Every resource must have a team label
+  echo "${output}" | yq -e 'select(.metadata.labels.team == null)' && {
+    echo "FAIL: Resources in ${overlay} missing 'team' label"
+    exit 1
+  }
+
+  # Production must have resource limits
+  if [[ "${overlay}" == *production* ]]; then
+    echo "${output}" | yq -e \
+      'select(.kind == "Deployment") | .spec.template.spec.containers[] | select(.resources.limits == null)' && {
+      echo "FAIL: Production containers in ${overlay} missing resource limits"
+      exit 1
+    }
+  fi
+done
+
+echo "All conventions passed."
+```
+
+### Pin All Remote References
+
+```yaml
+# Good — pinned to a tag
+resources:
+  - https://github.com/my-org/platform-base//k8s/base?ref=v2.1.0
+
+# Bad — points to a branch
+resources:
+  - https://github.com/my-org/platform-base//k8s/base?ref=main
+```
+
+### Keep Bases Minimal
+
+A base should contain only the resources that every environment needs. Optional features belong in components. Environment-specific values belong in overlay patches. If your base has `if-else` logic encoded as commented-out YAML, you need components.
+
+### Use Consistent Naming
+
+```
+{service-name}/
+├── base/
+│   └── kustomization.yaml
+├── components/
+│   └── {feature-name}/
+│       └── kustomization.yaml
+└── overlays/
+    └── {environment}/
+        └── kustomization.yaml
+```
+
+Every team follows the same directory layout. New engineers know immediately where to look.
+
+### Review Generated Output, Not Just Source
+
+```bash
+# In your PR review checklist:
+# 1. Review the kustomization.yaml changes
+# 2. Review the generated output
+kubectl kustomize overlays/production > /tmp/prod-output.yaml
+
+# 3. Diff against what's currently deployed
+kubectl diff -f /tmp/prod-output.yaml
+```
+
+The source files tell you what changed. The generated output tells you the full impact.
+
+## Common Production Issues
+
+### Drift Detection
+
+Drift occurs when someone manually edits a resource in the cluster, diverging from Git. Use GitOps controllers with `selfHeal` enabled, or run periodic checks:
+
+```bash
+# Detect drift
+kubectl kustomize overlays/production | kubectl diff -f -
+```
+
+A non-zero exit code means the cluster state differs from the declared state.
+
+### Handling CRDs
+
+Custom Resource Definitions (CRDs) must exist before the resources that use them. In Kustomize, separate CRD installation from application deployment:
+
+```yaml
+# crds/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - service-monitor-crd.yaml
+  - external-secret-crd.yaml
+```
+
+Apply CRDs first, then application manifests. ArgoCD supports sync waves for this. Flux supports dependencies between Kustomizations.
+
+### Scaling Kustomize Builds
+
+Large repositories with hundreds of resources can slow down `kustomize build`. Strategies:
+
+1. **Split large overlays** into service-specific overlays instead of one overlay containing everything
+2. **Cache remote bases** locally instead of fetching from Git on every build
+3. **Use `kustomize build` binary** instead of `kubectl kustomize` — the standalone binary is often newer and faster
+
+## Summary
+
+- Structure your repository for GitOps: mono-repo for small teams, per-service repos with a deploy repo for larger organizations
+- Validate manifests in CI with `kubectl kustomize`, `kubeconform`, and `kubectl diff`
+- Use ArgoCD or Flux for automated reconciliation — both support Kustomize natively
+- Never store plain-text secrets in Git — use SOPS, KSOPS, or External Secrets Operator
+- Layer overlays for multi-cluster deployments: shared production base plus per-region overlays
+- Enforce organizational conventions with CI validation scripts
+- Pin remote references, keep bases minimal, review generated output not just source files
+- Enable drift detection through GitOps self-healing or periodic `kubectl diff` checks
+
+## What's Next
+
+Congratulations — you have completed the Kustomize learning path. You can now structure multi-environment Kubernetes configurations with bases, overlays, patches, generators, transformers, and components. You know when to choose Kustomize over Helm, and you have the patterns to run Kustomize in production with GitOps, secret management, and organizational best practices.

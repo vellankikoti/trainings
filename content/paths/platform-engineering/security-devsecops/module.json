@@ -1,0 +1,15 @@
+{
+  "id": "security-devsecops",
+  "title": "Security & DevSecOps",
+  "slug": "security-devsecops",
+  "pathSlug": "platform-engineering",
+  "description": "Integrate security into the DevOps lifecycle. SAST, DAST, supply chain security, and policy as code.",
+  "order": 4,
+  "estimatedHours": 20,
+  "lessonsCount": 3,
+  "lessons": [
+    { "slug": "introduction", "title": "DevSecOps — Security Shifted Left", "order": 1 },
+    { "slug": "supply-chain", "title": "Supply Chain Security", "order": 2 },
+    { "slug": "policy-as-code", "title": "Policy as Code (OPA, Kyverno)", "order": 3 }
+  ]
+}

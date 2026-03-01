@@ -1,0 +1,152 @@
+---
+title: "Ingress & Ingress Controllers"
+description: "Expose your Kubernetes services to the internet with HTTP/HTTPS routing, TLS termination, and virtual hosting using Ingress resources."
+order: 17
+xpReward: 35
+estimatedMinutes: 40
+prerequisites: ["network-policies"]
+objectives:
+  - Understand the difference between Ingress and LoadBalancer services
+  - Deploy an Ingress Controller (NGINX)
+  - Configure path-based and host-based routing
+  - Set up TLS/HTTPS with certificates
+tags:
+  - kubernetes
+  - ingress
+  - networking
+  - tls
+  - https
+---
+
+<Callout type="story" title="The Story">
+Your cluster runs three services: a frontend app, a REST API, and a documentation site. With LoadBalancer services, each would need its own external IP and cloud load balancer — that's expensive and hard to manage. Ingress gives you a single entry point that routes traffic based on the URL: `app.example.com` goes to the frontend, `api.example.com/v1` goes to the API, and `docs.example.com` goes to the docs. One load balancer, multiple services, with TLS termination included.
+</Callout>
+
+## Ingress vs. LoadBalancer
+
+| Feature | LoadBalancer Service | Ingress |
+|---------|---------------------|---------|
+| Layer | L4 (TCP/UDP) | L7 (HTTP/HTTPS) |
+| External IPs | One per service | One for all services |
+| Path routing | No | Yes |
+| Host routing | No | Yes |
+| TLS termination | External | Built-in |
+| Cost | $$$ (one LB each) | $ (one shared LB) |
+
+## Ingress Controllers
+
+An Ingress resource is just configuration — you need an **Ingress Controller** to implement it. Popular choices:
+
+- **NGINX Ingress Controller** (most common)
+- **Traefik**
+- **HAProxy**
+- **AWS ALB Ingress Controller**
+
+```bash
+# Install NGINX Ingress Controller (using Helm)
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --create-namespace
+```
+
+## Path-Based Routing
+
+Route different paths to different services:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: myapp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-api
+                port:
+                  number: 8080
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: docs
+                port:
+                  number: 80
+```
+
+## Host-Based Routing
+
+Route based on the hostname (virtual hosting):
+
+```yaml
+spec:
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-api
+                port:
+                  number: 8080
+```
+
+## TLS/HTTPS
+
+```yaml
+spec:
+  tls:
+    - hosts:
+        - app.example.com
+        - api.example.com
+      secretName: tls-secret    # Contains TLS cert and key
+  rules:
+    - host: app.example.com
+      # ...
+```
+
+For automatic certificate management, use **cert-manager** with Let's Encrypt:
+
+```yaml
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+```
+
+## Summary
+
+- Ingress provides L7 HTTP/HTTPS routing for multiple services through a single entry point
+- An Ingress Controller (e.g., NGINX) implements the routing rules
+- Support path-based routing, host-based routing, and TLS termination
+- Use cert-manager for automated Let's Encrypt certificates
+- Far more cost-effective than one LoadBalancer per service
+
+## What's Next
+
+Traffic is growing — you need your pods to scale automatically. **Horizontal Pod Autoscaler (HPA)** scales pods based on CPU, memory, or custom metrics.

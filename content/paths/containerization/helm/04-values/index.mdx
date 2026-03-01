@@ -1,0 +1,365 @@
+---
+title: "Values Files & Overrides"
+description: "Learn how to structure values.yaml, layer multiple values files, use --set overrides, and manage configuration across environments with Helm."
+order: 4
+xpReward: 30
+estimatedMinutes: 35
+prerequisites: ["templates"]
+objectives:
+  - Structure values.yaml with clear, logical groupings
+  - Layer multiple values files for environment-specific configuration
+  - Use --set and --set-file for command-line overrides
+  - Implement schema validation with values.schema.json
+tags:
+  - helm
+  - kubernetes
+  - values
+  - configuration
+---
+
+<Callout type="story" title="The Story">
+Your chart templates are flexible and well-written, but deploying across development, staging, and production is still painful. Each environment needs different replica counts, resource limits, image tags, and feature flags. Developers keep passing long chains of `--set` flags that are impossible to review in pull requests. You need a strategy for managing values that scales with your team and your environments.
+</Callout>
+
+## How Values Work
+
+Helm merges values from multiple sources in a defined priority order (highest wins):
+
+1. `--set` and `--set-string` flags on the command line
+2. `-f` / `--values` files (last file wins)
+3. The chart's `values.yaml`
+
+```bash
+# All three sources at once
+helm install my-app ./my-app \
+  -f base-values.yaml \
+  -f production-values.yaml \
+  --set image.tag=v2.5.0
+```
+
+## Structuring values.yaml
+
+A well-organized `values.yaml` groups related configuration logically:
+
+```yaml
+# values.yaml — sensible defaults for development
+
+# Application
+replicaCount: 1
+
+image:
+  repository: myregistry/my-app
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Networking
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: my-app.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Compute
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilization: 70
+
+# Application configuration
+config:
+  logLevel: info
+  debugMode: false
+  featureFlags:
+    newUI: false
+    betaAPI: false
+
+# Monitoring
+metrics:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+```
+
+### Guidelines for Structuring Values
+
+- **Use flat, predictable keys** — avoid deeply nested structures when possible
+- **Provide sensible defaults** for development
+- **Comment each section** so users understand what they can configure
+- **Use `enabled` booleans** to toggle optional features (ingress, autoscaling, monitoring)
+- **Group related settings** under a common key (image, service, resources)
+
+## Environment-Specific Values Files
+
+Create separate values files per environment:
+
+```yaml
+# values-development.yaml
+replicaCount: 1
+image:
+  tag: "latest"
+  pullPolicy: Always
+config:
+  logLevel: debug
+  debugMode: true
+  featureFlags:
+    newUI: true
+    betaAPI: true
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+```
+
+```yaml
+# values-staging.yaml
+replicaCount: 2
+image:
+  tag: "rc-latest"
+ingress:
+  enabled: true
+  hosts:
+    - host: my-app.staging.company.com
+      paths:
+        - path: /
+          pathType: Prefix
+config:
+  logLevel: info
+  featureFlags:
+    newUI: true
+    betaAPI: true
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+```
+
+```yaml
+# values-production.yaml
+replicaCount: 5
+image:
+  tag: "v2.4.1"
+  pullPolicy: IfNotPresent
+ingress:
+  enabled: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: my-app.company.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: my-app-tls
+      hosts:
+        - my-app.company.com
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+autoscaling:
+  enabled: true
+  minReplicas: 5
+  maxReplicas: 20
+  targetCPUUtilization: 60
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+```
+
+Deploy with:
+
+```bash
+helm install my-app ./my-app -f values-production.yaml
+```
+
+## Command-Line Overrides
+
+### --set for Quick Overrides
+
+```bash
+# Simple values
+helm install my-app ./my-app --set replicaCount=3
+
+# Nested values use dots
+helm install my-app ./my-app --set image.tag=v2.5.0
+
+# Multiple values
+helm install my-app ./my-app \
+  --set image.tag=v2.5.0 \
+  --set replicaCount=3
+
+# Strings with special characters
+helm install my-app ./my-app --set-string nodeSelector."kubernetes\\.io/os"=linux
+
+# Lists
+helm install my-app ./my-app --set ingress.hosts[0].host=app.example.com
+```
+
+### --set-file for File Contents
+
+Inject entire file contents as a value — useful for config files and certificates:
+
+```bash
+helm install my-app ./my-app \
+  --set-file config.nginxConf=./nginx.conf \
+  --set-file tls.cert=./cert.pem
+```
+
+### --set-json for Complex Structures
+
+```bash
+helm install my-app ./my-app \
+  --set-json 'resources={"requests":{"cpu":"500m","memory":"512Mi"}}'
+```
+
+## Values Schema Validation
+
+Create a `values.schema.json` to enforce structure and types:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["image", "service"],
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    },
+    "image": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    }
+  }
+}
+```
+
+When a schema is present, Helm validates values during `install`, `upgrade`, `template`, and `lint`:
+
+```bash
+# This will fail if replicaCount is negative
+helm install my-app ./my-app --set replicaCount=-1
+# Error: values don't meet the specifications of the schema
+```
+
+## Inspecting Values
+
+```bash
+# See a chart's default values
+helm show values bitnami/nginx
+
+# See computed values for a running release
+helm get values my-app
+
+# See all values (including defaults)
+helm get values my-app --all
+
+# Diff values between revisions
+helm get values my-app --revision 1
+helm get values my-app --revision 2
+```
+
+## Common Patterns
+
+### Optional Blocks with Conditionals
+
+```yaml
+# Only render if values are provided
+{{- with .Values.podAnnotations }}
+annotations:
+  {{- toYaml . | nindent 4 }}
+{{- end }}
+```
+
+### Default Values in Templates
+
+```yaml
+# Fallback in the template itself
+replicas: {{ .Values.replicaCount | default 1 }}
+logLevel: {{ .Values.config.logLevel | default "info" }}
+```
+
+### Feature Flags
+
+```yaml
+# values.yaml
+features:
+  caching: true
+  rateLimit: false
+
+# templates/deployment.yaml
+env:
+  - name: ENABLE_CACHING
+    value: {{ .Values.features.caching | quote }}
+  - name: ENABLE_RATE_LIMIT
+    value: {{ .Values.features.rateLimit | quote }}
+```
+
+## Summary
+
+- Values merge from multiple sources: `values.yaml` < `-f files` < `--set` flags
+- Structure `values.yaml` with logical groupings and sensible defaults
+- Use per-environment values files (`values-production.yaml`) for clean configuration management
+- `--set` is for quick overrides; `-f` is for reproducible, reviewable configuration
+- `values.schema.json` enforces validation at install and upgrade time
+- `helm show values` and `helm get values` let you inspect defaults and running configuration
+
+## What's Next
+
+Charts rarely exist in isolation. Next, you'll learn about **chart dependencies** — how to compose complex applications from multiple charts.

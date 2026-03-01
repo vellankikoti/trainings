@@ -1,0 +1,403 @@
+---
+title: "Reusable Components"
+description: "Learn Kustomize Components — reusable bundles of resources, patches, and transformers that can be mixed into any overlay without duplication."
+order: 6
+xpReward: 30
+estimatedMinutes: 30
+prerequisites: ["transformers"]
+objectives:
+  - Understand the difference between components and overlays
+  - Create reusable components for cross-cutting concerns
+  - Include components selectively across different overlays
+  - Compose multiple components in a single overlay
+  - Organize a component library for your organization
+tags:
+  - kustomize
+  - kubernetes
+  - components
+  - reusable
+  - composition
+---
+
+<Callout type="story" title="The Story">
+Your team has three environments and a growing list of optional features: Prometheus monitoring (ServiceMonitor + annotations), a debug sidecar for troubleshooting, network policies for production, and an external-dns annotation for public-facing services. Not every environment needs every feature. Development wants monitoring and the debug sidecar. Staging wants monitoring and network policies. Production wants monitoring, network policies, and external-dns. You could copy patches into every overlay, but that means duplicating YAML and maintaining it in multiple places. Kustomize Components solve this: each feature is a self-contained bundle you include — or don't — in any overlay.
+</Callout>
+
+## Why Not Just Use More Overlays?
+
+Overlays have a limitation: they are designed as **complete variants** that reference a base. An overlay is "the production version" or "the staging version." But some features cut across environments:
+
+- Monitoring is needed in staging AND production
+- Debug sidecars are needed in development AND staging
+- Network policies are needed in staging AND production
+
+If you put monitoring in the production overlay, you have to duplicate it in the staging overlay. Components let you define a feature once and include it in any overlay.
+
+```
+my-app/
+├── base/
+│   ├── kustomization.yaml
+│   ├── deployment.yaml
+│   └── service.yaml
+├── components/
+│   ├── monitoring/
+│   │   ├── kustomization.yaml
+│   │   └── service-monitor.yaml
+│   ├── debug-sidecar/
+│   │   └── kustomization.yaml
+│   ├── network-policy/
+│   │   ├── kustomization.yaml
+│   │   └── network-policy.yaml
+│   └── external-dns/
+│       └── kustomization.yaml
+└── overlays/
+    ├── development/
+    │   └── kustomization.yaml    # base + monitoring + debug-sidecar
+    ├── staging/
+    │   └── kustomization.yaml    # base + monitoring + network-policy
+    └── production/
+        └── kustomization.yaml    # base + monitoring + network-policy + external-dns
+```
+
+## Creating a Component
+
+A component uses `kind: Component` instead of `kind: Kustomization`. It can contain resources, patches, transformers, and generators — just like a kustomization — but it is designed to be included rather than built standalone.
+
+### Monitoring Component
+
+```yaml
+# components/monitoring/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - service-monitor.yaml
+
+patches:
+  - target:
+      kind: Deployment
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: not-important
+      spec:
+        template:
+          metadata:
+            annotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8080"
+              prometheus.io/path: "/metrics"
+```
+
+```yaml
+# components/monitoring/service-monitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: app-monitor
+spec:
+  selector:
+    matchLabels:
+      app: order-service
+  endpoints:
+    - port: http
+      interval: 15s
+      path: /metrics
+```
+
+This component does two things: it adds a ServiceMonitor resource and patches every Deployment to include Prometheus scrape annotations.
+
+### Debug Sidecar Component
+
+```yaml
+# components/debug-sidecar/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Deployment
+      name: order-service
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: order-service
+      spec:
+        template:
+          spec:
+            containers:
+              - name: debug
+                image: busybox:1.36
+                command: ["sleep", "infinity"]
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 16Mi
+                  limits:
+                    cpu: 50m
+                    memory: 64Mi
+```
+
+Including this component adds a lightweight debug container to the pod. Developers can `kubectl exec` into it for troubleshooting.
+
+### Network Policy Component
+
+```yaml
+# components/network-policy/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - network-policy.yaml
+```
+
+```yaml
+# components/network-policy/network-policy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: order-service-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: order-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:                          # allow DNS
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+```
+
+### External DNS Component
+
+```yaml
+# components/external-dns/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Service
+      name: order-service
+    patch: |-
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: order-service
+        annotations:
+          external-dns.alpha.kubernetes.io/hostname: "orders.company.com"
+          external-dns.alpha.kubernetes.io/ttl: "300"
+```
+
+## Including Components in Overlays
+
+Use the `components` field in your overlay's kustomization.yaml:
+
+```yaml
+# overlays/development/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namePrefix: dev-
+namespace: development
+
+components:
+  - ../../components/monitoring
+  - ../../components/debug-sidecar
+```
+
+```yaml
+# overlays/staging/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namePrefix: stg-
+namespace: staging
+
+components:
+  - ../../components/monitoring
+  - ../../components/network-policy
+```
+
+```yaml
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namePrefix: prod-
+namespace: production
+
+components:
+  - ../../components/monitoring
+  - ../../components/network-policy
+  - ../../components/external-dns
+
+images:
+  - name: myregistry/order-service
+    newTag: v2.5.0
+```
+
+Each overlay selects exactly the features it needs. The monitoring component appears in all three — defined once, used everywhere.
+
+## Components with Generators
+
+Components can also include ConfigMap and Secret generators:
+
+```yaml
+# components/feature-flags/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+configMapGenerator:
+  - name: feature-flags
+    literals:
+      - DARK_MODE=false
+      - BETA_API=false
+      - NEW_CHECKOUT=false
+
+patches:
+  - target:
+      kind: Deployment
+      name: order-service
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: order-service
+      spec:
+        template:
+          spec:
+            containers:
+              - name: order-service
+                envFrom:
+                  - configMapRef:
+                      name: feature-flags
+```
+
+An overlay can override the feature flags using a merge generator:
+
+```yaml
+# overlays/staging/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+components:
+  - ../../components/feature-flags
+
+configMapGenerator:
+  - name: feature-flags
+    behavior: merge
+    literals:
+      - BETA_API=true    # enable beta in staging
+```
+
+## Components with Transformers
+
+Components can apply transformers as well:
+
+```yaml
+# components/cost-tracking/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+commonAnnotations:
+  cost-center: "cc-engineering-1234"
+  budget-owner: "engineering@company.com"
+
+commonLabels:
+  billing-project: order-platform
+```
+
+Any overlay that includes this component gets cost-tracking metadata on every resource.
+
+## Ordering and Composition
+
+When an overlay includes multiple components, they are applied in the order listed:
+
+```yaml
+components:
+  - ../../components/monitoring       # applied first
+  - ../../components/network-policy   # applied second
+  - ../../components/external-dns     # applied third
+```
+
+If two components patch the same resource, they are merged in order. Later components override earlier ones for conflicting fields.
+
+## Organizing a Component Library
+
+As your organization grows, establish a shared component library:
+
+```
+platform-components/
+├── observability/
+│   ├── monitoring/
+│   │   └── kustomization.yaml
+│   ├── tracing/
+│   │   └── kustomization.yaml
+│   └── logging-sidecar/
+│       └── kustomization.yaml
+├── security/
+│   ├── network-policy-strict/
+│   │   └── kustomization.yaml
+│   ├── network-policy-relaxed/
+│   │   └── kustomization.yaml
+│   └── pod-security/
+│       └── kustomization.yaml
+├── scaling/
+│   ├── hpa-standard/
+│   │   └── kustomization.yaml
+│   └── hpa-aggressive/
+│       └── kustomization.yaml
+└── dns/
+    └── external-dns/
+        └── kustomization.yaml
+```
+
+Teams pick the components they need. Platform engineers maintain the components centrally. Updates propagate to every overlay that includes the component.
+
+## Summary
+
+- **Components** are reusable bundles with `kind: Component` that can be mixed into any overlay
+- Unlike overlays (which are complete variants), components represent **optional features** that cut across environments
+- Components can contain resources, patches, transformers, and generators
+- Include components with the `components` field in your kustomization.yaml
+- Components are applied in the order listed — later components override earlier ones for conflicts
+- Use a shared component library to standardize cross-cutting concerns across teams
+- Components combined with overlays give you a flexible matrix: each overlay selects its base plus any subset of components
+
+## What's Next
+
+You now have a complete toolkit for customizing Kubernetes manifests: bases, overlays, patches, generators, transformers, and components. But how does Kustomize compare to Helm, and when should you use which? Next, you will explore **Helm vs Kustomize** — a practical comparison.

@@ -1,0 +1,15 @@
+{
+  "id": "observability-fundamentals",
+  "title": "Observability Fundamentals",
+  "slug": "observability-fundamentals",
+  "pathSlug": "observability",
+  "description": "Understand the principles of observability — metrics, logs, and traces — and why they matter for running reliable systems.",
+  "order": 1,
+  "estimatedHours": 15,
+  "lessonsCount": 3,
+  "lessons": [
+    { "slug": "introduction", "title": "What Is Observability?", "order": 1 },
+    { "slug": "pillars", "title": "The Three Pillars — Metrics, Logs & Traces", "order": 2 },
+    { "slug": "instrumentation", "title": "Instrumenting Applications", "order": 3 }
+  ]
+}

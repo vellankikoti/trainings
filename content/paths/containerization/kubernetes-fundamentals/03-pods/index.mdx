@@ -1,0 +1,269 @@
+---
+title: "Pods — The Smallest Unit"
+description: "Learn about Pods, the atomic unit of deployment in Kubernetes. Understand why Kubernetes wraps containers in pods and how to create, inspect, and manage them."
+order: 3
+xpReward: 35
+estimatedMinutes: 40
+prerequisites: ["architecture"]
+objectives:
+  - Define what a Pod is and why Kubernetes uses them
+  - Create pods using both imperative commands and declarative YAML
+  - Inspect pod status, logs, and events
+  - Understand multi-container pod patterns (sidecar, init)
+  - Execute commands inside running pods
+tags:
+  - kubernetes
+  - pods
+  - containers
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+Think of a shipping port. Containers arrive on ships, but you don't just throw individual containers onto the dock randomly. Each container is placed on a specific berth, assigned to a crane, connected to power for refrigeration, and given a tracking number. The berth, with all its connections and context, is the Pod. The container is still inside — but the Pod is what Kubernetes actually manages, schedules, and tracks. A Pod might hold a single container (most common) or tightly coupled containers that must share resources. Let's explore this fundamental building block.
+</Callout>
+
+## What Is a Pod?
+
+A Pod is the **smallest deployable unit** in Kubernetes. It's a wrapper around one or more containers that:
+
+- Share the same network namespace (same IP address, same ports)
+- Can share storage volumes
+- Are always co-scheduled on the same node
+- Have a shared lifecycle (they start and stop together)
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-first-pod
+  labels:
+    app: web
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.25
+      ports:
+        - containerPort: 80
+```
+
+### Why Not Just Containers?
+
+Kubernetes adds the Pod abstraction because:
+
+1. **Network identity**: Each pod gets its own IP address. Containers within a pod communicate via `localhost`.
+2. **Shared storage**: Containers in a pod can share volumes.
+3. **Co-scheduling**: Tightly coupled containers always run together.
+4. **Lifecycle management**: Health checks, restarts, and cleanup happen at the pod level.
+
+## Creating Pods
+
+### Imperative (Quick Testing)
+
+```bash
+# Create a pod directly
+kubectl run my-nginx --image=nginx:1.25 --port=80
+
+# Create and expose a pod
+kubectl run my-nginx --image=nginx:1.25 --port=80 --expose
+```
+
+### Declarative (Production)
+
+```yaml
+# pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-server
+  labels:
+    app: web
+    environment: development
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.25
+      ports:
+        - containerPort: 80
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "250m"
+```
+
+```bash
+# Apply the manifest
+kubectl apply -f pod.yaml
+
+# Verify
+kubectl get pods
+```
+
+## Pod Lifecycle
+
+A pod goes through several phases:
+
+| Phase | Description |
+|-------|-------------|
+| **Pending** | Pod accepted but containers not yet running (pulling images, scheduling) |
+| **Running** | At least one container is running |
+| **Succeeded** | All containers completed successfully (exit code 0) |
+| **Failed** | At least one container terminated with an error |
+| **Unknown** | Pod state cannot be determined (usually a node communication issue) |
+
+```bash
+# Watch pod status in real-time
+kubectl get pods -w
+
+# Get detailed status
+kubectl describe pod web-server
+```
+
+## Inspecting Pods
+
+### View Logs
+
+```bash
+# View logs
+kubectl logs web-server
+
+# Follow logs in real-time
+kubectl logs -f web-server
+
+# View logs from a specific container (multi-container pod)
+kubectl logs web-server -c nginx
+
+# View previous container's logs (after restart)
+kubectl logs web-server --previous
+```
+
+### Execute Commands
+
+```bash
+# Run a command in a pod
+kubectl exec web-server -- ls /usr/share/nginx/html
+
+# Get an interactive shell
+kubectl exec -it web-server -- /bin/bash
+
+# Execute in a specific container
+kubectl exec -it web-server -c nginx -- /bin/bash
+```
+
+### Port Forwarding
+
+```bash
+# Forward local port 8080 to pod port 80
+kubectl port-forward web-server 8080:80
+
+# Now visit http://localhost:8080
+```
+
+## Multi-Container Pods
+
+Most pods run a single container. But sometimes tightly coupled containers belong together.
+
+### Sidecar Pattern
+
+A helper container that enhances the main container:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-with-logging
+spec:
+  containers:
+    - name: web
+      image: nginx:1.25
+      volumeMounts:
+        - name: logs
+          mountPath: /var/log/nginx
+    - name: log-shipper
+      image: fluentd:v1.16
+      volumeMounts:
+        - name: logs
+          mountPath: /var/log/nginx
+          readOnly: true
+  volumes:
+    - name: logs
+      emptyDir: {}
+```
+
+### Init Containers
+
+Containers that run to completion **before** the main containers start:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-init
+spec:
+  initContainers:
+    - name: wait-for-db
+      image: busybox:1.36
+      command: ['sh', '-c', 'until nc -z database 5432; do sleep 2; done']
+  containers:
+    - name: app
+      image: myapp:v1.0
+```
+
+Init containers are perfect for:
+- Waiting for dependencies to be ready
+- Running database migrations
+- Downloading configuration files
+
+## Pod Resource Management
+
+Always specify resource requests and limits:
+
+```yaml
+spec:
+  containers:
+    - name: app
+      image: myapp:v1.0
+      resources:
+        requests:      # Minimum resources guaranteed
+          memory: "128Mi"
+          cpu: "250m"   # 250 millicores = 0.25 CPU
+        limits:         # Maximum resources allowed
+          memory: "256Mi"
+          cpu: "500m"
+```
+
+- **Requests**: Used by the scheduler to find a node with enough resources
+- **Limits**: Enforced at runtime — container is killed (OOMKilled) if it exceeds memory limits
+
+<Callout type="warning" title="Always Set Resource Limits">
+A pod without resource limits can consume all available resources on a node, causing other pods to be evicted or crash. Always set limits in production.
+</Callout>
+
+## Cleaning Up
+
+```bash
+# Delete a specific pod
+kubectl delete pod web-server
+
+# Delete all pods with a label
+kubectl delete pods -l app=web
+
+# Delete pod and wait for termination
+kubectl delete pod web-server --wait
+```
+
+## Summary
+
+- A Pod is the smallest deployable unit — a wrapper around one or more containers
+- Containers in a pod share network (same IP) and can share storage
+- Use declarative YAML manifests for production, imperative commands for testing
+- Pods have a lifecycle: Pending → Running → Succeeded/Failed
+- Use `kubectl logs`, `kubectl exec`, and `kubectl describe` to inspect pods
+- Multi-container patterns: sidecar (helper) and init (setup) containers
+- Always set resource requests and limits
+
+## What's Next
+
+In practice, you rarely create pods directly. Instead, you use **Deployments** — which manage pods for you with replication, rolling updates, and self-healing. That's the next lesson.

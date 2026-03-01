@@ -1,0 +1,15 @@
+{
+  "id": "cloud-fundamentals",
+  "title": "Cloud Computing Fundamentals",
+  "slug": "cloud-fundamentals",
+  "pathSlug": "iac-cloud",
+  "description": "Understand cloud computing models, service types, and the AWS ecosystem before diving into infrastructure as code.",
+  "order": 1,
+  "estimatedHours": 15,
+  "lessonsCount": 3,
+  "lessons": [
+    { "slug": "cloud-computing", "title": "What Is Cloud Computing?", "order": 1 },
+    { "slug": "service-models", "title": "IaaS, PaaS, SaaS & Beyond", "order": 2 },
+    { "slug": "aws-overview", "title": "AWS Core Services Overview", "order": 3 }
+  ]
+}

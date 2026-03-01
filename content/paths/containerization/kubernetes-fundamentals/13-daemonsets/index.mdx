@@ -1,0 +1,116 @@
+---
+title: "DaemonSets"
+description: "Run a pod on every node in your cluster. Perfect for log collectors, monitoring agents, and network plugins."
+order: 13
+xpReward: 25
+estimatedMinutes: 25
+prerequisites: ["jobs-cronjobs"]
+objectives:
+  - Understand the DaemonSet use case
+  - Create DaemonSets for node-level workloads
+  - Use node selectors to target specific nodes
+  - Manage DaemonSet updates
+tags:
+  - kubernetes
+  - daemonsets
+  - monitoring
+  - logging
+---
+
+<Callout type="story" title="The Story">
+Your operations team needs to collect logs from every node and ship them to Elasticsearch. You could create a Deployment with replicas equal to the number of nodes — but what happens when you add a new node? You'd have to manually update the replica count. DaemonSets solve this: they automatically run exactly one pod on every node. When a new node joins the cluster, a DaemonSet pod is automatically scheduled on it.
+</Callout>
+
+## What Is a DaemonSet?
+
+A DaemonSet ensures that **one copy of a pod runs on every node** (or a subset of nodes). Common use cases:
+
+- **Log collectors**: Fluentd, Filebeat, Promtail
+- **Monitoring agents**: Node Exporter, Datadog agent
+- **Network plugins**: Calico, Cilium, kube-proxy
+- **Storage drivers**: CSI node plugins
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: log-collector
+spec:
+  selector:
+    matchLabels:
+      app: log-collector
+  template:
+    metadata:
+      labels:
+        app: log-collector
+    spec:
+      containers:
+        - name: fluentd
+          image: fluentd:v1.16
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "200Mi"
+            limits:
+              cpu: "200m"
+              memory: "400Mi"
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+```
+
+## Targeting Specific Nodes
+
+Run only on nodes with specific labels:
+
+```yaml
+spec:
+  template:
+    spec:
+      nodeSelector:
+        node-role: worker    # Only on worker nodes
+```
+
+Or use tolerations to run on control plane nodes (which normally repel workloads):
+
+```yaml
+spec:
+  template:
+    spec:
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+```
+
+## Updating DaemonSets
+
+DaemonSets support rolling updates:
+
+```yaml
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1   # Update one node at a time
+```
+
+```bash
+kubectl rollout status daemonset/log-collector
+kubectl rollout history daemonset/log-collector
+```
+
+## Summary
+
+- DaemonSets run one pod per node, automatically adding pods when nodes join
+- Ideal for logging, monitoring, and networking agents
+- Use `nodeSelector` or tolerations to target specific nodes
+- Support rolling updates for controlled deployment
+
+## What's Next
+
+Some applications need stable network identities and ordered deployment — databases, message queues, and distributed systems. **StatefulSets** handle these requirements.

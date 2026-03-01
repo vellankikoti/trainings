@@ -1,0 +1,160 @@
+---
+title: "Mega Project: Production Kubernetes Platform"
+description: "Build a production-grade Kubernetes platform from scratch — complete with CI/CD, monitoring, security, and multi-environment deployment."
+difficulty: "Advanced"
+estimatedHours: 80
+technologies:
+  - Kubernetes
+  - Helm
+  - ArgoCD
+  - Prometheus
+  - Grafana
+  - GitHub Actions
+prerequisites:
+  - kubernetes-fundamentals
+  - helm
+  - cicd-fundamentals
+  - observability-fundamentals
+xpReward: 500
+---
+
+# Production Kubernetes Platform
+
+## Overview
+
+In this mega project, you'll build a complete production-grade Kubernetes platform that a real company would use to run microservices. You'll go from an empty cluster to a fully operational platform with CI/CD, monitoring, security policies, and multi-environment deployment.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Production Cluster                         │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │ Ingress      │  │ cert-manager │  │ External Secrets  │  │
+│  │ (NGINX)      │  │ (Let's Enc.) │  │ Operator          │  │
+│  └─────────────┘  └──────────────┘  └───────────────────┘  │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │ App NS       │  │ Monitoring   │  │ ArgoCD            │  │
+│  │ - frontend   │  │ - Prometheus │  │ - GitOps deploys  │  │
+│  │ - backend    │  │ - Grafana    │  │ - App of Apps     │  │
+│  │ - database   │  │ - Loki       │  │ - Auto-sync       │  │
+│  └─────────────┘  └──────────────┘  └───────────────────┘  │
+│  ┌─────────────┐  ┌──────────────┐                         │
+│  │ Network      │  │ RBAC         │                         │
+│  │ Policies     │  │ Policies     │                         │
+│  └─────────────┘  └──────────────┘                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Phases
+
+### Phase 1: Cluster Setup (10 hours)
+
+1. Provision a Kubernetes cluster using kind or k3d (local development)
+2. Install and configure NGINX Ingress Controller
+3. Set up cert-manager for TLS certificates
+4. Configure namespaces: `app`, `monitoring`, `argocd`, `ingress`
+5. Apply baseline Network Policies (deny-all default)
+
+**Deliverable**: A running cluster with ingress, TLS, and namespace isolation.
+
+### Phase 2: Application Deployment (15 hours)
+
+1. Build a sample microservices application:
+   - Frontend (React/Next.js)
+   - Backend API (Node.js/Python)
+   - PostgreSQL database
+2. Create Helm charts for each service
+3. Write a values file per environment (dev, staging, prod)
+4. Deploy using `helm install`
+5. Configure health checks (liveness, readiness, startup probes)
+6. Set resource requests and limits
+7. Configure HPA for the backend API
+
+**Deliverable**: A running microservices application accessible via Ingress.
+
+### Phase 3: CI/CD Pipeline (15 hours)
+
+1. Create GitHub Actions workflows:
+   - Build and test on PR
+   - Build Docker images and push to registry
+   - Update Helm values with new image tags
+2. Install ArgoCD
+3. Configure ArgoCD Applications for each service
+4. Set up App of Apps pattern for managing all deployments
+5. Implement GitOps: changes to Git trigger ArgoCD sync
+6. Test rolling updates and rollbacks
+
+**Deliverable**: Automated pipeline from code push to production deployment.
+
+### Phase 4: Monitoring & Observability (15 hours)
+
+1. Deploy Prometheus using the kube-prometheus-stack Helm chart
+2. Configure service monitors for application metrics
+3. Build Grafana dashboards:
+   - Cluster health overview
+   - Application performance (latency, error rate, throughput)
+   - Resource utilization (CPU, memory per namespace)
+4. Configure alerting rules:
+   - High error rate (> 1% 5xx responses)
+   - Pod restart loops
+   - Node resource exhaustion
+5. Deploy Loki for log aggregation
+6. Create a combined dashboard with metrics and logs
+
+**Deliverable**: Full observability stack with dashboards and alerts.
+
+### Phase 5: Security Hardening (10 hours)
+
+1. Implement RBAC:
+   - Developer role (view pods, logs; deploy to staging only)
+   - SRE role (full access to monitoring, limited prod access)
+   - Admin role (full cluster access)
+2. Configure Pod Security Standards
+3. Implement Network Policies for all namespaces
+4. Set up OPA/Kyverno policies:
+   - Require resource limits
+   - Deny privileged containers
+   - Enforce image registry whitelist
+5. Enable audit logging
+
+**Deliverable**: Security-hardened cluster with RBAC, network policies, and policy enforcement.
+
+### Phase 6: Disaster Recovery & Documentation (15 hours)
+
+1. Configure etcd backup and restore procedures
+2. Test cluster recovery from backup
+3. Document runbook for common operations
+4. Create architecture decision records (ADRs)
+5. Write operational playbook for on-call engineers
+6. Conduct chaos engineering tests (kill pods, nodes)
+7. Measure and document recovery times
+
+**Deliverable**: Complete operational documentation and tested DR procedures.
+
+## Validation Criteria
+
+- [ ] Cluster runs 3+ microservices with proper health checks
+- [ ] CI/CD pipeline deploys changes within 5 minutes of merge
+- [ ] ArgoCD maintains desired state automatically
+- [ ] Grafana dashboards show real-time application metrics
+- [ ] Alerts fire correctly for simulated failures
+- [ ] RBAC prevents unauthorized access
+- [ ] Network Policies restrict pod-to-pod traffic
+- [ ] Cluster recovers from simulated node failure within 5 minutes
+- [ ] All operational procedures documented in runbook
+
+## Technologies Used
+
+| Technology | Purpose |
+|-----------|---------|
+| kind/k3d | Local Kubernetes cluster |
+| Helm | Application packaging |
+| ArgoCD | GitOps deployment |
+| GitHub Actions | CI pipeline |
+| Prometheus | Metrics collection |
+| Grafana | Visualization |
+| Loki | Log aggregation |
+| cert-manager | TLS certificates |
+| NGINX Ingress | HTTP routing |
+| Kyverno/OPA | Policy enforcement |

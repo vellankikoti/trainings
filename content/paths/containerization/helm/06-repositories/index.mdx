@@ -1,0 +1,246 @@
+---
+title: "Chart Repositories & Artifact Hub"
+description: "Learn how to find, add, and manage Helm chart repositories. Discover Artifact Hub and understand OCI-based chart distribution."
+order: 6
+xpReward: 25
+estimatedMinutes: 30
+prerequisites: ["dependencies"]
+objectives:
+  - Add, update, and manage Helm chart repositories
+  - Search for charts using the CLI and Artifact Hub
+  - Understand OCI registries for Helm chart distribution
+  - Push and pull charts using OCI-compliant registries
+tags:
+  - helm
+  - kubernetes
+  - repositories
+  - artifact-hub
+  - oci
+---
+
+<Callout type="story" title="The Story">
+A developer on your team finds an interesting chart on Artifact Hub that deploys a complete Kafka cluster. Another team member has been building a custom chart and wants to share it across the organization. Your CI/CD pipeline needs to pull charts reliably without hitting rate limits. You need to understand the Helm chart distribution ecosystem -- from public repositories and Artifact Hub to private OCI registries -- so your team can both consume and publish charts with confidence.
+</Callout>
+
+## Helm Repositories
+
+A Helm repository is an HTTP server that hosts an `index.yaml` file listing available charts and their download URLs. Think of it as a package registry like npm or PyPI.
+
+### Managing Repositories
+
+```bash
+# Add a repository
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo add prometheus https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+
+# List configured repositories
+helm repo list
+
+# Update repository indexes (fetch latest chart lists)
+helm repo update
+
+# Remove a repository
+helm repo remove bitnami
+```
+
+### Searching for Charts
+
+```bash
+# Search across all added repositories
+helm search repo nginx
+
+# Search with version constraints
+helm search repo redis --version ">=18.0.0"
+
+# Show all versions of a chart
+helm search repo bitnami/redis --versions
+
+# Search Artifact Hub from the CLI
+helm search hub wordpress
+```
+
+### Inspecting Charts Before Installing
+
+```bash
+# View chart metadata
+helm show chart bitnami/redis
+
+# View default values
+helm show values bitnami/redis
+
+# View the README
+helm show readme bitnami/redis
+
+# View everything
+helm show all bitnami/redis
+```
+
+## Artifact Hub
+
+[Artifact Hub](https://artifacthub.io) is the central search portal for Helm charts and other cloud-native artifacts. It indexes charts from hundreds of repositories.
+
+### What Artifact Hub Provides
+
+| Feature | Description |
+|---------|-------------|
+| **Search** | Full-text search across thousands of charts |
+| **Security reports** | Vulnerability scanning results for chart images |
+| **Verified publishers** | Trust badges for official chart maintainers |
+| **Changelog tracking** | Version history and release notes |
+| **Values schema** | Documentation of configurable values |
+| **Sign-off verification** | Provenance and signature verification |
+
+### Evaluating Charts
+
+When choosing a chart from Artifact Hub, consider:
+
+1. **Stars and downloads** -- popularity indicates community trust
+2. **Last updated** -- stale charts may have unpatched vulnerabilities
+3. **Verified publisher** -- official charts from the software vendor
+4. **Security report** -- check for known CVEs in container images
+5. **Source repository** -- review the chart source code
+6. **Documentation** -- well-documented charts are easier to configure
+
+## Popular Repository Sources
+
+| Repository | URL | Charts |
+|------------|-----|--------|
+| Bitnami | `https://charts.bitnami.com/bitnami` | PostgreSQL, Redis, Kafka, MongoDB, and more |
+| Prometheus Community | `https://prometheus-community.github.io/helm-charts` | Prometheus, Alertmanager, exporters |
+| Grafana | `https://grafana.github.io/helm-charts` | Grafana, Loki, Tempo, Mimir |
+| Ingress NGINX | `https://kubernetes.github.io/ingress-nginx` | NGINX Ingress Controller |
+| Jetstack | `https://charts.jetstack.io` | cert-manager |
+| HashiCorp | `https://helm.releases.hashicorp.com` | Vault, Consul |
+
+## OCI-Based Chart Distribution
+
+Helm 3 supports storing charts in OCI (Open Container Initiative) registries -- the same registries used for container images. This is the future of chart distribution.
+
+### Why OCI?
+
+- **Unified infrastructure** -- same registry for images and charts
+- **Better security** -- leverage existing registry authentication and scanning
+- **Standardized** -- OCI is an industry standard, not Helm-specific
+- **No index.yaml** -- registries handle discovery and metadata natively
+
+### Working with OCI Registries
+
+```bash
+# Log in to a registry
+helm registry login registry.company.com
+
+# Push a chart to an OCI registry
+helm push my-app-1.0.0.tgz oci://registry.company.com/charts
+
+# Pull a chart from an OCI registry
+helm pull oci://registry.company.com/charts/my-app --version 1.0.0
+
+# Install directly from OCI
+helm install my-release oci://registry.company.com/charts/my-app --version 1.0.0
+
+# Show chart info from OCI
+helm show chart oci://registry.company.com/charts/my-app --version 1.0.0
+```
+
+### Supported OCI Registries
+
+Most major container registries support Helm OCI charts:
+
+- **Docker Hub** -- `oci://registry-1.docker.io`
+- **GitHub Container Registry** -- `oci://ghcr.io`
+- **AWS ECR** -- `oci://<account>.dkr.ecr.<region>.amazonaws.com`
+- **Google Artifact Registry** -- `oci://<region>-docker.pkg.dev/<project>`
+- **Azure Container Registry** -- `oci://<registry>.azurecr.io`
+- **Harbor** -- `oci://<harbor-host>/chartrepo`
+
+### Packaging and Pushing
+
+```bash
+# Package the chart
+helm package ./my-app
+# Creates: my-app-1.0.0.tgz
+
+# Push to OCI registry
+helm push my-app-1.0.0.tgz oci://ghcr.io/my-org/charts
+
+# Verify it's there
+helm show chart oci://ghcr.io/my-org/charts/my-app --version 1.0.0
+```
+
+## Using Repositories in Dependencies
+
+Reference repositories in your `Chart.yaml` dependencies:
+
+```yaml
+# Traditional repository reference
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+
+# OCI registry reference
+dependencies:
+  - name: my-library
+    version: "1.x.x"
+    repository: "oci://registry.company.com/charts"
+```
+
+For traditional repositories, they must be added with `helm repo add` before running `helm dependency update`. OCI references are resolved directly.
+
+## Repository Authentication
+
+### Basic Auth for Traditional Repositories
+
+```bash
+# Add a repository with credentials
+helm repo add private-repo https://charts.company.com \
+  --username admin \
+  --password secret123
+
+# Using a CA certificate
+helm repo add private-repo https://charts.company.com \
+  --ca-file ./ca.crt \
+  --cert-file ./client.crt \
+  --key-file ./client.key
+```
+
+### Token-Based Auth for OCI
+
+```bash
+# Docker Hub
+echo $DOCKER_TOKEN | helm registry login registry-1.docker.io \
+  --username myuser --password-stdin
+
+# GitHub Container Registry
+echo $GITHUB_TOKEN | helm registry login ghcr.io \
+  --username myuser --password-stdin
+
+# AWS ECR (using aws cli)
+aws ecr get-login-password --region us-east-1 | \
+  helm registry login --username AWS --password-stdin \
+  123456789.dkr.ecr.us-east-1.amazonaws.com
+```
+
+## Repository Best Practices
+
+1. **Pin chart versions** in production -- never use `latest` or unbounded ranges
+2. **Mirror public charts** to a private registry for reliability and security
+3. **Prefer OCI registries** for new projects -- they are the future of Helm distribution
+4. **Run `helm repo update`** before searching or installing to get the latest index
+5. **Verify chart provenance** with `helm verify` when security is critical
+6. **Cache charts locally** in CI/CD pipelines to avoid network failures during deployment
+
+## Summary
+
+- Helm repositories host charts with an `index.yaml` manifest; manage them with `helm repo add/update/remove`
+- Artifact Hub is the central search portal for discovering community charts
+- OCI registries are the modern approach to chart distribution, using the same infrastructure as container images
+- `helm search repo` searches local indexes; `helm search hub` searches Artifact Hub
+- Always inspect charts with `helm show` before installing them
+- Evaluate charts for recency, security, verified publishers, and documentation quality
+
+## What's Next
+
+Helm can run actions at specific points during the release lifecycle. Next, you'll learn about **Helm hooks** -- how to run Jobs before installs, after upgrades, and more.

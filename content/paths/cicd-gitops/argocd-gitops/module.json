@@ -1,0 +1,17 @@
+{
+  "id": "argocd-gitops",
+  "title": "ArgoCD & GitOps",
+  "slug": "argocd-gitops",
+  "pathSlug": "cicd-gitops",
+  "description": "Implement GitOps with ArgoCD. Deploy to Kubernetes with Git as the single source of truth.",
+  "order": 4,
+  "estimatedHours": 30,
+  "lessonsCount": 5,
+  "lessons": [
+    { "slug": "gitops-principles", "title": "GitOps Principles", "order": 1 },
+    { "slug": "argocd-setup", "title": "Setting Up ArgoCD", "order": 2 },
+    { "slug": "application-deployment", "title": "Deploying Applications with ArgoCD", "order": 3 },
+    { "slug": "sync-strategies", "title": "Sync Strategies & Hooks", "order": 4 },
+    { "slug": "multi-cluster", "title": "Multi-Cluster GitOps", "order": 5 }
+  ]
+}

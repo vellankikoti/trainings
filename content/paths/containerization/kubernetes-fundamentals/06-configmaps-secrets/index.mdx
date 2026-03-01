@@ -1,0 +1,177 @@
+---
+title: "ConfigMaps & Secrets"
+description: "Learn how to externalize application configuration with ConfigMaps and manage sensitive data with Secrets in Kubernetes."
+order: 6
+xpReward: 35
+estimatedMinutes: 40
+prerequisites: ["services"]
+objectives:
+  - Create and use ConfigMaps for application configuration
+  - Store sensitive data in Secrets safely
+  - Inject configuration via environment variables and volume mounts
+  - Understand the security limitations of Kubernetes Secrets
+tags:
+  - kubernetes
+  - configmaps
+  - secrets
+  - configuration
+  - security
+---
+
+<Callout type="story" title="The Story">
+Your web application needs a database connection string, an API key for a third-party service, and a feature flag that differs between staging and production. You could hardcode these into your Docker image — but then you'd need a different image for each environment. ConfigMaps let you store configuration separately from your code, and Secrets keep sensitive values like passwords and API keys from being exposed in plain-text manifests. Together, they follow the twelve-factor app principle: store config in the environment, not in the code.
+</Callout>
+
+## ConfigMaps
+
+A ConfigMap holds **non-sensitive** configuration data as key-value pairs.
+
+### Creating ConfigMaps
+
+```bash
+# From literal values
+kubectl create configmap app-config \
+  --from-literal=APP_ENV=production \
+  --from-literal=LOG_LEVEL=info \
+  --from-literal=MAX_CONNECTIONS=100
+
+# From a file
+kubectl create configmap nginx-config --from-file=nginx.conf
+
+# From YAML
+kubectl apply -f configmap.yaml
+```
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  APP_ENV: "production"
+  LOG_LEVEL: "info"
+  MAX_CONNECTIONS: "100"
+  config.json: |
+    {
+      "feature_flags": {
+        "new_dashboard": true,
+        "beta_api": false
+      }
+    }
+```
+
+### Using ConfigMaps as Environment Variables
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  containers:
+    - name: app
+      image: myapp:v1.0
+      envFrom:
+        - configMapRef:
+            name: app-config    # All keys become env vars
+      env:
+        - name: SPECIFIC_VAR
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: LOG_LEVEL
+```
+
+### Using ConfigMaps as Volumes
+
+```yaml
+spec:
+  containers:
+    - name: app
+      image: myapp:v1.0
+      volumeMounts:
+        - name: config
+          mountPath: /etc/app/config
+          readOnly: true
+  volumes:
+    - name: config
+      configMap:
+        name: app-config
+```
+
+Each key becomes a file in the mount directory. The `config.json` key becomes `/etc/app/config/config.json`.
+
+## Secrets
+
+Secrets are like ConfigMaps but for **sensitive data**: passwords, API keys, TLS certificates.
+
+### Creating Secrets
+
+```bash
+# From literal values
+kubectl create secret generic db-credentials \
+  --from-literal=DB_USER=admin \
+  --from-literal=DB_PASSWORD=s3cur3-p@ss
+
+# From files (e.g., TLS)
+kubectl create secret tls my-tls \
+  --cert=tls.crt \
+  --key=tls.key
+```
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+type: Opaque
+data:
+  DB_USER: YWRtaW4=           # base64 encoded "admin"
+  DB_PASSWORD: czNjdXIzLXBAc3M=  # base64 encoded "s3cur3-p@ss"
+```
+
+<Callout type="warning" title="Base64 Is Not Encryption">
+Kubernetes Secrets are base64-encoded, not encrypted. Anyone with access to the API server or etcd can read them. For production, enable encryption at rest and consider tools like Sealed Secrets, External Secrets Operator, or HashiCorp Vault.
+</Callout>
+
+### Using Secrets
+
+```yaml
+spec:
+  containers:
+    - name: app
+      image: myapp:v1.0
+      env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_PASSWORD
+      volumeMounts:
+        - name: certs
+          mountPath: /etc/tls
+          readOnly: true
+  volumes:
+    - name: certs
+      secret:
+        secretName: my-tls
+```
+
+## Best Practices
+
+1. **Never commit Secrets YAML to Git** — use sealed-secrets or external secret managers
+2. **Use ConfigMaps for non-sensitive config** — they're easier to inspect and debug
+3. **Mount as volumes** when config files need to be updated without pod restart
+4. **Use RBAC** to restrict who can read Secrets
+5. **Enable encryption at rest** for etcd in production clusters
+
+## Summary
+
+- ConfigMaps store non-sensitive key-value configuration
+- Secrets store sensitive data (base64-encoded, not encrypted by default)
+- Both can be injected as environment variables or mounted as files
+- Keep secrets out of Git — use external secret management in production
+
+## What's Next
+
+As your cluster grows, you need to isolate workloads. **Namespaces** provide logical separation within a cluster — they're next.
