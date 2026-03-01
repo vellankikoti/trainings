@@ -43,6 +43,10 @@ yarn-error.log*
 # Sentry
 .sentryclirc
 
+# Makefile runtime
+.pids/
+.logs/
+
 # Testing
 coverage/
 
