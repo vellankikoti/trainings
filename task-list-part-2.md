@@ -324,7 +324,7 @@
 
 ### TASK-054: Build certificate gallery in dashboard
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-052
 - **Estimated effort:** M
@@ -463,7 +463,7 @@
 
 ### TASK-060: Build public profile page
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-059
 - **Estimated effort:** L
@@ -490,7 +490,7 @@
 
 ### TASK-061: Build leaderboard page
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-036
 - **Estimated effort:** M
@@ -583,7 +583,7 @@
 
 ### TASK-065: Implement dark mode
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-004, TASK-017
 - **Estimated effort:** M
@@ -629,7 +629,7 @@
 
 ### TASK-067: Add error boundaries and error pages
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-003
 - **Estimated effort:** M
@@ -651,7 +651,7 @@
 
 ### TASK-068: Implement toast notifications
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-005
 - **Estimated effort:** S
