@@ -35,7 +35,7 @@ Each task follows this format:
 
 ### TASK-001: Initialize monorepo with pnpm workspaces
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** Nothing
 - **Estimated effort:** M
@@ -59,7 +59,7 @@ Each task follows this format:
 
 ### TASK-002: Set up Turborepo for build orchestration
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-001
 - **Estimated effort:** S
@@ -76,7 +76,7 @@ Each task follows this format:
 
 ### TASK-003: Scaffold Next.js application
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-001
 - **Estimated effort:** M
@@ -101,7 +101,7 @@ Each task follows this format:
 
 ### TASK-004: Configure Tailwind CSS
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (Tailwind v4 with @tailwindcss/postcss)
 - **Priority:** P0
 - **Depends on:** TASK-003
 - **Estimated effort:** S
@@ -122,7 +122,7 @@ Each task follows this format:
 
 ### TASK-005: Install and configure ShadCN UI
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (11 components installed)
 - **Priority:** P0
 - **Depends on:** TASK-004
 - **Estimated effort:** M
@@ -143,7 +143,7 @@ Each task follows this format:
 
 ### TASK-006: Create shared configuration packages
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (ESLint v8 + next/core-web-vitals)
 - **Priority:** P1
 - **Depends on:** TASK-001
 - **Estimated effort:** M
@@ -166,7 +166,7 @@ Each task follows this format:
 
 ### TASK-007: Create environment variable template
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (Zod validation + SKIP_ENV_VALIDATION)
 - **Priority:** P1
 - **Depends on:** TASK-003
 - **Estimated effort:** S
@@ -191,7 +191,7 @@ Each task follows this format:
 
 ### TASK-008: Set up GitHub repository structure
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-001
 - **Estimated effort:** M
@@ -218,7 +218,7 @@ Each task follows this format:
 
 ### TASK-009: Set up CI/CD pipeline with GitHub Actions
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-006
 - **Estimated effort:** L
@@ -246,7 +246,7 @@ Each task follows this format:
 
 ### TASK-010: Configure Vercel deployment
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (vercel.json created)
 - **Priority:** P1
 - **Depends on:** TASK-003, TASK-009
 - **Estimated effort:** M
@@ -269,7 +269,7 @@ Each task follows this format:
 
 ### TASK-011: Set up Clerk authentication
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-003, TASK-007
 - **Estimated effort:** L
@@ -296,7 +296,7 @@ Each task follows this format:
 
 ### TASK-012: Set up Supabase project and initial schema
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (11 tables, RLS, indexes, seed data)
 - **Priority:** P0
 - **Depends on:** TASK-007
 - **Estimated effort:** L
@@ -331,7 +331,7 @@ Each task follows this format:
 
 ### TASK-013: Create Supabase client library
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (browser + server + admin clients)
 - **Priority:** P0
 - **Depends on:** TASK-012
 - **Estimated effort:** M
@@ -352,7 +352,7 @@ Each task follows this format:
 
 ### TASK-014: Implement Clerk-Supabase user sync
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (webhook with svix verification)
 - **Priority:** P0
 - **Depends on:** TASK-011, TASK-013
 - **Estimated effort:** L
@@ -378,7 +378,7 @@ Each task follows this format:
 
 ### TASK-015: Create user profile API routes
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-014
 - **Estimated effort:** M
@@ -400,7 +400,7 @@ Each task follows this format:
 
 ### TASK-016: Create onboarding flow
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (4-step flow with profile persistence)
 - **Priority:** P1
 - **Depends on:** TASK-014
 - **Estimated effort:** L
@@ -429,7 +429,7 @@ Each task follows this format:
 
 ### TASK-017: Create root layout with header and footer
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-005, TASK-011
 - **Estimated effort:** L
@@ -455,7 +455,7 @@ Each task follows this format:
 
 ### TASK-018: Create marketing route group layout
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-017
 - **Estimated effort:** S
@@ -473,7 +473,7 @@ Each task follows this format:
 
 ### TASK-019: Create platform route group layout with sidebar
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (sidebar deferred to later iteration)
 - **Priority:** P0
 - **Depends on:** TASK-017
 - **Estimated effort:** L
@@ -494,7 +494,7 @@ Each task follows this format:
 
 ### TASK-020: Create homepage
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (hero, paths, stats, how-it-works, CTA)
 - **Priority:** P0
 - **Depends on:** TASK-017
 - **Estimated effort:** L
@@ -565,7 +565,7 @@ Each task follows this format:
 
 ### TASK-023: Create dashboard page (basic)
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete (basic stats + continue learning card)
 - **Priority:** P0
 - **Depends on:** TASK-019, TASK-015
 - **Estimated effort:** L
