@@ -1,0 +1,27 @@
+{
+  "id": "docker-advanced",
+  "title": "Docker Advanced",
+  "slug": "docker-advanced",
+  "pathSlug": "containerization",
+  "description": "Master advanced Docker techniques: custom registries, build optimization, CI/CD integration, debugging, Docker Swarm, and production patterns.",
+  "order": 2,
+  "estimatedHours": 50,
+  "lessonsCount": 15,
+  "lessons": [
+    { "slug": "01-build-optimization", "title": "Build Optimization with BuildKit", "order": 1 },
+    { "slug": "02-private-registries", "title": "Private Docker Registries", "order": 2 },
+    { "slug": "03-advanced-networking", "title": "Advanced Docker Networking", "order": 3 },
+    { "slug": "04-storage-drivers", "title": "Storage Drivers and Advanced Volumes", "order": 4 },
+    { "slug": "05-compose-advanced", "title": "Advanced Docker Compose Patterns", "order": 5 },
+    { "slug": "06-docker-in-cicd", "title": "Docker in CI/CD Pipelines", "order": 6 },
+    { "slug": "07-debugging-containers", "title": "Debugging Containers", "order": 7 },
+    { "slug": "08-performance-tuning", "title": "Container Performance Tuning", "order": 8 },
+    { "slug": "09-docker-swarm-basics", "title": "Docker Swarm Fundamentals", "order": 9 },
+    { "slug": "10-swarm-services", "title": "Swarm Services and Stacks", "order": 10 },
+    { "slug": "11-image-management", "title": "Image Management at Scale", "order": 11 },
+    { "slug": "12-docker-api", "title": "The Docker Engine API", "order": 12 },
+    { "slug": "13-production-patterns", "title": "Production Architecture Patterns", "order": 13 },
+    { "slug": "14-troubleshooting", "title": "Troubleshooting Production Issues", "order": 14 },
+    { "slug": "15-beyond-docker", "title": "Beyond Docker: The Container Ecosystem", "order": 15 }
+  ]
+}

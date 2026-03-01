@@ -1,0 +1,1290 @@
+---
+title: "Image Management at Scale"
+description: "Master enterprise image management including tagging strategies, promotion workflows, vulnerability scanning with Trivy and Docker Scout, image signing, base image governance, and registry maintenance."
+order: 11
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - 10-ci-cd-docker
+objectives:
+  - Design and enforce image naming conventions for multi-team organizations
+  - Implement tagging strategies including semver, git SHA, and branch-based approaches
+  - Build image promotion workflows that move images from dev to staging to production
+  - Automate vulnerability scanning with Trivy and Docker Scout
+  - Sign and verify images with Docker Content Trust and cosign
+  - Manage base images, registry garbage collection, and image layer analysis
+tags:
+  - docker
+  - image-management
+  - vulnerability-scanning
+  - image-signing
+  - registry
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your company has grown from 3 developers to 30, organized into 6 teams. Everyone pushes Docker images to your private registry, but it has become a mess. Team A uses `latest` for everything and just overwrote a production image. Team B has 847 untagged images consuming 200 GB. Last week, a critical CVE was found in a base image, and nobody knows which of your 150+ images are affected. The security team is demanding vulnerability scanning, the compliance team wants image signing, and the infrastructure team is begging for registry cleanup. You need to bring order to the chaos. Today, you will build an enterprise-grade image management strategy from the ground up.
+</Callout>
+
+## Image Naming Conventions for Organizations
+
+When a single team pushes images, naming is simple. When dozens of teams share a registry, you need a naming convention that prevents collisions, enables access control, and makes images discoverable.
+
+### The Anatomy of an Image Reference
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Full Image Reference Breakdown                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  registry.example.com/platform/auth-service:v2.3.1-alpine   │
+│  ├──────────────────┘ ├──────┘ ├──────────┘ ├────────────┘  │
+│  │                    │        │            │                │
+│  Registry Host        Namespace  Repository   Tag            │
+│  (where it lives)     (who owns) (what it is) (which version)│
+│                                                              │
+│  Alternative with digest (immutable):                        │
+│  registry.example.com/platform/auth-service@sha256:abc123...│
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Organizational Naming Patterns
+
+| Pattern | Example | Best For |
+|---------|---------|----------|
+| `registry/team/service` | `reg.co/platform/auth` | Team-based ownership |
+| `registry/env/service` | `reg.co/prod/auth` | Environment separation |
+| `registry/product/service` | `reg.co/checkout/payments` | Product-line alignment |
+| `registry/team/product/service` | `reg.co/platform/checkout/payments` | Large organizations |
+
+Here is a practical naming policy document:
+
+```yaml
+# image-naming-policy.yaml
+# Organization: Acme Corp
+# Registry: registry.acme.io
+
+naming_convention:
+  pattern: "registry.acme.io/{team}/{service}"
+
+  teams:
+    - platform     # Infrastructure and shared services
+    - payments     # Payment processing team
+    - catalog      # Product catalog team
+    - fulfillment  # Order fulfillment team
+    - data         # Data engineering team
+    - mobile       # Mobile backend team
+
+  rules:
+    - "Service names must be lowercase alphanumeric with hyphens"
+    - "No underscores in service names (use hyphens)"
+    - "Maximum 64 characters for full image reference"
+    - "Each team owns their namespace — no cross-team pushes"
+    - "Shared base images go under 'platform' namespace"
+
+  examples:
+    valid:
+      - "registry.acme.io/platform/base-python:3.12-slim"
+      - "registry.acme.io/payments/stripe-gateway:v1.4.2"
+      - "registry.acme.io/catalog/search-indexer:main-abc1234"
+    invalid:
+      - "registry.acme.io/my_service:latest"       # underscores, no team
+      - "registry.acme.io/payments/MyApp:V1"       # uppercase
+      - "registry.acme.io/test:1"                  # no team namespace
+```
+
+<Callout type="warning" title="Never Use latest in Shared Environments">
+The `latest` tag is mutable — anyone can overwrite it. In a shared registry, this leads to unpredictable deployments. If Team A pushes `myapp:latest` at 2 PM and Team B deploys at 3 PM, they get a different image than what was tested at 1 PM. Always use explicit, immutable tags.
+</Callout>
+
+## Tagging Strategies
+
+Tags are how you identify specific versions of an image. The right tagging strategy depends on your release process, but most organizations combine multiple approaches.
+
+### Semantic Versioning (SemVer)
+
+```bash
+# Semantic versioning: MAJOR.MINOR.PATCH
+# MAJOR — breaking changes
+# MINOR — new features, backward compatible
+# PATCH — bug fixes, backward compatible
+
+# Tag an image with semver
+docker tag myapp:build-123 registry.acme.io/platform/myapp:v2.3.1
+docker tag myapp:build-123 registry.acme.io/platform/myapp:v2.3
+docker tag myapp:build-123 registry.acme.io/platform/myapp:v2
+
+# This creates a tag hierarchy:
+# v2.3.1 — exact version (immutable in practice)
+# v2.3   — latest patch of 2.3.x (floating)
+# v2     — latest minor of 2.x.x (floating)
+```
+
+```
+Tag Hierarchy Example:
+┌─────────────────────────────────────────────┐
+│ v2       → points to latest 2.x.x          │
+│ v2.3     → points to latest 2.3.x          │
+│ v2.3.1   → points to exact build           │
+│ v2.3.0   → previous patch                  │
+│ v2.2.8   → previous minor                  │
+│ v1.9.12  → previous major                  │
+└─────────────────────────────────────────────┘
+```
+
+### Git SHA-Based Tags
+
+```bash
+# Use the short git commit SHA as the tag
+GIT_SHA=$(git rev-parse --short HEAD)
+docker tag myapp:local registry.acme.io/platform/myapp:${GIT_SHA}
+
+# Example result:
+# registry.acme.io/platform/myapp:a1b2c3d
+
+# Advantages:
+# - Directly traceable to source code
+# - Automatically unique
+# - Easy to look up: git show a1b2c3d
+```
+
+### Branch-Based Tags
+
+```bash
+# Tag with the branch name (sanitized)
+BRANCH=$(git rev-parse --abbrev-ref HEAD | sed 's/[^a-zA-Z0-9]/-/g')
+docker tag myapp:local registry.acme.io/platform/myapp:${BRANCH}
+
+# Examples:
+# registry.acme.io/platform/myapp:main
+# registry.acme.io/platform/myapp:feature-user-auth
+# registry.acme.io/platform/myapp:hotfix-payment-bug
+
+# Often combined with SHA for uniqueness:
+docker tag myapp:local registry.acme.io/platform/myapp:${BRANCH}-${GIT_SHA}
+# registry.acme.io/platform/myapp:main-a1b2c3d
+```
+
+### Date-Based Tags
+
+```bash
+# ISO date-based tags
+DATE_TAG=$(date +%Y%m%d-%H%M%S)
+docker tag myapp:local registry.acme.io/platform/myapp:${DATE_TAG}
+# registry.acme.io/platform/myapp:20260301-143022
+
+# Useful for nightly builds or scheduled releases
+docker tag myapp:local registry.acme.io/platform/myapp:nightly-${DATE_TAG}
+```
+
+### Combined Tagging Strategy (Recommended)
+
+```bash
+#!/bin/bash
+# tag-and-push.sh — Production tagging script
+set -euo pipefail
+
+REGISTRY="registry.acme.io"
+TEAM="platform"
+SERVICE="auth-service"
+IMAGE="${REGISTRY}/${TEAM}/${SERVICE}"
+
+GIT_SHA=$(git rev-parse --short HEAD)
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD | sed 's/[^a-zA-Z0-9]/-/g')
+BUILD_DATE=$(date +%Y%m%d)
+VERSION=${1:-""}
+
+# Always tag with git SHA (traceability)
+docker tag ${SERVICE}:local ${IMAGE}:${GIT_SHA}
+docker push ${IMAGE}:${GIT_SHA}
+
+# Tag with branch name (environment routing)
+docker tag ${SERVICE}:local ${IMAGE}:${GIT_BRANCH}-${GIT_SHA}
+docker push ${IMAGE}:${GIT_BRANCH}-${GIT_SHA}
+
+# If on main branch, also tag as latest build
+if [ "${GIT_BRANCH}" = "main" ]; then
+  docker tag ${SERVICE}:local ${IMAGE}:${BUILD_DATE}-${GIT_SHA}
+  docker push ${IMAGE}:${BUILD_DATE}-${GIT_SHA}
+fi
+
+# If a version is provided, create semver tags
+if [ -n "${VERSION}" ]; then
+  MAJOR=$(echo ${VERSION} | cut -d. -f1)
+  MINOR=$(echo ${VERSION} | cut -d. -f1-2)
+
+  docker tag ${SERVICE}:local ${IMAGE}:v${VERSION}
+  docker tag ${SERVICE}:local ${IMAGE}:v${MINOR}
+  docker tag ${SERVICE}:local ${IMAGE}:v${MAJOR}
+
+  docker push ${IMAGE}:v${VERSION}
+  docker push ${IMAGE}:v${MINOR}
+  docker push ${IMAGE}:v${MAJOR}
+
+  echo "Tagged and pushed: v${VERSION}, v${MINOR}, v${MAJOR}"
+fi
+
+echo "Tagged and pushed: ${GIT_SHA}, ${GIT_BRANCH}-${GIT_SHA}"
+```
+
+<Callout type="tip" title="Use OCI Image Labels for Metadata">
+Tags alone do not carry enough metadata. Use OCI labels in your Dockerfile to embed build information directly into the image:
+
+```dockerfile
+LABEL org.opencontainers.image.source="https://github.com/acme/auth-service"
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.version="${VERSION}"
+```
+</Callout>
+
+## Image Promotion Workflows
+
+In production environments, images should never go directly from a developer's machine to production. Instead, they flow through a promotion pipeline where each stage adds confidence.
+
+```
+Image Promotion Pipeline:
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│          │    │          │    │          │    │          │
+│   Build  │───▶│   Dev    │───▶│ Staging  │───▶│   Prod   │
+│          │    │          │    │          │    │          │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘
+     │               │               │               │
+  CI builds     Auto-deploy     Manual gate      Manual gate
+  & tests       on merge        + integration    + approval
+                                tests            + sign-off
+
+  Tags:          Tags:           Tags:            Tags:
+  :git-sha      :dev-sha        :staging-sha     :v1.2.3
+  :branch-sha   :dev-latest     :rc-1.2.3        :prod-latest
+```
+
+### Single Registry with Promotion Tags
+
+```bash
+#!/bin/bash
+# promote.sh — Promote an image between environments
+set -euo pipefail
+
+REGISTRY="registry.acme.io"
+IMAGE="${REGISTRY}/platform/auth-service"
+SOURCE_TAG=$1   # e.g., "dev-a1b2c3d"
+TARGET_ENV=$2   # e.g., "staging" or "prod"
+
+echo "Promoting ${IMAGE}:${SOURCE_TAG} to ${TARGET_ENV}..."
+
+# Pull the source image
+docker pull ${IMAGE}:${SOURCE_TAG}
+
+# Get the git SHA from the source tag
+GIT_SHA=$(echo ${SOURCE_TAG} | grep -o '[a-f0-9]\{7\}$')
+
+# Re-tag for the target environment
+docker tag ${IMAGE}:${SOURCE_TAG} ${IMAGE}:${TARGET_ENV}-${GIT_SHA}
+docker tag ${IMAGE}:${SOURCE_TAG} ${IMAGE}:${TARGET_ENV}-latest
+
+# Push the new tags
+docker push ${IMAGE}:${TARGET_ENV}-${GIT_SHA}
+docker push ${IMAGE}:${TARGET_ENV}-latest
+
+echo "Promoted to ${IMAGE}:${TARGET_ENV}-${GIT_SHA}"
+```
+
+### Multi-Registry Promotion
+
+Larger organizations use separate registries per environment for stronger isolation:
+
+```bash
+#!/bin/bash
+# promote-cross-registry.sh
+set -euo pipefail
+
+DEV_REGISTRY="dev-registry.acme.io"
+STAGING_REGISTRY="staging-registry.acme.io"
+PROD_REGISTRY="prod-registry.acme.io"
+
+SERVICE="platform/auth-service"
+SOURCE_TAG=$1
+TARGET_ENV=$2
+
+case ${TARGET_ENV} in
+  staging)
+    SOURCE="${DEV_REGISTRY}/${SERVICE}:${SOURCE_TAG}"
+    TARGET="${STAGING_REGISTRY}/${SERVICE}:${SOURCE_TAG}"
+    ;;
+  prod)
+    SOURCE="${STAGING_REGISTRY}/${SERVICE}:${SOURCE_TAG}"
+    TARGET="${PROD_REGISTRY}/${SERVICE}:${SOURCE_TAG}"
+    ;;
+  *)
+    echo "Unknown environment: ${TARGET_ENV}"
+    exit 1
+    ;;
+esac
+
+echo "Promoting ${SOURCE} → ${TARGET}"
+
+# Use crane for efficient cross-registry copy (no docker pull/push needed)
+crane copy ${SOURCE} ${TARGET}
+
+# Alternatively with skopeo:
+# skopeo copy docker://${SOURCE} docker://${TARGET}
+
+echo "Promotion complete."
+```
+
+<Callout type="info" title="Crane and Skopeo for Registry Operations">
+Tools like `crane` (from Google) and `skopeo` (from Red Hat) can copy images between registries without pulling them to the local Docker daemon. This is much faster for large images and does not require Docker to be running. Install crane with `go install github.com/google/go-containerregistry/cmd/crane@latest` or use the pre-built binaries.
+</Callout>
+
+## Automated Vulnerability Scanning
+
+Every image you deploy could contain known vulnerabilities in OS packages, language libraries, or application dependencies. Automated scanning catches these before they reach production.
+
+### Scanning with Trivy
+
+Trivy is an open-source scanner that checks for vulnerabilities in OS packages, language-specific dependencies, IaC misconfigurations, and secrets.
+
+```bash
+# Install Trivy
+curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+# Scan a local image
+trivy image myapp:latest
+
+# Example output:
+# myapp:latest (alpine 3.19.1)
+# ============================
+# Total: 3 (UNKNOWN: 0, LOW: 1, MEDIUM: 1, HIGH: 1, CRITICAL: 0)
+#
+# ┌──────────────┬───────────────┬──────────┬────────┬───────────────────┐
+# │   Library    │ Vulnerability │ Severity │ Status │  Installed Version│
+# ├──────────────┼───────────────┼──────────┼────────┼───────────────────┤
+# │ libcrypto3   │ CVE-2024-0727 │ MEDIUM   │ fixed  │ 3.1.4-r2         │
+# │ libssl3      │ CVE-2024-0727 │ MEDIUM   │ fixed  │ 3.1.4-r2         │
+# │ busybox      │ CVE-2023-42366│ LOW      │ fixed  │ 1.36.1-r15       │
+# └──────────────┴───────────────┴──────────┴────────┴───────────────────┘
+
+# Scan with severity filter (fail on HIGH or CRITICAL)
+trivy image --severity HIGH,CRITICAL --exit-code 1 myapp:latest
+
+# Scan and output JSON for CI/CD processing
+trivy image --format json --output results.json myapp:latest
+
+# Scan a remote image without pulling it
+trivy image --remote registry.acme.io/platform/auth-service:v2.3.1
+
+# Scan for secrets embedded in the image
+trivy image --scanners secret myapp:latest
+
+# Scan filesystem (useful in CI before building)
+trivy fs --scanners vuln,secret ./
+```
+
+### Integrating Trivy in CI/CD
+
+```yaml
+# .github/workflows/image-scan.yml
+name: Image Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t myapp:${{ github.sha }} .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'myapp:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Run Trivy and upload SARIF
+        uses: aquasecurity/trivy-action@master
+        if: always()
+        with:
+          image-ref: 'myapp:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+```
+
+### Scanning with Docker Scout
+
+Docker Scout is Docker's native vulnerability analysis tool, integrated directly into Docker Desktop and Docker Hub.
+
+```bash
+# Enable Docker Scout (included with Docker Desktop)
+docker scout quickview myapp:latest
+
+# Example output:
+#     Target     │  myapp:latest     │    0C     2H     5M    12L
+#       digest   │  sha256:abc123... │
+#     Base image │  python:3.12-slim │    0C     1H     3M     8L
+#
+# What's next:
+#   View vulnerabilities → docker scout cves myapp:latest
+#   View base image recommendations → docker scout recommendations myapp:latest
+
+# Detailed CVE listing
+docker scout cves myapp:latest
+
+# Get base image recommendations
+docker scout recommendations myapp:latest
+# Output:
+#   Recommended fixes:
+#   - Update base image python:3.12-slim to python:3.12.2-slim
+#     Fixes: 1H, 2M vulnerabilities
+#   - Consider switching to python:3.12-alpine
+#     Reduces: 4L vulnerabilities, saves 85 MB
+
+# Compare two image versions
+docker scout compare myapp:v2.3.0 --to myapp:v2.3.1
+# Shows which vulnerabilities were fixed or introduced
+
+# Continuous monitoring in Docker Hub (enable in settings)
+# Docker Scout will alert you when new CVEs affect your images
+```
+
+<Callout type="warning" title="Scanning Is Not Optional">
+In 2024, the average Docker Hub image contained 56 known vulnerabilities. Container images inherit vulnerabilities from their base images, OS packages, and application dependencies. A scan that passes today may fail tomorrow when new CVEs are published. Set up continuous scanning, not just build-time checks.
+</Callout>
+
+## Image Signing with Docker Content Trust and Cosign
+
+Vulnerability scanning tells you what is in an image. Image signing tells you who built it and whether it has been tampered with.
+
+### Docker Content Trust (DCT)
+
+```bash
+# Enable Docker Content Trust globally
+export DOCKER_CONTENT_TRUST=1
+
+# Now all push and pull operations require signatures
+docker push registry.acme.io/platform/auth-service:v2.3.1
+# First push creates a root key and repository key
+# Output:
+# Signing and pushing trust data for registry.acme.io/platform/auth-service:v2.3.1
+# Enter passphrase for root key with ID abc1234:
+# Enter passphrase for repository key with ID def5678:
+# Successfully signed registry.acme.io/platform/auth-service:v2.3.1
+
+# Pulling now verifies the signature
+docker pull registry.acme.io/platform/auth-service:v2.3.1
+# Pull tag from registry.acme.io/platform/auth-service
+# sha256:abc123...
+# Tagging registry.acme.io/platform/auth-service:v2.3.1
+
+# Unsigned images will be rejected
+docker pull registry.acme.io/unknown/image:v1
+# Error: remote trust data does not exist
+
+# View trust data
+docker trust inspect registry.acme.io/platform/auth-service
+
+# Delegate signing to a specific CI/CD key
+docker trust key generate ci-server
+docker trust signer add --key ci-server.pub ci-server registry.acme.io/platform/auth-service
+```
+
+### Signing with Cosign (Sigstore)
+
+Cosign is a more modern approach from the Sigstore project, supported by the Linux Foundation. It uses keyless signing with OIDC identity providers.
+
+```bash
+# Install cosign
+curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
+sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+sudo chmod +x /usr/local/bin/cosign
+
+# Generate a key pair (traditional approach)
+cosign generate-key-pair
+# Enter password for private key:
+# Private key written to cosign.key
+# Public key written to cosign.pub
+
+# Sign an image
+cosign sign --key cosign.key registry.acme.io/platform/auth-service:v2.3.1
+# Pushing signature to: registry.acme.io/platform/auth-service
+# Signature pushed successfully
+
+# Verify a signature
+cosign verify --key cosign.pub registry.acme.io/platform/auth-service:v2.3.1
+# Verification for registry.acme.io/platform/auth-service:v2.3.1 --
+# The following checks were performed on each of these signatures:
+#   - The cosign claims were validated
+#   - The signatures were verified against the specified public key
+# [{"critical":{"identity":{"docker-reference":"registry.acme.io/platform/auth-service"}...}]
+
+# Keyless signing with OIDC (GitHub Actions, GitLab CI, etc.)
+# No keys to manage — identity comes from the CI provider
+cosign sign --yes registry.acme.io/platform/auth-service:v2.3.1
+# This opens a browser for OIDC authentication (interactive)
+# In CI, it uses the ambient OIDC token automatically
+
+# Attach an SBOM (Software Bill of Materials) to the image
+cosign attach sbom --sbom sbom.spdx registry.acme.io/platform/auth-service:v2.3.1
+
+# Verify in CI/CD before deployment
+cosign verify --key cosign.pub registry.acme.io/platform/auth-service:v2.3.1 || {
+  echo "Image signature verification failed! Aborting deployment."
+  exit 1
+}
+```
+
+### Enforcing Signatures in Kubernetes
+
+```yaml
+# Kyverno policy to enforce image signatures
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signatures
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: verify-cosign-signature
+      match:
+        resources:
+          kinds:
+            - Pod
+      verifyImages:
+        - imageReferences:
+            - "registry.acme.io/*"
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
+                      -----END PUBLIC KEY-----
+```
+
+<Callout type="tip" title="Keyless Is the Future">
+Cosign's keyless signing eliminates the need to manage signing keys. In CI/CD environments like GitHub Actions, the runner's OIDC identity becomes the signer. The Sigstore transparency log (Rekor) provides a public, auditable record of all signatures. For new projects, prefer keyless cosign over Docker Content Trust.
+</Callout>
+
+## Base Image Management
+
+Base images are the foundation of every image your organization builds. Managing them well prevents cascading vulnerabilities and inconsistencies.
+
+### Golden Base Images
+
+```dockerfile
+# Dockerfile.base-python — Organization's standard Python base image
+# Build: docker build -t registry.acme.io/platform/base-python:3.12 -f Dockerfile.base-python .
+FROM python:3.12-slim AS base
+
+LABEL org.opencontainers.image.authors="platform-team@acme.io"
+LABEL org.opencontainers.image.source="https://github.com/acme/base-images"
+LABEL acme.base-image.version="2024.03"
+LABEL acme.base-image.support="platform-team@acme.io"
+
+# Security: run as non-root
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
+# Install common dependencies all Python services need
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install standard Python packages
+RUN pip install --no-cache-dir \
+    structlog==24.1.0 \
+    prometheus-client==0.20.0 \
+    opentelemetry-api==1.23.0 \
+    opentelemetry-sdk==1.23.0
+
+# Health check endpoint support
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:8080/healthz || exit 1
+
+WORKDIR /app
+USER appuser
+
+# Teams extend this base:
+# FROM registry.acme.io/platform/base-python:3.12
+# COPY requirements.txt .
+# RUN pip install -r requirements.txt
+# COPY . .
+# CMD ["python", "main.py"]
+```
+
+### Automated Base Image Rebuilds
+
+```yaml
+# .github/workflows/base-image-rebuild.yml
+name: Rebuild Base Images
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 6 AM
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  rebuild:
+    strategy:
+      matrix:
+        base:
+          - { name: "base-python", file: "Dockerfile.base-python", tag: "3.12" }
+          - { name: "base-node", file: "Dockerfile.base-node", tag: "20-slim" }
+          - { name: "base-go", file: "Dockerfile.base-go", tag: "1.22" }
+          - { name: "base-java", file: "Dockerfile.base-java", tag: "21-jre" }
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build base image
+        run: |
+          docker build \
+            -f ${{ matrix.base.file }} \
+            -t registry.acme.io/platform/${{ matrix.base.name }}:${{ matrix.base.tag }} \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            .
+
+      - name: Scan for vulnerabilities
+        run: |
+          trivy image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            registry.acme.io/platform/${{ matrix.base.name }}:${{ matrix.base.tag }}
+
+      - name: Push if scan passes
+        run: |
+          docker push registry.acme.io/platform/${{ matrix.base.name }}:${{ matrix.base.tag }}
+
+      - name: Notify dependent teams
+        if: success()
+        run: |
+          # Trigger rebuilds of downstream images
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/acme/services/dispatches" \
+            -d '{"event_type":"base-image-updated","client_payload":{"image":"${{ matrix.base.name }}","tag":"${{ matrix.base.tag }}"}}'
+```
+
+### Tracking Base Image Usage
+
+```bash
+#!/bin/bash
+# find-base-image-usage.sh — Find all images using a specific base
+set -euo pipefail
+
+BASE_IMAGE=${1:-"python:3.12-slim"}
+REGISTRY="registry.acme.io"
+
+echo "Finding images based on: ${BASE_IMAGE}"
+echo "========================================="
+
+# List all repositories in the registry
+REPOS=$(curl -s "https://${REGISTRY}/v2/_catalog" | jq -r '.repositories[]')
+
+for repo in ${REPOS}; do
+  # Get the latest tag
+  TAGS=$(curl -s "https://${REGISTRY}/v2/${repo}/tags/list" | jq -r '.tags[]' 2>/dev/null | head -5)
+
+  for tag in ${TAGS}; do
+    # Check the image config for the base image
+    MANIFEST=$(curl -s "https://${REGISTRY}/v2/${repo}/manifests/${tag}" \
+      -H "Accept: application/vnd.docker.distribution.manifest.v2+json")
+
+    CONFIG_DIGEST=$(echo ${MANIFEST} | jq -r '.config.digest')
+    CONFIG=$(curl -s "https://${REGISTRY}/v2/${repo}/blobs/${CONFIG_DIGEST}")
+
+    # Check history for the base image
+    if echo ${CONFIG} | jq -r '.history[].created_by' 2>/dev/null | grep -q "${BASE_IMAGE}"; then
+      echo "  ${REGISTRY}/${repo}:${tag}"
+    fi
+  done
+done
+```
+
+## Registry Garbage Collection and Retention Policies
+
+Docker registries grow continuously. Without cleanup policies, they consume disk space and slow down operations.
+
+### Understanding Registry Storage
+
+```
+Registry Storage Structure:
+┌─────────────────────────────────────────────────────┐
+│ /var/lib/registry/                                   │
+│ ├── docker/                                          │
+│ │   └── registry/                                    │
+│ │       └── v2/                                      │
+│ │           ├── blobs/                               │
+│ │           │   └── sha256/                          │
+│ │           │       ├── ab/ab1234... (layer data)    │
+│ │           │       ├── cd/cd5678... (config)        │
+│ │           │       └── ef/ef9012... (shared layer)  │
+│ │           └── repositories/                        │
+│ │               └── platform/                        │
+│ │                   └── auth-service/                │
+│ │                       ├── _manifests/              │
+│ │                       │   ├── revisions/           │
+│ │                       │   └── tags/                │
+│ │                       │       ├── v2.3.1/          │
+│ │                       │       └── v2.3.0/          │
+│ │                       └── _layers/                 │
+│ │                           └── sha256/              │
+│ │                               └── ab1234.../       │
+└─────────────────────────────────────────────────────┘
+
+Key concept: Blobs are shared across images.
+Deleting a tag does NOT delete the blob if another tag uses it.
+Garbage collection removes unreferenced blobs.
+```
+
+### Registry Garbage Collection
+
+```bash
+# For Docker Distribution (self-hosted registry)
+
+# Step 1: Delete the tag via the API
+# Get the digest for the tag
+DIGEST=$(curl -s -I \
+  -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+  "https://registry.acme.io/v2/platform/auth-service/manifests/v2.2.0" \
+  | grep Docker-Content-Digest | awk '{print $2}' | tr -d '\r')
+
+# Delete the manifest
+curl -X DELETE "https://registry.acme.io/v2/platform/auth-service/manifests/${DIGEST}"
+
+# Step 2: Run garbage collection (must be done on the registry server)
+# Dry run first to see what would be deleted
+docker exec registry bin/registry garbage-collect \
+  /etc/docker/registry/config.yml --dry-run
+
+# Example output:
+# platform/auth-service
+# platform/auth-service: marking manifest sha256:abc123...
+# platform/auth-service: marking blob sha256:def456...
+#
+# 3 blobs marked, 12 blobs and 0 manifests eligible for deletion
+# Would free up 847.3 MB
+
+# Actually run garbage collection
+docker exec registry bin/registry garbage-collect \
+  /etc/docker/registry/config.yml
+
+# Step 3: Optionally remove empty repositories
+docker exec registry bin/registry garbage-collect \
+  /etc/docker/registry/config.yml --delete-untagged
+```
+
+### Automated Retention Policies
+
+```bash
+#!/bin/bash
+# registry-cleanup.sh — Enforce retention policies
+set -euo pipefail
+
+REGISTRY="registry.acme.io"
+MAX_TAGS_PER_REPO=50
+MAX_AGE_DAYS=90
+
+echo "Registry Cleanup — $(date)"
+echo "Policy: Keep ${MAX_TAGS_PER_REPO} most recent tags, delete tags older than ${MAX_AGE_DAYS} days"
+echo "========================================================================="
+
+# Get all repositories
+REPOS=$(curl -s "https://${REGISTRY}/v2/_catalog" | jq -r '.repositories[]')
+
+for repo in ${REPOS}; do
+  echo ""
+  echo "Processing: ${repo}"
+
+  # Get all tags
+  TAGS=$(curl -s "https://${REGISTRY}/v2/${repo}/tags/list" | jq -r '.tags[]' 2>/dev/null)
+  TAG_COUNT=$(echo "${TAGS}" | wc -l)
+
+  if [ ${TAG_COUNT} -le ${MAX_TAGS_PER_REPO} ]; then
+    echo "  ${TAG_COUNT} tags — within limit, skipping"
+    continue
+  fi
+
+  echo "  ${TAG_COUNT} tags — exceeds limit of ${MAX_TAGS_PER_REPO}"
+
+  # Sort tags by creation date and delete the oldest
+  TAGS_TO_DELETE=$((TAG_COUNT - MAX_TAGS_PER_REPO))
+  echo "  Deleting ${TAGS_TO_DELETE} oldest tags..."
+
+  # Protected tags (never delete these patterns)
+  PROTECTED_PATTERN="^(v[0-9]+\.[0-9]+\.[0-9]+|prod-|release-).*"
+
+  for tag in $(echo "${TAGS}" | head -${TAGS_TO_DELETE}); do
+    if echo "${tag}" | grep -qE "${PROTECTED_PATTERN}"; then
+      echo "  PROTECTED: ${repo}:${tag} — skipping"
+      continue
+    fi
+
+    echo "  Deleting: ${repo}:${tag}"
+    DIGEST=$(curl -s -I \
+      -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+      "https://${REGISTRY}/v2/${repo}/manifests/${tag}" \
+      | grep Docker-Content-Digest | awk '{print $2}' | tr -d '\r')
+
+    curl -s -X DELETE "https://${REGISTRY}/v2/${repo}/manifests/${DIGEST}"
+  done
+done
+
+echo ""
+echo "Cleanup complete. Run garbage-collect on the registry server to reclaim disk space."
+```
+
+<Callout type="info" title="Harbor and ECR Have Built-In Retention">
+If you use Harbor, ECR, GCR, or ACR, you get retention policies built into the registry itself. For example, Harbor supports tag retention rules like "keep the 10 most recent tags matching `v*`" and "delete tags not pulled in 30 days." AWS ECR supports lifecycle policies with similar rules. If you run a self-hosted Docker Distribution registry, you need to manage this yourself.
+</Callout>
+
+## Image Layer Analysis with Dive
+
+Understanding what is in each layer of your image helps you optimize size and catch unnecessary files.
+
+### Using Dive
+
+```bash
+# Install dive
+wget https://github.com/wagoodman/dive/releases/latest/download/dive_linux_amd64.deb
+sudo dpkg -i dive_linux_amd64.deb
+
+# Analyze an image
+dive myapp:latest
+
+# Dive shows an interactive TUI:
+# ┌──────────────────────────────────────────────────────────────────┐
+# │ Layers ─────────────────────────────── │ Layer Details           │
+# │                                        │                         │
+# │ ● 1: FROM python:3.12-slim   45 MB    │ Current Layer Contents  │
+# │ ● 2: RUN apt-get install     12 MB    │                         │
+# │ ● 3: COPY requirements.txt   0.5 KB   │ /app/                   │
+# │ ● 4: RUN pip install         67 MB    │   requirements.txt      │
+# │ ● 5: COPY . .                4.2 MB   │   main.py               │
+# │ ● 6: CMD ["python","main"]   0 B      │   utils/                │
+# │                                        │   tests/    ← wasted!  │
+# │ Image Size: 128.7 MB                  │   .git/     ← wasted!  │
+# │ Wasted Space: 8.3 MB                  │   __pycache__/          │
+# │ Efficiency: 93%                        │                         │
+# └──────────────────────────────────────────────────────────────────┘
+
+# Run in CI mode (non-interactive, returns exit code)
+dive myapp:latest --ci
+# Output:
+#   Rules:
+#     highestImageEfficiency: PASS (93% >= 90%)
+#     highestWastedBytes: FAIL (8.3 MB > 5 MB)
+#     lowestUserWastedPercent: PASS (2% <= 10%)
+
+# CI integration with custom thresholds
+CI=true dive myapp:latest \
+  --highestWastedBytes=10MB \
+  --highestImageEfficiency=0.90 \
+  --lowestUserWastedPercent=0.05
+```
+
+### Analyzing Layers Without Dive
+
+```bash
+# View image history and layer sizes
+docker history myapp:latest --no-trunc --format "table {{.Size}}\t{{.CreatedBy}}"
+
+# Example output:
+# SIZE        CREATED BY
+# 0B          CMD ["python" "main.py"]
+# 4.2MB       COPY . . # buildkit
+# 67MB        RUN pip install -r requirements.txt # buildkit
+# 512B        COPY requirements.txt . # buildkit
+# 12MB        RUN apt-get update && apt-get install -y curl... # buildkit
+# 45MB        /bin/sh -c #(nop) FROM python:3.12-slim
+
+# Export and inspect an image filesystem
+docker save myapp:latest -o myapp.tar
+mkdir myapp-extracted
+tar xf myapp.tar -C myapp-extracted
+ls myapp-extracted/
+# blobs/  index.json  manifest.json  oci-layout
+
+# Inspect the manifest to see layer order
+cat myapp-extracted/manifest.json | jq '.[0].Layers'
+# [
+#   "sha256:abc123.../layer.tar",
+#   "sha256:def456.../layer.tar",
+#   ...
+# ]
+
+# Extract a specific layer to see its contents
+tar tf myapp-extracted/blobs/sha256/abc123... | head -20
+```
+
+### Image Size Optimization Checklist
+
+| Check | Command | Expected |
+|-------|---------|----------|
+| Total image size | `docker images myapp:latest` | Under 200 MB for most services |
+| Number of layers | `docker inspect myapp:latest \| jq '.[0].RootFS.Layers \| length'` | Under 15 layers |
+| Wasted space | `dive myapp:latest --ci` | Under 5% wasted |
+| No test files | `docker run --rm myapp:latest find /app -name "test*"` | No output |
+| No build tools | `docker run --rm myapp:latest which gcc make` | Not found |
+| No package caches | `docker run --rm myapp:latest du -sh /var/cache/apt` | 0 or nonexistent |
+| No .git directory | `docker run --rm myapp:latest ls /app/.git` | Not found |
+
+<Callout type="tip" title="Use .dockerignore Religiously">
+The `.dockerignore` file prevents unnecessary files from entering the build context in the first place. Always include:
+```
+.git
+.gitignore
+node_modules
+__pycache__
+*.pyc
+.env
+.env.*
+docker-compose*.yml
+Dockerfile*
+README.md
+tests/
+docs/
+.coverage
+.pytest_cache
+```
+</Callout>
+
+## Putting It All Together: Image Lifecycle
+
+```
+Complete Image Lifecycle:
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                   │
+│  Developer commits code                                           │
+│       │                                                           │
+│       ▼                                                           │
+│  CI Pipeline Starts                                               │
+│       │                                                           │
+│       ├── Build from golden base image                            │
+│       ├── Run unit tests                                          │
+│       ├── Build Docker image with git SHA tag                     │
+│       ├── Scan with Trivy (fail on CRITICAL/HIGH)                │
+│       ├── Analyze with dive (fail if efficiency < 90%)           │
+│       ├── Push to dev registry                                    │
+│       └── Sign with cosign                                        │
+│       │                                                           │
+│       ▼                                                           │
+│  Dev Environment (auto-deploy)                                    │
+│       │                                                           │
+│       ├── Integration tests pass                                  │
+│       └── Promote to staging (re-tag + copy)                     │
+│       │                                                           │
+│       ▼                                                           │
+│  Staging Environment (manual gate)                                │
+│       │                                                           │
+│       ├── QA approval                                             │
+│       ├── Performance tests pass                                  │
+│       └── Promote to production (semver tag + sign)              │
+│       │                                                           │
+│       ▼                                                           │
+│  Production Environment                                           │
+│       │                                                           │
+│       ├── Verify signature before deploy                          │
+│       ├── Rolling update with health checks                       │
+│       └── Continuous scanning for new CVEs                       │
+│       │                                                           │
+│       ▼                                                           │
+│  Retirement                                                       │
+│       │                                                           │
+│       ├── Retention policy removes old tags                       │
+│       └── Garbage collection reclaims disk space                 │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+<Exercise
+  title="Implement an Image Promotion Pipeline"
+  difficulty="intermediate"
+  xpReward={35}
+  estimatedMinutes={25}
+  objectives={[
+    "Create a multi-stage tagging script for dev, staging, and production",
+    "Implement promotion gates with vulnerability scanning",
+    "Build a rollback mechanism using image digests",
+    "Set up retention policies for old image tags"
+  ]}
+  hints={[
+    "Use shell scripts that accept source tag and target environment as arguments",
+    "Run trivy between promotion stages as a gate",
+    "Store image digests in a file for rollback tracking",
+    "Use crane or skopeo for cross-registry copies to avoid pulling large images locally"
+  ]}
+  validationCriteria={`
+Create the following files:
+
+1. \`promote.sh\` — Promotion script:
+\`\`\`bash
+#!/bin/bash
+set -euo pipefail
+
+REGISTRY="registry.acme.io"
+SERVICE="platform/auth-service"
+SOURCE_TAG=\${1:?"Usage: promote.sh <source-tag> <target-env>"}
+TARGET_ENV=\${2:?"Usage: promote.sh <source-tag> <target-env>"}
+
+IMAGE="\${REGISTRY}/\${SERVICE}"
+
+echo "=== Image Promotion Pipeline ==="
+echo "Source: \${IMAGE}:\${SOURCE_TAG}"
+echo "Target: \${TARGET_ENV}"
+echo ""
+
+# Step 1: Pull the source image
+echo "[1/4] Pulling source image..."
+docker pull \${IMAGE}:\${SOURCE_TAG}
+
+# Step 2: Scan for vulnerabilities
+echo "[2/4] Running vulnerability scan..."
+trivy image --severity CRITICAL,HIGH --exit-code 1 \${IMAGE}:\${SOURCE_TAG}
+if [ \$? -ne 0 ]; then
+  echo "FAILED: Vulnerability scan found CRITICAL/HIGH issues"
+  exit 1
+fi
+
+# Step 3: Re-tag for target environment
+GIT_SHA=$(echo \${SOURCE_TAG} | grep -o '[a-f0-9]\\{7\\}$' || echo \${SOURCE_TAG})
+TARGET_TAG="\${TARGET_ENV}-\${GIT_SHA}"
+
+echo "[3/4] Tagging as \${IMAGE}:\${TARGET_TAG}..."
+docker tag \${IMAGE}:\${SOURCE_TAG} \${IMAGE}:\${TARGET_TAG}
+
+# Save digest for rollback
+docker inspect --format='{{.Id}}' \${IMAGE}:\${TARGET_TAG} >> .promotion-history
+
+# Step 4: Push
+echo "[4/4] Pushing \${IMAGE}:\${TARGET_TAG}..."
+docker push \${IMAGE}:\${TARGET_TAG}
+
+echo ""
+echo "Promotion successful: \${IMAGE}:\${TARGET_TAG}"
+\`\`\`
+
+2. \`cleanup.sh\` — Retention policy script:
+\`\`\`bash
+#!/bin/bash
+set -euo pipefail
+KEEP_LAST=20
+PROTECTED="^(v[0-9]+|prod-|release-)"
+
+echo "Cleaning up old tags (keeping last \${KEEP_LAST})..."
+# List tags, filter out protected, sort by date, delete oldest
+\`\`\`
+
+Verify:
+1. Run \`./promote.sh dev-a1b2c3d staging\`
+2. Check the image exists with the staging tag
+3. Run \`./promote.sh staging-a1b2c3d prod\` — should scan again before promoting
+  `}
+/>
+
+<Exercise
+  title="Set Up Automated Vulnerability Scanning"
+  difficulty="advanced"
+  xpReward={40}
+  estimatedMinutes={30}
+  objectives={[
+    "Configure Trivy to scan images on build and on schedule",
+    "Set up severity thresholds that block deployments",
+    "Generate scan reports in multiple formats (table, JSON, SARIF)",
+    "Create a policy file to ignore accepted vulnerabilities"
+  ]}
+  hints={[
+    "Use trivy image with --exit-code 1 and --severity flags for gating",
+    "Create a .trivyignore file for known accepted CVEs",
+    "Use --format json to generate machine-readable reports",
+    "Set up a cron-based rescan of production images to catch new CVEs"
+  ]}
+  validationCriteria={`
+Create a scanning setup:
+
+1. \`scan.sh\` — Image scanning script:
+\`\`\`bash
+#!/bin/bash
+set -euo pipefail
+
+IMAGE=\${1:?"Usage: scan.sh <image:tag>"}
+REPORT_DIR="./scan-reports/$(date +%Y%m%d)"
+mkdir -p \${REPORT_DIR}
+
+echo "=== Vulnerability Scan: \${IMAGE} ==="
+
+# Table output for human review
+echo "[1/3] Generating table report..."
+trivy image --severity CRITICAL,HIGH,MEDIUM \${IMAGE} | tee \${REPORT_DIR}/scan-table.txt
+
+# JSON output for automation
+echo "[2/3] Generating JSON report..."
+trivy image --format json --output \${REPORT_DIR}/scan-results.json \${IMAGE}
+
+# Check for blockers
+echo "[3/3] Checking for blocking vulnerabilities..."
+CRITICAL_COUNT=$(trivy image --format json \${IMAGE} | jq '[.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length')
+HIGH_COUNT=$(trivy image --format json \${IMAGE} | jq '[.Results[].Vulnerabilities[]? | select(.Severity=="HIGH")] | length')
+
+echo ""
+echo "Summary:"
+echo "  Critical: \${CRITICAL_COUNT}"
+echo "  High:     \${HIGH_COUNT}"
+
+if [ \${CRITICAL_COUNT} -gt 0 ]; then
+  echo "BLOCKED: \${CRITICAL_COUNT} critical vulnerabilities found"
+  exit 1
+fi
+
+if [ \${HIGH_COUNT} -gt 5 ]; then
+  echo "WARNING: \${HIGH_COUNT} high vulnerabilities (threshold: 5)"
+  exit 1
+fi
+
+echo "PASSED: Image meets security requirements"
+\`\`\`
+
+2. \`.trivyignore\` — Accepted vulnerabilities:
+\`\`\`
+# Accepted by security team on 2026-01-15
+# Reason: Not exploitable in our configuration
+CVE-2024-0727
+
+# Accepted: low risk, fix not available
+CVE-2023-42366
+\`\`\`
+
+3. \`rescan-production.sh\` — Scheduled rescan:
+\`\`\`bash
+#!/bin/bash
+# Run via cron: 0 6 * * * /opt/scripts/rescan-production.sh
+PROD_IMAGES=(
+  "registry.acme.io/platform/auth-service:prod-latest"
+  "registry.acme.io/platform/api-gateway:prod-latest"
+  "registry.acme.io/payments/processor:prod-latest"
+)
+
+for img in "\${PROD_IMAGES[@]}"; do
+  echo "Rescanning \${img}..."
+  trivy image --severity CRITICAL --exit-code 0 --format json \${img} > /tmp/rescan.json
+
+  NEW_CVES=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' /tmp/rescan.json)
+  if [ \${NEW_CVES} -gt 0 ]; then
+    echo "ALERT: \${NEW_CVES} new critical CVEs in \${img}"
+    # Send alert to Slack/PagerDuty
+  fi
+done
+\`\`\`
+  `}
+/>
+
+<MiniProject
+  title="Enterprise Image Management System"
+  difficulty="advanced"
+  xpReward={75}
+  estimatedMinutes={45}
+  objectives={[
+    "Design a complete image naming convention for a multi-team organization",
+    "Build a CI/CD pipeline with build, scan, sign, and promote stages",
+    "Implement automated base image management with rebuild triggers",
+    "Create registry maintenance scripts with retention policies and garbage collection"
+  ]}
+  hints={[
+    "Start with a naming-policy.yaml that documents your conventions",
+    "Build the CI pipeline as a shell script that chains build, scan, sign, push steps",
+    "Use cosign for signing and trivy for scanning in the pipeline",
+    "Create a Makefile that orchestrates all the scripts for easy execution"
+  ]}
+  validationCriteria={`
+Build a complete image management system:
+
+1. \`naming-policy.yaml\` — Organization naming conventions
+2. \`Makefile\` — Orchestrates all image management tasks:
+\`\`\`makefile
+REGISTRY := registry.acme.io
+TEAM := platform
+SERVICE := auth-service
+VERSION := $(shell git describe --tags --always)
+GIT_SHA := $(shell git rev-parse --short HEAD)
+IMAGE := $(REGISTRY)/$(TEAM)/$(SERVICE)
+
+.PHONY: build scan sign push promote clean
+
+build:
+	docker build -t $(IMAGE):$(GIT_SHA) .
+
+scan:
+	trivy image --severity CRITICAL,HIGH --exit-code 1 $(IMAGE):$(GIT_SHA)
+	dive $(IMAGE):$(GIT_SHA) --ci
+
+sign:
+	cosign sign --key cosign.key $(IMAGE):$(GIT_SHA)
+
+push: build scan sign
+	docker push $(IMAGE):$(GIT_SHA)
+
+promote:
+	@read -p "Target environment (staging/prod): " ENV; \\
+	./promote.sh $(GIT_SHA) $$ENV
+
+clean:
+	./cleanup.sh $(IMAGE) 30
+\`\`\`
+
+3. \`Dockerfile\` — Uses golden base image:
+\`\`\`dockerfile
+FROM registry.acme.io/platform/base-python:3.12
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY src/ ./src/
+CMD ["python", "-m", "src.main"]
+\`\`\`
+
+4. \`promote.sh\` — Cross-environment promotion with gates
+5. \`cleanup.sh\` — Registry retention and garbage collection
+6. \`scan.sh\` — Comprehensive vulnerability scanning
+
+Verify the complete workflow:
+1. \`make build\` — builds with git SHA tag
+2. \`make scan\` — scans and analyzes layers
+3. \`make push\` — pushes signed image
+4. \`make promote\` — promotes between environments
+5. \`make clean\` — enforces retention policies
+  `}
+/>
+
+## Key Takeaways
+
+- **Naming conventions** prevent chaos in shared registries — use `registry/team/service:tag` patterns and enforce them with CI checks
+- **Tagging strategies** should combine semver for releases, git SHA for traceability, and branch names for environment routing
+- **Image promotion** adds confidence at each stage — never push directly from development to production
+- **Vulnerability scanning** with Trivy or Docker Scout must happen at build time and continuously in production to catch new CVEs
+- **Image signing** with cosign or Docker Content Trust guarantees image provenance and integrity
+- **Golden base images** standardize your organization's foundation and make security patches manageable
+- **Registry garbage collection** is essential — without it, storage grows unbounded
+- **Layer analysis** with dive helps you catch wasted space, unnecessary files, and optimization opportunities
+- **Automate everything** — manual image management does not scale beyond a handful of services
+
+## What's Next
+
+In the next lesson, you will go beyond the Docker CLI and interact directly with the **Docker Engine API**. You will learn to build custom tools, automation scripts, and monitoring dashboards by talking to the Docker daemon's REST API over its Unix socket. This opens up a world of possibilities for building Docker-native tooling tailored to your organization's needs.

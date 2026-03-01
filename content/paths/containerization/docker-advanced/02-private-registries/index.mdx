@@ -1,0 +1,1076 @@
+---
+title: "Private Docker Registries"
+description: "Deploy and manage private Docker registries for your organization, from self-hosted solutions with registry:2 to enterprise Harbor deployments and cloud-native options like ECR, GCR, and ACR, with image promotion pipelines and storage management."
+order: 2
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - "docker-fundamentals/06-docker-images"
+  - "docker-advanced/01-build-optimization"
+objectives:
+  - Deploy a self-hosted Docker registry with TLS and authentication
+  - Configure storage backends for registries including S3, Azure Blob, and GCS
+  - Set up Harbor as an enterprise registry with vulnerability scanning and replication
+  - Integrate with cloud registries (Amazon ECR, Google GCR, Azure ACR) using IAM
+  - Design and implement an image promotion pipeline across environments
+  - Manage registry storage with garbage collection and retention policies
+tags:
+  - docker
+  - registry
+  - harbor
+  - ecr
+  - security
+  - advanced
+---
+
+<Callout type="story" title="The Story">
+Your company has been pushing images to Docker Hub under a free plan. Last Tuesday, a junior developer accidentally pushed an image tagged `latest` that contained database credentials in an environment variable. By the time someone noticed, the image had been pulled 47 times -- and since it was a public repository, anyone on the internet could have seen those credentials. The incident response takes three days: rotating every credential, auditing access logs, and writing a post-mortem. The CTO reads the post-mortem and asks, "Why are we storing production images on a public service we do not control?" You are tasked with standing up a private registry infrastructure within the week. By Friday, every image flows through your own registry with vulnerability scanning, access control, and audit logging. No more 3 AM credential rotation fire drills.
+</Callout>
+
+## Why Private Registries Matter
+
+Docker Hub is excellent for open-source images, but production workloads demand more control:
+
+```
+Public Registry Risks:
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│  ┌─────────┐     ┌──────────┐     ┌──────────┐ │
+│  │ Your    │────►│ Docker   │────►│ Anyone   │ │
+│  │ Images  │     │ Hub      │     │ Can Pull │ │
+│  └─────────┘     └──────────┘     └──────────┘ │
+│                                                 │
+│  Problems:                                      │
+│  • Rate limits (100 pulls/6hr anonymous)        │
+│  • Public by default on free plans              │
+│  • No vulnerability scanning (free tier)        │
+│  • No audit logs of who pulled what             │
+│  • Supply chain attacks (image tampering)       │
+│  • Outages affect your deployments              │
+│  • Data sovereignty / compliance concerns       │
+│                                                 │
+└─────────────────────────────────────────────────┘
+
+Private Registry Benefits:
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│  ┌─────────┐     ┌──────────┐     ┌──────────┐ │
+│  │ CI/CD   │────►│ Private  │────►│ Only     │ │
+│  │ Pipeline│     │ Registry │     │ Your     │ │
+│  └─────────┘     │          │     │ Clusters │ │
+│                  │ • Auth   │     └──────────┘ │
+│                  │ • Scan   │                   │
+│                  │ • Audit  │                   │
+│                  │ • TLS    │                   │
+│                  └──────────┘                   │
+│                                                 │
+│  Benefits:                                      │
+│  • Full access control (RBAC)                   │
+│  • Vulnerability scanning on push               │
+│  • Complete audit trail                         │
+│  • No rate limits                               │
+│  • Faster pulls (local network)                 │
+│  • Compliance and data sovereignty              │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+## Docker Hub: Organizations and Access Tokens
+
+Before moving to self-hosted, understand Docker Hub's enterprise features. Many teams start here.
+
+### Organizations and Teams
+
+```bash
+# Create an organization on Docker Hub (via web UI)
+# Organization: mycompany
+# Teams: developers, devops, readonly
+
+# Team permissions:
+# ┌───────────────┬────────┬────────┬────────┐
+# │ Repository    │ devops │ dev    │ readonly│
+# ├───────────────┼────────┼────────┼────────┤
+# │ mycompany/api │ Admin  │ Write  │ Read   │
+# │ mycompany/web │ Admin  │ Write  │ Read   │
+# │ mycompany/db  │ Admin  │ None   │ None   │
+# └───────────────┴────────┴────────┴────────┘
+```
+
+### Personal Access Tokens
+
+Never use your Docker Hub password in CI/CD. Use access tokens with scoped permissions:
+
+```bash
+# Create a token via Docker Hub UI:
+# Account Settings → Security → New Access Token
+# Permissions: Read, Write, or Read/Write/Delete
+
+# Login with token (CI/CD)
+echo "${DOCKER_HUB_TOKEN}" | docker login --username myuser --password-stdin
+
+# Login with token (interactive)
+docker login --username myuser
+# Paste token when prompted for password
+
+# Verify login
+docker info | grep Username
+# Username: myuser
+```
+
+<Callout type="warning" title="Docker Hub Rate Limits">
+Anonymous pulls: 100 per 6 hours per IP. Authenticated pulls: 200 per 6 hours. Paid plans: higher or unlimited. In CI/CD, always authenticate even for public images to get higher rate limits. A single Kubernetes cluster pulling images for 50 pods can hit the limit in minutes.
+</Callout>
+
+## Self-Hosted Registry: registry:2
+
+Docker provides an official registry image that you can run anywhere. It is lightweight, fast, and production-ready with proper configuration.
+
+### Basic Registry Setup
+
+```bash
+# Run a basic registry (development only -- no TLS, no auth)
+docker run -d \
+  --name registry \
+  -p 5000:5000 \
+  -v registry-data:/var/lib/registry \
+  registry:2
+
+# Verify it is running
+curl http://localhost:5000/v2/
+# {}
+
+# Tag and push an image
+docker tag myapp:latest localhost:5000/myapp:latest
+docker push localhost:5000/myapp:latest
+
+# List repositories
+curl http://localhost:5000/v2/_catalog
+# {"repositories":["myapp"]}
+
+# List tags for an image
+curl http://localhost:5000/v2/myapp/tags/list
+# {"name":"myapp","tags":["latest"]}
+```
+
+### Production Registry with TLS
+
+```bash
+# Step 1: Generate TLS certificates (or use your CA-signed certs)
+mkdir -p /opt/registry/{certs,auth,data}
+
+# Generate self-signed certificate (for testing)
+openssl req -newkey rsa:4096 -nodes -sha256 \
+  -keyout /opt/registry/certs/domain.key \
+  -addext "subjectAltName = DNS:registry.mycompany.com" \
+  -x509 -days 365 \
+  -out /opt/registry/certs/domain.crt \
+  -subj "/CN=registry.mycompany.com"
+
+# Step 2: Create htpasswd authentication
+docker run --rm --entrypoint htpasswd \
+  httpd:2 -Bbn admin 'S3cur3P@ssw0rd' > /opt/registry/auth/htpasswd
+
+docker run --rm --entrypoint htpasswd \
+  httpd:2 -Bbn ciuser 'C1Tok3nP@ss' >> /opt/registry/auth/htpasswd
+
+# Step 3: Run the registry with TLS and auth
+docker run -d \
+  --name registry \
+  --restart=always \
+  -p 443:443 \
+  -v /opt/registry/data:/var/lib/registry \
+  -v /opt/registry/certs:/certs \
+  -v /opt/registry/auth:/auth \
+  -e REGISTRY_HTTP_ADDR=0.0.0.0:443 \
+  -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/domain.crt \
+  -e REGISTRY_HTTP_TLS_KEY=/certs/domain.key \
+  -e REGISTRY_AUTH=htpasswd \
+  -e REGISTRY_AUTH_HTPASSWD_REALM="Registry Realm" \
+  -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+  registry:2
+```
+
+```bash
+# Login and push
+docker login registry.mycompany.com
+# Username: admin
+# Password: S3cur3P@ssw0rd
+
+docker tag myapp:latest registry.mycompany.com/myapp:v1.0.0
+docker push registry.mycompany.com/myapp:v1.0.0
+```
+
+### Registry Configuration File
+
+For complex setups, use a configuration file instead of environment variables:
+
+```yaml
+# /opt/registry/config.yml
+version: 0.1
+log:
+  level: info
+  formatter: json
+  fields:
+    service: registry
+
+storage:
+  filesystem:
+    rootdirectory: /var/lib/registry
+  delete:
+    enabled: true
+  cache:
+    blobdescriptor: inmemory
+  maintenance:
+    uploadpurging:
+      enabled: true
+      age: 168h    # 7 days
+      interval: 24h
+      dryrun: false
+
+http:
+  addr: 0.0.0.0:443
+  tls:
+    certificate: /certs/domain.crt
+    key: /certs/domain.key
+  headers:
+    X-Content-Type-Options: [nosniff]
+
+auth:
+  htpasswd:
+    realm: "Registry Realm"
+    path: /auth/htpasswd
+
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3
+
+notifications:
+  events:
+    includereferences: true
+  endpoints:
+    - name: webhook
+      url: https://hooks.mycompany.com/registry
+      headers:
+        Authorization: [Bearer webhook-token]
+      timeout: 1s
+      threshold: 5
+      backoff: 5s
+```
+
+```bash
+# Run with config file
+docker run -d \
+  --name registry \
+  --restart=always \
+  -p 443:443 \
+  -v /opt/registry/config.yml:/etc/docker/registry/config.yml \
+  -v /opt/registry/data:/var/lib/registry \
+  -v /opt/registry/certs:/certs \
+  -v /opt/registry/auth:/auth \
+  registry:2
+```
+
+<Callout type="info" title="Registry API Endpoints">
+The Docker Registry HTTP API V2 is the standard interface. Key endpoints: `GET /v2/` (version check), `GET /v2/_catalog` (list repos), `GET /v2/{name}/tags/list` (list tags), `GET /v2/{name}/manifests/{reference}` (get manifest), `DELETE /v2/{name}/manifests/{reference}` (delete image). All cloud registries implement this same API.
+</Callout>
+
+## Storage Backends: S3, Azure Blob, GCS
+
+Production registries should not store images on local disk. External storage provides durability, scalability, and geographic distribution.
+
+### Amazon S3 Backend
+
+```yaml
+# Registry config with S3 storage
+storage:
+  s3:
+    accesskey: AKIAIOSFODNN7EXAMPLE
+    secretkey: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    region: us-east-1
+    bucket: mycompany-docker-registry
+    rootdirectory: /registry
+    encrypt: true              # Server-side encryption
+    secure: true               # HTTPS to S3
+    chunksize: 5242880         # 5MB multipart upload chunks
+    multipartcopychunksize: 33554432  # 32MB
+    multipartcopymaxconcurrency: 100
+    multipartcopythresholdsize: 33554432
+```
+
+For production, use IAM roles instead of hardcoded keys:
+
+```yaml
+# S3 with IAM role (no keys in config!)
+storage:
+  s3:
+    region: us-east-1
+    bucket: mycompany-docker-registry
+    rootdirectory: /registry
+    encrypt: true
+    # accesskey and secretkey omitted -- uses IAM role
+```
+
+### Azure Blob Storage Backend
+
+```yaml
+storage:
+  azure:
+    accountname: mycompanyregistry
+    accountkey: "base64-encoded-key"
+    container: docker-images
+    realm: core.windows.net
+```
+
+### Google Cloud Storage Backend
+
+```yaml
+storage:
+  gcs:
+    bucket: mycompany-docker-registry
+    rootdirectory: /registry
+    chunksize: 5242880
+    # Uses Application Default Credentials
+    # Run registry on GCE with appropriate service account
+```
+
+### Storage Backend Comparison
+
+```
+┌──────────────┬────────────┬────────────────┬──────────────────┐
+│ Backend      │ Durability │ Cost Model     │ Best For         │
+├──────────────┼────────────┼────────────────┼──────────────────┤
+│ Filesystem   │ Depends on │ Disk cost      │ Dev/test, small  │
+│              │ disk setup │                │ deployments      │
+├──────────────┼────────────┼────────────────┼──────────────────┤
+│ Amazon S3    │ 99.999999% │ Per-GB + req   │ AWS deployments  │
+│              │ (11 nines) │                │                  │
+├──────────────┼────────────┼────────────────┼──────────────────┤
+│ Azure Blob   │ 99.999999% │ Per-GB + req   │ Azure deployments│
+│              │            │ + egress       │                  │
+├──────────────┼────────────┼────────────────┼──────────────────┤
+│ Google GCS   │ 99.999999% │ Per-GB + ops   │ GCP deployments  │
+│              │            │                │                  │
+├──────────────┼────────────┼────────────────┼──────────────────┤
+│ Swift        │ Varies     │ Self-hosted    │ OpenStack envs   │
+│              │            │                │                  │
+└──────────────┴────────────┴────────────────┴──────────────────┘
+```
+
+## Harbor: Enterprise-Grade Registry
+
+Harbor is an open-source registry developed by VMware that adds enterprise features on top of the Docker distribution. It is the CNCF graduated project for container registry.
+
+```
+Harbor Architecture:
+┌───────────────────────────────────────────────────────┐
+│                      Harbor                           │
+│                                                       │
+│  ┌─────────┐  ┌───────────┐  ┌────────────────────┐  │
+│  │  Nginx  │  │   Core    │  │   Job Service      │  │
+│  │ (Proxy) │──│  Service  │──│ (Async tasks)      │  │
+│  └────┬────┘  └─────┬─────┘  │ • Replication      │  │
+│       │             │        │ • Garbage collection│  │
+│       │        ┌────┴────┐   │ • Scanning          │  │
+│       │        │ Registry│   └────────────────────┘  │
+│       │        │  (v2)   │                           │
+│       │        └────┬────┘   ┌────────────────────┐  │
+│       │             │        │     Trivy           │  │
+│       │        ┌────┴────┐   │ (Vulnerability      │  │
+│       │        │ Storage │   │  Scanner)           │  │
+│       │        │ Backend │   └────────────────────┘  │
+│       │        └─────────┘                           │
+│       │                      ┌────────────────────┐  │
+│       │                      │    PostgreSQL      │  │
+│       │                      │    (Metadata)      │  │
+│       │                      └────────────────────┘  │
+│       │                      ┌────────────────────┐  │
+│       │                      │    Redis           │  │
+│       │                      │    (Cache/Queue)   │  │
+│       │                      └────────────────────┘  │
+└───────┴───────────────────────────────────────────────┘
+```
+
+### Installing Harbor
+
+```bash
+# Download Harbor installer
+HARBOR_VERSION=2.10.0
+wget https://github.com/goharbor/harbor/releases/download/v${HARBOR_VERSION}/harbor-offline-installer-v${HARBOR_VERSION}.tgz
+tar xzf harbor-offline-installer-v${HARBOR_VERSION}.tgz
+cd harbor
+
+# Copy and edit the configuration
+cp harbor.yml.tmpl harbor.yml
+```
+
+```yaml
+# harbor.yml (key sections)
+hostname: registry.mycompany.com
+
+# HTTPS configuration
+https:
+  port: 443
+  certificate: /opt/harbor/certs/server.crt
+  private_key: /opt/harbor/certs/server.key
+
+# Admin password (change immediately after first login)
+harbor_admin_password: Harbor12345
+
+# Database
+database:
+  password: db-password-change-me
+  max_idle_conns: 100
+  max_open_conns: 900
+
+# Storage (default: filesystem)
+storage_service:
+  s3:
+    accesskey: AKIAIOSFODNN7EXAMPLE
+    secretkey: wJalrXUtnFEMI/K7MDENG
+    region: us-east-1
+    bucket: mycompany-harbor
+    rootdirectory: /harbor
+
+# Trivy vulnerability scanner
+trivy:
+  ignore_unfixed: false
+  security_check: vuln
+  insecure: false
+
+# Log rotation
+log:
+  level: info
+  local:
+    rotate_count: 50
+    rotate_size: 200M
+    location: /var/log/harbor
+```
+
+```bash
+# Install Harbor
+./install.sh --with-trivy --with-notary
+
+# Verify
+docker compose ps
+# NAME                COMMAND                  STATUS
+# harbor-core         "/harbor/entrypoint.…"   Up
+# harbor-db           "/docker-entrypoint.…"   Up
+# harbor-jobservice   "/harbor/entrypoint.…"   Up
+# harbor-log          "/bin/sh -c /usr/loc…"   Up
+# harbor-portal       "nginx -g 'daemon of…"   Up
+# nginx               "nginx -g 'daemon of…"   Up
+# redis               "redis-server /etc/r…"   Up
+# registry            "/home/harbor/entryp…"   Up
+# registryctl         "/home/harbor/start.…"   Up
+# trivy-adapter       "/home/scanner/entry…"   Up
+```
+
+### Harbor Features
+
+```bash
+# Login to Harbor
+docker login registry.mycompany.com
+# Username: admin
+# Password: Harbor12345
+
+# Push an image to a Harbor project
+docker tag myapp:v1.0.0 registry.mycompany.com/production/myapp:v1.0.0
+docker push registry.mycompany.com/production/myapp:v1.0.0
+
+# Harbor automatically scans the image for vulnerabilities
+# View results in the Harbor UI or via API:
+curl -u admin:Harbor12345 \
+  "https://registry.mycompany.com/api/v2.0/projects/production/repositories/myapp/artifacts/v1.0.0/additions/vulnerabilities"
+```
+
+<Callout type="tip" title="Harbor Robot Accounts">
+For CI/CD, create robot accounts instead of using user credentials. Robot accounts are scoped to specific projects and operations: `harbor → Project → Robot Accounts → New Robot Account`. They generate tokens that expire and can be revoked without affecting user accounts.
+</Callout>
+
+## Cloud Registries: ECR, GCR, ACR
+
+Each major cloud provider offers a managed registry service integrated with their IAM system.
+
+### Amazon Elastic Container Registry (ECR)
+
+```bash
+# Create an ECR repository
+aws ecr create-repository \
+  --repository-name mycompany/api \
+  --image-scanning-configuration scanOnPush=true \
+  --encryption-configuration encryptionType=AES256 \
+  --region us-east-1
+
+# Output:
+# {
+#     "repository": {
+#         "repositoryArn": "arn:aws:ecr:us-east-1:123456789012:repository/mycompany/api",
+#         "repositoryUri": "123456789012.dkr.ecr.us-east-1.amazonaws.com/mycompany/api",
+#         ...
+#     }
+# }
+
+# Authenticate Docker to ECR (token valid for 12 hours)
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin \
+  123456789012.dkr.ecr.us-east-1.amazonaws.com
+
+# Tag and push
+docker tag myapp:v1.0.0 \
+  123456789012.dkr.ecr.us-east-1.amazonaws.com/mycompany/api:v1.0.0
+docker push \
+  123456789012.dkr.ecr.us-east-1.amazonaws.com/mycompany/api:v1.0.0
+```
+
+### ECR Lifecycle Policy
+
+```json
+{
+  "rules": [
+    {
+      "rulePriority": 1,
+      "description": "Keep last 10 production images",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["prod-"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 10
+      },
+      "action": {
+        "type": "expire"
+      }
+    },
+    {
+      "rulePriority": 2,
+      "description": "Remove untagged images older than 7 days",
+      "selection": {
+        "tagStatus": "untagged",
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 7
+      },
+      "action": {
+        "type": "expire"
+      }
+    },
+    {
+      "rulePriority": 3,
+      "description": "Remove dev images older than 30 days",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["dev-"],
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 30
+      },
+      "action": {
+        "type": "expire"
+      }
+    }
+  ]
+}
+```
+
+```bash
+# Apply lifecycle policy
+aws ecr put-lifecycle-policy \
+  --repository-name mycompany/api \
+  --lifecycle-policy-text file://lifecycle-policy.json
+```
+
+### Google Artifact Registry (GAR)
+
+```bash
+# Google Artifact Registry (successor to GCR)
+# Create a repository
+gcloud artifacts repositories create docker-repo \
+  --repository-format=docker \
+  --location=us-central1 \
+  --description="Production Docker images"
+
+# Configure Docker authentication
+gcloud auth configure-docker us-central1-docker.pkg.dev
+
+# Tag and push
+docker tag myapp:v1.0.0 \
+  us-central1-docker.pkg.dev/my-project/docker-repo/myapp:v1.0.0
+docker push \
+  us-central1-docker.pkg.dev/my-project/docker-repo/myapp:v1.0.0
+
+# List images
+gcloud artifacts docker images list \
+  us-central1-docker.pkg.dev/my-project/docker-repo
+```
+
+### Azure Container Registry (ACR)
+
+```bash
+# Create an ACR
+az acr create \
+  --resource-group myResourceGroup \
+  --name mycompanyregistry \
+  --sku Premium \
+  --admin-enabled false
+
+# Login with Azure CLI
+az acr login --name mycompanyregistry
+
+# Tag and push
+docker tag myapp:v1.0.0 mycompanyregistry.azurecr.io/myapp:v1.0.0
+docker push mycompanyregistry.azurecr.io/myapp:v1.0.0
+
+# Enable content trust (image signing)
+az acr config content-trust update \
+  --name mycompanyregistry \
+  --status enabled
+```
+
+### Cloud Registry Comparison
+
+```
+┌──────────────────┬──────────────┬──────────────┬──────────────┐
+│ Feature          │ AWS ECR      │ Google GAR   │ Azure ACR    │
+├──────────────────┼──────────────┼──────────────┼──────────────┤
+│ Auth Method      │ IAM + token  │ gcloud + SA  │ AAD + SP     │
+│ Token Expiry     │ 12 hours     │ 1 hour       │ 3 hours      │
+│ Vuln Scanning    │ Basic + Enh. │ On-Demand    │ Defender     │
+│ Replication      │ Cross-region │ Multi-region │ Geo-replic.  │
+│ Image Signing    │ Sigstore     │ Binary Auth  │ Content Trust│
+│ Lifecycle Policy │ Yes          │ Cleanup pol. │ Retention    │
+│ Private Link     │ VPC Endpoint │ Private SA   │ Private EP   │
+│ Pricing          │ Per-GB + req │ Per-GB + req │ Tier-based   │
+│ Free Tier        │ 500MB/month  │ 500MB/month  │ None         │
+└──────────────────┴──────────────┴──────────────┴──────────────┘
+```
+
+<Callout type="info" title="Cross-Cloud Strategy">
+If you operate across multiple clouds, consider Harbor as a unified registry with replication to each cloud. Harbor can replicate images to ECR, GAR, and ACR, giving you a single push target with automatic distribution. Alternatively, use a cloud-agnostic tool like Skopeo to copy images between registries without pulling them locally.
+</Callout>
+
+## Image Promotion: Dev to Staging to Production
+
+A robust image promotion pipeline ensures that only tested, scanned, and approved images reach production.
+
+### Promotion Pipeline Architecture
+
+```
+Image Promotion Pipeline:
+
+  Developer pushes code
+         │
+         ▼
+  ┌──────────────┐
+  │   CI Build   │──► registry.mycompany.com/dev/api:git-abc123
+  │   & Test     │
+  └──────┬───────┘
+         │ Tests pass
+         ▼
+  ┌──────────────┐
+  │  Vulnerability│──► Scan report generated
+  │    Scan      │    CVE threshold check
+  └──────┬───────┘
+         │ No critical CVEs
+         ▼
+  ┌──────────────┐
+  │   Promote    │──► registry.mycompany.com/staging/api:v1.2.3-rc1
+  │  to Staging  │
+  └──────┬───────┘
+         │ QA approval
+         ▼
+  ┌──────────────┐
+  │   Promote    │──► registry.mycompany.com/prod/api:v1.2.3
+  │ to Production│
+  └──────────────┘
+```
+
+### Implementation with Tags and Repositories
+
+```bash
+#!/bin/bash
+# promote.sh - Image promotion script
+
+set -euo pipefail
+
+IMAGE_NAME=$1      # e.g., "api"
+SOURCE_TAG=$2      # e.g., "git-abc123"
+TARGET_ENV=$3      # e.g., "staging" or "prod"
+VERSION=$4         # e.g., "v1.2.3"
+
+REGISTRY="registry.mycompany.com"
+
+# Source and target paths
+case $TARGET_ENV in
+  staging)
+    SOURCE="${REGISTRY}/dev/${IMAGE_NAME}:${SOURCE_TAG}"
+    TARGET="${REGISTRY}/staging/${IMAGE_NAME}:${VERSION}-rc"
+    ;;
+  prod)
+    SOURCE="${REGISTRY}/staging/${IMAGE_NAME}:${VERSION}-rc"
+    TARGET="${REGISTRY}/prod/${IMAGE_NAME}:${VERSION}"
+    ;;
+  *)
+    echo "Unknown environment: ${TARGET_ENV}"
+    exit 1
+    ;;
+esac
+
+echo "Promoting ${SOURCE} → ${TARGET}"
+
+# Option 1: Pull, retag, push (requires local Docker)
+docker pull "${SOURCE}"
+docker tag "${SOURCE}" "${TARGET}"
+docker push "${TARGET}"
+
+# Option 2: Use Skopeo (no local Docker needed, faster)
+# skopeo copy "docker://${SOURCE}" "docker://${TARGET}"
+
+# Option 3: Use crane (lightweight Go tool)
+# crane copy "${SOURCE}" "${TARGET}"
+
+echo "Promotion complete: ${TARGET}"
+```
+
+### Promotion with Skopeo (No Docker Needed)
+
+```bash
+# Skopeo copies images between registries without pulling to local Docker
+# This is faster and does not require Docker daemon access
+
+# Copy between registries
+skopeo copy \
+  --src-creds user:pass \
+  --dest-creds user:pass \
+  docker://registry.mycompany.com/dev/api:git-abc123 \
+  docker://registry.mycompany.com/staging/api:v1.2.3-rc1
+
+# Copy from Docker Hub to private registry
+skopeo copy \
+  docker://docker.io/library/nginx:1.25 \
+  docker://registry.mycompany.com/base/nginx:1.25
+
+# Inspect an image without pulling
+skopeo inspect docker://registry.mycompany.com/prod/api:v1.2.3
+# Returns manifest, config, layers info as JSON
+```
+
+<Callout type="warning" title="Immutable Tags in Production">
+Never use `latest` in production. Use immutable tags like `v1.2.3` or `git-abc123`. Some registries (Harbor, ECR) support tag immutability policies that prevent overwriting a tag once pushed. Enable this for production repositories.
+</Callout>
+
+### Tagging Strategy
+
+```
+Recommended tagging strategy:
+
+┌─────────────────────┬─────────────────────────────────────┐
+│ Tag Format          │ When / Purpose                      │
+├─────────────────────┼─────────────────────────────────────┤
+│ git-{short-sha}     │ Every CI build (unique, traceable)  │
+│ branch-{name}       │ Latest build from a branch          │
+│ pr-{number}         │ Pull request preview builds         │
+│ v{major.minor.patch}│ Release versions (SemVer)           │
+│ v{version}-rc{n}    │ Release candidates in staging       │
+│ {date}-{sha}        │ Time-based with traceability        │
+│ latest              │ ONLY for development, NEVER prod    │
+└─────────────────────┴─────────────────────────────────────┘
+
+Example image lifecycle:
+  Build:    registry/dev/api:git-a1b2c3d
+  Staging:  registry/staging/api:v1.2.3-rc1
+  Prod:     registry/prod/api:v1.2.3
+```
+
+## Garbage Collection and Storage Management
+
+Docker registries accumulate unused layers over time. Without garbage collection, storage costs grow indefinitely.
+
+### How Registry Garbage Collection Works
+
+```
+Before Garbage Collection:
+┌────────────────────────────────────────┐
+│ Registry Storage                       │
+│                                        │
+│ Image: api:v1 ──► Layer A, Layer B     │
+│ Image: api:v2 ──► Layer A, Layer C     │  Layer B is orphaned
+│ (api:v1 tag deleted)                   │  (no manifest references it)
+│                                        │
+│ Layer A: 45 MB  (shared, keep)         │
+│ Layer B: 120 MB (orphaned, garbage!)   │
+│ Layer C: 89 MB  (referenced, keep)     │
+└────────────────────────────────────────┘
+
+After Garbage Collection:
+┌────────────────────────────────────────┐
+│ Registry Storage                       │
+│                                        │
+│ Image: api:v2 ──► Layer A, Layer C     │
+│                                        │
+│ Layer A: 45 MB  (kept)                 │
+│ Layer C: 89 MB  (kept)                 │
+│                                        │
+│ Freed: 120 MB                          │
+└────────────────────────────────────────┘
+```
+
+### Running Garbage Collection
+
+```bash
+# For self-hosted registry:2
+
+# Step 1: Delete the image tag via API
+curl -X DELETE \
+  -u admin:password \
+  "https://registry.mycompany.com/v2/myapp/manifests/sha256:abc123..."
+
+# Step 2: Run garbage collection (registry must be read-only or stopped)
+# Dry run first:
+docker exec registry bin/registry garbage-collect \
+  /etc/docker/registry/config.yml --dry-run
+
+# Output:
+# myapp
+# myapp: marking manifest sha256:abc123...
+# myapp: marking blob sha256:def456...
+# 3 blobs marked, 1 blobs and 0 manifests eligible for deletion
+# Would free 120.5 MB
+
+# Actual garbage collection:
+docker exec registry bin/registry garbage-collect \
+  /etc/docker/registry/config.yml
+
+# Step 3: Optionally delete untagged manifests too
+docker exec registry bin/registry garbage-collect \
+  /etc/docker/registry/config.yml --delete-untagged
+```
+
+### Automated Garbage Collection Schedule
+
+```bash
+#!/bin/bash
+# gc-registry.sh - Run weekly via cron
+
+REGISTRY_CONTAINER="registry"
+CONFIG="/etc/docker/registry/config.yml"
+LOG_FILE="/var/log/registry-gc.log"
+
+echo "$(date) - Starting registry garbage collection" >> "$LOG_FILE"
+
+# Put registry in read-only mode
+docker exec "$REGISTRY_CONTAINER" \
+  sed -i 's/readonly: false/readonly: true/' "$CONFIG"
+
+# Wait for in-flight pushes to complete
+sleep 30
+
+# Run garbage collection
+docker exec "$REGISTRY_CONTAINER" \
+  bin/registry garbage-collect "$CONFIG" --delete-untagged \
+  >> "$LOG_FILE" 2>&1
+
+# Restore read-write mode
+docker exec "$REGISTRY_CONTAINER" \
+  sed -i 's/readonly: true/readonly: false/' "$CONFIG"
+
+echo "$(date) - Garbage collection complete" >> "$LOG_FILE"
+```
+
+```bash
+# Add to crontab: run every Sunday at 3 AM
+# crontab -e
+0 3 * * 0 /opt/registry/gc-registry.sh
+```
+
+<Callout type="tip" title="Harbor Garbage Collection">
+Harbor has built-in scheduled garbage collection configured through the web UI. Navigate to Administration, then Garbage Collection, and set a schedule. Harbor handles read-only mode automatically and provides a report of freed storage.
+</Callout>
+
+## Registry Security Best Practices
+
+```
+Registry Security Checklist:
+┌────────────────────────────────────────────────────┐
+│                                                    │
+│  ☐ TLS enabled (never expose HTTP registries)      │
+│  ☐ Authentication required (htpasswd, LDAP, OIDC)  │
+│  ☐ RBAC configured (project-level permissions)     │
+│  ☐ Vulnerability scanning on push                  │
+│  ☐ Image signing enabled (Cosign or Notary)        │
+│  ☐ Network access restricted (firewall/VPN)        │
+│  ☐ Audit logging enabled                           │
+│  ☐ Immutable tags for production repositories      │
+│  ☐ Lifecycle policies for automatic cleanup        │
+│  ☐ Regular backups of registry data                │
+│  ☐ Content trust / admission control enforced      │
+│  ☐ No latest tag in production deployments         │
+│                                                    │
+└────────────────────────────────────────────────────┘
+```
+
+### Image Signing with Cosign
+
+```bash
+# Install cosign
+brew install cosign  # macOS
+# or download from GitHub releases
+
+# Generate a key pair
+cosign generate-key-pair
+# Creates cosign.key (private) and cosign.pub (public)
+
+# Sign an image after pushing
+cosign sign --key cosign.key registry.mycompany.com/prod/api:v1.2.3
+
+# Verify an image before pulling
+cosign verify --key cosign.pub registry.mycompany.com/prod/api:v1.2.3
+
+# Keyless signing with OIDC (Sigstore/Fulcio)
+cosign sign registry.mycompany.com/prod/api:v1.2.3
+# Opens browser for OIDC authentication
+```
+
+<Exercise title="Deploy a Private Docker Registry" difficulty="intermediate" xpReward={35} estimatedMinutes={25}
+  objectives={["Deploy a Docker registry with TLS and basic authentication", "Configure storage and test image push/pull operations", "Implement garbage collection for storage management", "Set up a registry UI for browsing images"]}
+  hints={["Use self-signed certificates for the exercise -- openssl can generate them", "The htpasswd file format is username:bcrypt-hash, one per line", "Test with curl commands against the V2 API before using docker push", "The joxit/docker-registry-ui image provides a nice web interface"]}
+  validationCriteria={["Registry is running with TLS (HTTPS) and responds to /v2/ endpoint", "At least two users are configured with htpasswd authentication", "An image can be pushed to and pulled from the registry", "The registry V2 API correctly lists repositories and tags", "Garbage collection can be run and reports freed space", "A registry UI is accessible via browser showing pushed images"]}
+>
+
+Deploy a production-ready private Docker registry on your local machine.
+
+**Step 1: Certificate Setup**
+
+Generate a self-signed TLS certificate for `registry.local`. Add the certificate to your Docker daemon's trusted certificates.
+
+**Step 2: Authentication**
+
+Create an htpasswd file with at least two users:
+- `admin` with full access
+- `readonly` for pull-only access (enforcement requires a separate authorization service, but create the user)
+
+**Step 3: Registry Deployment**
+
+Create a `docker-compose.yml` that runs:
+- The registry with TLS, auth, and a mounted data volume
+- A registry UI (use `joxit/docker-registry-ui`)
+
+**Step 4: Test Operations**
+
+```bash
+# Login, tag, push, pull, and verify
+docker login registry.local
+docker tag alpine:latest registry.local/test/alpine:v1
+docker push registry.local/test/alpine:v1
+docker pull registry.local/test/alpine:v1
+curl -u admin:password https://registry.local/v2/_catalog
+```
+
+**Step 5: Garbage Collection**
+
+Push multiple versions, delete one via the API, and run garbage collection. Document the storage freed.
+
+</Exercise>
+
+<Exercise title="Configure an Image Promotion Pipeline" difficulty="intermediate" xpReward={35} estimatedMinutes={20}
+  objectives={["Design a multi-environment image promotion strategy", "Implement promotion scripts that move images between registry projects", "Add vulnerability scanning gates to the promotion process", "Create a tagging strategy that provides full traceability"]}
+  hints={["Use separate registry projects or repositories for each environment (dev, staging, prod)", "Skopeo or crane can copy images between repositories without pulling locally", "Include the git commit SHA in all tags for traceability", "Check vulnerability scan results before promoting to production"]}
+  validationCriteria={["Three environment repositories exist: dev, staging, prod", "A promotion script moves images between environments with proper retagging", "Images in staging have -rc suffix tags, production has clean version tags", "A gate check prevents promoting images with critical vulnerabilities", "The git commit SHA is preserved throughout the promotion chain", "A rollback procedure is documented for reverting to a previous version"]}
+>
+
+Build an image promotion pipeline that moves container images from development through staging to production.
+
+**Pipeline Requirements:**
+
+1. **Environment Repositories:**
+   - `dev/` - Receives all CI builds (tagged with git SHA)
+   - `staging/` - Receives promoted candidates (tagged with version-rc)
+   - `prod/` - Receives approved releases (tagged with version)
+
+2. **Promotion Script (`promote.sh`):**
+   - Accepts: image name, source tag, target environment, version
+   - Copies image between repositories (retags, does not rebuild)
+   - Validates source image exists before promoting
+   - Logs all promotions with timestamps
+
+3. **Vulnerability Gate:**
+   - Before promoting to prod, check scan results
+   - Block promotion if critical or high CVEs are found
+   - Allow override with explicit `--force` flag and reason
+
+4. **Tagging Strategy:**
+   - Dev: `dev/api:git-a1b2c3d`
+   - Staging: `staging/api:v1.2.3-rc1` (also `staging/api:git-a1b2c3d`)
+   - Prod: `prod/api:v1.2.3` (also `prod/api:git-a1b2c3d`)
+
+**Bonus:** Add a `rollback.sh` script that promotes a previous production version back to the `latest` tag.
+
+</Exercise>
+
+<MiniProject title="Enterprise Registry Infrastructure" difficulty="advanced" xpReward={50} estimatedMinutes={40}
+  objectives={["Deploy Harbor as an enterprise registry with full configuration", "Integrate vulnerability scanning and enforce scan policies", "Configure replication between registries for disaster recovery", "Build a complete CI/CD pipeline that pushes, scans, promotes, and deploys images"]}
+  hints={["Harbor's docker-compose deployment includes all required services", "Create separate Harbor projects for dev, staging, and prod", "Use Harbor robot accounts for CI/CD authentication", "Harbor's replication can push to ECR, GAR, or another Harbor instance"]}
+  validationCriteria={["Harbor is deployed with TLS, authentication, and Trivy scanning", "At least three Harbor projects exist with appropriate access controls", "Vulnerability scanning runs automatically on push", "A scan policy blocks images with critical CVEs from being pulled", "A CI/CD pipeline (Makefile or script) handles build, push, scan, and promote", "Robot accounts are used for CI/CD instead of user credentials", "Garbage collection is configured on a schedule", "Replication is configured to at least one target (can be a second registry)", "Documentation covers deployment, operations, and troubleshooting"]}
+>
+
+Build a complete enterprise registry infrastructure using Harbor.
+
+**Infrastructure Components:**
+
+1. **Harbor Deployment:**
+   - Deploy Harbor with docker-compose
+   - Configure TLS with proper certificates
+   - Enable Trivy vulnerability scanner
+   - Configure S3 or filesystem storage
+
+2. **Project Structure:**
+   - `base-images` - Curated base images (nginx, python, node)
+   - `development` - CI build outputs
+   - `staging` - Promoted release candidates
+   - `production` - Approved releases (immutable tags)
+
+3. **Security Configuration:**
+   - Robot accounts for CI/CD pipelines
+   - Scan policy: block pulls of images with Critical CVEs
+   - Content trust for production images
+   - LDAP or OIDC integration (can be simulated with configuration)
+
+4. **Automation:**
+   - CI/CD pipeline script that:
+     - Builds and pushes to development project
+     - Waits for scan completion
+     - Checks scan results against policy
+     - Promotes to staging on success
+     - Promotes to production after manual approval
+   - Garbage collection cron job
+   - Storage usage monitoring script
+
+5. **Disaster Recovery:**
+   - Configure replication to a second registry instance
+   - Test failover by simulating primary registry failure
+   - Document recovery procedure
+
+**Deliverables:**
+- `docker-compose.yml` for Harbor deployment
+- `harbor.yml` configuration file
+- `promote.sh` promotion script
+- `ci-pipeline.sh` CI/CD pipeline script
+- `monitoring.sh` storage monitoring script
+- Architecture diagram showing the complete setup
+
+</MiniProject>
+
+## Key Takeaways
+
+- Private registries provide access control, vulnerability scanning, audit logging, and compliance that public registries cannot offer for production workloads
+- The Docker registry:2 image provides a lightweight self-hosted registry that is production-ready with proper TLS, authentication, and storage backend configuration
+- Harbor is the leading open-source enterprise registry with built-in vulnerability scanning (Trivy), RBAC, replication, and garbage collection
+- Cloud registries (ECR, GAR, ACR) integrate with their respective IAM systems and are the easiest option if you are already on that cloud provider
+- Image promotion pipelines (dev to staging to production) ensure only tested and scanned images reach production, with immutable tags preventing accidental overwrites
+- Garbage collection is essential for managing registry storage costs -- orphaned layers accumulate quickly without regular cleanup
+- Image signing with Cosign or Notary provides supply chain security by verifying image integrity and provenance
+- Use Skopeo or crane to copy images between registries efficiently without requiring a local Docker daemon
+
+## What's Next
+
+With your images securely stored and promoted through environments, the next challenge is connecting your containers together. In the next lesson, **Advanced Docker Networking**, you will master overlay networks for multi-host communication, macvlan for direct network access, custom DNS resolution, IPv6 configuration, and network policies that control traffic between containers.

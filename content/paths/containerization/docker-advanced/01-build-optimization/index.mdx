@@ -1,0 +1,1103 @@
+---
+title: "Build Optimization with BuildKit"
+description: "Master Docker BuildKit to dramatically speed up your image builds with parallel stages, cache mounts, secret handling, SSH forwarding, and buildx bake configurations that turn 10-minute builds into 30-second ones."
+order: 1
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - "docker-fundamentals/07-writing-dockerfiles"
+  - "docker-fundamentals/08-multi-stage-builds"
+objectives:
+  - Enable and configure BuildKit as the default build engine
+  - Implement cache mount strategies for package managers to avoid redundant downloads
+  - Design parallel multi-stage builds that exploit concurrency
+  - Use secret mounts and SSH forwarding to safely handle credentials during builds
+  - Configure buildx bake for complex multi-image build pipelines
+  - Benchmark and compare optimized vs unoptimized build performance
+tags:
+  - docker
+  - buildkit
+  - optimization
+  - performance
+  - multi-stage
+  - advanced
+---
+
+<Callout type="story" title="The Story">
+Your team's CI/CD pipeline is grinding to a halt. Every pull request triggers a Docker build that takes 12 minutes, and with 40 developers pushing code throughout the day, the build queue is backed up. Developers are making coffee runs while waiting for builds. Your infrastructure bill is climbing because you keep adding more CI runners. Then your lead engineer mentions BuildKit at a standup: "I cut our Node.js app build from 11 minutes to 47 seconds." Nobody believes her until she shares the before-and-after logs. Over the next week, your team rewrites every Dockerfile using BuildKit features, and the total daily build time drops from 38 hours to under 3. The CI runner fleet shrinks from 12 machines to 4. This is the power of understanding how Docker actually builds images, and how BuildKit revolutionizes that process.
+</Callout>
+
+## Understanding BuildKit: The Next-Generation Builder
+
+BuildKit is Docker's modern build engine, replacing the legacy builder that shipped with Docker since its early days. While the legacy builder processes Dockerfile instructions sequentially and has limited caching intelligence, BuildKit introduces a fundamentally different architecture.
+
+```
+Legacy Builder Architecture:
+┌──────────────────────────────────────┐
+│           Dockerfile                 │
+│  FROM node:18                        │
+│  COPY package.json .         ──────► Sequential execution
+│  RUN npm install             ──────► Each step waits for previous
+│  COPY . .                    ──────► No parallelism possible
+│  RUN npm run build           ──────► Cache invalidation cascades
+│  FROM nginx                          │
+│  COPY --from=0 /app/build .         │
+└──────────────────────────────────────┘
+
+BuildKit Architecture:
+┌──────────────────────────────────────┐
+│           Dockerfile                 │
+│                                      │
+│  Parsed into DAG (Directed Acyclic   │
+│  Graph) of build operations          │
+│                                      │
+│  ┌─── Stage 1 ───┐  ┌─── Stage 2 ──┐│
+│  │ FROM node:18   │  │ FROM nginx   ││
+│  │ COPY pkg.json  │  │ (waits only  ││
+│  │ npm install    │  │  for COPY    ││
+│  │ COPY . .       │  │  --from)     ││
+│  │ npm build      │  │              ││
+│  └───────┬────────┘  └──────┬───────┘│
+│          │    dependency     │        │
+│          └──────────────────►│        │
+│                                      │
+│  Independent stages run in PARALLEL  │
+└──────────────────────────────────────┘
+```
+
+### Enabling BuildKit
+
+BuildKit is the default builder in Docker Desktop and Docker Engine 23.0+. For older versions, you enable it explicitly:
+
+```bash
+# Method 1: Environment variable (per-command)
+DOCKER_BUILDKIT=1 docker build -t myapp .
+
+# Method 2: Environment variable (persistent in shell)
+export DOCKER_BUILDKIT=1
+
+# Method 3: Docker daemon configuration (system-wide)
+# Edit /etc/docker/daemon.json
+{
+  "features": {
+    "buildkit": true
+  }
+}
+
+# Restart Docker after changing daemon.json
+sudo systemctl restart docker
+
+# Method 4: Using docker buildx (always uses BuildKit)
+docker buildx build -t myapp .
+```
+
+Verify BuildKit is active by running a build. You will see output like:
+
+```
+[+] Building 2.3s (12/12) FINISHED                          docker:default
+ => [internal] load build definition from Dockerfile                 0.0s
+ => => transferring dockerfile: 547B                                 0.0s
+ => [internal] load metadata for docker.io/library/node:18-alpine    0.8s
+ => [internal] load .dockerignore                                    0.0s
+ => [build 1/6] FROM docker.io/library/node:18-alpine@sha256:abc..  0.0s
+ => [internal] load build context                                    0.1s
+ => => transferring context: 2.34kB                                  0.0s
+ => CACHED [build 2/6] WORKDIR /app                                  0.0s
+ => CACHED [build 3/6] COPY package*.json ./                         0.0s
+ => CACHED [build 4/6] RUN npm ci                                    0.0s
+ => [build 5/6] COPY . .                                             0.1s
+ => [build 6/6] RUN npm run build                                    1.2s
+ => [stage-1 1/2] COPY --from=build /app/dist ./html                 0.0s
+ => exporting to image                                               0.1s
+```
+
+Notice the `[+] Building` prefix and the `CACHED` labels. This is BuildKit's output format.
+
+<Callout type="info" title="BuildKit vs Legacy Builder Output">
+The legacy builder shows `Step 1/10 : FROM node:18` format. BuildKit shows `=> [stage 1/6]` format with parallel tracking. If you see the old format, BuildKit is not enabled. The legacy builder was removed entirely in Docker Engine 25.0.
+</Callout>
+
+## Build Cache Strategies: Layer Ordering
+
+The single most impactful optimization is ordering your Dockerfile layers correctly. Docker caches each layer, but when a layer changes, every subsequent layer is invalidated.
+
+### The Wrong Way
+
+```dockerfile
+# BAD: Copies all source files before installing dependencies
+FROM node:18-alpine
+WORKDIR /app
+COPY . .                    # <-- ANY file change invalidates this layer
+RUN npm install             # <-- Always re-runs (cache busted by COPY above)
+RUN npm run build           # <-- Always re-runs
+```
+
+```
+Build timeline (after changing src/index.js):
+
+COPY . .           ████████  (2s - cache miss, source changed)
+npm install        ████████████████████████████████  (45s - cache busted!)
+npm run build      ████████████  (8s - cache busted!)
+                   ──────────────────────────────────────
+Total:             55 seconds
+```
+
+### The Right Way
+
+```dockerfile
+# GOOD: Install dependencies first, copy source code last
+FROM node:18-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./   # <-- Changes rarely
+RUN npm ci                                # <-- Cached when lock file unchanged
+COPY . .                                  # <-- Only this invalidates on code change
+RUN npm run build                         # <-- Re-runs, but npm install was cached
+```
+
+```
+Build timeline (after changing src/index.js):
+
+COPY package*.json ████  (0.1s - CACHED, lock file unchanged)
+npm ci             ████  (0.0s - CACHED!)
+COPY . .           ████████  (2s - cache miss, source changed)
+npm run build      ████████████  (8s - re-runs)
+                   ──────────────────
+Total:             10 seconds (saved 45s!)
+```
+
+<Callout type="tip" title="Apply This Pattern to Every Language">
+The same principle applies everywhere: copy dependency manifests first, install, then copy source code. For Python: copy `requirements.txt` before your code. For Go: copy `go.mod` and `go.sum` first. For Rust: copy `Cargo.toml` and `Cargo.lock` first.
+</Callout>
+
+### Layer Ordering Reference Table
+
+| Language | Copy First | Install Command | Copy Last |
+|----------|-----------|----------------|-----------|
+| Node.js | `package.json`, `package-lock.json` | `npm ci` | `COPY . .` |
+| Python | `requirements.txt` or `pyproject.toml` | `pip install -r requirements.txt` | `COPY . .` |
+| Go | `go.mod`, `go.sum` | `go mod download` | `COPY . .` |
+| Rust | `Cargo.toml`, `Cargo.lock` | `cargo build --release` (with dummy src) | `COPY . .` |
+| Java/Maven | `pom.xml` | `mvn dependency:go-offline` | `COPY . .` |
+| Ruby | `Gemfile`, `Gemfile.lock` | `bundle install` | `COPY . .` |
+
+## Cache Mounts: Persistent Package Manager Caches
+
+BuildKit introduces `--mount=type=cache`, which lets you persist directories across builds without including them in the final image. This is transformative for package managers.
+
+### How Cache Mounts Work
+
+```
+Without cache mount:
+┌─────────────────────────────────────────┐
+│ Build 1: npm install                    │
+│   Downloads 847 packages (45s)          │
+│   node_modules stored in layer          │
+│                                         │
+│ Build 2: npm install (lock file changed)│
+│   Downloads 847 packages AGAIN (45s)    │
+│   Even though 840 packages are the same │
+└─────────────────────────────────────────┘
+
+With cache mount:
+┌─────────────────────────────────────────┐
+│ Build 1: npm install (with cache mount) │
+│   Downloads 847 packages (45s)          │
+│   npm cache stored in /tmp/npm-cache    │
+│                                         │
+│ Build 2: npm install (lock file changed)│
+│   7 new packages downloaded (3s)        │
+│   840 packages served from cache mount  │
+└─────────────────────────────────────────┘
+```
+
+### Cache Mount Syntax
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+FROM node:18-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+
+# Mount npm cache directory as a persistent cache
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+COPY . .
+RUN npm run build
+```
+
+The `# syntax=docker/dockerfile:1` directive at the top enables the latest Dockerfile syntax features.
+
+### Cache Mounts for Every Package Manager
+
+```dockerfile
+# ---- Node.js (npm) ----
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# ---- Node.js (yarn) ----
+RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+    yarn install --frozen-lockfile
+
+# ---- Python (pip) ----
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
+
+# ---- Go modules ----
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o /app/server .
+
+# ---- Rust (cargo) ----
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release
+
+# ---- Java (Maven) ----
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn package -DskipTests
+
+# ---- Java (Gradle) ----
+RUN --mount=type=cache,target=/root/.gradle/caches \
+    gradle build --no-daemon
+
+# ---- APT (Debian/Ubuntu) ----
+RUN --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt/lists \
+    apt-get update && apt-get install -y build-essential
+```
+
+<Callout type="warning" title="Cache Mount Sharing and Concurrency">
+By default, cache mounts use `sharing=shared`, which allows concurrent access. If your build tool does not handle concurrent access safely (like some versions of apt), use `sharing=locked` to serialize access: `--mount=type=cache,target=/var/cache/apt,sharing=locked`.
+</Callout>
+
+### Cache Mount Options
+
+```dockerfile
+# Full syntax with all options
+RUN --mount=type=cache,\
+    target=/path/in/container,\     # Where to mount the cache
+    id=my-cache-id,\                # Unique ID (default: target path)
+    sharing=shared,\                # shared | private | locked
+    from=builder-stage,\            # Inherit cache from another stage
+    source=/path/in/source,\        # Path in the from stage
+    mode=0755,\                     # Permissions
+    uid=1000,\                      # Owner UID
+    gid=1000 \                      # Owner GID
+    command-here
+```
+
+## Parallel Build Stages in Multi-Stage Builds
+
+BuildKit analyzes dependencies between stages and runs independent stages in parallel. This is automatic -- you just need to structure your Dockerfile correctly.
+
+### Sequential vs Parallel Stages
+
+```dockerfile
+# This Dockerfile has THREE independent stages that BuildKit runs in parallel
+
+# Stage 1: Build the backend API
+FROM golang:1.21-alpine AS backend
+WORKDIR /app
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ .
+RUN CGO_ENABLED=0 go build -o /api-server ./cmd/server
+
+# Stage 2: Build the frontend (INDEPENDENT of backend)
+FROM node:18-alpine AS frontend
+WORKDIR /app
+COPY frontend/package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY frontend/ .
+RUN npm run build
+
+# Stage 3: Build the documentation (INDEPENDENT of both)
+FROM python:3.11-alpine AS docs
+WORKDIR /docs
+COPY docs/requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+COPY docs/ .
+RUN mkdocs build
+
+# Final stage: Combine all artifacts
+FROM nginx:alpine
+COPY --from=backend /api-server /usr/local/bin/
+COPY --from=frontend /app/dist /usr/share/nginx/html
+COPY --from=docs /docs/site /usr/share/nginx/html/docs
+COPY nginx.conf /etc/nginx/nginx.conf
+```
+
+```
+Parallel build execution:
+
+Time ──────────────────────────────────────────────►
+
+backend:  ████████████████████████████  (28s)
+frontend: ████████████████████████████████████  (35s)
+docs:     ████████████████  (16s)
+final:                                    ████  (2s)
+                                              ──────
+Total wall time: 37s (not 81s sequential!)
+
+Sequential: 28 + 35 + 16 + 2 = 81 seconds
+Parallel:   max(28, 35, 16) + 2 = 37 seconds
+Speedup:    2.2x
+```
+
+### Maximizing Parallelism
+
+To get the most out of parallel builds, isolate independent work into separate stages:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+# ---- Independent prep stages ----
+FROM alpine:3.19 AS certs
+RUN apk add --no-cache ca-certificates
+
+FROM busybox:1.36 AS timezone
+RUN cp /usr/share/zoneinfo/UTC /etc/localtime
+
+FROM golang:1.21-alpine AS deps
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+# ---- Build stage (depends on deps) ----
+FROM deps AS build
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o /app/server .
+
+# ---- Test stage (depends on deps, runs in parallel with build) ----
+FROM deps AS test
+COPY . .
+RUN go test ./... -v
+
+# ---- Final minimal image ----
+FROM scratch
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=timezone /etc/localtime /etc/localtime
+COPY --from=build /app/server /server
+ENTRYPOINT ["/server"]
+```
+
+<Callout type="info" title="Target Stages and Selective Builds">
+You do not need to build every stage. Use `--target` to build only what you need: `docker build --target test .` builds only the test stage and its dependencies. The build and final stages are skipped entirely. This is extremely useful in CI/CD where test and release are separate pipeline steps.
+</Callout>
+
+## BuildKit Secret Mounts
+
+Hardcoding secrets in Dockerfiles is a critical security vulnerability. Even if you delete a secret in a later layer, it remains in the image history. BuildKit secret mounts solve this by making secrets available during build without persisting them.
+
+### The Problem with Build-Time Secrets
+
+```dockerfile
+# DANGEROUS: Secret is baked into the image layer history
+FROM python:3.11-slim
+ARG GITHUB_TOKEN
+RUN pip install git+https://${GITHUB_TOKEN}@github.com/company/private-lib.git
+
+# Even worse: .env file copied in and "deleted"
+COPY .env /tmp/.env
+RUN source /tmp/.env && do-something
+RUN rm /tmp/.env   # <-- Still visible in image history!
+```
+
+```bash
+# Anyone with the image can extract the secret:
+$ docker history myapp
+IMAGE          CREATED        CREATED BY
+abc123         2 min ago      RUN rm /tmp/.env
+def456         2 min ago      RUN source /tmp/.env && do-something
+ghi789         2 min ago      COPY .env /tmp/.env    # <-- SECRET EXPOSED!
+```
+
+### Using Secret Mounts
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+FROM python:3.11-slim
+
+# Secret is mounted as a file, never stored in a layer
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN=$(cat /run/secrets/github_token) && \
+    pip install git+https://${GITHUB_TOKEN}@github.com/company/private-lib.git
+```
+
+Build with the secret provided at build time:
+
+```bash
+# Pass a secret from a file
+echo "ghp_xxxxxxxxxxxxxxxxxxxx" > ./github_token.txt
+docker build --secret id=github_token,src=./github_token.txt -t myapp .
+
+# Pass a secret from an environment variable
+export GITHUB_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
+docker build --secret id=github_token,env=GITHUB_TOKEN -t myapp .
+```
+
+The secret is available only during the RUN instruction that mounts it. It is never written to a layer, never visible in `docker history`, and cannot be extracted from the image.
+
+### Multiple Secrets
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+FROM node:18-alpine
+WORKDIR /app
+
+# Mount multiple secrets for private npm registry authentication
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc \
+    --mount=type=secret,id=npm_token \
+    npm ci
+
+COPY . .
+RUN npm run build
+```
+
+```bash
+docker build \
+  --secret id=npmrc,src=$HOME/.npmrc \
+  --secret id=npm_token,env=NPM_TOKEN \
+  -t myapp .
+```
+
+<Callout type="warning" title="Secret Mount Default Path">
+By default, secrets are mounted at `/run/secrets/<id>`. You can override this with `target=/custom/path`. If your tool expects a config file at a specific location (like `.npmrc` in the home directory), use the `target` option to place it there.
+</Callout>
+
+## SSH Agent Forwarding During Builds
+
+When your build needs to clone private Git repositories, SSH agent forwarding lets you use your host's SSH keys without copying them into the image.
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add GitHub's SSH host key to known_hosts
+RUN mkdir -p /root/.ssh && \
+    ssh-keyscan github.com >> /root/.ssh/known_hosts
+
+# Clone private repo using forwarded SSH agent
+RUN --mount=type=ssh \
+    git clone git@github.com:company/private-library.git /lib
+
+WORKDIR /app
+COPY . .
+RUN pip install /lib && pip install -r requirements.txt
+```
+
+Build with SSH forwarding:
+
+```bash
+# Ensure your SSH agent is running and has the key loaded
+eval $(ssh-agent)
+ssh-add ~/.ssh/id_ed25519
+
+# Build with SSH agent forwarding
+docker build --ssh default -t myapp .
+
+# Or specify a specific key file
+docker build --ssh default=$HOME/.ssh/id_ed25519 -t myapp .
+```
+
+```
+What happens during the build:
+
+Host Machine                    Docker Build Container
+┌──────────────────┐           ┌──────────────────────┐
+│                  │           │                      │
+│  SSH Agent       │◄─────────│  git clone            │
+│  (holds keys)    │  SSH      │  git@github.com:...  │
+│                  │  Agent    │                      │
+│  id_ed25519      │  Forward  │  No keys stored!     │
+│  id_rsa          │           │  No keys in layers!  │
+│                  │           │                      │
+└──────────────────┘           └──────────────────────┘
+```
+
+<Callout type="tip" title="SSH vs Secret Mounts for Git">
+Use SSH mounts (`--mount=type=ssh`) when cloning Git repos via SSH. Use secret mounts (`--mount=type=secret`) when using HTTPS with a personal access token. SSH mounts integrate with your SSH agent, so you never handle key files directly.
+</Callout>
+
+## Build Arguments and Target Stages
+
+Build arguments let you parameterize your Dockerfiles, while target stages let you build specific portions of a multi-stage Dockerfile.
+
+### Build Arguments (ARG)
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+# Global ARG (available in FROM instructions)
+ARG NODE_VERSION=18
+ARG ALPINE_VERSION=3.19
+
+FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS base
+WORKDIR /app
+
+# Stage-scoped ARG (must be redeclared after FROM)
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN npm config set registry ${NPM_REGISTRY}
+
+FROM base AS development
+ARG NODE_ENV=development
+ENV NODE_ENV=${NODE_ENV}
+COPY package*.json ./
+RUN npm install
+COPY . .
+CMD ["npm", "run", "dev"]
+
+FROM base AS production
+ARG NODE_ENV=production
+ARG BUILD_DATE
+ARG GIT_COMMIT
+ENV NODE_ENV=${NODE_ENV}
+LABEL org.opencontainers.image.created=${BUILD_DATE}
+LABEL org.opencontainers.image.revision=${GIT_COMMIT}
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+CMD ["node", "dist/server.js"]
+```
+
+```bash
+# Build for development
+docker build --target development -t myapp:dev .
+
+# Build for production with metadata
+docker build \
+  --target production \
+  --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+  --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
+  --build-arg NODE_VERSION=20 \
+  -t myapp:prod .
+```
+
+### Combining ARG with Cache Busting
+
+```dockerfile
+# Use ARG to control cache invalidation
+ARG CACHEBUST=1
+
+FROM ubuntu:22.04
+
+# This layer is cached normally
+RUN apt-get update && apt-get install -y curl
+
+# This layer is busted when CACHEBUST changes
+ARG CACHEBUST
+RUN echo "Cache bust: ${CACHEBUST}" && \
+    curl -sL https://example.com/latest-config > /etc/app/config
+```
+
+```bash
+# Force re-download of config by changing CACHEBUST
+docker build --build-arg CACHEBUST=$(date +%s) -t myapp .
+```
+
+## Buildx Bake: Complex Build Configurations
+
+When you have multiple images to build with complex configurations, `docker buildx bake` lets you define everything in an HCL or JSON file -- think of it as `docker-compose` for builds.
+
+### Basic Bake File (docker-bake.hcl)
+
+```hcl
+// docker-bake.hcl
+
+// Variables
+variable "REGISTRY" {
+  default = "ghcr.io/mycompany"
+}
+
+variable "TAG" {
+  default = "latest"
+}
+
+variable "GIT_COMMIT" {
+  default = ""
+}
+
+// Groups let you build multiple targets at once
+group "default" {
+  targets = ["api", "frontend", "worker"]
+}
+
+group "ci" {
+  targets = ["api", "frontend", "worker", "test"]
+}
+
+// Target definitions
+target "api" {
+  context    = "./services/api"
+  dockerfile = "Dockerfile"
+  tags = [
+    "${REGISTRY}/api:${TAG}",
+    "${REGISTRY}/api:${GIT_COMMIT}"
+  ]
+  platforms = ["linux/amd64", "linux/arm64"]
+  cache-from = ["type=registry,ref=${REGISTRY}/api:cache"]
+  cache-to   = ["type=registry,ref=${REGISTRY}/api:cache,mode=max"]
+  args = {
+    BUILD_DATE = timestamp()
+    GIT_COMMIT = GIT_COMMIT
+  }
+}
+
+target "frontend" {
+  context    = "./services/frontend"
+  dockerfile = "Dockerfile"
+  tags = [
+    "${REGISTRY}/frontend:${TAG}",
+    "${REGISTRY}/frontend:${GIT_COMMIT}"
+  ]
+  platforms = ["linux/amd64", "linux/arm64"]
+  cache-from = ["type=registry,ref=${REGISTRY}/frontend:cache"]
+  cache-to   = ["type=registry,ref=${REGISTRY}/frontend:cache,mode=max"]
+}
+
+target "worker" {
+  context    = "./services/worker"
+  dockerfile = "Dockerfile"
+  tags = [
+    "${REGISTRY}/worker:${TAG}",
+    "${REGISTRY}/worker:${GIT_COMMIT}"
+  ]
+  args = {
+    PYTHON_VERSION = "3.11"
+  }
+}
+
+target "test" {
+  context    = "."
+  dockerfile = "Dockerfile.test"
+  target     = "test"
+  output     = ["type=cacheonly"]
+  no-cache-filter = ["test-run"]
+}
+```
+
+```bash
+# Build all default targets in parallel
+docker buildx bake
+
+# Build only the API
+docker buildx bake api
+
+# Build CI targets with custom tag
+TAG=v1.2.3 GIT_COMMIT=$(git rev-parse --short HEAD) docker buildx bake ci
+
+# Dry run to see what would be built
+docker buildx bake --print
+
+# Build from a specific file
+docker buildx bake -f docker-bake.hcl -f docker-bake.override.hcl
+```
+
+### Bake with Target Inheritance
+
+```hcl
+// Base target that others inherit from
+target "_base" {
+  dockerfile = "Dockerfile"
+  args = {
+    ALPINE_VERSION = "3.19"
+    BUILD_ENV = "production"
+  }
+  labels = {
+    "org.opencontainers.image.vendor" = "MyCompany"
+    "org.opencontainers.image.source" = "https://github.com/mycompany/app"
+  }
+}
+
+target "api" {
+  inherits = ["_base"]
+  context  = "./services/api"
+  tags     = ["myregistry.com/api:latest"]
+}
+
+target "worker" {
+  inherits = ["_base"]
+  context  = "./services/worker"
+  tags     = ["myregistry.com/worker:latest"]
+  args = {
+    // Override the base BUILD_ENV
+    BUILD_ENV = "worker"
+  }
+}
+```
+
+<Callout type="info" title="Bake File Formats">
+Buildx bake supports three file formats: HCL (recommended, most powerful), JSON, and Docker Compose YAML. HCL supports variables, functions, and inheritance. If you already have a `docker-compose.yml`, bake can read it directly as a build definition.
+</Callout>
+
+## External Cache: Speeding Up CI/CD Builds
+
+Local cache disappears when CI runners are ephemeral (which they usually are). BuildKit supports external cache backends that persist across builds.
+
+### Registry Cache
+
+```bash
+# Push cache to registry alongside the image
+docker buildx build \
+  --cache-from type=registry,ref=myregistry.com/myapp:cache \
+  --cache-to type=registry,ref=myregistry.com/myapp:cache,mode=max \
+  -t myregistry.com/myapp:latest \
+  --push .
+```
+
+```
+CI Build Pipeline with Registry Cache:
+
+Build #1 (cold cache):
+┌──────────────────────────────────────┐
+│ Pull cache from registry → MISS      │
+│ Build all layers from scratch        │
+│ Push image + cache to registry       │
+│ Total: 4m 30s                        │
+└──────────────────────────────────────┘
+
+Build #2 (warm cache):
+┌──────────────────────────────────────┐
+│ Pull cache from registry → HIT       │
+│ Only rebuild changed layers          │
+│ Push image + updated cache           │
+│ Total: 45s                           │
+└──────────────────────────────────────┘
+```
+
+### Cache Mode: min vs max
+
+```bash
+# mode=min: Cache only the final stage layers (default)
+# Smaller cache, misses intermediate stage caches
+--cache-to type=registry,ref=myapp:cache,mode=min
+
+# mode=max: Cache ALL stage layers including intermediates
+# Larger cache, but much better hit rate for multi-stage builds
+--cache-to type=registry,ref=myapp:cache,mode=max
+```
+
+### GitHub Actions Cache
+
+```bash
+# Use GitHub Actions cache backend (for GHA workflows)
+docker buildx build \
+  --cache-from type=gha \
+  --cache-to type=gha,mode=max \
+  -t myapp:latest .
+```
+
+### Local Directory Cache
+
+```bash
+# Cache to a local directory (useful for self-hosted CI)
+docker buildx build \
+  --cache-from type=local,src=/tmp/buildcache \
+  --cache-to type=local,dest=/tmp/buildcache,mode=max \
+  -t myapp:latest .
+```
+
+<Callout type="tip" title="S3 Cache Backend">
+For teams using AWS, BuildKit supports S3 as a cache backend via `type=s3`. This is excellent for shared caches across multiple CI runners: `--cache-to type=s3,region=us-east-1,bucket=my-build-cache,name=myapp`.
+</Callout>
+
+## Real Benchmarks: Optimized vs Unoptimized
+
+Let us walk through a real-world optimization of a full-stack application build.
+
+### The Unoptimized Dockerfile
+
+```dockerfile
+# BEFORE: Unoptimized (total build time: ~11 minutes)
+FROM node:18
+WORKDIR /app
+COPY . .
+RUN npm install
+RUN npm run build
+RUN npm run test
+RUN apt-get update && apt-get install -y python3 python3-pip
+RUN pip3 install awscli
+RUN aws s3 cp s3://config-bucket/config.json /app/config.json
+```
+
+Problems:
+1. Uses full `node:18` image (1.1 GB) instead of alpine (180 MB)
+2. Copies all source before installing dependencies (cache busted every time)
+3. No cache mounts for npm
+4. Tests and build are sequential, not parallel
+5. Installs AWS CLI in the runtime image (unnecessary bloat)
+6. No multi-stage build (final image is huge)
+
+### The Optimized Dockerfile
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+# AFTER: Optimized (total build time: ~47 seconds)
+
+# ---- Stage 1: Dependencies ----
+FROM node:18-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline
+
+# ---- Stage 2: Build (depends on deps) ----
+FROM deps AS build
+COPY . .
+RUN npm run build
+
+# ---- Stage 3: Test (runs in PARALLEL with build) ----
+FROM deps AS test
+COPY . .
+RUN npm run test
+
+# ---- Stage 4: Fetch config (runs in PARALLEL) ----
+FROM amazon/aws-cli:2.15.0 AS config
+ARG AWS_REGION=us-east-1
+RUN --mount=type=secret,id=aws_access_key \
+    --mount=type=secret,id=aws_secret_key \
+    AWS_ACCESS_KEY_ID=$(cat /run/secrets/aws_access_key) \
+    AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/aws_secret_key) \
+    aws s3 cp s3://config-bucket/config.json /tmp/config.json
+
+# ---- Final: Minimal runtime image ----
+FROM node:18-alpine AS runtime
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+WORKDIR /app
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=config /tmp/config.json ./config.json
+USER appuser
+EXPOSE 3000
+CMD ["node", "dist/server.js"]
+```
+
+### Benchmark Comparison
+
+```
+┌────────────────────────────┬─────────────┬──────────────┬───────────┐
+│ Metric                     │ Unoptimized │ Optimized    │ Savings   │
+├────────────────────────────┼─────────────┼──────────────┼───────────┤
+│ Cold build time            │ 11m 15s     │ 2m 10s       │ 80.7%    │
+│ Warm build (code change)   │ 8m 45s      │ 47s          │ 91.0%    │
+│ Warm build (dep change)    │ 10m 30s     │ 1m 35s       │ 84.9%    │
+│ Final image size           │ 1.47 GB     │ 184 MB       │ 87.5%    │
+│ Number of layers           │ 14          │ 7            │ 50.0%    │
+│ Attack surface (CVEs)      │ 847         │ 23           │ 97.3%    │
+│ Secrets in history         │ YES (!)     │ No           │ -        │
+└────────────────────────────┴─────────────┴──────────────┴───────────┘
+```
+
+<Callout type="warning" title="Measure Before Optimizing">
+Always benchmark your actual builds before and after optimization. Use `docker buildx build --progress=plain` to see detailed timing for every step. The `--progress=plain` flag shows full output including durations, which helps identify the slowest steps.
+</Callout>
+
+### Profiling Build Performance
+
+```bash
+# Show detailed timing for every build step
+docker buildx build --progress=plain -t myapp . 2>&1 | tee build.log
+
+# Extract timing information
+grep "DONE\|CACHED" build.log
+
+# Example output:
+#  #5 [deps 2/3] COPY package*.json ./
+#  #5 DONE 0.1s
+#  #6 [deps 3/3] RUN npm ci
+#  #6 DONE 12.3s         <-- Slowest step: optimize this first
+#  #7 [build 2/3] COPY . .
+#  #7 DONE 0.8s
+#  #8 [build 3/3] RUN npm run build
+#  #8 DONE 8.2s
+```
+
+## Advanced: Inline Cache Metadata
+
+You can embed cache metadata directly in the image, allowing any machine that pulls the image to use it as a cache source:
+
+```bash
+# Build with inline cache metadata
+docker buildx build \
+  --build-arg BUILDKIT_INLINE_CACHE=1 \
+  -t myregistry.com/myapp:latest \
+  --push .
+
+# On another machine, use that image as cache
+docker buildx build \
+  --cache-from myregistry.com/myapp:latest \
+  -t myregistry.com/myapp:latest \
+  --push .
+```
+
+This is simpler than maintaining a separate cache image but only caches final-stage layers (equivalent to `mode=min`). Use registry cache with `mode=max` for multi-stage builds.
+
+<Exercise title="Optimize a Slow Dockerfile" difficulty="intermediate" xpReward={35} estimatedMinutes={25}
+  objectives={["Identify build optimization issues in an unoptimized Dockerfile", "Apply layer ordering and cache mount strategies", "Implement parallel multi-stage builds", "Measure build performance improvements"]}
+  hints={["Start by identifying which layers change most frequently and move them to the end", "Use cache mounts for package managers -- identify the cache directory for each tool", "Look for stages that can run independently and split them into parallel stages", "Use --progress=plain to see per-step timing"]}
+  validationCriteria={["Rewritten Dockerfile uses proper layer ordering (dependencies before source)", "Cache mounts are used for at least one package manager", "Multi-stage build has at least 3 stages with 2 running in parallel", "Final image uses a minimal base (alpine or distroless)", "Build time is measured before and after with --progress=plain", "No secrets or unnecessary tools in the final image"]}
+>
+
+You have been given this unoptimized Dockerfile for a Python Flask application with a React frontend. Rewrite it to be as fast as possible.
+
+**The Unoptimized Dockerfile:**
+
+```dockerfile
+FROM ubuntu:22.04
+
+# Install everything in one giant layer
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python3-venv \
+    nodejs npm \
+    git curl wget
+
+# Copy everything
+COPY . /app
+WORKDIR /app
+
+# Install Python dependencies
+RUN pip3 install -r requirements.txt
+
+# Install Node dependencies and build frontend
+RUN cd frontend && npm install && npm run build
+
+# Copy frontend build to static directory
+RUN cp -r frontend/build/* static/
+
+# Run tests
+RUN python3 -m pytest tests/
+
+# The app
+EXPOSE 5000
+CMD ["python3", "app.py"]
+```
+
+**Your tasks:**
+
+1. **Analyze the problems**: List every optimization issue in the original Dockerfile.
+
+2. **Rewrite the Dockerfile**: Create an optimized version using:
+   - Multi-stage builds with parallel stages
+   - Proper layer ordering
+   - Cache mounts for pip and npm
+   - Alpine or slim base images
+   - Non-root user
+
+3. **Benchmark both versions**: Build both Dockerfiles and compare:
+   - Cold build time
+   - Warm build time (after changing a Python file)
+   - Final image size
+
+Create a file `Dockerfile.optimized` alongside the original and a `benchmarks.md` file documenting your results.
+
+</Exercise>
+
+<Exercise title="Secure Builds with Secret and SSH Mounts" difficulty="intermediate" xpReward={35} estimatedMinutes={20}
+  objectives={["Use BuildKit secret mounts to handle private package registry credentials", "Implement SSH agent forwarding for private Git repository access", "Verify that secrets do not appear in the final image history", "Compare secret mounts with insecure ARG-based approaches"]}
+  hints={["Create a dummy secret file to test with -- you do not need real credentials", "Use docker history to verify secrets are not in any layer", "Remember to add the syntax directive at the top of your Dockerfile", "The ssh-keyscan command adds host keys to known_hosts to prevent prompts"]}
+  validationCriteria={["Dockerfile uses --mount=type=secret for at least one secret", "Dockerfile uses --mount=type=ssh for Git clone operations", "docker history shows no traces of secrets in any layer", "Build command includes --secret and --ssh flags", "A known_hosts file is configured to prevent SSH host verification prompts", "Documentation explains why ARG-based secrets are insecure with image history example"]}
+>
+
+Your application depends on two private packages:
+- A Python package hosted in a private PyPI registry (requires token authentication)
+- A Go library in a private GitHub repository (requires SSH access)
+
+**Task 1: Create the Insecure Version**
+
+Write a Dockerfile that uses `ARG` to pass the PyPI token and copies an SSH key. This is the WRONG way -- you will use it to demonstrate the security problem.
+
+**Task 2: Create the Secure Version**
+
+Rewrite the Dockerfile using:
+- `--mount=type=secret` for the PyPI token
+- `--mount=type=ssh` for the GitHub repository access
+
+**Task 3: Prove the Difference**
+
+Run `docker history --no-trunc` on both images. Show that:
+- The insecure version exposes the token in the layer history
+- The secure version has no trace of the token
+
+**Task 4: Document the Build Commands**
+
+Write the complete `docker build` commands for the secure version, including:
+- How to pass the secret from a file
+- How to pass the secret from an environment variable
+- How to forward the SSH agent
+
+</Exercise>
+
+<MiniProject title="BuildKit-Optimized CI Pipeline" difficulty="intermediate" xpReward={50} estimatedMinutes={35}
+  objectives={["Design a complete multi-service build pipeline using buildx bake", "Implement external cache strategies for CI/CD environments", "Use secret mounts for private dependencies across multiple services", "Create a benchmarking framework to measure optimization impact"]}
+  hints={["Start with the docker-bake.hcl file to define all targets", "Use target inheritance to avoid repeating common settings", "Think about which stages can share cache and which need isolation", "Create a shell script that runs builds and captures timing data"]}
+  validationCriteria={["docker-bake.hcl defines at least 3 service targets with proper configuration", "Target inheritance is used to share common settings", "Registry cache is configured for all targets with mode=max", "Build arguments include BUILD_DATE and GIT_COMMIT for traceability", "A benchmark script compares cold, warm, and cache-hit build times", "All services use secret mounts for any credentials (no ARG secrets)", "Multi-platform builds are configured for at least amd64 and arm64", "A README documents the build pipeline and how to use it"]}
+>
+
+You are setting up the build pipeline for a microservices application with three services:
+
+1. **API Gateway** (Node.js/Express) - depends on a private npm package
+2. **User Service** (Go) - depends on a private Go module on GitHub
+3. **Analytics Service** (Python/FastAPI) - depends on a private PyPI package
+
+**Deliverables:**
+
+1. **Dockerfiles** (`Dockerfile.api`, `Dockerfile.users`, `Dockerfile.analytics`):
+   - Each uses multi-stage builds with parallel stages
+   - Cache mounts for their respective package managers
+   - Secret mounts for private dependencies
+   - Non-root users in the final stage
+   - OCI labels for traceability
+
+2. **Build Configuration** (`docker-bake.hcl`):
+   - Target for each service
+   - Base target with shared settings (inheritance)
+   - Group targets: `default` (all services), `ci` (services + tests), `deploy` (services only, with push)
+   - Registry cache configuration
+   - Multi-platform support (amd64 + arm64)
+   - Variables for registry, tag, and git commit
+
+3. **Benchmark Script** (`benchmark.sh`):
+   - Measures cold build time (no cache)
+   - Measures warm build time (code change only)
+   - Measures cache-hit build time (no changes)
+   - Records final image sizes
+   - Outputs a summary table
+
+4. **CI Integration** (`.github/workflows/build.yml` or equivalent):
+   - Uses buildx bake with GitHub Actions cache
+   - Runs tests as part of the build
+   - Pushes images on main branch merges
+   - Uses secrets for private dependencies
+
+Test your pipeline by running `docker buildx bake --print` to verify the configuration, then run actual builds to measure performance.
+
+</MiniProject>
+
+## Key Takeaways
+
+- BuildKit is Docker's modern build engine that replaces the legacy builder with a DAG-based architecture supporting parallel execution, better caching, and security features
+- Layer ordering is the most impactful optimization: always copy dependency manifests before source code to maximize cache hits
+- Cache mounts (`--mount=type=cache`) persist package manager caches across builds, eliminating redundant downloads even when dependency files change
+- Independent multi-stage build stages run in parallel automatically, reducing wall-clock build time proportionally to the number of independent stages
+- Secret mounts (`--mount=type=secret`) and SSH forwarding (`--mount=type=ssh`) keep credentials out of image layers and history, solving a critical security problem
+- External cache backends (registry, S3, GitHub Actions) persist build cache for ephemeral CI runners, turning multi-minute cold builds into sub-minute warm builds
+- Buildx bake provides a declarative configuration for complex multi-image build pipelines with inheritance, variables, and multi-platform support
+- Always benchmark with `--progress=plain` before and after optimizing -- measure the actual impact
+
+## What's Next
+
+Now that you can build Docker images at lightning speed, you need somewhere to store them. In the next lesson, **Private Docker Registries**, you will learn how to deploy your own registry, configure enterprise solutions like Harbor, integrate with cloud registries (ECR, GCR, ACR), and build an image promotion pipeline that moves tested images from development through staging to production.
