@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Quiz Definition",
+  "description": "Schema for DEVOPS ENGINEERS quiz files",
+  "type": "object",
+  "required": ["id", "title", "lessonSlug", "moduleSlug", "pathSlug", "passingScore", "questions"],
+  "properties": {
+    "id": { "type": "string", "description": "Unique quiz identifier" },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "lessonSlug": { "type": "string", "description": "Reference to lesson this quiz belongs to" },
+    "moduleSlug": { "type": "string" },
+    "pathSlug": { "type": "string" },
+    "passingScore": { "type": "number", "minimum": 0, "maximum": 100, "default": 70 },
+    "timeLimit": { "type": "number", "description": "Time limit in seconds (optional)" },
+    "xpRewards": {
+      "type": "object",
+      "properties": {
+        "pass": { "type": "number", "default": 50 },
+        "perfect": { "type": "number", "default": 75 },
+        "retry": { "type": "number", "default": 25 }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "question", "correctAnswer", "explanation"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["multiple_choice", "true_false", "code_completion"]
+          },
+          "question": { "type": "string" },
+          "options": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "correctAnswer": {
+            "description": "Index for multiple_choice, boolean for true_false, string for code_completion",
+            "oneOf": [
+              { "type": "number" },
+              { "type": "boolean" },
+              { "type": "string" }
+            ]
+          },
+          "explanation": { "type": "string" },
+          "referenceLesson": { "type": "string", "description": "Link back to relevant lesson section" },
+          "difficulty": {
+            "type": "string",
+            "enum": ["easy", "medium", "hard"]
+          }
+        }
+      }
+    }
+  }
+}
