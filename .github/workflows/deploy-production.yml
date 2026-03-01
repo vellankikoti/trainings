@@ -1,0 +1,44 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  SKIP_ENV_VALIDATION: true
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    # Only run when Vercel secrets are configured
+    if: ${{ vars.VERCEL_CONFIGURED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Vercel CLI
+        run: pnpm add -g vercel
+
+      - name: Pull Vercel environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy Production
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
