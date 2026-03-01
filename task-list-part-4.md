@@ -64,7 +64,7 @@
 
 ### TASK-122: Integrate Stripe for payments
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-011
 - **Estimated effort:** XL
@@ -89,7 +89,7 @@
 
 ### TASK-123: Implement feature gating
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-122
 - **Estimated effort:** M
@@ -113,7 +113,7 @@
 
 ### TASK-124: Build pricing page with Stripe integration
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-122, TASK-064
 - **Estimated effort:** M
