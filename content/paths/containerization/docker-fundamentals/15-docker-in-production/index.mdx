@@ -1,0 +1,953 @@
+---
+title: "Docker in Production"
+description: "Learn production-grade Docker practices including restart policies, health checks, resource limits, image tagging strategies, monitoring, backup strategies, and preparing for container orchestration."
+order: 15
+xpReward: 50
+estimatedMinutes: 60
+prerequisites:
+  - "14-docker-security"
+objectives:
+  - "Configure restart policies for reliable container uptime"
+  - "Implement health checks for automated recovery"
+  - "Apply resource limits to prevent runaway containers"
+  - "Design image tagging strategies for production deployments"
+  - "Set up monitoring with Prometheus and Grafana"
+  - "Plan backup and recovery strategies for persistent data"
+tags: ["docker", "production", "monitoring", "health-checks", "restart-policies", "deployment"]
+---
+
+<Callout type="story" title="The Story">
+Your team just shipped version 1.0. The app is containerized, tested, and ready. Friday afternoon, you push to the production server, run `docker compose up -d`, and head home for the weekend. Saturday morning, your phone buzzes — the app is down. A memory leak crashed the container at 3 AM, and nobody restarted it. Monday morning's post-mortem reveals: no restart policy, no health checks, no monitoring, no alerts. The container died silently. You built a great app, but you didn't build it for production. This lesson changes that.
+</Callout>
+
+## Development vs Production: What Changes
+
+Running Docker in production is fundamentally different from development. Here's what changes:
+
+| Aspect | Development | Production |
+|--------|-------------|------------|
+| Restart behavior | Manual restart after changes | Automatic restart on failure |
+| Resource limits | Unlimited (use all host resources) | Strictly bounded per container |
+| Logging | Console output (`docker logs`) | Centralized log aggregation |
+| Monitoring | `docker stats` in terminal | Prometheus + Grafana dashboards |
+| Image tags | `:latest` for convenience | Specific versions (`:1.2.3`, `:abc123`) |
+| Health checks | None (developer watches output) | Automated with recovery actions |
+| Data persistence | Bind mounts for live reload | Named volumes with backups |
+| Networking | Default bridge, exposed ports | Custom networks, reverse proxy, TLS |
+| Secrets | `.env` files in repo | Docker secrets, vault integration |
+| Updates | `docker compose up --build` | Rolling updates with zero downtime |
+
+<Callout type="warning" title="Production Is a Different World">
+Never assume that a container working in development will work the same way in production. Different resource constraints, network configurations, and failure modes will surface problems you never saw locally.
+</Callout>
+
+## Restart Policies
+
+Docker can automatically restart containers that stop or crash. This is your first line of defense against downtime.
+
+### Available Policies
+
+```bash
+# No restart (default)
+docker run --restart=no nginx
+
+# Restart only on non-zero exit code
+docker run --restart=on-failure nginx
+
+# Restart on failure with max attempts
+docker run --restart=on-failure:5 nginx
+
+# Always restart (even after daemon restart)
+docker run --restart=always nginx
+
+# Always restart EXCEPT when explicitly stopped
+docker run --restart=unless-stopped nginx
+```
+
+### Policy Comparison
+
+| Policy | On Crash | On `docker stop` | On Daemon Restart | Max Retries |
+|--------|----------|-------------------|-------------------|-------------|
+| `no` | No restart | N/A | No restart | N/A |
+| `on-failure` | Restarts | No restart | No restart | Configurable |
+| `on-failure:5` | Up to 5 times | No restart | No restart | 5 |
+| `always` | Restarts | Restarts | Restarts | Unlimited |
+| `unless-stopped` | Restarts | No restart | No restart | Unlimited |
+
+<Callout type="tip" title="Best Practice">
+Use `unless-stopped` for most production services. It gives you automatic recovery while still respecting `docker stop` commands during maintenance. Use `on-failure:5` for batch jobs where infinite restarts could mask bugs.
+</Callout>
+
+### Restart Policy in Docker Compose
+
+```yaml
+services:
+  web:
+    image: myapp:1.2.3
+    restart: unless-stopped
+
+  worker:
+    image: myapp-worker:1.2.3
+    restart: on-failure:10
+
+  db:
+    image: postgres:16
+    restart: always
+```
+
+### Checking Restart Count
+
+```bash
+# View restart count for a container
+docker inspect --format='{{.RestartCount}}' mycontainer
+
+# View last restart time
+docker inspect --format='{{.State.StartedAt}}' mycontainer
+
+# View restart policy
+docker inspect --format='{{.HostConfig.RestartPolicy}}' mycontainer
+```
+
+## Health Checks
+
+Restart policies only detect crashed containers (exit code != 0). But what about a container that's running but not responding? A web server stuck in an infinite loop is "running" but useless. Health checks solve this.
+
+### HEALTHCHECK in Dockerfiles
+
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --production
+COPY . .
+
+EXPOSE 3000
+
+# Health check configuration
+HEALTHCHECK --interval=30s \
+            --timeout=10s \
+            --start-period=60s \
+            --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+CMD ["node", "server.js"]
+```
+
+### Health Check Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--interval` | 30s | Time between checks |
+| `--timeout` | 30s | Maximum time for a single check |
+| `--start-period` | 0s | Grace period for container startup |
+| `--retries` | 3 | Consecutive failures before "unhealthy" |
+| `--start-interval` | 5s | Interval during start period (Docker 25+) |
+
+### Health Check States
+
+```
+┌─────────┐     start-period     ┌──────────┐
+│Starting │ ──────────────────→  │ Healthy  │
+└─────────┘                      └──────────┘
+                                      │
+                              retries failures
+                                      │
+                                      ▼
+                                ┌────────────┐
+                                │ Unhealthy  │
+                                └────────────┘
+```
+
+### Health Checks in Docker Compose
+
+```yaml
+services:
+  api:
+    image: myapi:2.1.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+```
+
+### Using Health Checks for Dependencies
+
+```yaml
+services:
+  api:
+    image: myapi:2.1.0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+```
+
+<Callout type="info" title="Monitoring Health Status">
+Check container health with `docker inspect --format='{{.State.Health.Status}}' container_name` or see it in `docker ps` output (shows "healthy", "unhealthy", or "starting" in the STATUS column).
+</Callout>
+
+### Viewing Health Check Results
+
+```bash
+# Current health status
+docker inspect --format='{{.State.Health.Status}}' myapi
+
+# Last 5 health check results
+docker inspect --format='{{range .State.Health.Log}}{{.End}} - {{.ExitCode}} - {{.Output}}{{end}}' myapi
+
+# Watch health transitions in events
+docker events --filter event=health_status
+```
+
+## Graceful Shutdown
+
+When Docker stops a container, it sends `SIGTERM` and waits for the process to exit. After a timeout (default 10 seconds), it sends `SIGKILL`.
+
+### The Shutdown Sequence
+
+```
+docker stop mycontainer
+         │
+         ▼
+    Send SIGTERM
+         │
+         ▼
+  Wait --stop-timeout
+  (default: 10 seconds)
+         │
+    ┌────┴────┐
+    │ Exited? │
+    └────┬────┘
+     No  │  Yes
+     │   └──→ Container stopped gracefully
+     ▼
+  Send SIGKILL (force kill)
+```
+
+### Handling SIGTERM in Your Application
+
+**Node.js:**
+
+```javascript
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received. Starting graceful shutdown...');
+
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('HTTP server closed.');
+  });
+
+  // Close database connections
+  await db.close();
+
+  // Flush logs
+  await logger.flush();
+
+  process.exit(0);
+});
+```
+
+**Python:**
+
+```python
+import signal
+import sys
+
+def handle_sigterm(signum, frame):
+    print("SIGTERM received. Shutting down gracefully...")
+    # Close database connections
+    db.close()
+    # Flush queues
+    queue.flush()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
+```
+
+### Setting Stop Timeout
+
+```bash
+# Give container 30 seconds to shut down
+docker stop --time=30 mycontainer
+```
+
+```yaml
+# In Docker Compose
+services:
+  api:
+    image: myapi:2.1.0
+    stop_grace_period: 30s
+```
+
+<Callout type="warning" title="PID 1 Problem">
+If your process doesn't run as PID 1, it won't receive SIGTERM. Use `exec` form in CMD (`CMD ["node", "server.js"]`, not `CMD node server.js`), or use `tini` as an init process: `RUN apk add --no-cache tini` and `ENTRYPOINT ["/sbin/tini", "--"]`.
+</Callout>
+
+## Resource Limits
+
+In production, a single runaway container can consume all host resources and take down every other container. Resource limits prevent this.
+
+### Memory Limits
+
+```bash
+# Hard memory limit (container is killed if exceeded)
+docker run --memory=512m myapp
+
+# Memory + swap limit
+docker run --memory=512m --memory-swap=1g myapp
+
+# Memory reservation (soft limit)
+docker run --memory=512m --memory-reservation=256m myapp
+```
+
+### CPU Limits
+
+```bash
+# Limit to 1.5 CPUs
+docker run --cpus=1.5 myapp
+
+# CPU shares (relative weight, default 1024)
+docker run --cpu-shares=512 myapp
+
+# Pin to specific CPU cores
+docker run --cpuset-cpus="0,1" myapp
+```
+
+### PID Limits
+
+```bash
+# Prevent fork bombs
+docker run --pids-limit=100 myapp
+```
+
+### Resource Limits in Compose
+
+```yaml
+services:
+  api:
+    image: myapi:2.1.0
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+```
+
+<Callout type="tip" title="Right-Sizing Resources">
+Start with generous limits and monitor actual usage with `docker stats`. Then tighten limits to 150-200% of observed peak usage. Too tight kills containers unnecessarily; too loose defeats the purpose.
+</Callout>
+
+### Monitoring Resource Usage
+
+```bash
+# Real-time stats for all containers
+docker stats
+
+# One-shot stats (for scripts)
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
+
+# Example output:
+# NAME        CPU %     MEM USAGE / LIMIT     MEM %
+# api         2.34%     124.5MiB / 512MiB     24.32%
+# db          5.67%     356.2MiB / 1GiB       34.78%
+# redis       0.12%     12.3MiB / 128MiB      9.61%
+```
+
+## Image Tagging Strategy
+
+Never use `:latest` in production. It's unpredictable — you don't know which version is running.
+
+### Tagging Best Practices
+
+```bash
+# Semantic versioning (most common)
+docker build -t myapp:1.2.3 .
+docker build -t myapp:1.2 .
+docker build -t myapp:1 .
+
+# Git SHA (for traceability)
+docker build -t myapp:$(git rev-parse --short HEAD) .
+
+# Combined: version + git SHA
+docker build -t myapp:1.2.3-abc1234 .
+
+# Date-based (for continuous deployment)
+docker build -t myapp:2026-03-01-abc1234 .
+```
+
+### Tagging Flow
+
+```
+Build → Tag → Push → Deploy
+
+docker build -t myapp:1.2.3 .
+docker tag myapp:1.2.3 registry.example.com/myapp:1.2.3
+docker push registry.example.com/myapp:1.2.3
+
+# On production server:
+docker pull registry.example.com/myapp:1.2.3
+```
+
+### Image Digest Pinning
+
+For maximum reproducibility, pin to the image digest:
+
+```bash
+# Get digest after pushing
+docker inspect --format='{{index .RepoDigests 0}}' myapp:1.2.3
+# Output: registry.example.com/myapp@sha256:abc123...
+
+# Use digest in production compose
+services:
+  api:
+    image: registry.example.com/myapp@sha256:abc123def456...
+```
+
+<Callout type="warning" title="Never Use :latest in Production">
+Using `:latest` means different servers might run different versions. A `docker pull` changes what's running without changing the compose file. You lose the ability to roll back. Always use explicit version tags.
+</Callout>
+
+## Monitoring in Production
+
+### Prometheus + cAdvisor + Grafana Stack
+
+```yaml
+# monitoring-stack.yml
+services:
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=changeme
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+```
+
+### Prometheus Configuration
+
+```yaml
+# prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'app'
+    static_configs:
+      - targets: ['api:8080']
+    metrics_path: '/metrics'
+```
+
+### Key Metrics to Monitor
+
+| Metric | Source | Alert Threshold |
+|--------|--------|----------------|
+| Container CPU usage | cAdvisor | > 80% sustained |
+| Container memory usage | cAdvisor | > 85% of limit |
+| Container restart count | cAdvisor | > 3 in 5 minutes |
+| Container health status | Docker events | Any "unhealthy" |
+| Disk usage | node-exporter | > 80% |
+| Network errors | cAdvisor | > 0 per second |
+
+### Docker Events for Alerting
+
+```bash
+# Stream all container events
+docker events --format '{{.Time}} {{.Type}} {{.Action}} {{.Actor.Attributes.name}}'
+
+# Filter for concerning events
+docker events --filter event=die --filter event=oom --filter event=health_status
+```
+
+<Callout type="info" title="Application Metrics">
+For application-level metrics, expose a `/metrics` endpoint in Prometheus format. Libraries like `prom-client` (Node.js), `prometheus_client` (Python), and `micrometer` (Java) make this easy.
+</Callout>
+
+## Backup Strategies
+
+### Volume Backup
+
+```bash
+#!/bin/bash
+# backup-volumes.sh — Backup Docker volumes
+
+BACKUP_DIR="/backups/docker/$(date +%Y-%m-%d)"
+mkdir -p "$BACKUP_DIR"
+
+# Backup a named volume
+backup_volume() {
+  local volume_name=$1
+  local backup_file="$BACKUP_DIR/${volume_name}.tar.gz"
+
+  docker run --rm \
+    -v "${volume_name}:/source:ro" \
+    -v "$BACKUP_DIR:/backup" \
+    alpine \
+    tar czf "/backup/${volume_name}.tar.gz" -C /source .
+
+  echo "Backed up $volume_name to $backup_file"
+}
+
+# Backup all application volumes
+backup_volume "myapp_db_data"
+backup_volume "myapp_uploads"
+backup_volume "myapp_config"
+
+# Cleanup old backups (keep 30 days)
+find /backups/docker -type d -mtime +30 -exec rm -rf {} +
+```
+
+### Database Backup (Hot Backup)
+
+```bash
+# PostgreSQL backup
+docker exec myapp-db pg_dump -U postgres mydb > backup.sql
+
+# MySQL backup
+docker exec myapp-db mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" mydb > backup.sql
+
+# MongoDB backup
+docker exec myapp-mongo mongodump --out /backup
+docker cp myapp-mongo:/backup ./mongo-backup
+```
+
+### Volume Restore
+
+```bash
+# Restore a volume from backup
+restore_volume() {
+  local volume_name=$1
+  local backup_file=$2
+
+  # Create volume if it doesn't exist
+  docker volume create "$volume_name"
+
+  # Restore from backup
+  docker run --rm \
+    -v "${volume_name}:/target" \
+    -v "$(dirname $backup_file):/backup:ro" \
+    alpine \
+    sh -c "rm -rf /target/* && tar xzf /backup/$(basename $backup_file) -C /target"
+
+  echo "Restored $volume_name from $backup_file"
+}
+
+restore_volume "myapp_db_data" "/backups/docker/2026-03-01/myapp_db_data.tar.gz"
+```
+
+## Container Orchestration: Beyond Single Host
+
+Docker on a single host has limitations:
+
+- **No high availability** — if the host dies, everything is down
+- **No horizontal scaling** — can't add more instances across servers
+- **No rolling updates** — zero-downtime deployments require orchestration
+- **No service discovery** — containers on different hosts can't find each other
+- **No load balancing** — traffic distribution across instances needs external tools
+
+### Docker Swarm vs Kubernetes
+
+| Feature | Docker Swarm | Kubernetes |
+|---------|-------------|------------|
+| Complexity | Low (built into Docker) | High (separate installation) |
+| Learning curve | Easy (uses Compose syntax) | Steep (many new concepts) |
+| Scaling | Good for small-medium | Excellent for any scale |
+| Community | Smaller | Massive |
+| Ecosystem | Limited | Extensive (Helm, Istio, etc.) |
+| Cloud support | Manual setup | Managed services (EKS, GKE, AKS) |
+| Best for | Small teams, simple deployments | Enterprise, complex microservices |
+
+<Callout type="tip" title="When to Move to Orchestration">
+You need orchestration when you need: high availability (multi-host), horizontal scaling, rolling updates, service discovery across hosts, or you're running more than 20-30 containers. For smaller deployments, Docker Compose with restart policies is often sufficient.
+</Callout>
+
+## Production Deployment Checklist
+
+Use this checklist before deploying containers to production:
+
+```markdown
+## Container Configuration
+- [ ] Restart policy set (unless-stopped or on-failure)
+- [ ] Health check defined with appropriate intervals
+- [ ] Resource limits set (memory AND CPU)
+- [ ] PID limits configured
+- [ ] Stop grace period appropriate for shutdown time
+- [ ] Running as non-root user
+- [ ] Read-only filesystem where possible
+
+## Image Management
+- [ ] Specific version tag (NOT :latest)
+- [ ] Image scanned for vulnerabilities
+- [ ] Multi-stage build for minimal image size
+- [ ] .dockerignore excludes unnecessary files
+- [ ] Base image from trusted/official source
+
+## Networking
+- [ ] Custom bridge network (not default)
+- [ ] Only required ports published
+- [ ] TLS configured for external traffic
+- [ ] Internal services not exposed externally
+
+## Data Management
+- [ ] Named volumes for persistent data
+- [ ] Backup strategy implemented and tested
+- [ ] Restore procedure documented and tested
+- [ ] Log rotation configured
+
+## Monitoring
+- [ ] Container metrics collected (CPU, memory, network)
+- [ ] Application metrics exposed
+- [ ] Alerting configured for failures
+- [ ] Log aggregation set up
+
+## Security
+- [ ] No secrets in images or environment variables
+- [ ] Capabilities dropped (--cap-drop ALL + selective add)
+- [ ] Docker Content Trust enabled
+- [ ] Regular image updates scheduled
+```
+
+<Exercise
+  title="Build a Production-Ready Container"
+  difficulty="intermediate"
+  xpReward={35}
+  estimatedMinutes={25}
+  objectives={[
+    "Configure restart policies and health checks",
+    "Set memory and CPU resource limits",
+    "Implement graceful shutdown handling",
+    "Use proper image tagging strategy"
+  ]}
+  hints={[
+    "Start with a Dockerfile that has HEALTHCHECK, USER, and proper CMD",
+    "Use docker compose with restart, deploy.resources, and healthcheck",
+    "Test by killing the process and watching restart behavior"
+  ]}
+  validationCriteria={`
+Create a docker-compose.yml for a production web app:
+
+\`\`\`yaml
+services:
+  web:
+    image: nginx:1.25-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+    ports:
+      - "8080:80"
+    volumes:
+      - web_content:/usr/share/nginx/html:ro
+    networks:
+      - frontend
+
+  app:
+    image: myapp:1.2.3
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+
+volumes:
+  web_content:
+  db_data:
+
+networks:
+  frontend:
+  backend:
+    internal: true
+\`\`\`
+
+Verify:
+1. \`docker compose up -d\`
+2. Wait for health checks: \`docker compose ps\` shows "(healthy)"
+3. Kill a container: \`docker kill <container>\` — watch it restart
+4. Check resource usage: \`docker stats --no-stream\`
+  `}
+/>
+
+<Exercise
+  title="Set Up Container Monitoring"
+  difficulty="advanced"
+  xpReward={40}
+  estimatedMinutes={30}
+  objectives={[
+    "Deploy Prometheus and Grafana with Docker Compose",
+    "Configure cAdvisor for container metrics",
+    "Create basic monitoring dashboard",
+    "Set up alerting rules for container failures"
+  ]}
+  hints={[
+    "Use the monitoring-stack.yml from the lesson as a starting point",
+    "Configure prometheus.yml with scrape targets for cAdvisor",
+    "Access Grafana at :3000 and import cAdvisor dashboard (ID: 14282)",
+    "Add alerting rules in prometheus for container_memory_usage_bytes"
+  ]}
+  validationCriteria={`
+1. Deploy the full monitoring stack:
+\`\`\`bash
+docker compose -f monitoring-stack.yml up -d
+\`\`\`
+
+2. Verify all services are healthy:
+\`\`\`bash
+docker compose -f monitoring-stack.yml ps
+# All should show "Up" or "healthy"
+\`\`\`
+
+3. Check Prometheus targets: http://localhost:9090/targets
+   - cAdvisor target should be "UP"
+
+4. Configure Grafana:
+   - Add Prometheus data source (URL: http://prometheus:9090)
+   - Import Docker dashboard (ID: 14282)
+   - Verify container metrics are visible
+
+5. Create alert rule in prometheus.yml:
+\`\`\`yaml
+rule_files:
+  - "alerts.yml"
+
+# alerts.yml
+groups:
+  - name: container_alerts
+    rules:
+      - alert: ContainerHighMemory
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ \$labels.name }} memory usage > 85%"
+\`\`\`
+  `}
+/>
+
+<MiniProject
+  title="Production Deployment Pipeline"
+  difficulty="advanced"
+  xpReward={75}
+  estimatedMinutes={45}
+  objectives={[
+    "Build a complete production Docker Compose configuration",
+    "Implement health checks for all services",
+    "Configure monitoring and backup automation",
+    "Create a deployment and rollback script"
+  ]}
+  hints={[
+    "Start with a 3-tier architecture: web server, API, database",
+    "Add monitoring (Prometheus + Grafana) as a separate compose file",
+    "Write a deploy.sh that tags, builds, and rolls out new versions",
+    "Write a rollback.sh that reverts to the previous image version"
+  ]}
+  validationCriteria={`
+Create a complete production deployment setup:
+
+1. \`docker-compose.prod.yml\` — Application stack:
+   - Nginx reverse proxy with TLS termination
+   - Application container with health checks
+   - PostgreSQL with named volume
+   - Redis for caching
+   - All services: restart policies, resource limits, health checks
+   - Custom networks: \`frontend\` (public), \`backend\` (internal)
+
+2. \`deploy.sh\` — Deployment script:
+\`\`\`bash
+#!/bin/bash
+set -euo pipefail
+
+VERSION=\${1:?Usage: deploy.sh <version>}
+REGISTRY="registry.example.com"
+APP="myapp"
+
+echo "Deploying $APP:$VERSION..."
+
+# Pull new image
+docker pull "$REGISTRY/$APP:$VERSION"
+
+# Save current version for rollback
+CURRENT=$(docker inspect --format='{{.Config.Image}}' myapp-api 2>/dev/null || echo "none")
+echo "$CURRENT" > .previous-version
+
+# Rolling update
+docker compose -f docker-compose.prod.yml up -d --no-deps api
+
+# Wait for health check
+echo "Waiting for health check..."
+for i in {1..30}; do
+  STATUS=$(docker inspect --format='{{.State.Health.Status}}' myapp-api 2>/dev/null || echo "starting")
+  if [ "$STATUS" = "healthy" ]; then
+    echo "Deployment successful! Running $APP:$VERSION"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "Health check failed! Rolling back..."
+./rollback.sh
+exit 1
+\`\`\`
+
+3. \`rollback.sh\` — Rollback script:
+\`\`\`bash
+#!/bin/bash
+PREVIOUS=$(cat .previous-version)
+echo "Rolling back to $PREVIOUS..."
+docker compose -f docker-compose.prod.yml up -d --no-deps api
+\`\`\`
+
+4. \`backup.sh\` — Automated backup script:
+\`\`\`bash
+#!/bin/bash
+BACKUP_DIR="/backups/$(date +%Y-%m-%d)"
+mkdir -p "$BACKUP_DIR"
+docker exec myapp-db pg_dump -U postgres mydb | gzip > "$BACKUP_DIR/db.sql.gz"
+docker run --rm -v myapp_uploads:/data:ro -v "$BACKUP_DIR:/backup" alpine tar czf /backup/uploads.tar.gz -C /data .
+echo "Backup complete: $BACKUP_DIR"
+\`\`\`
+  `}
+/>
+
+## Key Takeaways
+
+- **Restart policies** are your first line of defense — use `unless-stopped` for services and `on-failure:N` for batch jobs
+- **Health checks** detect silent failures that restart policies miss — always define them for web services
+- **Resource limits** (memory, CPU, PIDs) prevent a single container from taking down the entire host
+- **Never use `:latest`** in production — use semantic versions or git SHAs for traceability and rollback
+- **Graceful shutdown** requires handling SIGTERM in your application and using exec-form CMD
+- **Monitoring** with Prometheus + cAdvisor + Grafana gives you visibility into container behavior
+- **Backup your volumes** — containers are ephemeral, but your data isn't
+- **Docker on a single host** works for small deployments, but consider orchestration (Kubernetes) when you need HA, scaling, or rolling updates
+- **Use the production checklist** before every deployment — it prevents the 3 AM phone call
+
+## Congratulations — Docker Fundamentals Complete!
+
+You've completed the entire Docker Fundamentals module! Here's what you've mastered:
+
+| Module Section | Lessons | What You Learned |
+|---------------|---------|-----------------|
+| Foundations (01-05) | Docker story, containers vs VMs, architecture, installation, first container | Core concepts and getting started |
+| Images & Builds (06-08) | Images, Dockerfiles, multi-stage builds | Building production images |
+| Storage & Networking (09-10) | Volumes, networking | Data persistence and container communication |
+| Multi-Container (11-12) | Docker Compose, environment config | Running complex applications |
+| Operations (13-15) | Logging, security, production | Running Docker in the real world |
+
+You can now:
+- Build optimized Docker images for any application
+- Run multi-container applications with Docker Compose
+- Secure containers with non-root users, capabilities, and scanning
+- Deploy containers with health checks, monitoring, and backup strategies
+- Make informed decisions about when to adopt container orchestration
+
+## What's Next
+
+In **Docker Advanced**, you'll go deeper:
+- Docker build optimization with BuildKit
+- Custom Docker registries
+- Docker Swarm for multi-host deployments
+- Advanced Compose patterns (profiles, extends, anchors)
+- Docker-in-Docker and Docker for CI/CD
+- Container debugging and performance profiling
+- Migration strategies to Kubernetes
