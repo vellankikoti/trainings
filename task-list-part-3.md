@@ -720,7 +720,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-118: Create glossary
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-110
 - **Estimated effort:** M
