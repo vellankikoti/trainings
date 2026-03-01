@@ -13,7 +13,7 @@
 
 ### TASK-120: Build WebSocket terminal backend
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-049
 - **Estimated effort:** XL
@@ -39,7 +39,7 @@
 
 ### TASK-121: Implement lab session management
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-120
 - **Estimated effort:** L
