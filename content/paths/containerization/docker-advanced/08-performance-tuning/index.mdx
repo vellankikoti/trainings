@@ -1,0 +1,1394 @@
+---
+title: "Container Performance Tuning"
+description: "Learn to benchmark, profile, and optimize container performance. Master CPU scheduling with shares, quotas, and pinning. Tune memory limits, I/O throttling, and network performance. Optimize JVM, Node.js, and Python runtimes for containerized environments using cAdvisor, perf, and flame graphs."
+order: 8
+xpReward: 50
+estimatedMinutes: 60
+prerequisites:
+  - 07-debugging-containers
+objectives:
+  - Benchmark container performance using sysbench, wrk, hey, and fio
+  - Configure CPU scheduling with shares, quotas, periods, and CPU pinning
+  - Tune memory limits, reservations, swap behavior, and OOM scores
+  - Apply I/O throttling with device-read-bps and device-write-bps controls
+  - Optimize JVM, Node.js, and Python runtimes for container environments
+  - Profile containers with docker stats, cAdvisor, perf, and flame graphs
+tags:
+  - docker
+  - performance
+  - benchmarking
+  - cpu
+  - memory
+  - tuning
+  - jvm
+  - nodejs
+  - cadvisor
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your e-commerce platform handles 500 requests per second on a bare-metal server. After containerizing the application with default settings, throughput drops to 180 requests per second. The CEO is furious. The team wants to abandon containers and go back to bare metal. But the problem is not containers — it is configuration. The JVM inside the container thinks it has 64 GB of RAM (the host's total) and allocates a 16 GB heap, triggering constant garbage collection inside a 512 MB container limit. The Node.js worker processes are fighting over two CPU cores with no affinity. The database container has no I/O priority and starves during peak traffic. Today you learn to tune containers until they match — and often exceed — bare-metal performance.
+</Callout>
+
+## Benchmarking Containers
+
+Before tuning, you need a baseline. Never optimize based on guesses — measure, change one variable, and measure again.
+
+### CPU Benchmarking with sysbench
+
+```bash
+# Run sysbench CPU benchmark inside a container
+docker run --rm severalnines/sysbench sysbench cpu \
+  --cpu-max-prime=20000 \
+  --threads=4 \
+  run
+
+# Example output:
+# CPU speed:
+#     events per second:  3842.15
+#
+# Throughput:
+#     events/s (eps):     3842.1537
+#     time elapsed:       10.0003s
+#     total number of events: 38423
+#
+# Latency (ms):
+#          min:           0.94
+#          avg:           1.04
+#          max:           12.31
+#          95th percentile: 1.16
+
+# Compare with resource limits
+docker run --rm --cpus 1.0 severalnines/sysbench sysbench cpu \
+  --cpu-max-prime=20000 \
+  --threads=4 \
+  run
+# events per second: ~960 (approximately 1/4 of unlimited)
+
+docker run --rm --cpus 0.5 severalnines/sysbench sysbench cpu \
+  --cpu-max-prime=20000 \
+  --threads=4 \
+  run
+# events per second: ~480 (approximately 1/8 of unlimited)
+```
+
+### HTTP Benchmarking with wrk and hey
+
+```bash
+# Start a test web server
+docker run -d --name bench-target \
+  -p 8080:80 \
+  nginx:alpine
+
+# Benchmark with wrk (requires wrk installed on host or another container)
+docker run --rm --network host williamyeh/wrk \
+  -t4 -c100 -d30s http://localhost:8080/
+# Running 30s test @ http://localhost:8080/
+#   4 threads and 100 connections
+#   Thread Stats   Avg      Stdev     Max   +/- Stdev
+#     Latency     2.34ms    1.21ms   45.23ms   89.12%
+#     Req/Sec     10.82k     1.23k   14.56k    72.33%
+#   1294563 requests in 30.02s, 1.04GB read
+# Requests/sec: 43123.45
+# Transfer/sec: 35.52MB
+
+# Benchmark with hey
+docker run --rm --network host ricoli/hey \
+  -n 10000 -c 100 http://localhost:8080/
+# Summary:
+#   Total:        1.2345 secs
+#   Slowest:      0.0456 secs
+#   Fastest:      0.0002 secs
+#   Average:      0.0123 secs
+#   Requests/sec: 8100.12
+#
+# Status code distribution:
+#   [200] 10000 responses
+
+docker rm -f bench-target
+```
+
+### I/O Benchmarking with fio
+
+```bash
+# Sequential write test
+docker run --rm -v bench-vol:/data \
+  ljishen/fio \
+  --name=seqwrite \
+  --ioengine=libaio \
+  --direct=1 \
+  --bs=4k \
+  --size=256M \
+  --rw=write \
+  --numjobs=1 \
+  --directory=/data
+# WRITE: bw=245MiB/s (257MB/s), iops=62834
+
+# Random read test
+docker run --rm -v bench-vol:/data \
+  ljishen/fio \
+  --name=randread \
+  --ioengine=libaio \
+  --direct=1 \
+  --bs=4k \
+  --size=256M \
+  --rw=randread \
+  --numjobs=4 \
+  --directory=/data
+# READ: bw=189MiB/s (198MB/s), iops=48412
+
+# Compare with I/O throttling
+docker run --rm \
+  --device-write-bps /dev/sda:10mb \
+  -v bench-vol:/data \
+  ljishen/fio \
+  --name=throttled \
+  --ioengine=libaio \
+  --direct=1 \
+  --bs=4k \
+  --size=64M \
+  --rw=write \
+  --numjobs=1 \
+  --directory=/data
+# WRITE: bw=9.99MiB/s (throttled to 10MB/s)
+
+docker volume rm bench-vol
+```
+
+## CPU Scheduling
+
+Docker provides multiple mechanisms to control how containers use CPU resources. Understanding the difference between shares, quotas, and pinning is critical for performance tuning.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CPU Scheduling Mechanisms                     │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │  CPU Shares (--cpu-shares)                               │    │
+│  │  ─────────────────────────                               │    │
+│  │  Relative weight. Only matters when CPU is contended.    │    │
+│  │  Default: 1024. Higher = more CPU time proportionally.   │    │
+│  │                                                          │    │
+│  │  Container A: shares=1024  ─┐                            │    │
+│  │  Container B: shares=512   ─┤ A gets 2x B's CPU time    │    │
+│  │  Container C: shares=256   ─┘ A gets 4x C's CPU time    │    │
+│  │                                                          │    │
+│  │  When CPU is NOT contended, all containers can use 100%  │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │  CPU Quota (--cpus or --cpu-quota/--cpu-period)          │    │
+│  │  ──────────────────────────────────────                  │    │
+│  │  Hard limit. Container cannot exceed this regardless     │    │
+│  │  of available CPU.                                       │    │
+│  │                                                          │    │
+│  │  --cpus 0.5  = max 50% of one core                      │    │
+│  │  --cpus 2.0  = max 200% (two full cores)                │    │
+│  │  --cpus 0.25 = max 25% of one core                      │    │
+│  │                                                          │    │
+│  │  Equivalent: --cpu-quota=50000 --cpu-period=100000       │    │
+│  │  (50000 microseconds per 100000 microsecond period)      │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │  CPU Pinning (--cpuset-cpus)                             │    │
+│  │  ───────────────────────────                             │    │
+│  │  Bind container to specific CPU cores.                   │    │
+│  │  Eliminates context switching between cores.             │    │
+│  │  Best for latency-sensitive workloads.                   │    │
+│  │                                                          │    │
+│  │  --cpuset-cpus="0,1"    = cores 0 and 1 only            │    │
+│  │  --cpuset-cpus="0-3"    = cores 0, 1, 2, 3              │    │
+│  │  --cpuset-cpus="0,2,4"  = cores 0, 2, 4 (skip 1,3)     │    │
+│  └──────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### CPU Shares — Relative Weight
+
+```bash
+# Default shares (1024) — equal priority
+docker run -d --name app-default alpine sleep 3600
+docker inspect app-default --format '{{.HostConfig.CpuShares}}'
+# 0 (means default: 1024)
+
+# High priority container (2x CPU time when contended)
+docker run -d --name app-high \
+  --cpu-shares 2048 \
+  myapp:latest
+
+# Low priority container (half CPU time when contended)
+docker run -d --name app-low \
+  --cpu-shares 512 \
+  worker:latest
+
+# Demonstrate: when CPU is contended, shares determine allocation
+# Container with shares=2048 gets 2048/(2048+512) = 80% of CPU
+# Container with shares=512 gets 512/(2048+512) = 20% of CPU
+
+# When only one container needs CPU, it gets 100% regardless of shares
+```
+
+<Callout type="info" title="Shares Only Matter Under Contention">
+CPU shares are a proportional weight, not an absolute limit. A container with `--cpu-shares 256` can use all available CPU if no other container wants it. Shares only determine allocation when multiple containers compete for the same CPU time. Use `--cpus` for hard limits.
+</Callout>
+
+### CPU Quota — Hard Limits
+
+```bash
+# Limit to 0.5 CPU (50% of one core)
+docker run -d --name app-half-cpu \
+  --cpus 0.5 \
+  myapp:latest
+
+# Limit to 2 CPUs (can use up to 2 full cores)
+docker run -d --name app-two-cpu \
+  --cpus 2.0 \
+  myapp:latest
+
+# Equivalent using quota/period (advanced)
+# --cpus 0.5 is the same as:
+docker run -d --name app-quota \
+  --cpu-quota 50000 \
+  --cpu-period 100000 \
+  myapp:latest
+
+# Why use quota/period directly?
+# For burst-friendly workloads, increase the period:
+docker run -d --name app-burst \
+  --cpu-quota 100000 \
+  --cpu-period 200000 \
+  myapp:latest
+# This allows the container to use 100ms of CPU time per 200ms period
+# Same average (0.5 CPU) but can burst to 100% for 100ms at a time
+
+# Update limits on a running container
+docker update --cpus 1.5 myapp
+```
+
+### CPU Pinning — Core Affinity
+
+```bash
+# Check available CPU cores
+nproc
+# 8
+
+# Pin to cores 0 and 1
+docker run -d --name app-pinned \
+  --cpuset-cpus="0,1" \
+  --cpus 2.0 \
+  myapp:latest
+
+# Pin database to cores 2-3 (no sharing with app)
+docker run -d --name db-pinned \
+  --cpuset-cpus="2,3" \
+  --cpus 2.0 \
+  postgres:16-alpine
+
+# This prevents CPU cache thrashing between app and database
+# Each has dedicated cores with warm L1/L2 caches
+
+# Verify the CPU affinity
+docker inspect app-pinned --format '{{.HostConfig.CpusetCpus}}'
+# 0,1
+
+# Pin memory to specific NUMA nodes (for NUMA-aware systems)
+docker run -d --name numa-aware \
+  --cpuset-cpus="0-3" \
+  --cpuset-mems="0" \
+  myapp:latest
+```
+
+<Callout type="tip" title="CPU Pinning for Latency-Sensitive Applications">
+CPU pinning eliminates the overhead of context switching between cores. When a process moves from core 0 to core 3, it loses its L1 and L2 cache (a "cold cache miss"), which can add 10-100 microseconds of latency. For applications where every millisecond matters (trading systems, real-time data processing, game servers), pin the container to specific cores and keep those cores free from other workloads.
+</Callout>
+
+## Memory Management
+
+### Memory Limits and Reservations
+
+```bash
+# Hard memory limit (container is killed if it exceeds this)
+docker run -d --name app-mem \
+  --memory 512m \
+  myapp:latest
+
+# Memory reservation (soft limit — scheduling hint)
+docker run -d --name app-mem-res \
+  --memory 512m \
+  --memory-reservation 256m \
+  myapp:latest
+# The container is guaranteed 256MB and can use up to 512MB
+# Docker will try to reclaim memory back to 256MB under pressure
+
+# Disable swap (recommended for predictable performance)
+docker run -d --name app-no-swap \
+  --memory 512m \
+  --memory-swap 512m \
+  myapp:latest
+# memory-swap = memory means NO swap available
+# memory-swap > memory means swap = (memory-swap - memory)
+
+# Unlimited swap (dangerous)
+docker run -d --name app-unlimited-swap \
+  --memory 512m \
+  --memory-swap -1 \
+  myapp:latest
+# Container can swap without limit — very slow but will not be OOM killed
+
+# Check current memory usage
+docker stats --no-stream --format \
+  "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" app-mem
+# NAME      MEM USAGE / LIMIT     MEM %
+# app-mem   45.12MiB / 512MiB     8.81%
+```
+
+### OOM Score Adjustment
+
+```bash
+# Set OOM kill priority (lower = less likely to be killed)
+# Range: -1000 (never kill) to 1000 (kill first)
+
+# Protect critical containers from OOM
+docker run -d --name critical-db \
+  --memory 1g \
+  --oom-score-adj -500 \
+  postgres:16-alpine
+
+# Make batch workers the first to be killed
+docker run -d --name batch-worker \
+  --memory 256m \
+  --oom-score-adj 500 \
+  worker:latest
+
+# Disable OOM killer entirely (container pauses instead of dying)
+docker run -d --name no-oom-kill \
+  --memory 512m \
+  --oom-kill-disable \
+  myapp:latest
+# WARNING: If this container exceeds memory, it will hang,
+# and may cause the host to become unresponsive
+```
+
+### Kernel Memory Limits
+
+```bash
+# Limit kernel memory (for preventing fork bombs and excessive file handles)
+docker run -d --name app-kmem \
+  --memory 512m \
+  --kernel-memory 64m \
+  myapp:latest
+
+# View memory breakdown
+docker stats --no-stream --format \
+  "{{.Name}}: {{.MemUsage}} ({{.MemPerc}})"
+```
+
+## I/O Throttling
+
+```bash
+# Limit write speed to a specific device
+docker run -d --name app-io \
+  --device-write-bps /dev/sda:50mb \
+  --device-read-bps /dev/sda:100mb \
+  myapp:latest
+
+# Limit I/O operations per second (IOPS)
+docker run -d --name app-iops \
+  --device-write-iops /dev/sda:1000 \
+  --device-read-iops /dev/sda:2000 \
+  myapp:latest
+
+# Relative I/O weight (like CPU shares, 10-1000, default 500)
+docker run -d --name app-io-weight \
+  --blkio-weight 300 \
+  myapp:latest
+
+docker run -d --name db-io-weight \
+  --blkio-weight 700 \
+  postgres:16-alpine
+# Database gets ~70% of I/O bandwidth when contended
+
+# Verify I/O limits
+docker inspect app-io --format '{{json .HostConfig.BlkioDeviceWriteBps}}' | jq .
+# [
+#   {
+#     "Path": "/dev/sda",
+#     "Rate": 52428800
+#   }
+# ]
+```
+
+<Callout type="warning" title="I/O Throttling Requires Direct Device Access">
+The `--device-read-bps` and `--device-write-bps` flags only work with direct device access, not with the overlay filesystem. If your container's workload goes through the overlay storage driver, these limits may not be enforced. For reliable I/O throttling, use volumes backed by specific block devices and set the limits on those devices.
+</Callout>
+
+## Network Performance
+
+### Host Networking
+
+```bash
+# Default bridge networking adds ~2-5% latency overhead from NAT
+docker run -d --name app-bridge \
+  -p 8080:3000 \
+  myapp:latest
+
+# Host networking eliminates the overhead (no NAT, no bridge)
+docker run -d --name app-host \
+  --network host \
+  myapp:latest
+# The container shares the host's network stack directly
+# Port 3000 is available on the host without mapping
+
+# Benchmark comparison
+# Bridge:
+docker run --rm --network bridge williamyeh/wrk \
+  -t4 -c100 -d10s http://app-bridge:3000/
+# Requests/sec: 42000
+
+# Host:
+docker run --rm --network host williamyeh/wrk \
+  -t4 -c100 -d10s http://localhost:3000/
+# Requests/sec: 48000  (~14% improvement)
+```
+
+### Network Tuning for High Throughput
+
+```bash
+# Increase container's network buffer sizes
+docker run -d --name app-tuned \
+  --sysctl net.core.rmem_max=16777216 \
+  --sysctl net.core.wmem_max=16777216 \
+  --sysctl net.core.somaxconn=65535 \
+  --sysctl net.ipv4.tcp_max_syn_backlog=65535 \
+  myapp:latest
+
+# Enable TCP_NODELAY for latency-sensitive applications
+# (configure in your application, not Docker)
+
+# Use macvlan for near-bare-metal network performance
+docker network create -d macvlan \
+  --subnet=192.168.1.0/24 \
+  --gateway=192.168.1.1 \
+  -o parent=eth0 \
+  macnet
+
+docker run -d --name app-macvlan \
+  --network macnet \
+  --ip 192.168.1.100 \
+  myapp:latest
+# Container gets its own MAC address and IP on the physical network
+# No NAT, no bridge — lowest possible latency
+```
+
+## JVM in Containers
+
+The JVM has a historically difficult relationship with containers. Older JVM versions do not respect container memory limits and will allocate heap based on the host's total memory, causing OOM kills.
+
+```bash
+# BAD: JVM ignoring container limits (Java 8 before update 191)
+docker run --rm --memory 256m openjdk:8-jdk java -XX:+PrintFlagsFinal -version \
+  2>&1 | grep -i maxheap
+# MaxHeapSize = 16873684992  (16 GB — the HOST's memory!)
+# Container has 256MB limit — JVM will be OOM killed
+
+# GOOD: Modern JVM (Java 11+) respects container limits by default
+docker run --rm --memory 256m eclipse-temurin:21-jdk \
+  java -XX:+PrintFlagsFinal -version 2>&1 | grep -i maxheap
+# MaxHeapSize = 130023424  (~124 MB — ~50% of container limit)
+```
+
+### JVM Tuning for Containers
+
+```bash
+# Optimal JVM settings for containers
+docker run -d --name java-app \
+  --memory 512m \
+  --cpus 2.0 \
+  -e JAVA_OPTS="\
+    -XX:MaxRAMPercentage=75.0 \
+    -XX:InitialRAMPercentage=50.0 \
+    -XX:+UseG1GC \
+    -XX:MaxGCPauseMillis=200 \
+    -XX:+UseStringDeduplication \
+    -XX:+UseContainerSupport \
+    -XX:ActiveProcessorCount=2" \
+  eclipse-temurin:21-jdk \
+  java $JAVA_OPTS -jar /app/myapp.jar
+```
+
+| JVM Flag | Purpose | Recommended Value |
+|----------|---------|-------------------|
+| `-XX:MaxRAMPercentage` | Max heap as % of container memory | 75% (leave room for non-heap) |
+| `-XX:InitialRAMPercentage` | Initial heap as % of container memory | 50% |
+| `-XX:+UseContainerSupport` | Respect cgroup memory limits | Always enable (default in JDK 11+) |
+| `-XX:ActiveProcessorCount` | Override detected CPU count | Set to `--cpus` value |
+| `-XX:+UseG1GC` | Garbage collector for containers | Best for most workloads |
+| `-XX:MaxGCPauseMillis` | Target GC pause time | 200ms for APIs, 500ms for batch |
+
+<Callout type="warning" title="Always Set ActiveProcessorCount for JVM">
+Even modern JVMs may detect the host's total CPU count instead of the container's CPU limit. This causes the JVM to create too many GC threads and compiler threads, all competing for limited CPU quota. Set `-XX:ActiveProcessorCount` to match your `--cpus` value. For `--cpus 2.0`, set `-XX:ActiveProcessorCount=2`.
+</Callout>
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              JVM Memory Layout in a 512MB Container          │
+│                                                              │
+│  Container Memory Limit: 512 MB                             │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │                                                        │  │
+│  │  JVM Heap (MaxRAMPercentage=75%)          384 MB       │  │
+│  │  ┌──────────────────────────────────────────────────┐  │  │
+│  │  │  Young Generation (Eden + Survivor)              │  │  │
+│  │  │  Old Generation                                  │  │  │
+│  │  └──────────────────────────────────────────────────┘  │  │
+│  │                                                        │  │
+│  │  Non-Heap Memory                          ~80 MB       │  │
+│  │  ┌──────────────────────────────────────────────────┐  │  │
+│  │  │  Metaspace              ~40 MB                   │  │  │
+│  │  │  Code Cache             ~20 MB                   │  │  │
+│  │  │  Thread Stacks          ~10 MB                   │  │  │
+│  │  │  Direct Buffers         ~10 MB                   │  │  │
+│  │  └──────────────────────────────────────────────────┘  │  │
+│  │                                                        │  │
+│  │  OS / Container Overhead              ~48 MB           │  │
+│  │  (libc, /proc, container runtime)                      │  │
+│  │                                                        │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                              │
+│  Rule: Heap should be 70-75% of container memory.            │
+│  Going above 80% risks OOM kills from non-heap growth.       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Node.js in Containers
+
+### Thread Pool and Memory Tuning
+
+```bash
+# Node.js uses libuv with a default thread pool of 4 threads
+# For I/O-heavy applications, increase it
+docker run -d --name node-app \
+  --memory 512m \
+  --cpus 2.0 \
+  -e UV_THREADPOOL_SIZE=8 \
+  -e NODE_OPTIONS="--max-old-space-size=384" \
+  node:20-alpine node /app/server.js
+
+# UV_THREADPOOL_SIZE: default 4, max 1024
+# Used for: DNS lookups, filesystem I/O, crypto, zlib
+# Rule of thumb: set to 2x the number of CPU cores
+
+# --max-old-space-size: V8 heap limit in MB
+# Should be ~75% of container memory limit
+# For 512MB container: 384MB
+# For 1GB container: 768MB
+# For 256MB container: 192MB
+```
+
+### Node.js Cluster Mode
+
+```bash
+# Single-process Node.js only uses one CPU core
+# Use cluster module for multi-core utilization
+
+cat > /tmp/cluster-server.js << 'EOF'
+const cluster = require('cluster');
+const http = require('http');
+const os = require('os');
+
+// Use the number of available CPUs (respects --cpus in modern Node)
+const WORKERS = parseInt(process.env.WEB_CONCURRENCY) || os.availableParallelism?.() || os.cpus().length;
+
+if (cluster.isPrimary) {
+  console.log(`Primary ${process.pid} starting ${WORKERS} workers`);
+
+  for (let i = 0; i < WORKERS; i++) {
+    cluster.fork();
+  }
+
+  cluster.on('exit', (worker, code, signal) => {
+    console.log(`Worker ${worker.process.pid} died (${signal || code}). Restarting...`);
+    cluster.fork();
+  });
+} else {
+  http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end(`Worker ${process.pid}\n`);
+  }).listen(3000);
+
+  console.log(`Worker ${process.pid} started`);
+}
+EOF
+
+# Run with cluster mode
+docker run -d --name node-cluster \
+  --memory 1g \
+  --cpus 4.0 \
+  -e WEB_CONCURRENCY=4 \
+  -e UV_THREADPOOL_SIZE=16 \
+  -e NODE_OPTIONS="--max-old-space-size=192" \
+  -p 3000:3000 \
+  -v /tmp/cluster-server.js:/app/server.js:ro \
+  node:20-alpine node /app/server.js
+
+# Note: --max-old-space-size is PER PROCESS
+# With 4 workers: 4 * 192MB = 768MB max heap total
+# Plus overhead: ~200MB for V8 internals, libuv, etc.
+# Total: ~968MB fits within 1GB container limit
+```
+
+| Setting | Default | Recommended | Notes |
+|---------|---------|-------------|-------|
+| `UV_THREADPOOL_SIZE` | 4 | 2x CPU cores | For I/O-heavy apps |
+| `--max-old-space-size` | 1.5GB | 75% container memory / workers | Per process |
+| `WEB_CONCURRENCY` | 1 | Match `--cpus` | Number of cluster workers |
+| `NODE_ENV` | undefined | `production` | Enables optimizations |
+
+## Python in Containers
+
+### Gunicorn Worker Tuning
+
+```bash
+# Gunicorn with sync workers (CPU-bound)
+docker run -d --name python-app \
+  --memory 512m \
+  --cpus 2.0 \
+  -p 8000:8000 \
+  python-app:latest \
+  gunicorn app:application \
+    --bind 0.0.0.0:8000 \
+    --workers 5 \
+    --threads 2 \
+    --worker-class gthread \
+    --max-requests 1000 \
+    --max-requests-jitter 50 \
+    --timeout 30 \
+    --graceful-timeout 10
+
+# Worker formula: (2 * CPU cores) + 1
+# For --cpus 2.0: (2 * 2) + 1 = 5 workers
+
+# For async I/O-bound apps, use uvicorn with uvloop
+docker run -d --name python-async \
+  --memory 512m \
+  --cpus 2.0 \
+  -p 8000:8000 \
+  python-app:latest \
+  uvicorn app:application \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 5 \
+    --loop uvloop \
+    --http httptools \
+    --no-access-log
+```
+
+| Setting | Formula | Example (2 CPUs, 512MB) |
+|---------|---------|------------------------|
+| `--workers` | (2 * CPUs) + 1 | 5 |
+| `--threads` | 2-4 per worker | 2 |
+| Memory per worker | Container memory / workers | ~100MB |
+| `--max-requests` | Recycle workers | 1000 (prevents memory leaks) |
+| `--worker-class` | `gthread` for mixed I/O | `gthread` or `uvicorn.workers.UvicornWorker` |
+
+<Callout type="tip" title="Use --max-requests to Prevent Memory Leaks">
+Python applications are prone to memory leaks due to reference cycles, C extensions that do not free memory, and growing caches. Set `--max-requests 1000 --max-requests-jitter 50` in gunicorn to automatically restart workers after a set number of requests. The jitter prevents all workers from restarting simultaneously. This is a safety net, not a fix — investigate and fix the actual memory leak.
+</Callout>
+
+## Profiling Tools
+
+### docker stats — Built-in Monitoring
+
+```bash
+# Real-time stats for all containers
+docker stats
+# CONTAINER   CPU %   MEM USAGE / LIMIT   MEM %   NET I/O       BLOCK I/O     PIDS
+# webapp      2.34%   128.5MiB / 512MiB   25.10%  1.23MB/456kB  12.3MB/8.9MB  15
+# redis       0.12%   24.3MiB / 256MiB    9.49%   456kB/123kB   0B/0B         4
+# postgres    1.56%   245.6MiB / 1GiB     24.00%  2.34MB/1.2MB  45.6MB/23.4MB 28
+
+# Single snapshot (no streaming)
+docker stats --no-stream
+
+# Format output for scripting
+docker stats --no-stream --format \
+  '{{.Name}}: CPU={{.CPUPerc}} MEM={{.MemPerc}} PIDS={{.PIDs}}'
+
+# Monitor a specific container
+docker stats myapp --format \
+  "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.PIDs}}"
+```
+
+### cAdvisor — Container Monitoring
+
+```bash
+# Run cAdvisor for detailed container metrics
+docker run -d --name cadvisor \
+  --volume=/:/rootfs:ro \
+  --volume=/var/run:/var/run:ro \
+  --volume=/sys:/sys:ro \
+  --volume=/var/lib/docker/:/var/lib/docker:ro \
+  --volume=/dev/disk/:/dev/disk:ro \
+  --publish=8080:8080 \
+  --privileged \
+  --device=/dev/kmsg \
+  gcr.io/cadvisor/cadvisor:latest
+
+# Access the web UI
+# http://localhost:8080
+
+# API endpoints for programmatic access
+curl -s http://localhost:8080/api/v2.1/machine | jq .
+curl -s http://localhost:8080/api/v2.1/summary/docker | jq .
+
+# Get metrics for a specific container
+curl -s "http://localhost:8080/api/v2.1/stats/docker/myapp?count=1" | jq .
+
+# cAdvisor exposes Prometheus metrics at /metrics
+curl -s http://localhost:8080/metrics | grep container_memory_usage_bytes
+```
+
+### perf and Flame Graphs
+
+```bash
+# Profile a containerized application with perf
+PID=$(docker inspect myapp --format '{{.State.Pid}}')
+
+# Record 30 seconds of CPU profiling
+sudo perf record -F 99 -p $PID -g -- sleep 30
+
+# Generate a flamegraph
+sudo perf script > perf.out
+# Use Brendan Gregg's FlameGraph tools
+git clone https://github.com/brendangregg/FlameGraph
+./FlameGraph/stackcollapse-perf.pl perf.out > perf.folded
+./FlameGraph/flamegraph.pl perf.folded > flamegraph.svg
+
+# Open flamegraph.svg in a browser to analyze CPU hotspots
+```
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   How to Read a Flame Graph                  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │                  main()                              │    │
+│  │  ┌────────────────────────┐ ┌──────────────────────┐ │    │
+│  │  │   handleRequest()     │ │   processQueue()     │ │    │
+│  │  │  ┌──────┐ ┌────────┐  │ │  ┌─────────────────┐ │ │    │
+│  │  │  │parse │ │respond │  │ │  │ transform()     │ │ │    │
+│  │  │  │ JSON │ │  HTTP  │  │ │  │ ┌─────────────┐ │ │ │    │
+│  │  │  │      │ │        │  │ │  │ │ encrypt()   │ │ │ │    │
+│  │  │  └──────┘ └────────┘  │ │  │ └─────────────┘ │ │ │    │
+│  │  └────────────────────────┘ │  └─────────────────┘ │ │    │
+│  │                             └──────────────────────┘ │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                              │
+│  Width = CPU time consumed by that function                  │
+│  Height = call stack depth                                   │
+│  Wide bars at the top = CPU hotspots (optimize these)        │
+│  Narrow bars = called infrequently                           │
+│                                                              │
+│  In this example, encrypt() is the widest leaf function      │
+│  → It consumes the most CPU time → Optimize it first         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+<Exercise title="Benchmark and Optimize a Container" difficulty="intermediate" xpReward={35} estimatedMinutes={25}>
+
+Benchmark a web application container, identify performance bottlenecks, apply tuning configurations, and measure the improvement.
+
+**Objectives:**
+- Run a baseline benchmark of a containerized web server
+- Apply CPU, memory, and network optimizations
+- Re-run the benchmark and compare results
+- Document the performance improvement from each change
+
+**Hints:**
+- Start with an nginx container using default settings
+- Use wrk or hey for HTTP benchmarking
+- Compare bridge networking vs host networking
+- Try different CPU and memory configurations
+- Use `docker stats` during benchmarks to correlate resource usage with performance
+
+**Validation Criteria:**
+- Baseline benchmark numbers are recorded
+- At least three different optimizations are applied and measured
+- Each optimization is benchmarked independently
+- Results show measurable improvement from at least one optimization
+- A summary documents the before and after metrics
+
+<CollapsibleSolution>
+
+```bash
+# ═══════════════════════════════════════════
+# Container Performance Optimization Lab
+# ═══════════════════════════════════════════
+
+echo "========================================"
+echo "  Container Performance Optimization Lab"
+echo "========================================"
+echo ""
+
+# Create a results file
+RESULTS="/tmp/bench-results.txt"
+echo "Benchmark Results - $(date)" > $RESULTS
+
+# ─── Baseline: Default settings with bridge network ───
+echo "=== Test 1: Baseline (default settings, bridge network) ==="
+docker run -d --name bench-baseline \
+  -p 8081:80 \
+  nginx:alpine
+sleep 2
+
+echo "Baseline benchmark:" | tee -a $RESULTS
+docker run --rm --network host williamyeh/wrk \
+  -t2 -c50 -d10s http://localhost:8081/ 2>&1 | tee -a $RESULTS
+
+docker rm -f bench-baseline
+echo "" >> $RESULTS
+
+# ─── Test 2: With CPU limits ───
+echo ""
+echo "=== Test 2: CPU limit (--cpus 1.0) ==="
+docker run -d --name bench-cpu \
+  -p 8082:80 \
+  --cpus 1.0 \
+  nginx:alpine
+sleep 2
+
+echo "CPU limited (1.0 CPU):" | tee -a $RESULTS
+docker run --rm --network host williamyeh/wrk \
+  -t2 -c50 -d10s http://localhost:8082/ 2>&1 | tee -a $RESULTS
+
+docker rm -f bench-cpu
+echo "" >> $RESULTS
+
+# ─── Test 3: With CPU pinning ───
+echo ""
+echo "=== Test 3: CPU pinning (cores 0-1) ==="
+docker run -d --name bench-pinned \
+  -p 8083:80 \
+  --cpuset-cpus="0,1" \
+  --cpus 2.0 \
+  nginx:alpine
+sleep 2
+
+echo "CPU pinned (cores 0,1):" | tee -a $RESULTS
+docker run --rm --network host williamyeh/wrk \
+  -t2 -c50 -d10s http://localhost:8083/ 2>&1 | tee -a $RESULTS
+
+docker rm -f bench-pinned
+echo "" >> $RESULTS
+
+# ─── Test 4: Host networking ───
+echo ""
+echo "=== Test 4: Host networking ==="
+docker run -d --name bench-host \
+  --network host \
+  nginx:alpine
+sleep 2
+
+echo "Host networking:" | tee -a $RESULTS
+docker run --rm --network host williamyeh/wrk \
+  -t2 -c50 -d10s http://localhost:80/ 2>&1 | tee -a $RESULTS
+
+docker rm -f bench-host
+echo "" >> $RESULTS
+
+# ─── Test 5: Optimized (host network + CPU pin + tuned sysctls) ───
+echo ""
+echo "=== Test 5: Fully optimized ==="
+docker run -d --name bench-optimized \
+  --network host \
+  --cpuset-cpus="0,1" \
+  --cpus 2.0 \
+  --memory 256m \
+  --sysctl net.core.somaxconn=65535 \
+  nginx:alpine
+sleep 2
+
+echo "Fully optimized (host + pinned + sysctl):" | tee -a $RESULTS
+docker run --rm --network host williamyeh/wrk \
+  -t2 -c50 -d10s http://localhost:80/ 2>&1 | tee -a $RESULTS
+
+docker rm -f bench-optimized
+echo "" >> $RESULTS
+
+# ─── Summary ───
+echo ""
+echo "========================================"
+echo "  Results Summary"
+echo "========================================"
+echo ""
+cat $RESULTS
+
+echo ""
+echo "Key findings:"
+echo "1. Bridge networking adds latency due to NAT and iptables rules"
+echo "2. CPU pinning improves consistency by avoiding cache thrashing"
+echo "3. Host networking eliminates the network namespace overhead"
+echo "4. Combining optimizations produces the best results"
+echo ""
+echo "Full results saved to: $RESULTS"
+```
+
+The most impactful optimization is typically switching from bridge to host networking, which eliminates the NAT and iptables overhead. CPU pinning improves consistency (lower tail latency) more than throughput. Memory limits have little impact on static content serving but are critical for preventing OOM kills. The lesson is to always measure — not every optimization matters for every workload.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise title="Tune a JVM Application in a Container" difficulty="advanced" xpReward={40} estimatedMinutes={30}>
+
+Configure and optimize a Java application running in a container to properly respect container resource limits and maximize throughput.
+
+**Objectives:**
+- Demonstrate the JVM heap sizing problem in containers
+- Configure proper MaxRAMPercentage and ActiveProcessorCount
+- Compare performance before and after JVM tuning
+- Verify the JVM respects container memory and CPU limits
+
+**Hints:**
+- Use `eclipse-temurin:21-jdk` as the base image
+- Check heap size with `java -XX:+PrintFlagsFinal -version 2>&1 | grep MaxHeapSize`
+- Set `-XX:MaxRAMPercentage=75.0` to use 75% of container memory for heap
+- Set `-XX:ActiveProcessorCount` to match your `--cpus` value
+- Use `-XX:+UseG1GC` for the garbage collector
+- Monitor with `docker stats` during load testing
+
+**Validation Criteria:**
+- JVM heap size is verified to respect container memory limits
+- ActiveProcessorCount matches the container's CPU limit
+- GC threads are appropriate for the container's CPU allocation
+- Memory usage stays within the container limit under load
+- Before/after comparison shows improved behavior
+
+<CollapsibleSolution>
+
+```bash
+# ═══════════════════════════════════════════
+# JVM Container Tuning Lab
+# ═══════════════════════════════════════════
+
+mkdir -p ~/jvm-tuning
+
+# Create a simple Java application
+cat > ~/jvm-tuning/App.java << 'JAVAEOF'
+import com.sun.net.httpserver.HttpServer;
+import java.io.OutputStream;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.net.InetSocketAddress;
+
+public class App {
+    public static void main(String[] args) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
+
+        server.createContext("/health", exchange -> {
+            Runtime rt = Runtime.getRuntime();
+            MemoryMXBean mem = ManagementFactory.getMemoryMXBean();
+
+            String response = String.format(
+                "{\"status\":\"healthy\"," +
+                "\"maxMemory\":\"%dMB\"," +
+                "\"totalMemory\":\"%dMB\"," +
+                "\"freeMemory\":\"%dMB\"," +
+                "\"usedMemory\":\"%dMB\"," +
+                "\"heapUsed\":\"%dMB\"," +
+                "\"heapMax\":\"%dMB\"," +
+                "\"availableProcessors\":%d," +
+                "\"activeThreads\":%d}",
+                rt.maxMemory() / 1024 / 1024,
+                rt.totalMemory() / 1024 / 1024,
+                rt.freeMemory() / 1024 / 1024,
+                (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024,
+                mem.getHeapMemoryUsage().getUsed() / 1024 / 1024,
+                mem.getHeapMemoryUsage().getMax() / 1024 / 1024,
+                rt.availableProcessors(),
+                Thread.activeCount()
+            );
+
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length());
+            OutputStream os = exchange.getResponseBody();
+            os.write(response.getBytes());
+            os.close();
+        });
+
+        server.start();
+
+        Runtime rt = Runtime.getRuntime();
+        System.out.printf("JVM started: maxHeap=%dMB, processors=%d%n",
+            rt.maxMemory() / 1024 / 1024, rt.availableProcessors());
+    }
+}
+JAVAEOF
+
+# Create Dockerfile
+cat > ~/jvm-tuning/Dockerfile << 'DOCKEOF'
+FROM eclipse-temurin:21-jdk AS builder
+WORKDIR /app
+COPY App.java .
+RUN javac App.java
+
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY --from=builder /app/App.class .
+
+RUN addgroup --gid 1001 appgroup && \
+    adduser --uid 1001 --gid 1001 --disabled-password appuser
+USER appuser
+
+EXPOSE 8080
+ENTRYPOINT ["java"]
+CMD ["App"]
+DOCKEOF
+
+# Build
+cd ~/jvm-tuning
+docker build -t jvm-demo:latest .
+
+echo "============================================"
+echo "  Test 1: Default JVM (no tuning)"
+echo "============================================"
+
+docker run -d --name jvm-default \
+  --memory 512m \
+  --cpus 2.0 \
+  -p 8081:8080 \
+  jvm-demo:latest
+sleep 3
+
+echo "JVM flags (default):"
+docker exec jvm-default java -XX:+PrintFlagsFinal -version 2>&1 | \
+  grep -E "(MaxHeapSize|ActiveProcessorCount|UseG1GC|ParallelGCThreads)" | \
+  sed 's/^/  /'
+
+echo ""
+echo "Runtime info:"
+curl -s http://localhost:8081/health | jq .
+
+docker rm -f jvm-default
+
+echo ""
+echo "============================================"
+echo "  Test 2: Tuned JVM"
+echo "============================================"
+
+docker run -d --name jvm-tuned \
+  --memory 512m \
+  --cpus 2.0 \
+  -p 8082:8080 \
+  jvm-demo:latest \
+  -XX:MaxRAMPercentage=75.0 \
+  -XX:InitialRAMPercentage=50.0 \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=200 \
+  -XX:ActiveProcessorCount=2 \
+  -XX:ParallelGCThreads=2 \
+  -XX:ConcGCThreads=1 \
+  -XX:+UseStringDeduplication \
+  App
+sleep 3
+
+echo "JVM flags (tuned):"
+docker exec jvm-tuned java \
+  -XX:MaxRAMPercentage=75.0 \
+  -XX:ActiveProcessorCount=2 \
+  -XX:+PrintFlagsFinal -version 2>&1 | \
+  grep -E "(MaxHeapSize|ActiveProcessorCount|UseG1GC|ParallelGCThreads)" | \
+  sed 's/^/  /'
+
+echo ""
+echo "Runtime info:"
+curl -s http://localhost:8082/health | jq .
+
+echo ""
+echo "Container memory usage:"
+docker stats --no-stream --format "  {{.Name}}: {{.MemUsage}} ({{.MemPerc}})" jvm-tuned
+
+docker rm -f jvm-tuned
+docker rmi jvm-demo:latest
+
+echo ""
+echo "============================================"
+echo "  Summary"
+echo "============================================"
+echo ""
+echo "Key tuning parameters applied:"
+echo "  - MaxRAMPercentage=75%: Heap uses 75% of 512MB = ~384MB"
+echo "  - InitialRAMPercentage=50%: Start with ~256MB heap"
+echo "  - ActiveProcessorCount=2: Match --cpus value"
+echo "  - ParallelGCThreads=2: GC threads match CPU limit"
+echo "  - ConcGCThreads=1: Concurrent GC uses 1 thread"
+echo "  - UseG1GC: Best GC for container workloads"
+echo "  - MaxGCPauseMillis=200: Target pause time for APIs"
+```
+
+Without tuning, the JVM may allocate an oversized heap and too many GC threads based on the host's resources. With proper tuning, the heap is sized to 75% of the container's memory limit, leaving room for non-heap memory and container overhead. The GC thread count matches the CPU limit, preventing thread contention. This produces predictable memory usage and consistent latency.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Performance Tuning Dashboard">
+
+Build a complete performance testing and monitoring setup that benchmarks a containerized application with different resource configurations and produces a comparison report.
+
+Your setup must include:
+
+1. A web application container with configurable resource limits
+2. A load generator container (wrk or hey)
+3. cAdvisor for real-time monitoring
+4. A benchmark runner script that tests multiple configurations
+5. A summary report comparing all configurations
+
+```bash
+mkdir -p ~/perf-dashboard/app
+
+# ─── Application ───
+cat > ~/perf-dashboard/app/server.js << 'EOF'
+const http = require('http');
+const crypto = require('crypto');
+const os = require('os');
+
+const PORT = process.env.PORT || 3000;
+let requests = 0;
+
+const server = http.createServer((req, res) => {
+  requests++;
+
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'healthy',
+      requests,
+      uptime: Math.floor(process.uptime()),
+      memory: {
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024)
+      },
+      cpus: os.cpus().length,
+      platform: os.arch()
+    }));
+    return;
+  }
+
+  if (req.url === '/compute') {
+    // CPU-intensive: generate a hash
+    const data = crypto.randomBytes(256);
+    const hash = crypto.createHash('sha256').update(data).digest('hex');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ hash, request: requests }));
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Performance tuning target\n');
+});
+
+server.listen(PORT, () => {
+  console.log(`Server on port ${PORT}, PID ${process.pid}`);
+});
+EOF
+
+cat > ~/perf-dashboard/app/Dockerfile << 'EOF'
+FROM node:20-alpine
+RUN addgroup -g 1001 -S app && adduser -u 1001 -S app -G app
+WORKDIR /app
+COPY --chown=app:app server.js .
+USER app
+EXPOSE 3000
+CMD ["node", "server.js"]
+EOF
+
+# ─── Benchmark Runner Script ───
+cat > ~/perf-dashboard/benchmark.sh << 'BENCHEOF'
+#!/bin/bash
+set -euo pipefail
+
+APP_IMAGE="perf-target:latest"
+DURATION="10s"
+CONNECTIONS=50
+THREADS=2
+REPORT_FILE="./benchmark-report.txt"
+ENDPOINT="/compute"
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Container Performance Benchmark Suite           ║"
+echo "║          $(date '+%Y-%m-%d %H:%M:%S')                    ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+# Build the application image
+echo "Building application image..."
+docker build -t $APP_IMAGE ./app/ > /dev/null 2>&1
+echo "Done."
+echo ""
+
+# Initialize report
+cat > $REPORT_FILE << REPORTHEADER
+Performance Benchmark Report
+Generated: $(date '+%Y-%m-%d %H:%M:%S')
+Endpoint: $ENDPOINT
+Duration: $DURATION
+Connections: $CONNECTIONS
+Threads: $THREADS
+============================================================
+REPORTHEADER
+
+# Define test configurations
+declare -a CONFIGS=(
+  "default|Default (no limits)|"
+  "cpu-half|CPU limited (0.5)|--cpus 0.5"
+  "cpu-one|CPU limited (1.0)|--cpus 1.0"
+  "cpu-two|CPU limited (2.0)|--cpus 2.0"
+  "mem-128|Memory 128MB + CPU 1.0|--memory 128m --cpus 1.0"
+  "mem-512|Memory 512MB + CPU 1.0|--memory 512m --cpus 1.0"
+  "pinned|CPU pinned (0,1)|--cpuset-cpus=0,1 --cpus 2.0"
+  "host-net|Host network + CPU 2.0|--network host --cpus 2.0"
+)
+
+run_benchmark() {
+  local name="$1"
+  local label="$2"
+  local flags="$3"
+
+  echo "─── Test: $label ───"
+
+  # Start the application with given flags
+  if echo "$flags" | grep -q "host"; then
+    # Host networking - no port mapping needed
+    docker run -d --name "bench-$name" \
+      $flags \
+      -e PORT=9999 \
+      $APP_IMAGE > /dev/null 2>&1
+    local URL="http://localhost:9999$ENDPOINT"
+  else
+    docker run -d --name "bench-$name" \
+      $flags \
+      -p 0:3000 \
+      $APP_IMAGE > /dev/null 2>&1
+    sleep 2
+    local PORT=$(docker port "bench-$name" 3000 2>/dev/null | head -1 | cut -d: -f2)
+    local URL="http://localhost:$PORT$ENDPOINT"
+  fi
+
+  sleep 2
+
+  # Verify the app is running
+  if ! curl -sf "$URL" > /dev/null 2>&1; then
+    echo "  SKIP: Application not responding"
+    docker rm -f "bench-$name" > /dev/null 2>&1
+    return
+  fi
+
+  # Run benchmark
+  local RESULT=$(docker run --rm --network host williamyeh/wrk \
+    -t$THREADS -c$CONNECTIONS -d$DURATION "$URL" 2>&1)
+
+  # Extract key metrics
+  local RPS=$(echo "$RESULT" | grep "Requests/sec" | awk '{print $2}')
+  local LATENCY_AVG=$(echo "$RESULT" | grep "Latency" | awk '{print $2}')
+  local LATENCY_MAX=$(echo "$RESULT" | grep "Latency" | awk '{print $4}')
+  local TRANSFER=$(echo "$RESULT" | grep "Transfer/sec" | awk '{print $2}')
+
+  echo "  Requests/sec:  $RPS"
+  echo "  Avg Latency:   $LATENCY_AVG"
+  echo "  Max Latency:   $LATENCY_MAX"
+  echo "  Transfer/sec:  $TRANSFER"
+
+  # Get resource usage
+  local STATS=$(docker stats --no-stream --format "CPU={{.CPUPerc}} MEM={{.MemUsage}}" "bench-$name" 2>/dev/null)
+  echo "  Resources:     $STATS"
+  echo ""
+
+  # Append to report
+  printf "%-20s | RPS: %-10s | Lat: %-10s | Max: %-10s | %s\n" \
+    "$label" "$RPS" "$LATENCY_AVG" "$LATENCY_MAX" "$STATS" >> $REPORT_FILE
+
+  # Cleanup
+  docker rm -f "bench-$name" > /dev/null 2>&1
+}
+
+# Run all benchmarks
+for config in "${CONFIGS[@]}"; do
+  IFS='|' read -r name label flags <<< "$config"
+  run_benchmark "$name" "$label" "$flags"
+done
+
+echo "============================================================" >> $REPORT_FILE
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║  Benchmark Complete                                      ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+echo "Report saved to: $REPORT_FILE"
+echo ""
+cat $REPORT_FILE
+BENCHEOF
+
+chmod +x ~/perf-dashboard/benchmark.sh
+
+# ─── Docker Compose for monitoring ───
+cat > ~/perf-dashboard/docker-compose.yml << 'EOF'
+services:
+  app:
+    build: ./app
+    ports:
+      - "3000:3000"
+    cpus: 2.0
+    mem_limit: 512m
+    environment:
+      - NODE_ENV=production
+      - UV_THREADPOOL_SIZE=8
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+EOF
+
+# ─── Run the benchmarks ───
+cd ~/perf-dashboard
+
+echo "=== Building and running benchmarks ==="
+bash ./benchmark.sh
+
+echo ""
+echo "=== Starting monitoring stack ==="
+echo "Run: cd ~/perf-dashboard && docker compose up -d"
+echo "Then access cAdvisor at http://localhost:8080"
+```
+
+This mini project creates a systematic performance testing framework. The benchmark script tests eight different resource configurations against the same application and endpoint, measuring requests per second, average and maximum latency, and resource utilization. The configurations progress from no limits through CPU limiting, memory limiting, CPU pinning, and host networking. The report lets you make data-driven decisions about resource allocation. cAdvisor provides real-time monitoring to correlate resource usage with performance metrics during testing.
+
+</MiniProject>
+
+## Key Takeaways
+
+- **Always benchmark before optimizing** — use sysbench for CPU, wrk/hey for HTTP, and fio for I/O to establish baselines and measure the impact of each change
+- **CPU shares** (`--cpu-shares`) are relative weights that only matter under contention; **CPU quotas** (`--cpus`) are hard limits; **CPU pinning** (`--cpuset-cpus`) binds containers to specific cores for cache efficiency
+- **Memory limits** (`--memory`) are enforced by the kernel OOM killer; set `--memory-swap` equal to `--memory` to disable swap; use `--memory-reservation` as a soft limit for scheduling
+- **I/O throttling** with `--device-read-bps` and `--device-write-bps` controls storage bandwidth per container, preventing I/O-heavy containers from starving others
+- **Host networking** (`--network host`) eliminates NAT overhead and can improve throughput by 10-15% for network-intensive workloads, at the cost of port isolation
+- **JVM containers** require explicit tuning: set `-XX:MaxRAMPercentage=75.0` for heap sizing, `-XX:ActiveProcessorCount` to match `--cpus`, and use G1GC for containerized workloads
+- **Node.js containers** need `UV_THREADPOOL_SIZE` (2x CPU cores), `--max-old-space-size` (75% of container memory divided by worker count), and cluster mode for multi-core utilization
+- **Python containers** with gunicorn should use `(2 * CPUs) + 1` workers, `--max-requests` to recycle workers and prevent memory leaks, and uvloop for async applications
+- **docker stats** provides real-time monitoring; **cAdvisor** provides historical metrics and Prometheus integration; **perf** and **flame graphs** identify CPU hotspots at the function level
+- Performance tuning is iterative: change one variable at a time, measure the impact, and keep the changes that produce measurable improvement
+
+## What's Next
+
+In the next lesson, **Docker Swarm Fundamentals**, you will learn Docker's built-in orchestration system. You will initialize a swarm, manage manager and worker nodes, understand Raft consensus for high availability, and configure overlay networking and mutual TLS for secure cluster communication. Swarm is the natural next step after mastering single-host container management.

@@ -1,0 +1,17 @@
+# =============================================================================
+# Python Dependencies — Server Monitoring System
+# =============================================================================
+# Install with: pip install -r requirements.txt
+# =============================================================================
+
+# HTTP requests for webhook alerts and endpoint monitoring
+requests>=2.28.0
+
+# YAML configuration file parsing
+pyyaml>=6.0
+
+# Cross-platform system metrics (CPU, memory, disk, network)
+psutil>=5.9.0
+
+# Rich terminal output for the dashboard
+rich>=13.0.0

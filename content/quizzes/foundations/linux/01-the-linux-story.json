@@ -1,0 +1,129 @@
+{
+  "id": "linux-story-quiz",
+  "title": "The Linux Story Quiz",
+  "description": "Test your knowledge of Linux fundamentals, distributions, and the Linux philosophy.",
+  "lessonSlug": "the-linux-story",
+  "moduleSlug": "linux",
+  "pathSlug": "foundations",
+  "passingScore": 70,
+  "xpRewards": {
+    "pass": 50,
+    "perfect": 75,
+    "retry": 25
+  },
+  "questions": [
+    {
+      "id": "ls-q1",
+      "type": "multiple_choice",
+      "question": "What percentage of the world's top servers run Linux?",
+      "options": ["About 50%", "About 75%", "Over 96%", "100%"],
+      "correctAnswer": 2,
+      "explanation": "Linux powers over 96.3% of the world's top 1 million servers, making it the dominant server operating system.",
+      "referenceLesson": "#what-is-linux",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ls-q2",
+      "type": "multiple_choice",
+      "question": "What is the relationship between the Linux kernel and a Linux distribution?",
+      "options": [
+        "They are the same thing",
+        "The kernel is the core; a distro bundles it with tools and a package manager",
+        "A distro is a lighter version of the kernel",
+        "The kernel is only for advanced users"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The Linux kernel manages hardware and processes. A distribution packages the kernel with user-space tools, libraries, and a package manager into a complete OS.",
+      "referenceLesson": "#what-is-linux",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ls-q3",
+      "type": "multiple_choice",
+      "question": "Which Linux distribution is recommended for DevOps beginners?",
+      "options": ["Arch Linux", "Alpine", "Ubuntu", "Gentoo"],
+      "correctAnswer": 2,
+      "explanation": "Ubuntu has the largest community, the most tutorials, and is the most common choice for cloud servers, making it ideal for beginners.",
+      "referenceLesson": "#linux-distributions",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ls-q4",
+      "type": "multiple_choice",
+      "question": "Which package manager does Alpine Linux use?",
+      "options": ["apt", "dnf", "pacman", "apk"],
+      "correctAnswer": 3,
+      "explanation": "Alpine Linux uses apk (Alpine Package Keeper) as its package manager. It's known for its tiny footprint, making it popular for Docker containers.",
+      "referenceLesson": "#linux-distributions",
+      "difficulty": "medium"
+    },
+    {
+      "id": "ls-q5",
+      "type": "true_false",
+      "question": "Docker containers share the host Linux kernel.",
+      "correctAnswer": true,
+      "explanation": "Docker containers share the host OS kernel, which is why they're lightweight compared to virtual machines. This is fundamentally a Linux technology.",
+      "referenceLesson": "#why-linux-for-devops",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ls-q6",
+      "type": "multiple_choice",
+      "question": "Which of these is NOT part of the Linux philosophy?",
+      "options": [
+        "Everything is a file",
+        "Small, focused tools",
+        "Graphical interfaces are preferred",
+        "Text is the universal interface"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The Linux philosophy favors the command line and text-based interfaces. While GUIs exist, the core philosophy centers on composable CLI tools and text streams.",
+      "referenceLesson": "#the-linux-philosophy",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ls-q7",
+      "type": "multiple_choice",
+      "question": "Who created the Linux kernel?",
+      "options": ["Richard Stallman", "Dennis Ritchie", "Linus Torvalds", "Ken Thompson"],
+      "correctAnswer": 2,
+      "explanation": "Linus Torvalds created the Linux kernel in 1991. Richard Stallman created GNU, Dennis Ritchie co-created Unix and C, and Ken Thompson co-created Unix.",
+      "referenceLesson": "#what-is-linux",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ls-q8",
+      "type": "multiple_choice",
+      "question": "What command shows your current working directory?",
+      "options": ["whoami", "pwd", "ls", "cd"],
+      "correctAnswer": 1,
+      "explanation": "The 'pwd' (print working directory) command displays the full path of your current directory.",
+      "referenceLesson": "#your-first-commands",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ls-q9",
+      "type": "true_false",
+      "question": "In Linux, network sockets can be represented as files.",
+      "correctAnswer": true,
+      "explanation": "One of the core Linux principles is 'everything is a file.' Devices, processes, and even network sockets are represented as files in the filesystem.",
+      "referenceLesson": "#the-linux-philosophy",
+      "difficulty": "medium"
+    },
+    {
+      "id": "ls-q10",
+      "type": "multiple_choice",
+      "question": "What is WSL?",
+      "options": [
+        "Web Server for Linux",
+        "Windows Subsystem for Linux",
+        "Wide System Layer",
+        "Web Shell Language"
+      ],
+      "correctAnswer": 1,
+      "explanation": "WSL (Windows Subsystem for Linux) allows you to run a full Linux terminal environment inside Windows without needing a virtual machine.",
+      "referenceLesson": "#setting-up-your-linux-environment",
+      "difficulty": "easy"
+    }
+  ]
+}

@@ -1,0 +1,1679 @@
+---
+title: "Pull Requests and Code Review"
+description: "The gateway to professional software development. Master pull requests — creating, reviewing, commenting, and merging — the workflow used by every modern team."
+order: 13
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 12-github-collaboration
+objectives:
+  - Create effective pull requests
+  - Review code professionally
+  - Use PR templates and checklists
+  - Understand merge strategies for PRs (merge, squash, rebase)
+tags:
+  - git
+  - pull-requests
+  - code-review
+  - github
+---
+
+<Callout type="story" title="The Story">
+You have been coding for 3 days on a feature. You push your branch and create a pull request. Within an hour, you get 12 comments. Some are suggestions, some are questions, some point out bugs you missed. This feels uncomfortable — but it is the most valuable part of your workday. Code review catches bugs, spreads knowledge, enforces standards, and makes the whole team better. Pull requests are where this magic happens. The developers who master PRs — both creating them and reviewing them — become the most effective members of any team.
+</Callout>
+
+## What Is a Pull Request?
+
+A pull request (PR) is a request to merge one branch into another. But it is much more than that — it is a conversation about code changes that includes:
+
+- The diff (what changed)
+- A description (why it changed)
+- Reviews (what others think)
+- CI checks (whether it works)
+- A merge decision (how it enters the target branch)
+
+```
+Feature Branch                      Pull Request                      Main Branch
+     │                                  │                                  │
+     │  git push                        │                                  │
+     ├─────────────►  PR Created        │                                  │
+     │                  │               │                                  │
+     │                  ├── Description  │                                  │
+     │                  ├── Reviewers    │                                  │
+     │                  ├── CI Checks    │                                  │
+     │                  ├── Comments     │                                  │
+     │                  ├── Approvals    │                                  │
+     │                  │               │                                  │
+     │  push fixes      │               │                                  │
+     ├─────────────►    │               │                                  │
+     │                  │               │                                  │
+     │                  ├── Re-review    │                                  │
+     │                  ├── Approved!    │                                  │
+     │                  │               │         Merge                    │
+     │                  ├───────────────┼──────────────►                   │
+     │                                  │                                  │
+```
+
+## Creating a Pull Request
+
+### The Branch Workflow
+
+```bash
+# Step 1: Create a feature branch from main
+git switch main
+git pull origin main
+git switch -c feature/user-profiles
+
+# Step 2: Make your changes
+# ... edit files ...
+
+# Step 3: Commit with clear messages
+git add src/profiles.js src/profiles.test.js
+git commit -m "Add user profile page with avatar upload
+
+- Create ProfilePage component with edit form
+- Add avatar upload with 5MB size limit
+- Include unit tests for profile validation
+- Update routes to include /profile/:id"
+
+# Step 4: Push your branch
+git push -u origin feature/user-profiles
+
+# Step 5: Create the PR
+gh pr create \
+  --title "Add user profile page" \
+  --body "## Summary
+Adds a user profile page where users can view and edit their information,
+including uploading a profile avatar.
+
+## Changes
+- New ProfilePage component
+- Avatar upload with validation (max 5MB, image formats only)
+- Profile API integration
+- Unit and integration tests
+
+## Related Issues
+Closes #45
+
+## Screenshots
+[Before/After screenshots would go here]
+
+## Test Plan
+- [ ] Profile loads for authenticated user
+- [ ] Avatar upload accepts valid images
+- [ ] Avatar upload rejects files over 5MB
+- [ ] Profile edits save correctly
+- [ ] Unauthorized users redirected to login"
+```
+
+### Writing Great PR Descriptions
+
+A good PR description answers three questions: What changed? Why did it change? How can reviewers verify it?
+
+```markdown
+## Summary
+<!-- One or two sentences explaining the purpose of this PR -->
+Add rate limiting to the API to prevent abuse and ensure fair usage
+across all clients.
+
+## Motivation
+<!-- Why is this change needed? Link to issues or discussions -->
+We've been seeing intermittent API slowdowns caused by individual clients
+making thousands of requests per minute. This affects all users.
+See incident report: #89
+
+## Changes
+<!-- Specific list of what was modified -->
+- Add rate limiting middleware using token bucket algorithm
+- Configure default limit: 100 requests per minute per API key
+- Add 429 (Too Many Requests) response with Retry-After header
+- Add rate limit headers to all API responses (X-RateLimit-*)
+- Store rate limit state in Redis for multi-instance support
+- Add configuration via environment variables
+
+## How It Works
+<!-- Technical details for reviewers -->
+The middleware uses a token bucket algorithm stored in Redis. Each API
+key gets a bucket with 100 tokens that refills at 100 tokens/minute.
+When a request arrives, a token is consumed. If the bucket is empty,
+the request gets a 429 response.
+
+## Test Plan
+- [ ] Unit tests for token bucket logic
+- [ ] Integration tests with Redis
+- [ ] Load test: verify 429s are returned after limit exceeded
+- [ ] Verify Retry-After header is accurate
+- [ ] Test behavior when Redis is unavailable (fail-open)
+
+## Rollback Plan
+Set RATE_LIMIT_ENABLED=false to disable without deploying.
+```
+
+<Callout type="tip" title="The Smaller the PR, the Better the Review">
+Large PRs get superficial reviews. Small PRs get thorough reviews. Aim for PRs under 400 lines of changes. If your feature is larger, break it into a series of smaller PRs that build on each other. A reviewer who sees 50 lines of focused changes will catch subtle bugs that they would miss in a 2000-line PR.
+</Callout>
+
+## PR Templates
+
+Standardize PR descriptions with a template file:
+
+```markdown
+<!-- .github/pull_request_template.md -->
+
+## Summary
+<!-- What does this PR do? Keep it brief. -->
+
+## Changes
+<!-- List specific changes -->
+-
+
+## Related Issues
+<!-- Link issues: Fixes #123, Closes #456, Relates to #789 -->
+
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Refactoring
+- [ ] Documentation
+- [ ] CI/CD
+
+## Testing
+<!-- How did you test this? -->
+- [ ] Unit tests added/updated
+- [ ] Integration tests added/updated
+- [ ] Manual testing completed
+
+## Screenshots
+<!-- If UI changes, add before/after screenshots -->
+
+## Checklist
+- [ ] Code follows project style guidelines
+- [ ] Self-review completed
+- [ ] Documentation updated
+- [ ] No new warnings generated
+- [ ] Tests pass locally
+```
+
+## Code Review: The Reviewer's Guide
+
+### What to Look For
+
+```
+1. Correctness
+   - Does the code do what the PR description says?
+   - Are edge cases handled?
+   - Are error conditions handled properly?
+
+2. Security
+   - Input validation present?
+   - SQL injection, XSS, CSRF risks?
+   - Secrets or credentials exposed?
+   - Proper authentication/authorization checks?
+
+3. Performance
+   - N+1 queries?
+   - Unnecessary loops or allocations?
+   - Missing indexes for database queries?
+   - Large payloads or memory usage?
+
+4. Maintainability
+   - Is the code readable?
+   - Are names descriptive?
+   - Is there unnecessary complexity?
+   - Will future developers understand this?
+
+5. Testing
+   - Are there tests for the happy path?
+   - Are there tests for edge cases?
+   - Are error paths tested?
+   - Do tests actually assert meaningful things?
+```
+
+### Writing Constructive Comments
+
+```markdown
+# Bad review comments:
+"This is wrong."
+"Why did you do it this way?"
+"No."
+
+# Good review comments:
+
+# Suggestion with explanation:
+"Consider using `Map` instead of a plain object here — it handles
+non-string keys better and has O(1) `.has()` checks. This matters
+because user IDs could be numeric."
+
+# Question that helps understanding:
+"I see this retries 3 times on failure. What happens if all retries
+fail? Should we alert the on-call team after exhausting retries?"
+
+# Pointing out a bug with context:
+"This will throw a TypeError if `user.address` is null/undefined.
+We've seen this in production with users who haven't completed
+onboarding yet. Consider: `user.address?.city || 'Unknown'`"
+
+# Acknowledging good work:
+"Nice approach! Using the strategy pattern here makes it easy to
+add new payment providers without touching existing code."
+```
+
+<Callout type="tip" title="Prefix Your Comments">
+Many teams use prefixes to clarify the intent of review comments:
+- **nit:** Minor style issue, not blocking (e.g., "nit: trailing whitespace")
+- **suggestion:** An improvement idea, take it or leave it
+- **question:** Seeking clarification, not requesting a change
+- **blocking:** Must be addressed before merge
+- **praise:** Something done well (do not skip these!)
+</Callout>
+
+### Review Actions
+
+```bash
+# Approve a PR (using GitHub CLI)
+gh pr review 42 --approve --body "LGTM! Clean implementation."
+
+# Request changes
+gh pr review 42 --request-changes --body "A few issues to address before merge. See inline comments."
+
+# Just comment (neither approve nor request changes)
+gh pr review 42 --comment --body "Looks good overall. Left a few questions."
+```
+
+### Using GitHub's Suggestion Feature
+
+In PR review comments, you can suggest specific code changes that the author can apply with one click:
+
+````markdown
+```suggestion
+const timeout = parseInt(process.env.TIMEOUT, 10) || 5000;
+```
+````
+
+The author sees a "Apply suggestion" button that commits the change directly.
+
+## Addressing Review Feedback
+
+### Pushing New Commits
+
+```bash
+# Make changes based on review feedback
+# ... edit files ...
+
+# Commit the fixes
+git add src/profiles.js
+git commit -m "Address review: add null check for user.address"
+
+git add src/profiles.test.js
+git commit -m "Address review: add test for missing address"
+
+# Push the new commits
+git push origin feature/user-profiles
+
+# The PR automatically updates with the new commits
+# Reviewers can see exactly what changed since their review
+```
+
+### Force-Pushing After Rebase
+
+Sometimes reviewers want you to clean up your commit history before merging:
+
+```bash
+# Squash your "address review" commits into the original
+git rebase -i HEAD~3
+# Mark the fixup commits as "fixup" or "squash"
+
+# Force push to update the PR
+git push --force-with-lease origin feature/user-profiles
+# The PR shows the cleaned-up history
+```
+
+<Callout type="warning" title="Force-Push Affects PR History">
+When you force-push to a PR branch, GitHub loses the individual commit-by-commit view that reviewers use to see incremental changes. Some teams prefer adding new commits during review and squashing at merge time. Others prefer a clean history at all times. Follow your team's convention.
+</Callout>
+
+## Draft Pull Requests
+
+Draft PRs signal that your work is in progress and not ready for review:
+
+```bash
+# Create a draft PR
+gh pr create --draft \
+  --title "WIP: Add user profiles" \
+  --body "Work in progress. Opening early for visibility."
+
+# Mark a draft as ready for review
+gh pr ready 42
+
+# Convert a regular PR back to draft
+gh pr ready 42 --undo
+```
+
+Use draft PRs when:
+- You want early feedback on your approach
+- You want CI to run on your changes
+- You want to track progress visually
+- You are blocked and want others to see the state
+
+## Merge Strategies
+
+When a PR is approved and CI passes, you choose how to merge it into the target branch.
+
+### Merge Commit (Default)
+
+```bash
+# Creates a merge commit that combines the feature branch
+gh pr merge 42 --merge
+
+# What happens:
+#   main ── C1 ── C2 ── C3 ────── M (merge commit)
+#                  │                │
+#                  └── F1 ── F2 ───┘ (feature commits preserved)
+```
+
+**Pros:** Preserves full branch history. You can see exactly when a feature was merged and all its individual commits.
+
+**Cons:** History can become noisy with many merge commits.
+
+**Use when:** You want to preserve the complete development history, or the feature commits are clean and meaningful.
+
+### Squash Merge
+
+```bash
+# Squashes all feature commits into a single commit on main
+gh pr merge 42 --squash
+
+# What happens:
+#   main ── C1 ── C2 ── C3 ── S (single squashed commit)
+#
+#   Feature branch had F1, F2, F3 — all squashed into S
+#   S's commit message is the PR title + description
+```
+
+**Pros:** Clean, linear history. Each feature is one commit on main. Hides messy WIP commits.
+
+**Cons:** Loses individual commit granularity. If the squashed commit is large, `git bisect` is less useful.
+
+**Use when:** The feature branch has messy commits (WIP, fixup, typo), or you want a clean main branch history.
+
+### Rebase Merge
+
+```bash
+# Replays feature commits on top of main (no merge commit)
+gh pr merge 42 --rebase
+
+# What happens:
+#   main ── C1 ── C2 ── C3 ── F1' ── F2' (commits replayed)
+#
+#   Feature commits are individually applied on top of main
+#   Commit hashes change (F1 → F1', F2 → F2')
+```
+
+**Pros:** Linear history with individual commits preserved. Best of both worlds if commits are clean.
+
+**Cons:** Commit hashes change, breaking references. Can be confusing if the branch had many commits.
+
+**Use when:** The feature branch has clean, well-structured commits and you want linear history.
+
+### Choosing the Right Strategy
+
+```
+Feature has 23 messy commits?      → Squash merge
+Feature has 3 clean, logical commits? → Rebase merge
+Feature is a long-running release?  → Merge commit
+Team prefers linear history?        → Squash or rebase
+Team wants full audit trail?        → Merge commit
+
+Many teams default to squash merge because:
+  - Most feature branches have messy history
+  - One commit per feature makes main easy to read
+  - You can always look at the closed PR for full history
+```
+
+<Callout type="tip" title="Configure Default Merge Strategy">
+Repository admins can configure which merge strategies are allowed in Settings → General → Pull Requests. Many teams disable the plain merge commit option and only allow squash merge to keep main's history clean.
+</Callout>
+
+## CI Checks on Pull Requests
+
+GitHub Actions (or other CI tools) run automatically on PRs:
+
+```yaml
+# .github/workflows/pr-checks.yml
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run lint
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run build
+```
+
+```
+PR Status Checks:
+  ✓ test — All 47 tests passed
+  ✓ lint — No issues found
+  ✓ build — Build succeeded
+  ✓ review — 1 approval (alice)
+  ──────────────────────────────
+  Ready to merge!
+```
+
+## Closing Issues via PRs
+
+When a PR is merged, it can automatically close related issues:
+
+```markdown
+## PR Description
+
+Adds user profile editing functionality.
+
+Fixes #45
+Closes #46
+Resolves #47
+
+<!-- All three issues will be closed when this PR is merged to main -->
+```
+
+```bash
+# Or from the command line
+gh pr create --title "Add profiles" --body "Fixes #45"
+```
+
+## Stacked PRs
+
+For large features, create a chain of PRs where each builds on the previous:
+
+```
+PR #1: Add user model          (base: main)
+PR #2: Add user API            (base: PR #1's branch)
+PR #3: Add user UI             (base: PR #2's branch)
+
+Review and merge order: PR #1 → PR #2 → PR #3
+Each PR is small and focused, but together they form the feature.
+```
+
+```bash
+# Create the stack
+git switch main && git pull
+git switch -c feature/user-model
+# ... add model code ...
+git push -u origin feature/user-model
+
+git switch -c feature/user-api  # branches from feature/user-model
+# ... add API code ...
+git push -u origin feature/user-api
+
+git switch -c feature/user-ui   # branches from feature/user-api
+# ... add UI code ...
+git push -u origin feature/user-ui
+
+# Create PRs
+gh pr create --base main --head feature/user-model --title "Add user model"
+gh pr create --base feature/user-model --head feature/user-api --title "Add user API"
+gh pr create --base feature/user-api --head feature/user-ui --title "Add user UI"
+
+# After PR #1 merges, update PR #2's base to main:
+# GitHub often does this automatically, or use:
+gh pr edit 2 --base main
+```
+
+<Callout type="warning" title="Stacked PRs Need Careful Management">
+When you update an earlier PR in the stack (e.g., address review feedback on PR #1), you need to rebase all downstream PRs. This can be tedious. Use stacked PRs only when the feature is truly too large for a single PR and the pieces are logically separable. Many teams prefer feature flags over stacked PRs.
+</Callout>
+
+<Exercise number={1} title="Create a Perfect PR">
+
+```bash
+# Practice creating a professional-quality PR
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# === Set up a project ===
+mkdir -p src tests
+
+cat > src/calculator.js << 'EOF'
+class Calculator {
+    add(a, b) {
+        return a + b;
+    }
+
+    subtract(a, b) {
+        return a - b;
+    }
+
+    multiply(a, b) {
+        return a * b;
+    }
+
+    divide(a, b) {
+        if (b === 0) throw new Error("Division by zero");
+        return a / b;
+    }
+}
+
+module.exports = Calculator;
+EOF
+
+cat > tests/calculator.test.js << 'EOF'
+const Calculator = require('../src/calculator');
+
+const calc = new Calculator();
+
+function assert(condition, message) {
+    if (!condition) throw new Error(`FAIL: ${message}`);
+    console.log(`  PASS: ${message}`);
+}
+
+assert(calc.add(2, 3) === 5, "2 + 3 = 5");
+assert(calc.subtract(5, 3) === 2, "5 - 3 = 2");
+assert(calc.multiply(4, 3) === 12, "4 * 3 = 12");
+assert(calc.divide(10, 2) === 5, "10 / 2 = 5");
+
+try {
+    calc.divide(1, 0);
+    assert(false, "Division by zero should throw");
+} catch (e) {
+    assert(e.message === "Division by zero", "Division by zero throws error");
+}
+
+console.log("All tests passed!");
+EOF
+
+git add . && git commit -q -m "Initial calculator with basic operations"
+
+# === Create a feature branch ===
+echo "=== Step 1: Create feature branch from up-to-date main ==="
+git switch -c feature/scientific-operations -q
+echo "Created branch: feature/scientific-operations"
+echo ""
+
+# === Make focused, logical commits ===
+echo "=== Step 2: Make changes with clean commit history ==="
+
+# Commit 1: Add power and square root
+cat > src/calculator.js << 'EOF'
+class Calculator {
+    add(a, b) {
+        return a + b;
+    }
+
+    subtract(a, b) {
+        return a - b;
+    }
+
+    multiply(a, b) {
+        return a * b;
+    }
+
+    divide(a, b) {
+        if (b === 0) throw new Error("Division by zero");
+        return a / b;
+    }
+
+    power(base, exponent) {
+        if (!Number.isFinite(base) || !Number.isFinite(exponent)) {
+            throw new Error("Arguments must be finite numbers");
+        }
+        return Math.pow(base, exponent);
+    }
+
+    squareRoot(n) {
+        if (n < 0) throw new Error("Cannot take square root of negative number");
+        if (!Number.isFinite(n)) throw new Error("Argument must be a finite number");
+        return Math.sqrt(n);
+    }
+}
+
+module.exports = Calculator;
+EOF
+
+git add src/calculator.js
+git commit -q -m "Add power and squareRoot operations
+
+- power(base, exponent): computes base^exponent
+- squareRoot(n): computes square root with negative number guard
+- Both validate inputs are finite numbers"
+
+echo "Commit 1: Add power and squareRoot"
+
+# Commit 2: Add corresponding tests
+cat > tests/calculator.test.js << 'EOF'
+const Calculator = require('../src/calculator');
+
+const calc = new Calculator();
+
+function assert(condition, message) {
+    if (!condition) throw new Error(`FAIL: ${message}`);
+    console.log(`  PASS: ${message}`);
+}
+
+// Basic operations
+assert(calc.add(2, 3) === 5, "add: 2 + 3 = 5");
+assert(calc.subtract(5, 3) === 2, "subtract: 5 - 3 = 2");
+assert(calc.multiply(4, 3) === 12, "multiply: 4 * 3 = 12");
+assert(calc.divide(10, 2) === 5, "divide: 10 / 2 = 5");
+
+try {
+    calc.divide(1, 0);
+    assert(false, "divide by zero should throw");
+} catch (e) {
+    assert(e.message === "Division by zero", "divide: division by zero throws error");
+}
+
+// Power operation
+assert(calc.power(2, 3) === 8, "power: 2^3 = 8");
+assert(calc.power(5, 0) === 1, "power: 5^0 = 1");
+assert(calc.power(2, -1) === 0.5, "power: 2^-1 = 0.5");
+
+try {
+    calc.power(Infinity, 2);
+    assert(false, "power with Infinity should throw");
+} catch (e) {
+    assert(e.message === "Arguments must be finite numbers", "power: validates finite input");
+}
+
+// Square root operation
+assert(calc.squareRoot(9) === 3, "squareRoot: sqrt(9) = 3");
+assert(calc.squareRoot(0) === 0, "squareRoot: sqrt(0) = 0");
+assert(calc.squareRoot(2) === Math.SQRT2, "squareRoot: sqrt(2) = SQRT2");
+
+try {
+    calc.squareRoot(-1);
+    assert(false, "squareRoot of negative should throw");
+} catch (e) {
+    assert(e.message === "Cannot take square root of negative number",
+        "squareRoot: negative number throws error");
+}
+
+console.log("\nAll tests passed!");
+EOF
+
+git add tests/calculator.test.js
+git commit -q -m "Add tests for power and squareRoot operations
+
+- Tests for normal cases, edge cases, and error conditions
+- power: positive/negative/zero exponents, Infinity check
+- squareRoot: perfect squares, zero, negative numbers"
+
+echo "Commit 2: Add tests for new operations"
+
+# Commit 3: Update documentation
+cat > README.md << 'EOF'
+# Calculator
+
+A simple calculator module with basic and scientific operations.
+
+## Operations
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `add(a, b)` | Addition | `calc.add(2, 3) → 5` |
+| `subtract(a, b)` | Subtraction | `calc.subtract(5, 3) → 2` |
+| `multiply(a, b)` | Multiplication | `calc.multiply(4, 3) → 12` |
+| `divide(a, b)` | Division | `calc.divide(10, 2) → 5` |
+| `power(base, exp)` | Exponentiation | `calc.power(2, 3) → 8` |
+| `squareRoot(n)` | Square root | `calc.squareRoot(9) → 3` |
+
+## Error Handling
+
+- `divide(a, 0)` throws "Division by zero"
+- `squareRoot(-1)` throws "Cannot take square root of negative number"
+- `power(Infinity, n)` throws "Arguments must be finite numbers"
+EOF
+
+git add README.md
+git commit -q -m "Update README with scientific operations documentation
+
+Add table of all available operations with examples and
+document error handling behavior."
+
+echo "Commit 3: Update documentation"
+echo ""
+
+# === Show the clean commit history ===
+echo "=== Step 3: Review the branch before creating PR ==="
+echo ""
+echo "--- Commits on this branch ---"
+git log main..feature/scientific-operations --oneline
+echo ""
+echo "--- Files changed ---"
+git diff --stat main..feature/scientific-operations
+echo ""
+echo "--- Full diff ---"
+git diff main..feature/scientific-operations
+
+# === Run tests ===
+echo ""
+echo "=== Step 4: Run tests to verify everything works ==="
+cd "$REPO"
+node tests/calculator.test.js
+echo ""
+
+# === Generate the PR description ===
+echo "=== Step 5: PR description (what you'd submit) ==="
+echo ""
+cat << 'PRDESC'
+-----------------------------------------------------------
+Title: Add scientific calculator operations (power, sqrt)
+-----------------------------------------------------------
+
+## Summary
+
+Adds power and square root operations to the Calculator class,
+with full input validation and comprehensive tests.
+
+## Changes
+
+- `power(base, exponent)` — computes exponentiation with finite number validation
+- `squareRoot(n)` — computes square root with negative number guard
+- Tests covering normal cases, edge cases, and error conditions
+- Updated README with operations table and error documentation
+
+## Related Issues
+
+Closes #12 (Add scientific operations to calculator)
+
+## Type of Change
+
+- [x] New feature
+- [ ] Bug fix
+- [ ] Breaking change
+
+## Testing
+
+- [x] Unit tests for power: positive, negative, zero exponents, Infinity
+- [x] Unit tests for squareRoot: perfect squares, zero, negative numbers
+- [x] All existing tests still pass (no regressions)
+
+## Checklist
+
+- [x] Code follows project style guidelines
+- [x] Self-review completed
+- [x] Documentation updated (README)
+- [x] Tests pass locally
+- [x] No new warnings generated
+-----------------------------------------------------------
+PRDESC
+
+echo ""
+echo "=== Key qualities of this PR ==="
+echo ""
+echo "  1. Small and focused (one feature, 3 commits)"
+echo "  2. Each commit is logical and self-contained:"
+echo "     - Implementation, then tests, then docs"
+echo "  3. Descriptive PR title (under 70 chars)"
+echo "  4. Structured description with all sections filled"
+echo "  5. Linked to an issue (Closes #12)"
+echo "  6. Tests cover happy path AND error cases"
+echo "  7. Documentation is updated"
+echo "  8. Self-review checklist is complete"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Code Review Practice">
+
+```bash
+# Practice reviewing code — identify issues in a prepared PR
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Set up the base project
+mkdir -p src
+
+cat > src/auth.js << 'EOF'
+const crypto = require('crypto');
+
+class AuthService {
+    constructor(db) {
+        this.db = db;
+        this.sessions = new Map();
+    }
+
+    async createUser(username, password) {
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+        return this.db.insert('users', { username, hash, salt });
+    }
+
+    async authenticate(username, password) {
+        const user = await this.db.findOne('users', { username });
+        if (!user) return null;
+
+        const hash = crypto.pbkdf2Sync(password, user.salt, 10000, 64, 'sha512').toString('hex');
+        if (hash !== user.hash) return null;
+
+        const sessionId = crypto.randomBytes(32).toString('hex');
+        this.sessions.set(sessionId, { userId: user.id, createdAt: Date.now() });
+        return { sessionId, userId: user.id };
+    }
+
+    validateSession(sessionId) {
+        return this.sessions.get(sessionId) || null;
+    }
+}
+
+module.exports = AuthService;
+EOF
+
+git add . && git commit -q -m "Initial auth service"
+
+# === Create the PR branch with intentional issues ===
+git switch -c feature/add-api-keys -q
+
+cat > src/auth.js << 'EOF'
+const crypto = require('crypto');
+
+class AuthService {
+    constructor(db) {
+        this.db = db;
+        this.sessions = new Map();
+    }
+
+    async createUser(username, password) {
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+        return this.db.insert('users', { username, hash, salt });
+    }
+
+    async authenticate(username, password) {
+        const user = await this.db.findOne('users', { username });
+        if (!user) return null;
+
+        const hash = crypto.pbkdf2Sync(password, user.salt, 10000, 64, 'sha512').toString('hex');
+        if (hash !== user.hash) return null;
+
+        const sessionId = crypto.randomBytes(32).toString('hex');
+        this.sessions.set(sessionId, { userId: user.id, createdAt: Date.now() });
+        return { sessionId, userId: user.id };
+    }
+
+    validateSession(sessionId) {
+        return this.sessions.get(sessionId) || null;
+    }
+
+    // New: API key management
+    async createApiKey(userId) {
+        var key = "sk_" + crypto.randomBytes(24).toString('hex');
+        console.log("Created API key for user " + userId + ": " + key);
+        await this.db.insert('api_keys', {
+            key: key,
+            userId: userId,
+            created: new Date()
+        });
+        return key;
+    }
+
+    async validateApiKey(key) {
+        const record = await this.db.findOne('api_keys', { key: key });
+        if (record) {
+            return record;
+        }
+        return null;
+    }
+
+    async deleteApiKey(key) {
+        this.db.delete('api_keys', { key: key });
+    }
+
+    async listApiKeys(userId) {
+        const keys = await this.db.find('api_keys', { userId });
+        return keys;
+    }
+
+    async rotateApiKey(oldKey) {
+        const record = await this.validateApiKey(oldKey);
+        if (!record) return null;
+        this.deleteApiKey(oldKey);
+        const newKey = await this.createApiKey(record.userId);
+        return newKey;
+    }
+}
+
+module.exports = AuthService;
+EOF
+
+cat > src/api-middleware.js << 'EOF'
+function apiKeyAuth(authService) {
+    return async (req, res, next) => {
+        const key = req.headers['x-api-key'] || req.query.api_key;
+
+        if (!key) {
+            res.status(401).json({ error: 'API key required' });
+            return;
+        }
+
+        const record = await authService.validateApiKey(key);
+        if (!record) {
+            res.status(401).json({ error: 'Invalid API key' });
+            return;
+        }
+
+        req.userId = record.userId;
+        next();
+    };
+}
+
+module.exports = { apiKeyAuth };
+EOF
+
+git add . && git commit -q -m "add api key stuff"
+echo "=== PR branch created with intentional issues ==="
+echo ""
+
+# === Now review the PR ===
+echo "=========================================="
+echo "  CODE REVIEW EXERCISE"
+echo "=========================================="
+echo ""
+echo "PR Title: 'add api key stuff'"
+echo "PR Description: (none provided)"
+echo ""
+echo "--- Files Changed ---"
+git diff --stat main..feature/add-api-keys
+echo ""
+echo "--- Full Diff ---"
+git diff main..feature/add-api-keys
+echo ""
+
+echo "=========================================="
+echo "  REVIEW COMMENTS (with explanations)"
+echo "=========================================="
+echo ""
+
+echo "--- PR-Level Comments ---"
+echo ""
+echo "  COMMENT 1: PR title and description"
+echo "  ======================================"
+echo "  Issue: PR title 'add api key stuff' is vague and informal."
+echo "         No description provided."
+echo "  Better: Title: 'Add API key authentication for programmatic access'"
+echo "          Description should include: Summary, motivation, changes,"
+echo "          test plan, and security considerations."
+echo ""
+
+echo "--- src/auth.js Line-by-Line Review ---"
+echo ""
+
+echo "  COMMENT 2 (blocking): Security — API key logged in plaintext"
+echo "  ============================================================="
+echo "  Line: console.log('Created API key for user ' + userId + ': ' + key);"
+echo "  Issue: This logs the API key in plaintext to stdout. In production,"
+echo "         logs are often stored in centralized logging systems. Anyone"
+echo "         with log access can steal API keys."
+echo "  Fix: Remove the console.log entirely, or log only a prefix:"
+echo "       console.log('Created API key for user ' + userId + ': sk_...');"
+echo ""
+
+echo "  COMMENT 3 (blocking): Security — API key stored in plaintext"
+echo "  ============================================================="
+echo "  Line: await this.db.insert('api_keys', { key: key, ... })"
+echo "  Issue: API keys are stored as plaintext in the database. If the"
+echo "         database is compromised, all API keys are exposed."
+echo "  Fix: Hash the key before storing (like passwords). Store the hash,"
+echo "       return the plaintext key only once at creation time."
+echo ""
+
+echo "  COMMENT 4 (suggestion): Style — use 'const' instead of 'var'"
+echo "  ============================================================="
+echo "  Line: var key = 'sk_' + crypto.randomBytes(24).toString('hex');"
+echo "  Issue: The rest of the codebase uses const/let (ES6+). Using var"
+echo "         is inconsistent and has different scoping rules."
+echo "  Fix: var key → const key"
+echo ""
+
+echo "  COMMENT 5 (blocking): Bug — missing 'await' on delete"
+echo "  ============================================================="
+echo "  Line: this.db.delete('api_keys', { key: key });"
+echo "  Issue: deleteApiKey doesn't await the database operation. The"
+echo "         function returns before the delete completes. In rotateApiKey,"
+echo "         this means the old key might still be valid when the new one"
+echo "         is created — a security window."
+echo "  Fix: await this.db.delete('api_keys', { key: key });"
+echo ""
+
+echo "  COMMENT 6 (blocking): Bug — missing 'await' in rotateApiKey"
+echo "  ============================================================="
+echo "  Line: this.deleteApiKey(oldKey);"
+echo "  Issue: deleteApiKey is async but not awaited. Same problem as above"
+echo "         but in a different call site."
+echo "  Fix: await this.deleteApiKey(oldKey);"
+echo ""
+
+echo "  COMMENT 7 (suggestion): Race condition in rotateApiKey"
+echo "  ============================================================="
+echo "  Issue: Between deleting the old key and creating the new one,"
+echo "         the user has NO valid API key. If the creation fails,"
+echo "         the user is locked out."
+echo "  Fix: Create the new key first, then delete the old one."
+echo "       Or wrap both operations in a transaction."
+echo ""
+
+echo "--- src/api-middleware.js Review ---"
+echo ""
+
+echo "  COMMENT 8 (blocking): Security — API key in query string"
+echo "  ============================================================="
+echo "  Line: const key = req.headers['x-api-key'] || req.query.api_key;"
+echo "  Issue: Allowing API keys in query parameters means they appear"
+echo "         in server access logs, browser history, and can be leaked"
+echo "         via the Referer header. Keys should only be in headers."
+echo "  Fix: Remove req.query.api_key. Only accept keys via header."
+echo ""
+
+echo "  COMMENT 9 (suggestion): Missing rate limiting"
+echo "  ============================================================="
+echo "  Issue: There is no rate limiting on API key validation. An"
+echo "         attacker could brute-force API keys by trying random"
+echo "         strings rapidly."
+echo "  Suggestion: Add rate limiting per IP, or add a timing delay"
+echo "              on failed validation attempts."
+echo ""
+
+echo "  COMMENT 10 (nit): Missing error handling"
+echo "  ============================================================="
+echo "  Issue: If authService.validateApiKey throws (e.g., database down),"
+echo "         the error propagates unhandled and the user gets a 500."
+echo "  Fix: Wrap in try/catch and return a proper error response."
+echo ""
+
+echo "--- Missing: No Tests ---"
+echo ""
+echo "  COMMENT 11 (blocking): No tests provided"
+echo "  ============================================================="
+echo "  Issue: This PR adds significant new functionality (API key"
+echo "         creation, validation, deletion, rotation, middleware)"
+echo "         but includes zero tests."
+echo "  Required: Unit tests for each method, integration test for"
+echo "            the middleware, tests for error conditions."
+echo ""
+
+echo "=========================================="
+echo "  REVIEW SUMMARY"
+echo "=========================================="
+echo ""
+echo "  Decision: REQUEST CHANGES"
+echo ""
+echo "  Blocking issues (5):"
+echo "    1. API key logged in plaintext (security)"
+echo "    2. API key stored in plaintext (security)"
+echo "    3. Missing await on delete operations (bugs)"
+echo "    4. API key accepted in query string (security)"
+echo "    5. No tests"
+echo ""
+echo "  Suggestions (4):"
+echo "    1. Use const instead of var"
+echo "    2. Fix race condition in rotateApiKey"
+echo "    3. Add rate limiting"
+echo "    4. Add error handling in middleware"
+echo ""
+echo "  This review caught:"
+echo "    - 3 security vulnerabilities"
+echo "    - 2 bugs (missing await)"
+echo "    - 1 race condition"
+echo "    - Style inconsistencies"
+echo "    - Missing tests"
+echo ""
+echo "  Without code review, all of these would reach production."
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="PR Template Generator">
+
+```bash
+cat > ~/pr-template-generator.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# PR Template Generator — creates PR templates for different project types
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+TARGET_DIR="${1:-.}"
+
+if [ ! -d "$TARGET_DIR" ]; then
+    echo -e "${RED}Error: Directory '$TARGET_DIR' does not exist${NC}"
+    exit 1
+fi
+
+echo -e "${BOLD}${BLUE}============================================${NC}"
+echo -e "${BOLD}${BLUE}  PR Template Generator${NC}"
+echo -e "${BOLD}${BLUE}============================================${NC}"
+echo ""
+echo "Select a template type:"
+echo ""
+echo "  1) Standard (general purpose)"
+echo "  2) Feature (new feature development)"
+echo "  3) Bugfix (bug fix with reproduction steps)"
+echo "  4) Hotfix (urgent production fix)"
+echo "  5) Refactor (code improvement, no behavior change)"
+echo "  6) Infrastructure (DevOps, CI/CD, deployment)"
+echo "  7) All (create all templates with chooser)"
+echo ""
+
+read -r -p "Choose (1-7): " choice
+
+mkdir -p "$TARGET_DIR/.github"
+
+generate_standard() {
+    cat > "$TARGET_DIR/.github/pull_request_template.md" << 'TMPLEOF'
+## Summary
+
+<!-- What does this PR do? One or two sentences. -->
+
+## Changes
+
+<!-- List the specific changes made -->
+-
+
+## Related Issues
+
+<!-- Link issues: Fixes #123, Closes #456, Relates to #789 -->
+
+## Type of Change
+
+- [ ] Bug fix (non-breaking change that fixes an issue)
+- [ ] New feature (non-breaking change that adds functionality)
+- [ ] Breaking change (fix or feature causing existing functionality to change)
+- [ ] Refactoring (no functional changes)
+- [ ] Documentation update
+- [ ] Infrastructure/CI change
+
+## Testing
+
+- [ ] Unit tests added/updated
+- [ ] Integration tests added/updated
+- [ ] Manual testing completed
+- [ ] All existing tests pass
+
+## Checklist
+
+- [ ] Code follows project style guidelines
+- [ ] Self-review completed
+- [ ] Code comments added where necessary
+- [ ] Documentation updated
+- [ ] No new warnings generated
+- [ ] Dependent changes have been merged
+TMPLEOF
+    echo -e "  ${GREEN}Created: .github/pull_request_template.md${NC}"
+}
+
+generate_feature() {
+    mkdir -p "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE"
+    cat > "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE/feature.md" << 'TMPLEOF'
+## Feature: <!-- Feature name -->
+
+### Summary
+
+<!-- What does this feature do? Who is it for? -->
+
+### Motivation
+
+<!-- Why is this feature needed? Link to product spec, RFC, or discussion. -->
+
+### Implementation Details
+
+<!-- How does it work? Key design decisions and trade-offs. -->
+
+### User-Facing Changes
+
+<!-- What will users see or experience differently? -->
+
+### Screenshots / Demo
+
+<!-- If UI changes, add before/after screenshots or a demo GIF -->
+
+| Before | After |
+|--------|-------|
+|        |       |
+
+### Database Changes
+
+- [ ] New migrations added
+- [ ] Migration is reversible
+- [ ] No breaking schema changes
+- [ ] N/A — no database changes
+
+### API Changes
+
+- [ ] New endpoints added (document below)
+- [ ] Existing endpoints modified (document below)
+- [ ] Breaking API changes (requires version bump)
+- [ ] N/A — no API changes
+
+<!-- List new/modified endpoints if applicable:
+| Method | Path | Description |
+|--------|------|-------------|
+| POST   | /api/v1/resource | Creates a new resource |
+-->
+
+### Feature Flag
+
+- [ ] Behind feature flag: `FLAG_NAME`
+- [ ] Enabled by default
+- [ ] N/A — no feature flag needed
+
+### Testing
+
+- [ ] Unit tests cover happy path
+- [ ] Unit tests cover edge cases
+- [ ] Unit tests cover error conditions
+- [ ] Integration tests added
+- [ ] Performance tested (if applicable)
+- [ ] Accessibility tested (if UI)
+
+### Rollout Plan
+
+<!-- How will this be rolled out? All at once? Gradual? -->
+
+### Rollback Plan
+
+<!-- How to revert if something goes wrong? -->
+
+### Checklist
+
+- [ ] Self-review completed
+- [ ] Documentation updated
+- [ ] No new warnings
+- [ ] Tests pass in CI
+- [ ] Product owner approved design
+TMPLEOF
+    echo -e "  ${GREEN}Created: .github/PULL_REQUEST_TEMPLATE/feature.md${NC}"
+}
+
+generate_bugfix() {
+    mkdir -p "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE"
+    cat > "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE/bugfix.md" << 'TMPLEOF'
+## Bug Fix: <!-- Brief description -->
+
+### Bug Description
+
+<!-- What was the bug? What was the user impact? -->
+
+### Root Cause
+
+<!-- What caused the bug? Be specific. -->
+
+### Fix Description
+
+<!-- How does this PR fix the bug? -->
+
+### Reproduction Steps (Before Fix)
+
+<!-- Steps to reproduce the original bug -->
+1.
+2.
+3.
+
+### Verification (After Fix)
+
+<!-- Steps to verify the fix works -->
+1.
+2.
+3.
+
+### Related Issues
+
+Fixes #
+
+### Affected Versions
+
+<!-- Which versions/environments are affected? -->
+- [ ] Production
+- [ ] Staging
+- [ ] Development
+
+### Regression Risk
+
+<!-- Could this fix break something else? What areas are at risk? -->
+
+### Testing
+
+- [ ] Test added that reproduces the bug (fails without fix)
+- [ ] Test passes with fix applied
+- [ ] Existing tests still pass
+- [ ] Manual verification completed
+
+### Checklist
+
+- [ ] Self-review completed
+- [ ] Root cause understood (not just symptoms fixed)
+- [ ] No new warnings
+- [ ] Considered if similar bugs exist elsewhere
+TMPLEOF
+    echo -e "  ${GREEN}Created: .github/PULL_REQUEST_TEMPLATE/bugfix.md${NC}"
+}
+
+generate_hotfix() {
+    mkdir -p "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE"
+    cat > "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE/hotfix.md" << 'TMPLEOF'
+## HOTFIX: <!-- Critical issue description -->
+
+### Severity
+
+- [ ] P0 — System down / data loss
+- [ ] P1 — Major feature broken for all users
+- [ ] P2 — Feature degraded for some users
+
+### Incident
+
+<!-- Link to incident tracker, PagerDuty, or Slack thread -->
+
+### Impact
+
+<!-- Who is affected? How many users? What is the business impact? -->
+
+### Root Cause (Brief)
+
+<!-- Quick summary. Full post-mortem will follow. -->
+
+### Fix
+
+<!-- What does this change do to resolve the incident? -->
+
+### Risk Assessment
+
+<!-- This is being fast-tracked. What could go wrong? -->
+
+### Testing
+
+- [ ] Fix verified in staging/preview environment
+- [ ] Smoke tests pass
+- [ ] No regressions in critical paths
+
+### Rollback Plan
+
+<!-- How to revert quickly if the fix makes things worse -->
+
+### Post-Merge Actions
+
+- [ ] Monitor metrics for 30 minutes after deploy
+- [ ] Update incident channel
+- [ ] Schedule post-mortem
+
+### Approval
+
+<!-- Hotfixes may bypass normal review requirements -->
+- [ ] Engineering lead approved
+- [ ] On-call engineer reviewed
+TMPLEOF
+    echo -e "  ${GREEN}Created: .github/PULL_REQUEST_TEMPLATE/hotfix.md${NC}"
+}
+
+generate_refactor() {
+    mkdir -p "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE"
+    cat > "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE/refactor.md" << 'TMPLEOF'
+## Refactor: <!-- What is being refactored -->
+
+### Summary
+
+<!-- What code is being refactored and why? -->
+
+### Motivation
+
+<!-- Why is this refactor needed now? Technical debt? Performance? Readability? -->
+
+### Changes
+
+<!-- Specific changes made. Emphasize that behavior is unchanged. -->
+-
+
+### Before / After
+
+<!-- Show a representative example of the code before and after -->
+
+**Before:**
+```
+```
+
+**After:**
+```
+```
+
+### Behavioral Changes
+
+- [x] **No behavioral changes** — this is a pure refactor
+- [ ] If there ARE behavioral changes, list them here:
+
+### Performance Impact
+
+- [ ] No performance impact expected
+- [ ] Performance improvement expected (benchmark results below)
+- [ ] Potential performance regression (justified because...)
+
+### Testing
+
+- [ ] All existing tests pass WITHOUT modification
+  (Tests unchanged = behavior unchanged)
+- [ ] New tests added for previously untested code
+- [ ] Manual smoke test completed
+
+### Checklist
+
+- [ ] Self-review: changes are purely structural
+- [ ] No feature additions hiding in this refactor
+- [ ] No configuration changes
+- [ ] Documentation updated if APIs/interfaces changed
+TMPLEOF
+    echo -e "  ${GREEN}Created: .github/PULL_REQUEST_TEMPLATE/refactor.md${NC}"
+}
+
+generate_infrastructure() {
+    mkdir -p "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE"
+    cat > "$TARGET_DIR/.github/PULL_REQUEST_TEMPLATE/infrastructure.md" << 'TMPLEOF'
+## Infrastructure: <!-- Brief description -->
+
+### Summary
+
+<!-- What infrastructure change does this PR make? -->
+
+### Type
+
+- [ ] CI/CD pipeline change
+- [ ] Deployment configuration
+- [ ] Monitoring/alerting
+- [ ] Infrastructure as Code (Terraform, CloudFormation)
+- [ ] Docker/container configuration
+- [ ] Security/access changes
+- [ ] Dependency update
+
+### Changes
+
+<!-- List specific changes -->
+-
+
+### Environment Impact
+
+- [ ] Development only
+- [ ] Staging
+- [ ] Production
+- [ ] All environments
+
+### Rollback Plan
+
+<!-- How to revert this change. Infrastructure changes MUST have a rollback plan. -->
+
+### Security Considerations
+
+- [ ] No secrets or credentials in code
+- [ ] Access permissions reviewed
+- [ ] Network rules reviewed (if applicable)
+- [ ] N/A
+
+### Cost Impact
+
+- [ ] No cost change expected
+- [ ] Cost increase (estimated: $X/month)
+- [ ] Cost decrease (estimated: $X/month)
+
+### Testing
+
+- [ ] Tested in development/staging
+- [ ] Dry-run completed (terraform plan, etc.)
+- [ ] Monitoring verified after change
+
+### Checklist
+
+- [ ] Changes reviewed by DevOps/platform team
+- [ ] Runbook updated (if applicable)
+- [ ] Team notified of upcoming change
+- [ ] Deployment window scheduled (if production)
+TMPLEOF
+    echo -e "  ${GREEN}Created: .github/PULL_REQUEST_TEMPLATE/infrastructure.md${NC}"
+}
+
+generate_chooser() {
+    cat > "$TARGET_DIR/.github/pull_request_template.md" << 'TMPLEOF'
+<!-- Choose a template by adding ?template=NAME.md to the PR creation URL -->
+<!-- Or select from the template dropdown when creating a PR on GitHub -->
+
+<!-- Available templates:
+  - feature.md        — New feature development
+  - bugfix.md         — Bug fix with reproduction steps
+  - hotfix.md         — Urgent production fix
+  - refactor.md       — Code improvement, no behavior change
+  - infrastructure.md — DevOps, CI/CD, deployment changes
+-->
+
+## Summary
+
+<!-- What does this PR do? -->
+
+## Changes
+
+-
+
+## Related Issues
+
+<!-- Fixes #, Closes #, Relates to # -->
+
+## Type of Change
+
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Refactoring
+- [ ] Documentation
+- [ ] Infrastructure
+
+## Testing
+
+- [ ] Tests added/updated
+- [ ] Manual testing completed
+- [ ] All existing tests pass
+
+## Checklist
+
+- [ ] Self-review completed
+- [ ] Documentation updated
+- [ ] No new warnings
+TMPLEOF
+    echo -e "  ${GREEN}Created: .github/pull_request_template.md (default chooser)${NC}"
+}
+
+case "$choice" in
+    1) generate_standard ;;
+    2) generate_feature ;;
+    3) generate_bugfix ;;
+    4) generate_hotfix ;;
+    5) generate_refactor ;;
+    6) generate_infrastructure ;;
+    7)
+        generate_chooser
+        generate_feature
+        generate_bugfix
+        generate_hotfix
+        generate_refactor
+        generate_infrastructure
+        ;;
+    *)
+        echo -e "${RED}Invalid choice${NC}"
+        exit 1
+        ;;
+esac
+
+echo ""
+echo -e "${BOLD}${GREEN}Templates generated!${NC}"
+echo ""
+echo "Files:"
+find "$TARGET_DIR/.github" -name "*.md" -type f | sort | while read -r f; do
+    echo "  $f"
+done
+echo ""
+echo "Usage on GitHub:"
+echo "  - Default template: used automatically for all new PRs"
+echo "  - Named templates: select from dropdown when creating a PR"
+echo "    or add ?template=feature.md to the URL"
+
+SCRIPT
+
+chmod +x ~/pr-template-generator.sh
+
+# Demonstrate generating all templates
+DEMO_DIR=$(mktemp -d)
+echo "7" | ~/pr-template-generator.sh "$DEMO_DIR"
+
+echo ""
+echo "=== Generated template files ==="
+find "$DEMO_DIR/.github" -name "*.md" -type f | sort | while read -r f; do
+    echo ""
+    echo "--- $f ---"
+    head -5 "$f"
+    echo "  ..."
+done
+
+# Clean up
+rm -rf "$DEMO_DIR"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- A pull request is a conversation about code changes — not just a merge mechanism
+- Write PR descriptions that answer What, Why, and How — include a test plan and link related issues
+- Keep PRs small and focused (under 400 lines) for thorough reviews
+- Use PR templates to standardize descriptions across your team
+- Review code for correctness, security, performance, and maintainability — not just style
+- Write constructive review comments: explain the problem, suggest a fix, and share context
+- Use prefixes (nit, suggestion, blocking, question) to clarify the severity of review comments
+- Choose merge strategies thoughtfully: squash for messy history, rebase for clean commits, merge commit for full audit trail
+- Draft PRs signal work-in-progress and enable early feedback without triggering reviews
+- CI checks on PRs catch bugs automatically before code reaches main
+- Stacked PRs break large features into reviewable pieces but require careful branch management
+
+## What's Next
+
+Pull requests work great within your team's repository. But what about contributing to projects you do not own? In **Forking and Open Source**, you'll learn the fork-and-PR workflow that powers open source collaboration — forking repos, keeping forks synced, and submitting contributions that maintainers actually want to merge.

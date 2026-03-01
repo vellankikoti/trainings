@@ -1,0 +1,313 @@
+---
+title: "Terminal Mastery"
+description: "Master the bash terminal with keyboard shortcuts, command history, tab completion, and productivity techniques that separate beginners from power users."
+order: 5
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 04-installing-linux
+objectives:
+  - Navigate bash efficiently with keyboard shortcuts
+  - Use command history and search to work faster
+  - Master tab completion and globbing
+  - Customize your shell prompt and environment
+tags:
+  - linux
+  - terminal
+  - bash
+  - productivity
+---
+
+<Callout type="story" title="The Story">
+You've seen experienced engineers fly through the terminal — commands appearing almost instantly, long file paths completed with a single keystroke, previous commands recalled from memory. It looks like magic, but it's not. It's muscle memory built from knowing a handful of keyboard shortcuts and bash features. After this lesson, you'll have the same toolkit.
+</Callout>
+
+## The Bash Shell
+
+When you open a terminal, you're interacting with a **shell** — a program that reads your commands, interprets them, and sends them to the kernel. **Bash** (Bourne Again SHell) is the default on most Linux systems.
+
+```bash
+# Check which shell you're running
+echo $SHELL
+
+# Check bash version
+bash --version | head -1
+```
+
+## Essential Keyboard Shortcuts
+
+These shortcuts work in bash and most Unix shells. Memorize them — they'll save you thousands of keystrokes:
+
+### Navigation
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl + A` | Jump to beginning of line |
+| `Ctrl + E` | Jump to end of line |
+| `Alt + F` | Jump forward one word |
+| `Alt + B` | Jump backward one word |
+| `Ctrl + L` | Clear the screen |
+
+### Editing
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl + U` | Delete from cursor to beginning of line |
+| `Ctrl + K` | Delete from cursor to end of line |
+| `Ctrl + W` | Delete the word before cursor |
+| `Alt + D` | Delete the word after cursor |
+| `Ctrl + Y` | Paste last deleted text (yank) |
+
+### Control
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl + C` | Kill the current process |
+| `Ctrl + D` | Exit the shell (or send EOF) |
+| `Ctrl + Z` | Suspend the current process |
+| `Ctrl + R` | Reverse search command history |
+
+<Callout type="tip" title="The Big Three">
+If you only learn three shortcuts: `Ctrl + R` (search history), `Ctrl + A/E` (jump to start/end), and `Tab` (autocomplete). These alone will 10x your terminal speed.
+</Callout>
+
+## Command History
+
+Bash remembers every command you type. This history is your most powerful productivity tool.
+
+```bash
+# View recent command history
+history | tail -20
+
+# Run the last command again
+!!
+
+# Run command number 42 from history
+!42
+
+# Run the last command that started with "ssh"
+!ssh
+
+# Reverse search: press Ctrl+R, then type a search term
+# Press Ctrl+R again to cycle through matches
+# Press Enter to execute, Ctrl+G to cancel
+```
+
+### History Expansion
+
+```bash
+# Reuse the last argument of the previous command
+mkdir /tmp/my-project
+cd !$
+# cd /tmp/my-project
+
+# Reuse all arguments of the previous command
+echo one two three
+echo !*
+# echo one two three
+
+# Substitute text in the previous command
+cat /etc/hotsname     # typo!
+^hotsname^hostname    # fix and rerun
+# cat /etc/hostname
+```
+
+<Exercise number={1} title="Speed Training">
+
+Practice these shortcuts until they feel natural:
+
+1. Type a long command: `echo "this is a very long command that I am typing"`
+2. Press `Ctrl + A` to jump to the beginning
+3. Press `Ctrl + E` to jump to the end
+4. Press `Ctrl + U` to delete the whole line
+5. Type: `ls /usr/local/bin/some-long-path`
+6. Press `Ctrl + W` to delete the last word
+7. Press `Ctrl + Y` to paste it back
+8. Press `Ctrl + R` and type "echo" — find your earlier command
+9. Press `Ctrl + L` to clear the screen
+
+Time yourself: how fast can you complete all 9 steps?
+
+</Exercise>
+
+## Tab Completion
+
+Press `Tab` to autocomplete commands, file paths, and arguments. Press `Tab` twice to see all options:
+
+```bash
+# Type "sys" then press Tab twice:
+sys⇥⇥
+# Shows: sysctl  systemctl  systemd-*  ...
+
+# Type "systemctl st" then press Tab:
+systemctl st⇥
+# Completes to: systemctl status
+
+# File path completion:
+ls /etc/sy⇥
+# Completes to: ls /etc/sysctl.conf  (or shows options)
+```
+
+<Callout type="info">
+Install `bash-completion` for even better tab completion with command arguments:
+
+```bash
+sudo apt install bash-completion
+```
+</Callout>
+
+## Globbing (Wildcards)
+
+Bash expands special characters before running commands:
+
+| Pattern | Matches |
+|---|---|
+| `*` | Any number of characters |
+| `?` | Exactly one character |
+| `[abc]` | Any one of a, b, or c |
+| `[0-9]` | Any digit |
+| `{a,b,c}` | Comma-separated alternatives |
+
+```bash
+# List all .conf files in /etc
+ls /etc/*.conf
+
+# List files starting with "host"
+ls /etc/host*
+
+# List files with single-char extensions
+ls /etc/*.?
+
+# Create multiple directories at once
+mkdir -p project/{src,tests,docs,config}
+```
+
+<Exercise number={2} title="Glob Mastery">
+
+Use globbing to complete these tasks:
+
+```bash
+# 1. List all files in /etc that start with "pass"
+ls /etc/pass*
+
+# 2. Count how many .conf files are in /etc
+ls /etc/*.conf 2>/dev/null | wc -l
+
+# 3. Create a project structure with one command
+mkdir -p ~/devops-learning/project-{alpha,beta,gamma}/{src,tests,docs}
+
+# 4. List only the project directories you just created
+ls ~/devops-learning/project-*/
+
+# 5. Remove all the test directories
+rmdir ~/devops-learning/project-*/tests
+```
+
+Verify each step worked with `ls`.
+
+</Exercise>
+
+## Customizing Your Prompt
+
+The bash prompt is controlled by the `PS1` variable:
+
+```bash
+# See your current prompt
+echo "$PS1"
+
+# Simple prompt: username@hostname:directory$
+export PS1="\u@\h:\w\$ "
+
+# Colorful prompt with git branch (add to ~/.bashrc)
+export PS1='\[\e[32m\]\u@\h\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ '
+```
+
+### Useful Prompt Escape Codes
+
+| Code | Shows |
+|---|---|
+| `\u` | Username |
+| `\h` | Hostname |
+| `\w` | Current directory (full path) |
+| `\W` | Current directory (basename only) |
+| `\t` | Current time (24h) |
+| `\$` | `$` for regular user, `#` for root |
+
+## Aliases: Command Shortcuts
+
+Create short names for commands you use often:
+
+```bash
+# Add to ~/.bashrc
+alias ll='ls -la'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias gs='git status'
+alias gd='git diff'
+alias k='kubectl'
+
+# Reload after editing
+source ~/.bashrc
+
+# List all aliases
+alias
+```
+
+<MiniProject title="Custom Shell Configuration">
+
+Create a personalized `.bashrc` configuration:
+
+```bash
+cat >> ~/.bashrc << 'CONFIG'
+
+# --- Custom DevOps Learning Config ---
+
+# Aliases
+alias ll='ls -la --color=auto'
+alias la='ls -A'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias h='history | tail -20'
+alias ports='ss -tlnp'
+alias mem='free -h'
+alias disk='df -h /'
+
+# Functions
+mkcd() { mkdir -p "$1" && cd "$1"; }
+extract() {
+  case "$1" in
+    *.tar.gz) tar xzf "$1" ;;
+    *.tar.bz2) tar xjf "$1" ;;
+    *.zip) unzip "$1" ;;
+    *) echo "Unknown format: $1" ;;
+  esac
+}
+
+# History settings
+export HISTSIZE=10000
+export HISTFILESIZE=20000
+export HISTCONTROL=ignoredups:erasedups
+
+# Colored prompt
+export PS1='\[\e[32m\]\u@\h\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ '
+CONFIG
+
+source ~/.bashrc
+echo "Shell configured! Try: ll, mkcd test-dir, .."
+```
+
+Test each alias and function you created.
+
+</MiniProject>
+
+## Key Takeaways
+
+- `Ctrl + R` (reverse search), `Tab` (autocomplete), and `Ctrl + A/E` (line navigation) are the shortcuts that matter most
+- Command history (`!!`, `!$`, `!command`) saves retyping
+- Globbing (`*`, `?`, `{}`) lets you work with multiple files at once
+- Aliases and functions in `~/.bashrc` automate your most common commands
+- A well-configured terminal multiplies your productivity
+
+## What's Next
+
+Now that you're comfortable in the terminal, it's time to navigate the filesystem. In **Filesystem Navigation**, you'll master `cd`, `ls`, `find`, and `locate` — the commands you'll use more than any others.

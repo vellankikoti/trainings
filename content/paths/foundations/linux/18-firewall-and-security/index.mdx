@@ -1,0 +1,451 @@
+---
+title: "Firewall and Security"
+description: "Secure Linux servers with iptables, ufw, SSH hardening, and fail2ban. Learn the security practices that protect production infrastructure."
+order: 18
+xpReward: 100
+estimatedMinutes: 45
+prerequisites:
+  - 17-networking-essentials
+objectives:
+  - Configure firewalls with ufw and iptables
+  - Harden SSH configuration
+  - Implement basic intrusion prevention with fail2ban
+  - Follow security best practices for Linux servers
+tags:
+  - linux
+  - security
+  - firewall
+  - ssh
+  - iptables
+---
+
+<Callout type="story" title="The Story">
+You check your SSH logs and find 15,000 failed login attempts from IP addresses in countries you've never heard of. Someone is brute-forcing your server. Without a firewall and SSH hardening, it's only a matter of time before a weak password is cracked. Server security isn't optional — it's the first thing you configure on any new server.
+</Callout>
+
+## UFW — Uncomplicated Firewall
+
+UFW is a user-friendly frontend for iptables. It's the recommended firewall tool for Ubuntu:
+
+```bash
+# Install ufw
+sudo apt install -y ufw
+
+# Check status
+sudo ufw status verbose
+
+# Set default policies
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# Allow SSH (ALWAYS do this before enabling!)
+sudo ufw allow ssh
+# or: sudo ufw allow 22/tcp
+
+# Enable the firewall
+sudo ufw enable
+
+# Check status with rules
+sudo ufw status numbered
+```
+
+### Common Rules
+
+```bash
+# Allow HTTP and HTTPS
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# Allow a specific port
+sudo ufw allow 3000/tcp
+
+# Allow from a specific IP
+sudo ufw allow from 192.168.1.100
+
+# Allow from a specific IP to a specific port
+sudo ufw allow from 192.168.1.100 to any port 5432
+
+# Allow a subnet
+sudo ufw allow from 10.0.0.0/8
+
+# Deny a specific IP
+sudo ufw deny from 203.0.113.50
+
+# Delete a rule by number
+sudo ufw status numbered
+sudo ufw delete 3
+
+# Delete a rule by specification
+sudo ufw delete allow 3000/tcp
+
+# Reset all rules
+sudo ufw reset
+```
+
+<Callout type="warning" title="Lock Yourself Out">
+ALWAYS allow SSH before enabling UFW. If you enable UFW without an SSH allow rule on a remote server, you will lose access. The fix requires console access to the server.
+</Callout>
+
+## iptables — The Power Tool
+
+iptables is the underlying firewall system. UFW generates iptables rules behind the scenes.
+
+```bash
+# View current rules
+sudo iptables -L -n -v
+
+# View rules with line numbers
+sudo iptables -L -n --line-numbers
+
+# View NAT rules
+sudo iptables -t nat -L -n
+```
+
+### iptables Chains
+
+| Chain | Purpose |
+|---|---|
+| INPUT | Packets destined for this server |
+| OUTPUT | Packets leaving this server |
+| FORWARD | Packets being routed through this server |
+
+### Basic iptables Rules
+
+```bash
+# Allow established connections (stateful firewall)
+sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Allow loopback
+sudo iptables -A INPUT -i lo -j ACCEPT
+
+# Allow SSH
+sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+# Allow HTTP/HTTPS
+sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+
+# Drop everything else
+sudo iptables -A INPUT -j DROP
+
+# Delete a rule by line number
+sudo iptables -D INPUT 5
+
+# Flush all rules (careful!)
+sudo iptables -F
+```
+
+### Saving iptables Rules
+
+```bash
+# Save current rules
+sudo iptables-save > /etc/iptables.rules
+
+# Restore rules
+sudo iptables-restore < /etc/iptables.rules
+
+# Make persistent (Debian/Ubuntu)
+sudo apt install -y iptables-persistent
+sudo netfilter-persistent save
+```
+
+<Exercise number={1} title="Firewall Configuration">
+
+```bash
+# 1. Check current firewall status
+sudo ufw status verbose 2>/dev/null || echo "UFW not installed"
+sudo iptables -L -n 2>/dev/null | head -15
+
+# 2. View iptables rules
+sudo iptables -L -n --line-numbers 2>/dev/null
+
+# 3. Check what ports are currently open
+ss -tlnp | awk 'NR>1 {print $4}' | sort -u
+
+# 4. View connection tracking
+cat /proc/net/nf_conntrack 2>/dev/null | head -5 || echo "Conntrack not available"
+
+# 5. Check which services are exposed
+ss -tlnp | grep -v "127.0.0" | head -10
+echo "(Services NOT on localhost are exposed to the network)"
+```
+
+</Exercise>
+
+## SSH Hardening
+
+SSH is the primary way you access Linux servers. Hardening it is critical:
+
+### Key-Based Authentication
+
+```bash
+# Generate an SSH key pair (on your LOCAL machine)
+ssh-keygen -t ed25519 -C "your.email@example.com"
+# or RSA (wider compatibility):
+ssh-keygen -t rsa -b 4096 -C "your.email@example.com"
+
+# Copy your public key to the server
+ssh-copy-id -i ~/.ssh/id_ed25519.pub user@server
+
+# Test key-based login
+ssh -i ~/.ssh/id_ed25519 user@server
+```
+
+### SSH Server Configuration
+
+Edit `/etc/ssh/sshd_config`:
+
+```bash
+# Recommended security settings for /etc/ssh/sshd_config:
+
+# Disable root login
+PermitRootLogin no
+
+# Disable password authentication (after setting up keys)
+PasswordAuthentication no
+
+# Disable empty passwords
+PermitEmptyPasswords no
+
+# Use Protocol 2 only
+Protocol 2
+
+# Change default port (optional — security through obscurity)
+# Port 2222
+
+# Limit authentication attempts
+MaxAuthTries 3
+
+# Set login grace time
+LoginGraceTime 30
+
+# Allow specific users only
+AllowUsers ubuntu deploy
+
+# Disable X11 forwarding (unless needed)
+X11Forwarding no
+
+# Set idle timeout
+ClientAliveInterval 300
+ClientAliveCountMax 2
+```
+
+```bash
+# Test configuration before restarting
+sudo sshd -t
+
+# Restart SSH to apply changes
+sudo systemctl restart sshd
+```
+
+<Callout type="warning" title="SSH Changes">
+Before disabling password authentication, make sure key-based login works! Test in a second terminal window. If keys don't work and you disable passwords, you lose access.
+</Callout>
+
+## Fail2ban — Intrusion Prevention
+
+Fail2ban monitors log files and bans IPs that show malicious signs:
+
+```bash
+# Install
+sudo apt install -y fail2ban
+
+# Create local config (don't edit jail.conf directly)
+sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+```
+
+### Configure Fail2ban
+
+```bash
+# Edit /etc/fail2ban/jail.local
+sudo tee /etc/fail2ban/jail.local > /dev/null << 'CONF'
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 5
+banaction = iptables-multiport
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 86400
+CONF
+```
+
+```bash
+# Start and enable
+sudo systemctl enable --now fail2ban
+
+# Check status
+sudo fail2ban-client status
+sudo fail2ban-client status sshd
+
+# View banned IPs
+sudo fail2ban-client get sshd banip
+
+# Unban an IP
+sudo fail2ban-client set sshd unbanip 192.168.1.100
+```
+
+## Security Checklist for New Servers
+
+```bash
+# 1. Update the system
+sudo apt update && sudo apt upgrade -y
+
+# 2. Create a non-root user with sudo
+sudo adduser deploy
+sudo usermod -aG sudo deploy
+
+# 3. Set up SSH key authentication
+# (copy key from local machine)
+
+# 4. Harden SSH
+sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+sudo systemctl restart sshd
+
+# 5. Configure firewall
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow ssh
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+
+# 6. Install fail2ban
+sudo apt install -y fail2ban
+sudo systemctl enable --now fail2ban
+
+# 7. Set up automatic security updates
+sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+```
+
+<Exercise number={2} title="Security Audit">
+
+```bash
+# 1. Check for open ports
+echo "=== Open Ports ==="
+ss -tlnp 2>/dev/null | awk 'NR>1 {print $4, $6}' | sort
+
+# 2. Check SSH configuration
+echo ""
+echo "=== SSH Config ==="
+grep -E "^(PermitRootLogin|PasswordAuthentication|Port |MaxAuthTries)" /etc/ssh/sshd_config 2>/dev/null
+
+# 3. Check for users with login shells
+echo ""
+echo "=== Users with Login Shells ==="
+grep -v '/nologin\|/false' /etc/passwd | awk -F: '{print $1, $7}'
+
+# 4. Check sudo group membership
+echo ""
+echo "=== Sudo Users ==="
+getent group sudo 2>/dev/null | cut -d: -f4
+
+# 5. Check firewall status
+echo ""
+echo "=== Firewall ==="
+sudo ufw status 2>/dev/null || echo "UFW not active"
+sudo iptables -L -n 2>/dev/null | head -10
+
+# 6. Check for failed SSH login attempts
+echo ""
+echo "=== Recent Failed SSH Logins ==="
+grep "Failed password" /var/log/auth.log 2>/dev/null | tail -5 || echo "No auth log found"
+
+# 7. Check for SUID files (potential security risk)
+echo ""
+echo "=== SUID Files Count ==="
+find / -perm -4000 -type f 2>/dev/null | wc -l
+```
+
+</Exercise>
+
+<MiniProject title="Server Hardening Script">
+
+```bash
+cat > ~/harden.sh << 'SCRIPT'
+#!/bin/bash
+# Server Hardening Script — basic security setup
+
+set -euo pipefail
+
+echo "=== Server Hardening Script ==="
+echo "This script will apply basic security configurations."
+echo ""
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run with sudo: sudo $0"
+    exit 1
+fi
+
+echo "[1/6] Updating system..."
+apt update -qq && apt upgrade -y -qq
+
+echo "[2/6] Configuring SSH..."
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config
+sed -i 's/^#*ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config
+sed -i 's/^#*ClientAliveCountMax.*/ClientAliveCountMax 2/' /etc/ssh/sshd_config
+sshd -t && systemctl restart sshd
+echo "  SSH hardened (backup at /etc/ssh/sshd_config.bak)"
+
+echo "[3/6] Configuring firewall..."
+ufw --force reset >/dev/null 2>&1
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow ssh
+ufw --force enable
+echo "  UFW enabled (SSH allowed)"
+
+echo "[4/6] Installing fail2ban..."
+apt install -y -qq fail2ban
+systemctl enable --now fail2ban
+echo "  fail2ban active"
+
+echo "[5/6] Configuring automatic updates..."
+apt install -y -qq unattended-upgrades
+echo 'Unattended-Upgrade::Allowed-Origins { "${distro_id}:${distro_codename}-security"; };' > /etc/apt/apt.conf.d/50unattended-upgrades-local
+echo "  Automatic security updates enabled"
+
+echo "[6/6] Final security check..."
+echo "  Open ports: $(ss -tlnp | awk 'NR>1' | wc -l)"
+echo "  Users with sudo: $(getent group sudo | cut -d: -f4)"
+echo "  Firewall: $(ufw status | head -1)"
+echo "  Fail2ban: $(systemctl is-active fail2ban)"
+
+echo ""
+echo "=== Hardening Complete ==="
+echo "NOTE: Password auth is still enabled. After confirming key-based"
+echo "SSH works, disable it by setting PasswordAuthentication no in"
+echo "/etc/ssh/sshd_config and restarting sshd."
+SCRIPT
+
+chmod +x ~/harden.sh
+echo "Created ~/harden.sh — run with: sudo ~/harden.sh"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- UFW: simple firewall management — `ufw allow ssh` then `ufw enable`
+- Always allow SSH before enabling a firewall on a remote server
+- SSH hardening: disable root login, use key auth, limit retries
+- Fail2ban automatically bans IPs after repeated failed login attempts
+- iptables provides granular control; UFW simplifies common patterns
+- Security is layers: firewall + SSH hardening + fail2ban + updates + monitoring
+- New server checklist: update → create user → SSH keys → harden SSH → firewall → fail2ban
+
+## What's Next
+
+You can secure and network your server. Now it's time to process the data flowing through it. In **Text Processing with grep, sed, awk**, you'll learn the text manipulation tools that make Linux the ultimate data processing platform.

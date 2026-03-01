@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  lab:
+    image: ubuntu:22.04
+    container_name: devops-git-basics-lab
+    command: >
+      bash -c "apt-get update -qq &&
+      apt-get install -y -qq git vim nano curl >/dev/null 2>&1 &&
+      git config --global user.name 'Lab User' &&
+      git config --global user.email 'lab@devops.training' &&
+      git config --global init.defaultBranch main &&
+      echo 'Git Basics Lab Ready.' &&
+      /bin/bash"
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    volumes:
+      - ./workspace:/workspace
+    environment:
+      - TERM=xterm-256color

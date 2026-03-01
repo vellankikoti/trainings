@@ -1,0 +1,1115 @@
+---
+title: "HTTP and HTTPS"
+description: "The protocol of the web. Understand HTTP methods, status codes, headers, cookies, and how TLS makes it all secure."
+order: 5
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - "04-dns-deep-dive"
+objectives:
+  - "Understand HTTP request/response structure"
+  - "Know HTTP methods and when to use each"
+  - "Interpret HTTP status codes"
+  - "Understand HTTPS and TLS handshake basics"
+  - "Use curl for HTTP debugging"
+tags:
+  - networking
+  - http
+  - https
+  - tls
+  - web
+---
+
+<Callout type="story" title="The Story">
+Your API returns a 502 Bad Gateway. The frontend team says "the API is down." But your API server is running fine. The problem is the reverse proxy — it can't reach your API on the new port after the last deployment. Understanding HTTP status codes tells you exactly where to look. 502 means the gateway (proxy) got a bad response from the upstream (your API). Knowing HTTP means knowing where the problem is.
+</Callout>
+
+## HTTP Basics
+
+**HTTP** (HyperText Transfer Protocol) is the protocol that powers the web. It is how browsers talk to servers, how APIs communicate, and how most of the internet's data is exchanged.
+
+HTTP has three defining characteristics:
+
+- **Client-server** — The client (browser, curl, API consumer) sends a request; the server sends a response
+- **Stateless** — Each request is independent. The server does not remember previous requests (unless you add state via cookies or tokens)
+- **Text-based** — HTTP/1.1 messages are human-readable plain text (HTTP/2 is binary but the semantics are the same)
+
+```bash
+# The simplest HTTP interaction:
+# Client sends:    GET / HTTP/1.1
+# Server responds: HTTP/1.1 200 OK
+
+# You can see this with curl:
+curl -v http://example.com 2>&1 | head -20
+
+# Or even with raw TCP using netcat:
+echo -e "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n" | nc example.com 80
+```
+
+## HTTP Request Anatomy
+
+Every HTTP request has three parts: a **request line**, **headers**, and an optional **body**.
+
+```http
+POST /api/users HTTP/1.1          ← Request line (method, path, version)
+Host: api.example.com             ← Headers start here
+Content-Type: application/json
+Authorization: Bearer eyJhbG...
+Accept: application/json
+Content-Length: 47
+                                  ← Blank line separates headers from body
+{"name": "Alice", "role": "admin"}  ← Request body (for POST/PUT/PATCH)
+```
+
+### The Request Line
+
+```
+METHOD /path/to/resource HTTP/version
+
+Examples:
+GET /index.html HTTP/1.1
+POST /api/users HTTP/1.1
+DELETE /api/users/42 HTTP/1.1
+```
+
+### Request Headers
+
+Headers provide metadata about the request:
+
+```http
+Host: api.example.com           ← Required: which server/virtual host
+Content-Type: application/json  ← Format of the request body
+Accept: text/html               ← What format the client wants back
+Authorization: Bearer token123  ← Authentication credentials
+User-Agent: curl/7.81.0         ← What client is making the request
+Cookie: session=abc123          ← Cookies for session management
+Cache-Control: no-cache         ← Caching instructions
+```
+
+## HTTP Methods
+
+HTTP methods (also called "verbs") define the action to perform on a resource:
+
+| Method | Purpose | Has Body | Idempotent | Safe |
+|---|---|---|---|---|
+| **GET** | Retrieve a resource | No | Yes | Yes |
+| **POST** | Create a resource | Yes | No | No |
+| **PUT** | Replace a resource entirely | Yes | Yes | No |
+| **PATCH** | Update a resource partially | Yes | No | No |
+| **DELETE** | Remove a resource | Optional | Yes | No |
+| **HEAD** | Like GET but no body | No | Yes | Yes |
+| **OPTIONS** | List supported methods | No | Yes | Yes |
+
+```bash
+# GET — Retrieve data
+curl https://api.example.com/users
+curl https://api.example.com/users/42
+
+# POST — Create new data
+curl -X POST https://api.example.com/users \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Alice", "email": "alice@example.com"}'
+
+# PUT — Replace existing data entirely
+curl -X PUT https://api.example.com/users/42 \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Alice Updated", "email": "alice@example.com", "role": "admin"}'
+
+# PATCH — Update specific fields
+curl -X PATCH https://api.example.com/users/42 \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+
+# DELETE — Remove data
+curl -X DELETE https://api.example.com/users/42
+
+# HEAD — Check if resource exists (no body returned)
+curl -I https://api.example.com/users/42
+
+# OPTIONS — Check what methods are allowed (used in CORS)
+curl -X OPTIONS https://api.example.com/users \
+  -H "Origin: http://frontend.example.com" -v
+```
+
+<Callout type="tip" title="Idempotent vs Safe">
+**Safe** methods do not modify the server (GET, HEAD, OPTIONS). **Idempotent** methods produce the same result if called multiple times (GET, PUT, DELETE). POST is neither safe nor idempotent — calling POST twice creates two resources. This distinction matters for retry logic: it is safe to retry a failed PUT, but retrying a failed POST might create duplicates.
+</Callout>
+
+## HTTP Response Anatomy
+
+Every HTTP response has three parts: a **status line**, **headers**, and an optional **body**.
+
+```http
+HTTP/1.1 200 OK                   ← Status line (version, code, reason)
+Content-Type: application/json    ← Headers start here
+Content-Length: 85
+Date: Mon, 01 Jan 2024 12:00:00 GMT
+Cache-Control: max-age=3600
+Set-Cookie: session=abc123; Path=/; HttpOnly
+                                   ← Blank line
+{"id": 42, "name": "Alice", "role": "admin"}  ← Response body
+```
+
+### Response Headers
+
+```http
+Content-Type: application/json     ← Format of the response body
+Content-Length: 85                  ← Size of response in bytes
+Date: Mon, 01 Jan 2024 12:00:00 GMT ← When the server generated the response
+Cache-Control: max-age=3600        ← Cache this for 1 hour
+Set-Cookie: session=abc; HttpOnly  ← Set a cookie on the client
+Location: /api/users/42            ← Redirect target (with 3xx status)
+X-RateLimit-Remaining: 98         ← Custom header: API rate limit
+Server: nginx/1.24.0              ← What server software is running
+```
+
+## HTTP Status Codes
+
+Status codes tell you what happened with your request. They are grouped by the first digit:
+
+### 1xx — Informational
+
+Rarely seen directly. The server is acknowledging the request is being processed.
+
+```
+100 Continue        — "I got your headers, send the body"
+101 Switching Protocols — "Let's upgrade to WebSocket"
+```
+
+### 2xx — Success
+
+The request was received, understood, and accepted.
+
+```bash
+200 OK              — Standard success for GET requests
+201 Created         — Resource was created (POST)
+204 No Content      — Success but no body (DELETE)
+202 Accepted        — Request accepted for async processing
+
+# Example:
+curl -s -o /dev/null -w "%{http_code}" https://example.com
+# 200
+```
+
+### 3xx — Redirection
+
+The client needs to take additional action (usually follow a redirect).
+
+```bash
+301 Moved Permanently — Resource has permanently moved (update bookmarks)
+302 Found             — Temporary redirect (keep using original URL)
+304 Not Modified      — Use your cached version (nothing changed)
+307 Temporary Redirect — Like 302 but preserves the HTTP method
+308 Permanent Redirect — Like 301 but preserves the HTTP method
+
+# See redirects with curl:
+curl -v http://google.com 2>&1 | grep -E "< HTTP|< Location"
+# < HTTP/1.1 301 Moved Permanently
+# < Location: http://www.google.com/
+
+# Follow redirects automatically:
+curl -L http://google.com    # -L follows redirects
+```
+
+### 4xx — Client Error
+
+Something is wrong with the **client's** request.
+
+```bash
+400 Bad Request          — Malformed request (syntax error, invalid JSON)
+401 Unauthorized         — Authentication required (not logged in)
+403 Forbidden            — Authenticated but not authorized (no permission)
+404 Not Found            — Resource doesn't exist
+405 Method Not Allowed   — Method not supported (e.g., DELETE on a read-only endpoint)
+408 Request Timeout      — Client took too long to send the request
+409 Conflict             — Request conflicts with current state
+413 Payload Too Large    — Request body exceeds server limit
+429 Too Many Requests    — Rate limited (slow down!)
+
+# 401 vs 403: A critical distinction
+# 401: "Who are you? Please authenticate."
+# 403: "I know who you are. You're not allowed."
+
+# Example: Getting a 404
+curl -s -o /dev/null -w "%{http_code}" https://example.com/nonexistent
+# 404
+```
+
+### 5xx — Server Error
+
+Something went wrong on the **server** side.
+
+```bash
+500 Internal Server Error — Generic server error (check server logs!)
+502 Bad Gateway           — Proxy/LB got bad response from upstream
+503 Service Unavailable   — Server is overloaded or in maintenance
+504 Gateway Timeout       — Proxy/LB didn't get a response from upstream in time
+
+# 502 vs 504: Both involve a proxy/gateway
+# 502: Proxy connected to upstream but got an invalid response
+# 504: Proxy couldn't connect to upstream at all (timeout)
+
+# These are the status codes you'll see most in production:
+# 502 — upstream crashed, wrong port, or returned garbage
+# 503 — server overloaded, deployment in progress
+# 504 — upstream is too slow or unreachable
+```
+
+<Callout type="warning" title="Status Codes in Troubleshooting">
+The status code tells you exactly which layer has the problem:
+
+- **4xx** = The client did something wrong. Fix the request.
+- **500** = The server crashed. Check application logs.
+- **502** = The proxy received a bad response from upstream. Check if the upstream service is running and on the correct port.
+- **503** = The server is overloaded or down. Check resource usage and deployment status.
+- **504** = The proxy timed out waiting for upstream. Check if upstream is slow or network connectivity is broken.
+
+Never guess — the status code tells you where to start investigating.
+</Callout>
+
+### Quick Reference: Most Common Status Codes
+
+| Code | Name | Meaning | You Should |
+|---|---|---|---|
+| 200 | OK | Success | Nothing, it works |
+| 201 | Created | Resource created | Check Location header for new URL |
+| 301 | Moved Permanently | URL changed forever | Update references |
+| 302 | Found | Temporary redirect | Follow the redirect |
+| 400 | Bad Request | Invalid request | Fix request syntax/data |
+| 401 | Unauthorized | Not authenticated | Add/fix auth token |
+| 403 | Forbidden | Not authorized | Check permissions |
+| 404 | Not Found | Resource missing | Check URL path |
+| 429 | Too Many Requests | Rate limited | Implement backoff |
+| 500 | Internal Server Error | Server bug | Check server logs |
+| 502 | Bad Gateway | Upstream error | Check upstream service |
+| 503 | Service Unavailable | Server overloaded | Check capacity/deployment |
+| 504 | Gateway Timeout | Upstream timeout | Check upstream + network |
+
+## Important HTTP Headers
+
+### Content-Type
+
+Specifies the format of the request or response body:
+
+```bash
+# Common Content-Type values:
+# application/json            — JSON data (APIs)
+# text/html                   — HTML pages
+# text/plain                  — Plain text
+# application/x-www-form-urlencoded — Form data (default HTML forms)
+# multipart/form-data         — File uploads
+# application/xml             — XML data
+
+# Setting Content-Type in requests:
+curl -X POST https://api.example.com/data \
+  -H "Content-Type: application/json" \
+  -d '{"key": "value"}'
+```
+
+### Authorization
+
+Carries authentication credentials:
+
+```bash
+# Bearer token (most common for APIs):
+curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  https://api.example.com/me
+
+# Basic auth (base64 encoded username:password):
+curl -u username:password https://api.example.com/me
+# This sends: Authorization: Basic dXNlcm5hbWU6cGFzc3dvcmQ=
+
+# API key (varies by service):
+curl -H "X-API-Key: your-api-key-here" https://api.example.com/data
+```
+
+### Cache-Control
+
+Controls how responses are cached:
+
+```bash
+# Response headers:
+Cache-Control: max-age=3600           # Cache for 1 hour
+Cache-Control: no-cache               # Always revalidate with server
+Cache-Control: no-store               # Never cache (sensitive data)
+Cache-Control: public, max-age=86400  # Anyone can cache for 24h
+Cache-Control: private, max-age=600   # Only browser can cache for 10min
+
+# Request headers:
+Cache-Control: no-cache      # "I want a fresh response"
+
+# Check cache headers:
+curl -I https://example.com | grep -i cache
+```
+
+### Other Important Headers
+
+```bash
+# Accept — what format the client wants:
+Accept: application/json
+Accept: text/html, application/xhtml+xml
+
+# Host — required in HTTP/1.1, used for virtual hosts:
+Host: api.example.com
+
+# User-Agent — identifies the client:
+User-Agent: Mozilla/5.0 (X11; Linux x86_64)
+User-Agent: curl/7.81.0
+
+# X-Forwarded-For — real client IP behind a proxy:
+X-Forwarded-For: 203.0.113.50
+
+# X-Request-ID — trace a request across microservices:
+X-Request-ID: abc-123-def-456
+```
+
+## Cookies and Sessions
+
+HTTP is stateless, but web applications need to track users. **Cookies** solve this.
+
+```bash
+# Server sets a cookie:
+# HTTP/1.1 200 OK
+# Set-Cookie: session=abc123; Path=/; HttpOnly; Secure; SameSite=Lax
+
+# Browser includes it in subsequent requests:
+# GET /dashboard HTTP/1.1
+# Cookie: session=abc123
+
+# Cookie attributes:
+# HttpOnly  — JavaScript can't access (prevents XSS theft)
+# Secure    — Only sent over HTTPS
+# SameSite  — Controls cross-site sending (CSRF protection)
+# Path=/    — Cookie sent for all paths
+# Max-Age=3600  — Expires in 1 hour
+# Domain=.example.com — Available to all subdomains
+
+# Inspect cookies with curl:
+curl -v https://example.com 2>&1 | grep -i "set-cookie"
+
+# Send a cookie with curl:
+curl -b "session=abc123" https://example.com/dashboard
+
+# Save and reuse cookies:
+curl -c cookies.txt https://example.com/login -d "user=alice&pass=secret"
+curl -b cookies.txt https://example.com/dashboard
+```
+
+<Callout type="info" title="Cookies vs Tokens">
+Modern APIs often use **JWT tokens** in the Authorization header instead of cookies. Cookies are better for browser-based sessions (automatic handling, HttpOnly security). Tokens are better for API authentication (no CSRF issues, works cross-domain). In practice, many applications use both — cookies for web users, tokens for API consumers.
+</Callout>
+
+## HTTPS and TLS
+
+**HTTPS** is HTTP over TLS (Transport Layer Security). It encrypts the entire HTTP conversation, preventing eavesdropping, tampering, and impersonation.
+
+### Why HTTPS Matters
+
+```
+HTTP (unencrypted):
+Client ──── "GET /api/users" ──────────► Server
+       ◄─── "{ password: 'secret' }" ──
+
+        ^^ Anyone on the network can read this! ^^
+
+HTTPS (encrypted):
+Client ──── [encrypted gibberish] ─────► Server
+       ◄─── [encrypted gibberish] ──────
+
+        ^^ Only client and server can read this ^^
+```
+
+Without HTTPS:
+- Passwords, tokens, and sensitive data are visible on the network
+- Attackers can modify responses (inject ads, malware)
+- Users have no way to verify they are talking to the real server
+
+### The TLS Handshake (Simplified)
+
+Before any HTTP data is exchanged, client and server perform a TLS handshake:
+
+```
+Client                                Server
+  │                                     │
+  ├── ClientHello ──────────────────►   │
+  │   "I support TLS 1.3,              │
+  │    these cipher suites..."          │
+  │                                     │
+  │   ◄── ServerHello ─────────────    │
+  │       "Let's use TLS 1.3,          │
+  │        AES-256-GCM.                │
+  │        Here's my certificate."     │
+  │                                     │
+  │   Client verifies certificate:      │
+  │   - Is it signed by a trusted CA?   │
+  │   - Is it for this domain?          │
+  │   - Has it expired?                 │
+  │                                     │
+  ├── Key Exchange ─────────────────►   │
+  │   (Diffie-Hellman: generate         │
+  │    shared secret without            │
+  │    sending it over the wire)        │
+  │                                     │
+  │   ◄── Finished ────────────────    │
+  │                                     │
+  │   Encrypted channel established!    │
+  │                                     │
+  ├── GET / HTTP/1.1 (encrypted) ──►   │
+  │   ◄── HTTP/1.1 200 OK (encrypted)  │
+```
+
+```bash
+# See the TLS handshake in action:
+curl -v https://example.com 2>&1 | grep -E "^\*"
+
+# Output includes:
+# * TLSv1.3 (OUT), TLS handshake, Client hello (1):
+# * TLSv1.3 (IN), TLS handshake, Server hello (2):
+# * TLSv1.3 (IN), TLS handshake, Certificate (11):
+# * TLSv1.3 (IN), TLS handshake, Finished (20):
+# * SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+
+# Inspect the certificate:
+openssl s_client -connect example.com:443 -brief
+# CONNECTION ESTABLISHED
+# Protocol version: TLSv1.3
+# Ciphersuite: TLS_AES_256_GCM_SHA384
+# Peer certificate: CN = www.example.org
+# ...
+
+# Get detailed certificate info:
+echo | openssl s_client -connect example.com:443 2>/dev/null | \
+  openssl x509 -noout -text | head -30
+```
+
+## Certificates
+
+TLS certificates are the identity cards of the internet. They prove that a server is who it claims to be.
+
+### Certificate Chain
+
+```
+Root CA (pre-installed in your browser/OS)
+  │
+  ├── Intermediate CA (signed by Root)
+  │     │
+  │     ├── Your Certificate (signed by Intermediate)
+  │           CN: www.example.com
+  │           Valid: Jan 2024 – Jan 2025
+```
+
+```bash
+# View the certificate chain:
+openssl s_client -connect google.com:443 -showcerts 2>/dev/null | \
+  grep "s:" | head -5
+
+# Check certificate expiration:
+echo | openssl s_client -connect example.com:443 2>/dev/null | \
+  openssl x509 -noout -dates
+# notBefore=Jan  1 00:00:00 2024 GMT
+# notAfter=Apr  1 00:00:00 2025 GMT
+
+# Check days until expiration:
+echo | openssl s_client -connect example.com:443 2>/dev/null | \
+  openssl x509 -noout -enddate
+```
+
+### Let's Encrypt
+
+**Let's Encrypt** provides free TLS certificates. It is used by a majority of HTTPS sites.
+
+```bash
+# Install certbot (Let's Encrypt client):
+# Ubuntu/Debian:
+sudo apt install certbot python3-certbot-nginx
+
+# Get a certificate:
+sudo certbot --nginx -d example.com -d www.example.com
+
+# Auto-renewal (certbot sets this up automatically):
+sudo certbot renew --dry-run
+
+# Let's Encrypt certificates expire after 90 days
+# Certbot auto-renews them every 60 days
+```
+
+<Callout type="warning" title="Certificate Expiration">
+Expired certificates cause HTTPS errors and browser warnings. In production, certificate expiration is a common cause of outages. Always monitor certificate expiration dates. Automate renewal with Let's Encrypt and certbot, or use managed certificates from your cloud provider (AWS ACM, GCP Managed Certificates). Set up alerts for certificates expiring within 30 days.
+</Callout>
+
+## curl for HTTP Debugging
+
+`curl` is the most important tool for debugging HTTP. Master these flags:
+
+```bash
+# Basic GET request:
+curl https://example.com
+
+# Verbose output (shows everything):
+curl -v https://example.com
+
+# Show only response headers:
+curl -I https://example.com
+
+# Follow redirects:
+curl -L http://google.com
+
+# POST with JSON data:
+curl -X POST https://api.example.com/data \
+  -H "Content-Type: application/json" \
+  -d '{"key": "value"}'
+
+# POST with form data:
+curl -X POST https://example.com/login \
+  -d "username=alice&password=secret"
+
+# Upload a file:
+curl -X POST https://example.com/upload \
+  -F "file=@/path/to/file.txt"
+
+# Custom headers:
+curl -H "Authorization: Bearer token123" \
+  -H "Accept: application/json" \
+  https://api.example.com/me
+
+# Save response to a file:
+curl -o output.html https://example.com
+
+# Show timing information:
+curl -o /dev/null -s -w "\
+  DNS:       %{time_namelookup}s\n\
+  Connect:   %{time_connect}s\n\
+  TLS:       %{time_appconnect}s\n\
+  FirstByte: %{time_starttransfer}s\n\
+  Total:     %{time_total}s\n\
+  Status:    %{http_code}\n\
+  Size:      %{size_download} bytes\n" \
+  https://example.com
+
+# Ignore SSL certificate errors (for testing only!):
+curl -k https://self-signed.example.com
+
+# Send request with specific HTTP version:
+curl --http1.1 https://example.com
+curl --http2 https://example.com
+```
+
+<Callout type="tip" title="curl -w for Performance Testing">
+The `-w` (write-out) flag is extremely useful for measuring performance. `time_namelookup` shows DNS speed, `time_connect` shows TCP handshake time, `time_appconnect` shows TLS negotiation time, and `time_starttransfer` shows time to first byte (TTFB). If TTFB is high but connect time is low, the problem is on the server. If connect time is high, the problem is network latency.
+</Callout>
+
+## HTTP/2 and HTTP/3
+
+### HTTP/2
+
+HTTP/1.1 sends requests one at a time per connection. **HTTP/2** introduces major improvements:
+
+- **Multiplexing** — Multiple requests and responses over a single connection simultaneously
+- **Binary protocol** — More efficient than text-based HTTP/1.1
+- **Header compression** — HPACK compression reduces redundant header data
+- **Server push** — Server can proactively send resources before the client requests them
+
+```bash
+# Check if a server supports HTTP/2:
+curl -I --http2 https://example.com 2>&1 | grep HTTP
+# HTTP/2 200
+
+# Most modern web servers (Nginx, Apache, Caddy) support HTTP/2
+# It requires HTTPS (TLS) in practice
+```
+
+### HTTP/3
+
+**HTTP/3** replaces TCP with **QUIC** (a UDP-based protocol):
+
+- **Faster connections** — 0-RTT connection establishment
+- **No head-of-line blocking** — Lost packets only affect their stream, not all streams
+- **Better for mobile** — Handles network switches (Wi-Fi to cellular) gracefully
+- **Built-in encryption** — TLS 1.3 is integrated into QUIC
+
+```bash
+# Check if a server supports HTTP/3:
+curl --http3 https://cloudflare.com 2>&1 | head -5
+# (Requires curl built with HTTP/3 support)
+
+# HTTP/3 is still being adopted. Major sites like Google,
+# Facebook, and Cloudflare support it.
+```
+
+| Feature | HTTP/1.1 | HTTP/2 | HTTP/3 |
+|---|---|---|---|
+| Transport | TCP | TCP | QUIC (UDP) |
+| Multiplexing | No | Yes | Yes |
+| Header Compression | No | HPACK | QPACK |
+| Encryption | Optional | Practically required | Always |
+| Head-of-line blocking | Yes | Yes (TCP level) | No |
+
+## REST API Basics
+
+Most web APIs follow **REST** (Representational State Transfer) conventions:
+
+```bash
+# REST maps HTTP methods to CRUD operations:
+# CREATE → POST   /api/users          (create a new user)
+# READ   → GET    /api/users          (list all users)
+# READ   → GET    /api/users/42       (get user 42)
+# UPDATE → PUT    /api/users/42       (replace user 42)
+# UPDATE → PATCH  /api/users/42       (partially update user 42)
+# DELETE → DELETE /api/users/42       (delete user 42)
+
+# Example: Full CRUD workflow with curl
+# Create
+curl -s -X POST https://jsonplaceholder.typicode.com/posts \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Hello", "body": "World", "userId": 1}'
+
+# Read
+curl -s https://jsonplaceholder.typicode.com/posts/1 | python3 -m json.tool
+
+# Update
+curl -s -X PUT https://jsonplaceholder.typicode.com/posts/1 \
+  -H "Content-Type: application/json" \
+  -d '{"id": 1, "title": "Updated", "body": "New content", "userId": 1}'
+
+# Delete
+curl -s -X DELETE https://jsonplaceholder.typicode.com/posts/1
+```
+
+<Exercise number={1} title="HTTP Exploration">
+
+Use curl to explore HTTP in detail. Perform each of the following tasks and observe the results.
+
+```bash
+# 1. Make a GET request and examine the response headers:
+curl -I https://www.google.com
+
+# 2. Make a verbose request to see the full conversation:
+curl -v https://httpbin.org/get 2>&1
+
+# 3. Make a POST request with JSON data:
+curl -X POST https://httpbin.org/post \
+  -H "Content-Type: application/json" \
+  -d '{"name": "test", "value": 42}'
+
+# 4. Follow a redirect chain:
+curl -v -L http://github.com 2>&1 | grep -E "< HTTP|< Location"
+
+# 5. Measure request timing:
+curl -o /dev/null -s -w "DNS: %{time_namelookup}s\nConnect: %{time_connect}s\nTLS: %{time_appconnect}s\nTotal: %{time_total}s\nStatus: %{http_code}\n" https://www.google.com
+
+# 6. Test different status codes:
+curl -s -o /dev/null -w "%{http_code}" https://httpbin.org/status/200
+curl -s -o /dev/null -w "%{http_code}" https://httpbin.org/status/404
+curl -s -o /dev/null -w "%{http_code}" https://httpbin.org/status/500
+```
+
+Answer these questions:
+1. What status code did google.com return? What headers did it include?
+2. How many redirects does http://github.com go through?
+3. What is the TLS handshake time for google.com?
+4. What does httpbin.org return when you POST JSON to it?
+
+<CollapsibleSolution>
+
+```bash
+# 1. Google response headers
+$ curl -I https://www.google.com
+HTTP/2 200
+content-type: text/html; charset=ISO-8859-1
+date: Mon, 01 Jan 2024 12:00:00 GMT
+cache-control: private, max-age=0
+# Key observations:
+# - HTTP/2 (Google supports HTTP/2)
+# - cache-control: private (don't cache in shared caches)
+
+# 2. GitHub redirect chain
+$ curl -v -L http://github.com 2>&1 | grep -E "< HTTP|< Location"
+< HTTP/1.1 301 Moved Permanently
+< Location: https://github.com/
+< HTTP/2 200
+# Two steps: http://github.com → https://github.com/ → 200 OK
+# First redirect upgrades HTTP to HTTPS
+
+# 3. Timing breakdown
+$ curl -o /dev/null -s -w "DNS: %{time_namelookup}s\nConnect: %{time_connect}s\nTLS: %{time_appconnect}s\nTTFB: %{time_starttransfer}s\nTotal: %{time_total}s\n" https://www.google.com
+DNS: 0.004s
+Connect: 0.010s
+TLS: 0.025s
+TTFB: 0.045s
+Total: 0.048s
+# TLS adds about 15ms on top of TCP connect
+# Values will vary based on your network and location
+
+# 4. httpbin.org mirrors your request back to you:
+$ curl -s -X POST https://httpbin.org/post \
+  -H "Content-Type: application/json" \
+  -d '{"name": "test", "value": 42}' | python3 -m json.tool
+{
+    "args": {},
+    "data": "{\"name\": \"test\", \"value\": 42}",
+    "headers": {
+        "Content-Type": "application/json",
+        "Host": "httpbin.org",
+        ...
+    },
+    "json": {
+        "name": "test",
+        "value": 42
+    },
+    "url": "https://httpbin.org/post"
+}
+# httpbin.org is an invaluable tool for testing HTTP requests.
+# It echoes back everything you sent.
+```
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise number={2} title="API Debugging">
+
+You are debugging HTTP issues using curl. For each scenario, use `curl -v` or other flags to diagnose the problem.
+
+**Scenario 1:** An API endpoint returns an error. Debug it.
+
+```bash
+# Try to access an endpoint that requires authentication:
+curl -v https://api.github.com/user 2>&1
+
+# What status code do you get? What does the response body say?
+# How would you fix it?
+```
+
+**Scenario 2:** A website loads slowly. Identify the bottleneck.
+
+```bash
+# Measure where time is spent:
+curl -o /dev/null -s -w "\
+DNS Lookup:   %{time_namelookup}s\n\
+TCP Connect:  %{time_connect}s\n\
+TLS Setup:    %{time_appconnect}s\n\
+First Byte:   %{time_starttransfer}s\n\
+Total:        %{time_total}s\n\
+Download:     %{size_download} bytes\n" \
+https://www.example.com
+
+# Run it 3 times. Is the bottleneck DNS, TCP, TLS, or server processing?
+```
+
+**Scenario 3:** Debug a certificate issue.
+
+```bash
+# Check the certificate details of a website:
+echo | openssl s_client -connect expired.badssl.com:443 2>/dev/null | \
+  openssl x509 -noout -subject -dates
+
+# What's wrong with the certificate?
+# Try: curl -v https://expired.badssl.com/ 2>&1
+```
+
+<CollapsibleSolution>
+
+```bash
+# ====================================
+# Scenario 1: API Authentication
+# ====================================
+$ curl -v https://api.github.com/user 2>&1
+
+# Key lines from output:
+# < HTTP/2 401
+# < x-github-media-type: github.v3
+# {"message":"Requires authentication", ...}
+
+# Status: 401 Unauthorized
+# Fix: Add authentication
+curl -H "Authorization: Bearer ghp_yourTokenHere" \
+  https://api.github.com/user
+# Or use basic auth:
+curl -u username:token https://api.github.com/user
+
+# ====================================
+# Scenario 2: Performance Bottleneck
+# ====================================
+$ curl -o /dev/null -s -w "\
+DNS Lookup:   %{time_namelookup}s\n\
+TCP Connect:  %{time_connect}s\n\
+TLS Setup:    %{time_appconnect}s\n\
+First Byte:   %{time_starttransfer}s\n\
+Total:        %{time_total}s\n" \
+https://www.example.com
+
+# Example output:
+# DNS Lookup:   0.003s      ← Fast DNS
+# TCP Connect:  0.050s      ← 50ms network latency
+# TLS Setup:    0.120s      ← TLS adds 70ms
+# First Byte:   0.250s      ← Server processing: 130ms
+# Total:        0.260s
+
+# Analysis:
+# If DNS is high (>100ms): Check resolver, use 8.8.8.8 or 1.1.1.1
+# If Connect is high: Network latency, server far away or overloaded
+# If TLS is high: TLS configuration issue, consider session resumption
+# If First Byte is high but Connect is low: Server is slow (application issue)
+# If Total is high but First Byte is low: Large response, slow download
+
+# ====================================
+# Scenario 3: Certificate Issue
+# ====================================
+$ echo | openssl s_client -connect expired.badssl.com:443 2>/dev/null | \
+  openssl x509 -noout -subject -dates
+subject=CN = *.badssl.com
+notBefore=Apr  9 00:00:00 2015 GMT
+notAfter=Apr 12 23:59:59 2015 GMT
+#         ^^^^^^^^^^^^^^^^^^^^
+#         EXPIRED in April 2015!
+
+$ curl -v https://expired.badssl.com/ 2>&1 | grep -E "expire|SSL|error"
+# curl: (60) SSL certificate problem: certificate has expired
+# SSL certificate verify result: certificate has expired
+
+# The certificate expired years ago. curl refuses to connect.
+# curl -k would bypass this check (NEVER do this in production).
+```
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="API Health Monitor">
+
+Build a script that monitors multiple API endpoints, checks status codes and response times, and alerts on failures.
+
+```bash
+#!/bin/bash
+# api-health-monitor.sh — Monitor API endpoints for health and performance
+# Usage: ./api-health-monitor.sh [config-file]
+
+# Default endpoints if no config file provided
+DEFAULT_ENDPOINTS=(
+    "https://httpbin.org/status/200|GET|200|httpbin OK endpoint"
+    "https://httpbin.org/delay/1|GET|200|httpbin 1s delay endpoint"
+    "https://jsonplaceholder.typicode.com/posts/1|GET|200|JSONPlaceholder API"
+    "https://api.github.com|GET|200|GitHub API"
+    "https://httpbin.org/status/500|GET|500|httpbin 500 (expected fail)"
+)
+
+CONFIG_FILE="${1}"
+TIMEOUT=10
+SLOW_THRESHOLD=2  # seconds — anything slower is flagged
+
+# Colors for terminal output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Counters
+TOTAL=0
+PASSED=0
+FAILED=0
+SLOW=0
+
+# Load endpoints from config file or use defaults
+if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+    mapfile -t ENDPOINTS < "$CONFIG_FILE"
+else
+    ENDPOINTS=("${DEFAULT_ENDPOINTS[@]}")
+fi
+
+echo "=============================================="
+echo "  API Health Monitor"
+echo "  Date: $(date)"
+echo "  Endpoints: ${#ENDPOINTS[@]}"
+echo "  Timeout: ${TIMEOUT}s"
+echo "  Slow threshold: ${SLOW_THRESHOLD}s"
+echo "=============================================="
+echo ""
+
+# Header
+printf "%-40s %-6s %-8s %-10s %-8s\n" "ENDPOINT" "METHOD" "STATUS" "TIME" "RESULT"
+printf "%-40s %-6s %-8s %-10s %-8s\n" "$(printf '%0.s-' {1..40})" "------" "--------" "----------" "--------"
+
+# Check each endpoint
+for entry in "${ENDPOINTS[@]}"; do
+    # Skip empty lines and comments
+    [[ -z "$entry" || "$entry" == \#* ]] && continue
+
+    # Parse: URL|METHOD|EXPECTED_STATUS|DESCRIPTION
+    IFS='|' read -r URL METHOD EXPECTED_STATUS DESCRIPTION <<< "$entry"
+
+    METHOD="${METHOD:-GET}"
+    EXPECTED_STATUS="${EXPECTED_STATUS:-200}"
+    DESCRIPTION="${DESCRIPTION:-$URL}"
+
+    ((TOTAL++))
+
+    # Make the request
+    RESPONSE=$(curl -s -o /dev/null -w "%{http_code}|%{time_total}|%{time_namelookup}|%{time_connect}|%{time_appconnect}|%{time_starttransfer}|%{size_download}" \
+        -X "$METHOD" \
+        --max-time "$TIMEOUT" \
+        "$URL" 2>/dev/null)
+
+    # Parse response
+    IFS='|' read -r STATUS TOTAL_TIME DNS_TIME CONNECT_TIME TLS_TIME TTFB_TIME SIZE <<< "$RESPONSE"
+
+    # Handle timeout (curl returns 000)
+    if [ "$STATUS" = "000" ]; then
+        STATUS="TIMEOUT"
+    fi
+
+    # Determine result
+    RESULT=""
+    if [ "$STATUS" = "$EXPECTED_STATUS" ]; then
+        # Check if slow
+        SLOW_CHECK=$(echo "$TOTAL_TIME > $SLOW_THRESHOLD" | bc -l 2>/dev/null || echo "0")
+        if [ "$SLOW_CHECK" = "1" ]; then
+            RESULT="${YELLOW}SLOW${NC}"
+            ((SLOW++))
+            ((PASSED++))
+        else
+            RESULT="${GREEN}OK${NC}"
+            ((PASSED++))
+        fi
+    else
+        RESULT="${RED}FAIL${NC}"
+        ((FAILED++))
+    fi
+
+    # Display result
+    DISPLAY_URL=$(echo "$DESCRIPTION" | cut -c1-38)
+    printf "%-40s %-6s %-8s %-10s " "$DISPLAY_URL" "$METHOD" "$STATUS" "${TOTAL_TIME}s"
+    echo -e "$RESULT"
+
+    # Show details for failures and slow responses
+    if [ "$STATUS" != "$EXPECTED_STATUS" ] || [ "${SLOW_CHECK:-0}" = "1" ]; then
+        echo "  Details:"
+        echo "    URL:          $URL"
+        echo "    Expected:     $EXPECTED_STATUS"
+        echo "    Got:          $STATUS"
+        echo "    DNS:          ${DNS_TIME}s"
+        echo "    TCP Connect:  ${CONNECT_TIME}s"
+        echo "    TLS:          ${TLS_TIME}s"
+        echo "    First Byte:   ${TTFB_TIME}s"
+        echo "    Total:        ${TOTAL_TIME}s"
+        echo "    Size:         ${SIZE} bytes"
+        echo ""
+    fi
+done
+
+# Summary
+echo ""
+echo "=============================================="
+echo "  Summary"
+echo "=============================================="
+echo -e "  Total:   $TOTAL"
+echo -e "  ${GREEN}Passed:  $PASSED${NC}"
+echo -e "  ${RED}Failed:  $FAILED${NC}"
+echo -e "  ${YELLOW}Slow:    $SLOW${NC}"
+echo ""
+
+# Exit code based on results
+if [ "$FAILED" -gt 0 ]; then
+    echo -e "  Overall: ${RED}UNHEALTHY${NC} — $FAILED endpoint(s) failed"
+    echo "=============================================="
+    exit 1
+elif [ "$SLOW" -gt 0 ]; then
+    echo -e "  Overall: ${YELLOW}DEGRADED${NC} — $SLOW endpoint(s) slow"
+    echo "=============================================="
+    exit 0
+else
+    echo -e "  Overall: ${GREEN}HEALTHY${NC} — All endpoints OK"
+    echo "=============================================="
+    exit 0
+fi
+```
+
+Create a configuration file for your endpoints:
+
+```bash
+# endpoints.conf — One endpoint per line
+# Format: URL|METHOD|EXPECTED_STATUS|DESCRIPTION
+https://www.google.com|GET|200|Google Homepage
+https://api.github.com|GET|200|GitHub API
+https://jsonplaceholder.typicode.com/posts/1|GET|200|JSONPlaceholder
+https://httpbin.org/status/200|GET|200|HTTPBin OK
+https://httpbin.org/delay/3|GET|200|HTTPBin Slow (3s delay)
+```
+
+Save and run:
+
+```bash
+chmod +x api-health-monitor.sh
+
+# Run with default endpoints:
+./api-health-monitor.sh
+
+# Run with custom config:
+./api-health-monitor.sh endpoints.conf
+
+# Run periodically with watch:
+watch -n 30 ./api-health-monitor.sh endpoints.conf
+
+# Integrate with cron for scheduled monitoring:
+# */5 * * * * /path/to/api-health-monitor.sh /path/to/endpoints.conf >> /var/log/api-health.log 2>&1
+```
+
+This script demonstrates practical HTTP knowledge: making requests with different methods, interpreting status codes, measuring performance at each phase of the connection, and building automated monitoring — tasks you will perform daily as a DevOps engineer.
+
+</MiniProject>
+
+## Key Takeaways
+
+- HTTP is the stateless, text-based protocol that powers the web — every request has a method, path, headers, and optional body; every response has a status code, headers, and optional body
+- HTTP methods map to actions: GET (read), POST (create), PUT (replace), PATCH (update), DELETE (remove) — understanding idempotency prevents bugs in retry logic
+- Status codes tell you exactly where to troubleshoot: 4xx means the client is wrong, 500 means the server crashed, 502 means the proxy cannot reach upstream, 504 means upstream is too slow
+- HTTPS encrypts HTTP with TLS — the TLS handshake verifies the server's identity using certificates and establishes an encrypted channel before any HTTP data is exchanged
+- `curl` is the essential HTTP debugging tool — use `-v` for verbose output, `-I` for headers only, `-w` for timing metrics, and `-o /dev/null` to suppress the body when you only care about metadata
+
+<Quiz>
+<QuizQuestion
+  question="What does a 502 Bad Gateway status code indicate?"
+  options={[
+    "The client sent an invalid request",
+    "The server crashed while processing the request",
+    "A proxy or load balancer received an invalid response from the upstream server",
+    "The server is intentionally down for maintenance"
+  ]}
+  answer={2}
+  explanation="502 Bad Gateway means a proxy, gateway, or load balancer received an invalid response from the upstream (backend) server. This often happens when the upstream service crashed, is listening on the wrong port, or returned malformed data. 500 is a generic server error, 503 is maintenance/overload, and 400 is a client error."
+/>
+<QuizQuestion
+  question="What is the difference between PUT and PATCH?"
+  options={[
+    "PUT creates a resource, PATCH deletes it",
+    "PUT replaces the entire resource, PATCH updates specific fields",
+    "PUT is idempotent, PATCH is not. Otherwise they are identical",
+    "There is no practical difference"
+  ]}
+  answer={1}
+  explanation="PUT replaces the entire resource with the new representation. If you PUT a user with only a 'name' field, the email and role fields would be removed. PATCH updates only the specified fields, leaving everything else unchanged. PUT is idempotent (same result each time), while PATCH may or may not be."
+/>
+<QuizQuestion
+  question="Which curl flag shows the TLS handshake, request headers, and response headers?"
+  options={[
+    "curl -I (head)",
+    "curl -L (follow redirects)",
+    "curl -v (verbose)",
+    "curl -s (silent)"
+  ]}
+  answer={2}
+  explanation="curl -v (verbose) shows the complete request lifecycle: DNS resolution, TCP connection, TLS handshake details, request headers sent (lines starting with >), and response headers received (lines starting with <). -I shows only response headers, -L follows redirects, and -s suppresses progress output."
+/>
+<QuizQuestion
+  question="Why is it safe to retry a failed PUT request but not always safe to retry a failed POST?"
+  options={[
+    "PUT is encrypted, POST is not",
+    "PUT is idempotent — calling it multiple times produces the same result. POST is not — it may create duplicates",
+    "PUT is faster than POST",
+    "POST requires authentication, PUT does not"
+  ]}
+  answer={1}
+  explanation="PUT is idempotent: sending the same PUT request twice results in the same final state (the resource is replaced with the same data). POST is not idempotent: sending the same POST twice typically creates two resources. This is why retry logic and message queues must handle POST requests carefully to avoid duplicate processing."
+/>
+</Quiz>
+
+## What's Next?
+
+In the next lesson, **TCP vs UDP**, you will dive deeper into the Transport layer protocols that carry HTTP and every other application protocol. You now understand how HTTP works on top of TCP — next you will understand why some applications choose UDP instead, how TCP provides reliability through acknowledgments and retransmission, and how to troubleshoot transport-layer issues with tools like `ss`, `netstat`, and `tcpdump`.

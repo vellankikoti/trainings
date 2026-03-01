@@ -1,0 +1,131 @@
+name: shell-scripting
+title: "Shell Scripting Fundamentals Lab"
+description: "Practice shell scripting from basics to advanced patterns including argument parsing, text processing, error handling, and building CLI tools."
+module: "shell-scripting"
+difficulty: beginner-to-intermediate
+duration: 60
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: sh-ex-1
+    title: "Create a safe script template"
+    description: "Create a script called 'script.sh' with a proper shebang line (#!/usr/bin/env bash) and 'set -euo pipefail' on the second line. Add an echo statement that prints 'Hello, DevOps!' and make the script executable. Run it to verify it works."
+    hints:
+      - "Start the file with #!/usr/bin/env bash on the first line"
+      - "Add set -euo pipefail on the second line to enable strict mode"
+      - "Use chmod +x script.sh to make it executable"
+    validation:
+      type: command
+      command: "bash -n /workspace/script.sh && head -2 /workspace/script.sh | grep -q 'set -euo pipefail' && echo 'valid'"
+      expected_output: "valid"
+
+  - id: sh-ex-2
+    title: "Parse command-line arguments with getopts"
+    description: "Write a script called 'greet.sh' that uses getopts to accept a -n flag for a name and a -v flag for verbose mode. When run with -n 'Alice', it should print 'Hello, Alice!'. In verbose mode (-v), it should also print the current date before the greeting."
+    hints:
+      - "Use 'while getopts \"n:v\" opt; do' to parse options"
+      - "The colon after 'n' means it requires an argument; 'v' has no colon so it is a flag"
+      - "Store the name in a variable and check the verbose flag to decide whether to print the date"
+    validation:
+      type: command
+      command: "chmod +x /workspace/greet.sh && /workspace/greet.sh -n 'Alice' | grep -q 'Alice' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: sh-ex-3
+    title: "Loop to create numbered files"
+    description: "Write a for loop (in a script or directly) in /workspace that creates 5 files named file1.txt through file5.txt. Each file should contain the text 'File N' where N is the file number (e.g., file3.txt contains 'File 3')."
+    hints:
+      - "Use a for loop: for i in {1..5}; do ... done"
+      - "Inside the loop use: echo \"File $i\" > \"file${i}.txt\""
+      - "Run 'ls file*.txt' to verify all five files exist"
+    validation:
+      type: command
+      command: "ls /workspace/file{1..5}.txt >/dev/null 2>&1 && grep -q 'File 3' /workspace/file3.txt && echo 'pass'"
+      expected_output: "pass"
+
+  - id: sh-ex-4
+    title: "Write a reusable function"
+    description: "Create a file called 'functions.sh' that defines a function called 'count_files'. The function should take a directory path as its first argument and print the number of files (not directories) in that path. Source the file and test it with: source functions.sh && count_files /etc"
+    hints:
+      - "Define the function with: count_files() { ... }"
+      - "Use 'find \"$1\" -maxdepth 1 -type f | wc -l' inside the function to count regular files"
+      - "Make sure the function prints only the number, trimming any whitespace"
+    validation:
+      type: command
+      command: "source /workspace/functions.sh && count_files /etc | grep -qE '^[0-9]+$' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: sh-ex-5
+    title: "Process a CSV file with awk"
+    description: "First, create a CSV file called 'data.csv' in /workspace with this content:\nName,Age,Role\nAlice,30,Engineer\nBob,25,Designer\nCharlie,35,Manager\n\nThen write a script called 'process-csv.sh' that uses awk to extract and print only the Name and Role columns (comma-separated). The output should include the header line."
+    hints:
+      - "Use awk with -F',' to set the field separator to comma"
+      - "Print columns 1 and 3: awk -F',' '{print $1\",\"$3}' data.csv"
+      - "Make sure the script is executable and runs from /workspace"
+    validation:
+      type: command
+      command: "chmod +x /workspace/process-csv.sh && cd /workspace && ./process-csv.sh | head -1 | grep -q 'Name' && ./process-csv.sh | grep -q 'Manager' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: sh-ex-6
+    title: "Error handling with trap"
+    description: "Write a script called 'cleanup.sh' that creates a temporary file using mktemp, writes some data to it, then uses 'trap' to ensure the temp file is removed on EXIT (whether the script succeeds or fails). The trap should also print 'Cleaning up...' before removing the file."
+    hints:
+      - "Create the temp file: TMPFILE=$(mktemp)"
+      - "Set the trap: trap 'echo Cleaning up...; rm -f \"$TMPFILE\"' EXIT"
+      - "Place the trap immediately after creating the temp file so it fires even if later commands fail"
+    validation:
+      type: command
+      command: "bash -n /workspace/cleanup.sh && grep -q 'trap' /workspace/cleanup.sh && grep -q 'EXIT' /workspace/cleanup.sh && echo 'pass'"
+      expected_output: "pass"
+
+  - id: sh-ex-7
+    title: "Transform a config file with sed"
+    description: "Create an input file called 'input.conf' with these lines:\n# Server Configuration\nhost=localhost\nport=3000\n# debug=true\ntimeout=30\n\nThen write a script called 'transform-config.sh' that uses sed to: (1) change port=3000 to port=8080, (2) remove all comment lines starting with #, and (3) write the result to 'output.conf'."
+    hints:
+      - "Chain sed commands: sed -e 's/port=3000/port=8080/' -e '/^#/d' input.conf > output.conf"
+      - "The '/^#/d' pattern deletes lines beginning with #"
+      - "Make sure output.conf ends up in /workspace"
+    validation:
+      type: command
+      command: "chmod +x /workspace/transform-config.sh && cd /workspace && ./transform-config.sh && grep -q 'port=8080' /workspace/output.conf && ! grep -q '^#' /workspace/output.conf && echo 'pass'"
+      expected_output: "pass"
+
+  - id: sh-ex-8
+    title: "Monitor a log file for errors"
+    description: "Write a script called 'monitor-log.sh' that takes a log file path as its first argument, searches it for lines containing 'ERROR', and prints the total count of matching lines. If the file does not exist, the script should print '0' and exit with code 0."
+    hints:
+      - "Accept the file path with: LOGFILE=\"${1:?Usage: monitor-log.sh <logfile>}\""
+      - "Use grep -c 'ERROR' to count matching lines"
+      - "Handle the missing-file case with: if [[ ! -f \"$LOGFILE\" ]]; then echo 0; exit 0; fi"
+    validation:
+      type: command
+      command: "chmod +x /workspace/monitor-log.sh && /workspace/monitor-log.sh /nonexistent 2>/dev/null; echo $?"
+      expected_output: "0"
+
+  - id: sh-ex-9
+    title: "Create a retry function with exponential backoff"
+    description: "Create a file called 'retry.sh' that defines a function called 'retry'. The function should accept a max-retries count as its first argument and a command as the remaining arguments. It should retry the command up to the specified number of times, doubling the sleep interval on each attempt (starting at 1 second). It should print which attempt is being tried and return 0 on success or 1 if all retries are exhausted."
+    hints:
+      - "Use a loop: local attempt=1; local delay=1; while (( attempt <= max_retries )); do ..."
+      - "Double the delay each iteration: delay=$(( delay * 2 ))"
+      - "Run the command with: \"${@:2}\" to expand all arguments after the first"
+    validation:
+      type: command
+      command: "source /workspace/retry.sh && type retry | grep -q 'function' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: sh-ex-10
+    title: "Build a multi-command CLI tool"
+    description: "Write a script called 'tool.sh' that implements a simple CLI with three subcommands:\n- 'init': creates a .tool-data directory and a status file containing 'initialized', then prints 'Project initialized.'\n- 'status': reads the status file and prints its contents\n- 'clean': removes the .tool-data directory and prints 'Cleaned up.'\nIf no subcommand or an unknown subcommand is given, print a usage message and exit with code 1."
+    hints:
+      - "Use a case statement: case \"${1:-}\" in init) ... ;; status) ... ;; clean) ... ;; *) ... ;; esac"
+      - "For init: mkdir -p .tool-data && echo 'initialized' > .tool-data/status"
+      - "For status: cat .tool-data/status"
+    validation:
+      type: command
+      command: "chmod +x /workspace/tool.sh && cd /workspace && rm -rf .tool-data && ./tool.sh init && ./tool.sh status | grep -q 'initialized' && echo 'pass'"
+      expected_output: "pass"

@@ -1,0 +1,1240 @@
+---
+title: "Forking and Open Source"
+description: "Contribute to open source like a pro. Master the fork-and-PR workflow, keep your fork synced, and understand the etiquette that gets your contributions merged."
+order: 14
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 13-pull-requests
+objectives:
+  - Understand the fork workflow
+  - Keep forks synced with upstream
+  - Create upstream-friendly pull requests
+  - Follow open source contribution etiquette
+tags:
+  - git
+  - forking
+  - open-source
+  - github
+---
+
+<Callout type="story" title="The Story">
+You find a bug in a popular open source tool your company uses. You could file an issue and wait... or you could fork the repo, fix it yourself, and submit a PR. Your fix gets reviewed by the maintainers, merged into the next release, and now thousands of developers benefit from your contribution. This is the power of open source — and the fork workflow makes it possible. But there is etiquette to follow, processes to respect, and technical steps to master. The developers whose PRs get merged are the ones who understand both the code and the culture.
+</Callout>
+
+## What Is a Fork?
+
+A fork is your own server-side copy of someone else's repository. Unlike cloning (which creates a local copy), forking creates a copy on GitHub under your account.
+
+```
+Original Repository                    Your Fork
+(github.com/original/project)          (github.com/you/project)
+┌──────────────────────┐               ┌──────────────────────┐
+│                      │    Fork        │                      │
+│  main                ├──────────►    │  main                │
+│  feature/x           │               │                      │
+│  docs/update         │               │  (your copy)         │
+│                      │               │                      │
+└──────────────────────┘               └──────────────────────┘
+                                              │
+                                              │ Clone
+                                              ▼
+                                       ┌──────────────────────┐
+                                       │  Your Local Machine  │
+                                       │                      │
+                                       │  origin → your fork  │
+                                       │  upstream → original │
+                                       └──────────────────────┘
+```
+
+### Fork vs Clone
+
+| Aspect | Fork | Clone |
+|--------|------|-------|
+| Where | Server-side (GitHub) | Local machine |
+| Creates | New repository under your account | Working copy on disk |
+| Push access | You own it (full access) | Depends on permissions |
+| Linked to original | Yes (GitHub tracks the relationship) | No special relationship |
+| Use case | Contributing to others' projects | Working on your own projects |
+
+## The Fork Workflow
+
+This is the standard workflow for contributing to any open source project:
+
+### Step 1: Fork the Repository
+
+```bash
+# Fork on GitHub (creates github.com/you/project)
+gh repo fork original-org/project
+
+# Fork and clone in one step
+gh repo fork original-org/project --clone
+
+# Or manually:
+# 1. Click "Fork" on the GitHub web page
+# 2. Clone YOUR fork (not the original)
+git clone https://github.com/you/project.git
+cd project
+```
+
+### Step 2: Set Up Remotes
+
+```bash
+# Your fork is automatically set as "origin"
+git remote -v
+# origin  https://github.com/you/project.git (fetch)
+# origin  https://github.com/you/project.git (push)
+
+# Add the original repository as "upstream"
+git remote add upstream https://github.com/original-org/project.git
+
+# Verify both remotes
+git remote -v
+# origin    https://github.com/you/project.git (fetch)
+# origin    https://github.com/you/project.git (push)
+# upstream  https://github.com/original-org/project.git (fetch)
+# upstream  https://github.com/original-org/project.git (push)
+```
+
+### Step 3: Create a Feature Branch
+
+```bash
+# Always start from an up-to-date main
+git switch main
+git fetch upstream
+git merge upstream/main
+
+# Create your feature branch
+git switch -c fix/null-pointer-in-parser
+```
+
+<Callout type="warning" title="Never Work Directly on main">
+Always create a branch for your contribution. Working on main in your fork makes syncing with upstream messy and prevents you from working on multiple contributions simultaneously. Your fork's main should always be a clean mirror of upstream's main.
+</Callout>
+
+### Step 4: Make Your Changes
+
+```bash
+# Make focused changes
+# ... edit files ...
+
+# Commit with clear, descriptive messages
+git add src/parser.js
+git commit -m "Fix null pointer when parsing empty input
+
+The parser throws a TypeError when the input string is empty
+because it tries to access .charAt(0) on undefined. This adds
+a guard clause that returns an empty result for null/empty input.
+
+Fixes original-org/project#234"
+
+# Note: reference the ORIGINAL repo's issue number
+```
+
+### Step 5: Push and Create a PR
+
+```bash
+# Push to YOUR fork (origin), not upstream
+git push -u origin fix/null-pointer-in-parser
+
+# Create a PR from your fork to the original repo
+gh pr create \
+  --repo original-org/project \
+  --title "Fix null pointer when parsing empty input" \
+  --body "## Summary
+Fixes the TypeError thrown when parser receives empty input.
+
+## Root Cause
+\`parseExpression()\` calls \`input.charAt(0)\` without checking
+if \`input\` is null or empty.
+
+## Fix
+Added guard clause at the top of \`parseExpression()\` that returns
+an empty AST node for null/empty input.
+
+## Testing
+- Added test for empty string input
+- Added test for null input
+- All existing tests pass
+
+Fixes #234"
+```
+
+### Step 6: Address Review Feedback
+
+```bash
+# Make changes requested by maintainers
+# ... edit files ...
+
+git add src/parser.js
+git commit -m "Address review: use early return instead of else block"
+git push origin fix/null-pointer-in-parser
+# The PR automatically updates
+```
+
+## Keeping Your Fork in Sync
+
+The original repository keeps moving forward. Your fork gets behind. Here is how to stay current:
+
+### Syncing main with Upstream
+
+```bash
+# Fetch the latest from the original repo
+git fetch upstream
+
+# Switch to your local main
+git switch main
+
+# Merge upstream's main into yours
+git merge upstream/main
+
+# Push the updated main to your fork
+git push origin main
+```
+
+### Syncing a Feature Branch
+
+If upstream's main has moved forward while you were working on your feature:
+
+```bash
+# Method 1: Merge upstream/main into your branch
+git switch fix/null-pointer-in-parser
+git fetch upstream
+git merge upstream/main
+# Resolve any conflicts
+git push origin fix/null-pointer-in-parser
+
+# Method 2: Rebase onto upstream/main (cleaner history)
+git switch fix/null-pointer-in-parser
+git fetch upstream
+git rebase upstream/main
+# Resolve any conflicts during rebase
+git push --force-with-lease origin fix/null-pointer-in-parser
+```
+
+<Callout type="tip" title="Rebase vs Merge for Fork Syncing">
+Many open source projects prefer rebased PRs because they produce a clean, linear history. Check the project's CONTRIBUTING.md for their preference. When in doubt, rebase your feature branch — it puts your changes neatly on top of the latest upstream code.
+</Callout>
+
+### Automated Fork Sync
+
+GitHub has a built-in "Sync fork" button on the web UI. Or automate it:
+
+```bash
+# Quick sync script
+sync_fork() {
+    git fetch upstream
+    git switch main
+    git merge upstream/main --ff-only
+    git push origin main
+    echo "Fork synced with upstream"
+}
+```
+
+## Contributing to Open Source
+
+### Before You Start
+
+```bash
+# 1. Read the CONTRIBUTING.md file
+cat CONTRIBUTING.md
+
+# 2. Check existing issues — don't duplicate work
+gh issue list --repo original-org/project --label "bug"
+
+# 3. Look for "good first issue" labels
+gh issue list --repo original-org/project --label "good first issue"
+
+# 4. Check if someone is already working on it
+# Look at the issue comments and linked PRs
+
+# 5. Comment on the issue to claim it
+gh issue comment 234 --repo original-org/project \
+  --body "I'd like to work on this. I think the fix is to add a null check in parseExpression(). Does that approach sound right?"
+```
+
+### Writing Upstream-Friendly PRs
+
+```
+DO:
+  ✓ Read CONTRIBUTING.md before starting
+  ✓ Follow the project's code style exactly
+  ✓ Write tests (most projects require them)
+  ✓ Keep PRs small and focused (one fix per PR)
+  ✓ Reference the issue number in your PR
+  ✓ Explain WHY you made the change, not just what
+  ✓ Update documentation if behavior changes
+  ✓ Run the full test suite locally before pushing
+  ✓ Respond to review feedback promptly and politely
+
+DON'T:
+  ✗ Submit huge refactoring PRs without discussion first
+  ✗ Change code style/formatting in unrelated files
+  ✗ Add features nobody asked for
+  ✗ Ignore the CI pipeline failures
+  ✗ Get defensive about review feedback
+  ✗ Submit the same PR to multiple projects
+  ✗ Rewrite history after reviewers have commented
+```
+
+<Callout type="tip" title="Start Small">
+Your first contribution to a project should be small — fix a typo, improve an error message, add a missing test. This lets you learn the project's workflow, build trust with maintainers, and understand the codebase before tackling bigger issues.
+</Callout>
+
+### Open Source Etiquette
+
+```
+1. Be respectful and patient
+   - Maintainers are often volunteers with limited time
+   - A PR review might take days or weeks — that's normal
+   - Don't ping maintainers repeatedly
+
+2. Be constructive
+   - If you disagree with a review comment, explain your reasoning
+   - Offer alternatives instead of just saying "no"
+   - Accept that the maintainer has the final say
+
+3. Test your changes
+   - Run the FULL test suite, not just your tests
+   - Test on the platforms the project supports
+   - If you can't test something, say so in the PR
+
+4. Respect the project's direction
+   - Not every good idea belongs in every project
+   - If your PR is declined, it's not personal
+   - Consider maintaining your change as a fork if it's truly needed
+
+5. Give back
+   - Review other people's PRs
+   - Answer questions in issues
+   - Improve documentation
+   - Report bugs clearly with reproduction steps
+```
+
+### Finding Projects to Contribute To
+
+```
+Where to find beginner-friendly projects:
+
+1. GitHub Explore: github.com/explore
+2. Good First Issues: goodfirstissue.dev
+3. First Timers Only: firsttimersonly.com
+4. Up For Grabs: up-for-grabs.net
+5. CodeTriage: codetriage.com
+
+Look for issues labeled:
+  - "good first issue"
+  - "help wanted"
+  - "beginner-friendly"
+  - "easy"
+  - "documentation"
+  - "hacktoberfest" (during October)
+```
+
+## CLA and DCO
+
+Some projects require legal agreements before accepting contributions:
+
+### Contributor License Agreement (CLA)
+
+```
+A CLA is a legal document where you grant the project permission
+to use your contribution. Common in corporate-backed projects.
+
+When you submit a PR to a CLA-protected project:
+1. A bot comments: "Please sign the CLA"
+2. You click a link and sign (usually one-time)
+3. The bot marks the check as passed
+4. Your PR can now be reviewed and merged
+
+Examples: Kubernetes, Angular, TensorFlow
+```
+
+### Developer Certificate of Origin (DCO)
+
+```
+A DCO is lighter than a CLA. You certify that you have the right
+to submit the code and that it can be used under the project's license.
+
+To sign off on a commit:
+```
+
+```bash
+# Add a sign-off line to your commit message
+git commit -s -m "Fix null pointer in parser"
+# Creates: "Fix null pointer in parser
+#
+# Signed-off-by: Your Name <your@email.com>"
+
+# Sign off on all commits in a range
+git rebase --signoff HEAD~3
+
+# Configure your name and email for sign-offs
+git config --global user.name "Your Name"
+git config --global user.email "your@email.com"
+```
+
+```
+Examples: Linux kernel, CNCF projects, Docker
+```
+
+## Multiple Contributions
+
+When you are actively contributing to a project, manage multiple branches:
+
+```bash
+# Your fork structure:
+# main             → always mirrors upstream/main
+# fix/parser-null  → PR #1 (under review)
+# feat/json-output → PR #2 (draft)
+# docs/api-guide   → PR #3 (ready for review)
+
+# Each PR is independent — branched from main, not from each other
+
+# Start a new contribution
+git switch main
+git fetch upstream
+git merge upstream/main
+git switch -c fix/memory-leak
+
+# Work on the new fix without affecting other PRs
+```
+
+```bash
+# Check the status of your open PRs
+gh pr list --repo original-org/project --author "@me"
+# #456  Fix null pointer in parser         fix/parser-null   OPEN
+# #457  Add JSON output format             feat/json-output  DRAFT
+# #458  Improve API documentation          docs/api-guide    OPEN
+
+# Check CI status of a specific PR
+gh pr checks 456 --repo original-org/project
+```
+
+<Exercise number={1} title="Fork Workflow">
+
+```bash
+# Simulate the complete fork-and-PR workflow using local bare repos
+
+WORK_DIR=$(mktemp -d)
+echo "Working directory: $WORK_DIR"
+echo ""
+
+# === Create the "original" open source project ===
+echo "=== Setting up the 'original' open source project ==="
+git init --bare "$WORK_DIR/original-project.git" -q
+
+# Maintainer sets up the project
+git clone "$WORK_DIR/original-project.git" "$WORK_DIR/maintainer" -q
+cd "$WORK_DIR/maintainer"
+
+mkdir -p src tests
+
+cat > README.md << 'EOF'
+# String Utils
+
+A collection of string utility functions.
+
+## Functions
+
+- `capitalize(str)` — Capitalizes the first letter
+- `reverse(str)` — Reverses a string
+- `truncate(str, len)` — Truncates to length with ellipsis
+EOF
+
+cat > CONTRIBUTING.md << 'EOF'
+# Contributing to String Utils
+
+1. Fork the repository
+2. Create a feature branch from main
+3. Write tests for your changes
+4. Ensure all tests pass
+5. Submit a PR with a clear description
+
+## Code Style
+- Use camelCase for function names
+- Add JSDoc comments for all public functions
+- Keep functions pure (no side effects)
+EOF
+
+cat > src/string-utils.js << 'EOF'
+/**
+ * Capitalize the first letter of a string.
+ * @param {string} str - The input string
+ * @returns {string} The capitalized string
+ */
+function capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Reverse a string.
+ * @param {string} str - The input string
+ * @returns {string} The reversed string
+ */
+function reverse(str) {
+    return str.split('').reverse().join('');
+}
+
+/**
+ * Truncate a string to a given length.
+ * @param {string} str - The input string
+ * @param {number} len - Maximum length
+ * @returns {string} The truncated string with ellipsis if needed
+ */
+function truncate(str, len) {
+    if (str.length <= len) return str;
+    return str.slice(0, len) + '...';
+}
+
+module.exports = { capitalize, reverse, truncate };
+EOF
+
+cat > tests/test.js << 'EOF'
+const { capitalize, reverse, truncate } = require('../src/string-utils');
+
+function assert(condition, msg) {
+    if (!condition) { console.error(`  FAIL: ${msg}`); process.exit(1); }
+    console.log(`  PASS: ${msg}`);
+}
+
+console.log("Testing capitalize:");
+assert(capitalize("hello") === "Hello", "capitalize('hello') = 'Hello'");
+assert(capitalize("world") === "World", "capitalize('world') = 'World'");
+
+console.log("Testing reverse:");
+assert(reverse("hello") === "olleh", "reverse('hello') = 'olleh'");
+assert(reverse("abc") === "cba", "reverse('abc') = 'cba'");
+
+console.log("Testing truncate:");
+assert(truncate("hello world", 5) === "hello...", "truncate('hello world', 5) = 'hello...'");
+assert(truncate("hi", 5) === "hi", "truncate('hi', 5) = 'hi'");
+
+console.log("\nAll tests passed!");
+EOF
+
+git add . && git commit -q -m "Initial project: string utility functions"
+git push -u origin main -q
+
+echo "Original project created with string utilities."
+echo ""
+
+# === You find a bug: capitalize doesn't handle empty strings ===
+echo "=== You discover a bug: capitalize('') throws an error ==="
+echo ""
+echo "Testing the bug:"
+cd "$WORK_DIR/maintainer"
+node -e "
+const { capitalize } = require('./src/string-utils');
+try {
+    console.log('  capitalize(\"hello\"): ' + capitalize('hello'));
+    console.log('  capitalize(\"\"): ' + capitalize(''));
+} catch(e) {
+    console.log('  capitalize(\"\"): ERROR — ' + e.message);
+}
+"
+echo ""
+
+# === Step 1: Fork the repository ===
+echo "=== Step 1: Fork the repository ==="
+git clone --bare "$WORK_DIR/original-project.git" "$WORK_DIR/your-fork.git" -q
+echo "Forked! Your copy: $WORK_DIR/your-fork.git"
+echo ""
+
+# === Step 2: Clone YOUR fork ===
+echo "=== Step 2: Clone your fork ==="
+git clone "$WORK_DIR/your-fork.git" "$WORK_DIR/your-local" -q
+cd "$WORK_DIR/your-local"
+echo "Cloned your fork locally."
+echo ""
+
+# === Step 3: Add upstream remote ===
+echo "=== Step 3: Set up remotes ==="
+git remote add upstream "$WORK_DIR/original-project.git"
+echo "Remotes configured:"
+git remote -v
+echo ""
+
+# === Step 4: Read CONTRIBUTING.md ===
+echo "=== Step 4: Read CONTRIBUTING.md ==="
+cat CONTRIBUTING.md
+echo ""
+
+# === Step 5: Create a feature branch ===
+echo "=== Step 5: Create feature branch ==="
+git fetch upstream -q
+git switch main -q
+git merge upstream/main -q
+git switch -c fix/empty-string-handling -q
+echo "Created branch: fix/empty-string-handling"
+echo ""
+
+# === Step 6: Make the fix ===
+echo "=== Step 6: Fix the bug ==="
+cat > src/string-utils.js << 'EOF'
+/**
+ * Capitalize the first letter of a string.
+ * @param {string} str - The input string
+ * @returns {string} The capitalized string
+ */
+function capitalize(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Reverse a string.
+ * @param {string} str - The input string
+ * @returns {string} The reversed string
+ */
+function reverse(str) {
+    if (!str) return '';
+    return str.split('').reverse().join('');
+}
+
+/**
+ * Truncate a string to a given length.
+ * @param {string} str - The input string
+ * @param {number} len - Maximum length
+ * @returns {string} The truncated string with ellipsis if needed
+ */
+function truncate(str, len) {
+    if (!str) return '';
+    if (str.length <= len) return str;
+    return str.slice(0, len) + '...';
+}
+
+module.exports = { capitalize, reverse, truncate };
+EOF
+
+# Add tests for edge cases
+cat > tests/test.js << 'EOF'
+const { capitalize, reverse, truncate } = require('../src/string-utils');
+
+function assert(condition, msg) {
+    if (!condition) { console.error(`  FAIL: ${msg}`); process.exit(1); }
+    console.log(`  PASS: ${msg}`);
+}
+
+console.log("Testing capitalize:");
+assert(capitalize("hello") === "Hello", "capitalize('hello') = 'Hello'");
+assert(capitalize("world") === "World", "capitalize('world') = 'World'");
+assert(capitalize("") === "", "capitalize('') = '' (empty string)");
+assert(capitalize(null) === "", "capitalize(null) = '' (null input)");
+assert(capitalize(undefined) === "", "capitalize(undefined) = '' (undefined input)");
+
+console.log("Testing reverse:");
+assert(reverse("hello") === "olleh", "reverse('hello') = 'olleh'");
+assert(reverse("abc") === "cba", "reverse('abc') = 'cba'");
+assert(reverse("") === "", "reverse('') = '' (empty string)");
+assert(reverse(null) === "", "reverse(null) = '' (null input)");
+
+console.log("Testing truncate:");
+assert(truncate("hello world", 5) === "hello...", "truncate('hello world', 5) = 'hello...'");
+assert(truncate("hi", 5) === "hi", "truncate('hi', 5) = 'hi'");
+assert(truncate("", 5) === "", "truncate('', 5) = '' (empty string)");
+assert(truncate(null, 5) === "", "truncate(null, 5) = '' (null input)");
+
+console.log("\nAll tests passed!");
+EOF
+
+git add src/string-utils.js
+git commit -q -m "Add null/empty string guards to all utility functions
+
+All three functions (capitalize, reverse, truncate) now return
+an empty string when given null, undefined, or empty string input.
+Previously, these inputs caused TypeErrors.
+
+Fixes original-org/string-utils#42"
+
+git add tests/test.js
+git commit -q -m "Add edge case tests for null/empty string inputs
+
+Tests added for empty string, null, and undefined inputs
+for all utility functions."
+
+echo "Changes committed."
+echo ""
+
+# === Step 7: Run tests ===
+echo "=== Step 7: Run tests ==="
+cd "$WORK_DIR/your-local"
+node tests/test.js
+echo ""
+
+# === Step 8: Push to your fork ===
+echo "=== Step 8: Push to your fork ==="
+git push -u origin fix/empty-string-handling -q
+echo "Pushed to origin (your fork)."
+echo ""
+
+# === Step 9: Create the PR ===
+echo "=== Step 9: Create PR (simulated) ==="
+echo ""
+echo "  PR: your-fork → original-project"
+echo "  Branch: fix/empty-string-handling → main"
+echo ""
+echo "  Title: Fix null/empty string handling in utility functions"
+echo "  Description:"
+echo "    ## Summary"
+echo "    Adds guard clauses to all string utility functions to handle"
+echo "    null, undefined, and empty string inputs gracefully."
+echo "    "
+echo "    ## Root Cause"
+echo "    capitalize(), reverse(), and truncate() all call string methods"
+echo "    on the input without checking for null/empty, causing TypeErrors."
+echo "    "
+echo "    ## Fix"
+echo "    Added early return of '' for falsy inputs in all three functions."
+echo "    "
+echo "    ## Testing"
+echo "    Added tests for empty string, null, and undefined inputs."
+echo "    All existing tests continue to pass."
+echo "    "
+echo "    Fixes #42"
+echo ""
+
+# === Simulate upstream accepting the PR ===
+echo "=== Step 10: Maintainer merges your PR ==="
+cd "$WORK_DIR/maintainer"
+git remote add contributor "$WORK_DIR/your-fork.git"
+git fetch contributor fix/empty-string-handling -q
+git merge contributor/fix/empty-string-handling -m "Merge PR #99: Fix null/empty string handling" -q
+git push origin main -q
+echo "PR merged by maintainer!"
+echo ""
+
+# === Step 11: Sync your fork ===
+echo "=== Step 11: Sync your fork with upstream ==="
+cd "$WORK_DIR/your-local"
+git switch main -q
+git fetch upstream -q
+git merge upstream/main -q
+git push origin main -q
+echo "Fork synced!"
+echo ""
+
+echo "--- Your fork's main now matches upstream ---"
+git log --oneline -5
+echo ""
+
+# === Step 12: Clean up the feature branch ===
+echo "=== Step 12: Clean up merged branch ==="
+git branch -d fix/empty-string-handling
+echo "Local branch deleted."
+git push origin --delete fix/empty-string-handling -q
+echo "Remote branch deleted."
+echo ""
+
+echo "=== Fork workflow complete! ==="
+echo ""
+echo "Summary:"
+echo "  1. Forked the repository"
+echo "  2. Cloned the fork locally"
+echo "  3. Added upstream remote"
+echo "  4. Read CONTRIBUTING.md"
+echo "  5. Created feature branch from up-to-date main"
+echo "  6. Made focused fix with clear commits"
+echo "  7. Ran full test suite"
+echo "  8. Pushed to fork (origin)"
+echo "  9. Created PR to upstream"
+echo "  10. Maintainer merged the PR"
+echo "  11. Synced fork with upstream"
+echo "  12. Cleaned up feature branch"
+
+# Clean up
+cd / && rm -rf "$WORK_DIR"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Sync with Upstream">
+
+```bash
+# Practice keeping a fork in sync when upstream has moved ahead
+
+WORK_DIR=$(mktemp -d)
+echo "Working directory: $WORK_DIR"
+echo ""
+
+# === Set up the original project ===
+git init --bare "$WORK_DIR/upstream.git" -q
+git clone "$WORK_DIR/upstream.git" "$WORK_DIR/maintainer" -q
+cd "$WORK_DIR/maintainer"
+
+mkdir -p src
+
+cat > src/math-utils.js << 'EOF'
+function add(a, b) { return a + b; }
+function subtract(a, b) { return a - b; }
+function multiply(a, b) { return a * b; }
+
+module.exports = { add, subtract, multiply };
+EOF
+
+git add . && git commit -q -m "Initial math utilities"
+git push -u origin main -q
+
+# === Create your fork ===
+git clone --bare "$WORK_DIR/upstream.git" "$WORK_DIR/fork.git" -q
+git clone "$WORK_DIR/fork.git" "$WORK_DIR/contributor" -q
+cd "$WORK_DIR/contributor"
+git remote add upstream "$WORK_DIR/upstream.git"
+
+echo "=== Setup complete ==="
+echo "  upstream.git  → the original project"
+echo "  fork.git      → your GitHub fork"
+echo "  contributor/  → your local clone"
+echo ""
+
+# === You start working on a feature ===
+echo "=== You start working on a feature ==="
+git switch -c feature/add-divide -q
+cat > src/math-utils.js << 'EOF'
+function add(a, b) { return a + b; }
+function subtract(a, b) { return a - b; }
+function multiply(a, b) { return a * b; }
+function divide(a, b) {
+    if (b === 0) throw new Error("Division by zero");
+    return a / b;
+}
+
+module.exports = { add, subtract, multiply, divide };
+EOF
+git add . && git commit -q -m "Add divide function with zero guard"
+echo "You committed: Add divide function"
+echo ""
+
+# === Meanwhile, upstream moves ahead with 3 commits ===
+echo "=== Meanwhile, upstream gets 3 new commits ==="
+cd "$WORK_DIR/maintainer"
+
+cat > src/math-utils.js << 'EOF'
+/**
+ * Math utility functions.
+ * @module math-utils
+ */
+
+function add(a, b) { return a + b; }
+function subtract(a, b) { return a - b; }
+function multiply(a, b) { return a * b; }
+
+module.exports = { add, subtract, multiply };
+EOF
+git add . && git commit -q -m "Add JSDoc module comment"
+git push origin main -q
+
+cat > src/math-utils.js << 'EOF'
+/**
+ * Math utility functions.
+ * @module math-utils
+ */
+
+/** Add two numbers. */
+function add(a, b) { return a + b; }
+
+/** Subtract b from a. */
+function subtract(a, b) { return a - b; }
+
+/** Multiply two numbers. */
+function multiply(a, b) { return a * b; }
+
+/** Calculate the absolute value. */
+function abs(n) { return n < 0 ? -n : n; }
+
+module.exports = { add, subtract, multiply, abs };
+EOF
+git add . && git commit -q -m "Add abs function and JSDoc to all functions"
+git push origin main -q
+
+echo "README update" > README.md
+git add . && git commit -q -m "Add README"
+git push origin main -q
+
+echo "Upstream has 3 new commits."
+echo ""
+
+# === Show the divergence ===
+cd "$WORK_DIR/contributor"
+echo "=== Current state: your fork is behind upstream ==="
+echo ""
+
+git fetch upstream -q
+echo "Your main vs upstream/main:"
+echo "  Upstream commits not in your main:"
+git log main..upstream/main --oneline
+echo ""
+
+echo "Your feature branch vs upstream/main:"
+echo "  Upstream commits not in your feature branch:"
+git log feature/add-divide..upstream/main --oneline
+echo ""
+echo "  Your commits not in upstream:"
+git log upstream/main..feature/add-divide --oneline
+echo ""
+
+# === Method 1: Sync main, then rebase feature branch ===
+echo "=========================================="
+echo "  Method 1: Rebase (recommended for PRs)"
+echo "=========================================="
+echo ""
+
+echo "--- Step 1: Sync your main with upstream ---"
+git switch main -q
+echo "Before sync:"
+git log --oneline -3
+echo ""
+
+git merge upstream/main -q
+git push origin main -q
+echo "After sync:"
+git log --oneline -5
+echo ""
+
+echo "--- Step 2: Rebase feature branch onto updated main ---"
+git switch feature/add-divide -q
+echo "Before rebase:"
+git log --oneline --graph --all | head -10
+echo ""
+
+git rebase main
+echo ""
+echo "After rebase:"
+git log --oneline --graph --all | head -10
+echo ""
+
+echo "Your feature branch now sits on top of the latest upstream."
+echo "The history is clean and linear."
+echo ""
+
+# Show the rebased file has both changes
+echo "--- Rebased file content ---"
+cat src/math-utils.js
+echo ""
+
+echo "--- Push the rebased branch to your fork ---"
+git push --force-with-lease origin feature/add-divide -q
+echo "Force-pushed (needed because rebase changed commit hashes)."
+echo ""
+
+# === Reset to demonstrate Method 2 ===
+echo "=========================================="
+echo "  Method 2: Merge (alternative approach)"
+echo "=========================================="
+echo ""
+
+# Reset feature branch to before rebase
+git switch feature/add-divide -q
+ORIGINAL_COMMIT=$(git reflog --format="%H %gs" | grep "rebase (start)" | head -1 | awk '{print $1}')
+
+# Recreate the scenario
+cd "$WORK_DIR"
+rm -rf contributor2
+git clone fork.git contributor2 -q
+cd "$WORK_DIR/contributor2"
+git remote add upstream "$WORK_DIR/upstream.git"
+git switch -c feature/add-modulo -q
+
+cat > src/math-utils.js << 'EOF'
+/**
+ * Math utility functions.
+ * @module math-utils
+ */
+
+/** Add two numbers. */
+function add(a, b) { return a + b; }
+
+/** Subtract b from a. */
+function subtract(a, b) { return a - b; }
+
+/** Multiply two numbers. */
+function multiply(a, b) { return a * b; }
+
+/** Calculate the absolute value. */
+function abs(n) { return n < 0 ? -n : n; }
+
+/** Calculate modulo (remainder). */
+function modulo(a, b) {
+    if (b === 0) throw new Error("Division by zero");
+    return a % b;
+}
+
+module.exports = { add, subtract, multiply, abs, modulo };
+EOF
+git add . && git commit -q -m "Add modulo function"
+
+# Now maintainer adds another commit
+cd "$WORK_DIR/maintainer"
+cat >> README.md << 'EOF'
+
+## Installation
+npm install math-utils
+EOF
+git add . && git commit -q -m "Add installation instructions to README"
+git push origin main -q
+
+echo "--- Upstream moved ahead again ---"
+
+cd "$WORK_DIR/contributor2"
+git fetch upstream -q
+
+echo "Upstream commits not in feature branch:"
+git log feature/add-modulo..upstream/main --oneline
+echo ""
+
+echo "--- Merging upstream/main into feature branch ---"
+git merge upstream/main -m "Merge upstream/main to sync with latest" -q
+echo ""
+echo "After merge:"
+git log --oneline --graph -8
+echo ""
+
+echo "Merge creates a merge commit but preserves original commit hashes."
+echo "No force-push needed."
+echo ""
+
+git push origin feature/add-modulo -q 2>/dev/null || true
+
+echo "=========================================="
+echo "  Comparison: Rebase vs Merge for Syncing"
+echo "=========================================="
+echo ""
+echo "  Rebase:"
+echo "    + Clean, linear history"
+echo "    + Easier to review in a PR"
+echo "    - Requires force-push (changes commit hashes)"
+echo "    - Can be tricky with many conflicts"
+echo ""
+echo "  Merge:"
+echo "    + Preserves original commits and hashes"
+echo "    + No force-push needed"
+echo "    - Creates extra merge commits"
+echo "    - History shows the sync points"
+echo ""
+echo "  Most open source projects prefer rebase."
+echo "  Check the project's CONTRIBUTING.md for their preference."
+
+# Clean up
+cd / && rm -rf "$WORK_DIR"
+```
+
+</Exercise>
+
+<MiniProject title="Fork Manager">
+
+```bash
+cat > ~/fork-manager.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Fork Manager — checks sync status of all local repos that have an upstream remote
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+SEARCH_DIR="${1:-$HOME/projects}"
+
+echo -e "${BOLD}${BLUE}============================================${NC}"
+echo -e "${BOLD}${BLUE}  Fork Manager${NC}"
+echo -e "${BOLD}${BLUE}  Scanning: ${SEARCH_DIR}${NC}"
+echo -e "${BOLD}${BLUE}============================================${NC}"
+echo ""
+
+if [ ! -d "$SEARCH_DIR" ]; then
+    echo -e "${RED}Directory '$SEARCH_DIR' does not exist.${NC}"
+    echo "Usage: $0 [directory-to-scan]"
+    exit 1
+fi
+
+TOTAL_FORKS=0
+FORKS_BEHIND=0
+FORKS_AHEAD=0
+FORKS_SYNCED=0
+FORKS_DIVERGED=0
+
+# Find all git repositories
+while IFS= read -r git_dir; do
+    REPO_DIR=$(dirname "$git_dir")
+    REPO_NAME=$(basename "$REPO_DIR")
+
+    # Check if this repo has an upstream remote
+    if ! git -C "$REPO_DIR" remote get-url upstream &>/dev/null; then
+        continue
+    fi
+
+    TOTAL_FORKS=$((TOTAL_FORKS + 1))
+
+    UPSTREAM_URL=$(git -C "$REPO_DIR" remote get-url upstream 2>/dev/null || echo "unknown")
+    ORIGIN_URL=$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || echo "unknown")
+    DEFAULT_BRANCH=$(git -C "$REPO_DIR" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
+
+    echo -e "${BOLD}${CYAN}$REPO_NAME${NC}"
+    echo -e "  Origin:   $ORIGIN_URL"
+    echo -e "  Upstream: $UPSTREAM_URL"
+    echo -e "  Branch:   $DEFAULT_BRANCH"
+
+    # Fetch upstream (quietly)
+    if git -C "$REPO_DIR" fetch upstream --quiet 2>/dev/null; then
+        # Check if upstream/default_branch exists
+        if git -C "$REPO_DIR" rev-parse "upstream/$DEFAULT_BRANCH" &>/dev/null; then
+            # Calculate ahead/behind
+            COUNTS=$(git -C "$REPO_DIR" rev-list --left-right --count "upstream/$DEFAULT_BRANCH...$DEFAULT_BRANCH" 2>/dev/null || echo "0 0")
+            BEHIND=$(echo "$COUNTS" | awk '{print $1}')
+            AHEAD=$(echo "$COUNTS" | awk '{print $2}')
+
+            if [ "$AHEAD" -eq 0 ] && [ "$BEHIND" -eq 0 ]; then
+                echo -e "  Status:   ${GREEN}In sync${NC}"
+                FORKS_SYNCED=$((FORKS_SYNCED + 1))
+            elif [ "$AHEAD" -eq 0 ] && [ "$BEHIND" -gt 0 ]; then
+                echo -e "  Status:   ${YELLOW}Behind upstream by $BEHIND commit(s)${NC}"
+                echo -e "  Action:   ${YELLOW}git fetch upstream && git merge upstream/$DEFAULT_BRANCH${NC}"
+                FORKS_BEHIND=$((FORKS_BEHIND + 1))
+            elif [ "$AHEAD" -gt 0 ] && [ "$BEHIND" -eq 0 ]; then
+                echo -e "  Status:   ${CYAN}Ahead of upstream by $AHEAD commit(s)${NC}"
+                echo -e "  Note:     You have local commits not in upstream"
+                FORKS_AHEAD=$((FORKS_AHEAD + 1))
+            else
+                echo -e "  Status:   ${RED}Diverged — $AHEAD ahead, $BEHIND behind${NC}"
+                echo -e "  Action:   ${RED}Needs manual sync (fetch + merge/rebase)${NC}"
+                FORKS_DIVERGED=$((FORKS_DIVERGED + 1))
+            fi
+
+            # Check for open feature branches
+            BRANCHES=$(git -C "$REPO_DIR" branch --no-merged "$DEFAULT_BRANCH" 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$BRANCHES" -gt 0 ]; then
+                echo -e "  Branches: $BRANCHES unmerged feature branch(es)"
+            fi
+        else
+            echo -e "  Status:   ${YELLOW}upstream/$DEFAULT_BRANCH not found (try: main or master)${NC}"
+        fi
+    else
+        echo -e "  Status:   ${RED}Failed to fetch upstream${NC}"
+    fi
+
+    echo ""
+done < <(find "$SEARCH_DIR" -maxdepth 3 -name ".git" -type d 2>/dev/null)
+
+# === Summary ===
+echo -e "${BOLD}${BLUE}============================================${NC}"
+echo -e "${BOLD}${BLUE}  Summary${NC}"
+echo -e "${BOLD}${BLUE}============================================${NC}"
+echo ""
+
+if [ "$TOTAL_FORKS" -eq 0 ]; then
+    echo "  No forked repositories found in $SEARCH_DIR"
+    echo "  (A fork is detected by having an 'upstream' remote)"
+    echo ""
+    echo "  To set up a fork:"
+    echo "    git remote add upstream <original-repo-url>"
+else
+    echo "  Total forks found: $TOTAL_FORKS"
+    echo -e "  ${GREEN}In sync:     $FORKS_SYNCED${NC}"
+    echo -e "  ${YELLOW}Behind:      $FORKS_BEHIND${NC}"
+    echo -e "  ${CYAN}Ahead:       $FORKS_AHEAD${NC}"
+    echo -e "  ${RED}Diverged:    $FORKS_DIVERGED${NC}"
+
+    if [ "$FORKS_BEHIND" -gt 0 ] || [ "$FORKS_DIVERGED" -gt 0 ]; then
+        echo ""
+        echo -e "${YELLOW}  Quick sync all behind forks:${NC}"
+        echo "    for each repo that's behind, run:"
+        echo "      cd <repo>"
+        echo "      git fetch upstream"
+        echo "      git switch main"
+        echo "      git merge upstream/main"
+        echo "      git push origin main"
+    fi
+fi
+
+echo ""
+SCRIPT
+
+chmod +x ~/fork-manager.sh
+
+# === Demonstrate with a simulated project directory ===
+DEMO_DIR=$(mktemp -d)/projects
+mkdir -p "$DEMO_DIR"
+
+# Create 3 simulated forks with different sync states
+
+# Fork 1: In sync
+git init --bare "/tmp/fork-demo-upstream1.git" -q
+git clone "/tmp/fork-demo-upstream1.git" "$DEMO_DIR/project-alpha" -q
+cd "$DEMO_DIR/project-alpha"
+echo "alpha" > file.txt && git add . && git commit -q -m "Init"
+git push -u origin main -q
+git remote add upstream "/tmp/fork-demo-upstream1.git"
+
+# Fork 2: Behind upstream
+git init --bare "/tmp/fork-demo-upstream2.git" -q
+git clone "/tmp/fork-demo-upstream2.git" "$DEMO_DIR/project-beta" -q
+cd "$DEMO_DIR/project-beta"
+echo "beta" > file.txt && git add . && git commit -q -m "Init"
+git push -u origin main -q
+git remote add upstream "/tmp/fork-demo-upstream2.git"
+
+# Push extra commits directly to upstream (simulating upstream activity)
+cd /tmp
+git clone fork-demo-upstream2.git fork-demo-upstream2-work -q
+cd fork-demo-upstream2-work
+echo "update 1" >> file.txt && git add . && git commit -q -m "Upstream update 1"
+echo "update 2" >> file.txt && git add . && git commit -q -m "Upstream update 2"
+git push origin main -q
+
+# Fork 3: Diverged
+git init --bare "/tmp/fork-demo-upstream3.git" -q
+git clone "/tmp/fork-demo-upstream3.git" "$DEMO_DIR/project-gamma" -q
+cd "$DEMO_DIR/project-gamma"
+echo "gamma" > file.txt && git add . && git commit -q -m "Init"
+git push -u origin main -q
+git remote add upstream "/tmp/fork-demo-upstream3.git"
+
+# Local changes
+echo "local change" >> file.txt && git add . && git commit -q -m "Local work"
+
+# Upstream changes
+cd /tmp
+git clone fork-demo-upstream3.git fork-demo-upstream3-work -q
+cd fork-demo-upstream3-work
+echo "upstream change" > other.txt && git add . && git commit -q -m "Upstream work"
+git push origin main -q
+
+# Non-fork repo (should be skipped)
+git init "$DEMO_DIR/not-a-fork" -q
+cd "$DEMO_DIR/not-a-fork"
+echo "local only" > file.txt && git add . && git commit -q -m "Local repo"
+
+echo ""
+echo "=== Running Fork Manager ==="
+echo ""
+
+~/fork-manager.sh "$DEMO_DIR"
+
+# Clean up
+cd / && rm -rf "$DEMO_DIR" /tmp/fork-demo-* /tmp/projects
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- A fork is your server-side copy of someone else's repository — it gives you push access without affecting the original
+- The fork workflow: fork, clone, branch, commit, push to your fork, create PR to upstream
+- Always set up two remotes: `origin` (your fork) and `upstream` (the original repository)
+- Keep your fork's main branch as a clean mirror of upstream — never commit directly to it
+- Sync regularly: `git fetch upstream && git merge upstream/main && git push origin main`
+- Rebase your feature branch onto upstream/main for clean PR history (most projects prefer this)
+- Read CONTRIBUTING.md before your first contribution — follow the project's specific guidelines
+- Start with small contributions to build trust and learn the project's workflow
+- Be patient with maintainers (they are often volunteers) and gracious with review feedback
+- Sign commits with DCO (`git commit -s`) when the project requires it
+- Clean up merged branches in your fork to keep it tidy
+- Use `gh repo fork` and `gh pr create --repo` for efficient command-line fork workflows
+
+## What's Next
+
+You can now contribute to any open source project. But your PR has 23 messy commits including "WIP", "fix typo", and "actually fix it this time." In **Interactive Rebase**, you will learn to rewrite your commit history — squashing, reordering, and editing commits to present a clean, professional narrative before sharing your work.

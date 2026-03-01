@@ -1,0 +1,686 @@
+---
+title: "File Operations in Scripts"
+description: "Read, write, and transform files from shell scripts. Master safe temp files, file locking, heredocs, and processing structured data like CSV and JSON."
+order: 9
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 08-arrays-strings
+objectives:
+  - Read files safely line by line with while read
+  - Write files using redirection and heredocs
+  - Create and manage temporary files with mktemp
+  - Use file locking to prevent race conditions
+  - Process CSV and JSON data in scripts
+tags:
+  - shell-scripting
+  - files
+  - io
+  - bash
+---
+
+<Callout type="story" title="The Story">
+Your CI/CD pipeline generates a build manifest, reads a list of deployment targets from a CSV, writes status reports, and updates a JSON config file — all in a single run. Meanwhile, two pipeline jobs might try to write to the same status file at the same time. You need to read, write, lock, and transform files safely and reliably from your shell scripts.
+</Callout>
+
+## Reading Files
+
+### Line-by-Line with `while read`
+
+The safest way to read a file line by line preserves whitespace and handles special characters:
+
+```bash
+# Basic line-by-line reading
+while IFS= read -r line; do
+    echo "Processing: $line"
+done < /etc/hostname
+
+# IFS= prevents leading/trailing whitespace trimming
+# -r prevents backslash interpretation
+```
+
+### Reading into Variables
+
+You can split each line into multiple variables:
+
+```bash
+# /etc/passwd uses : as delimiter
+while IFS=: read -r username _ uid gid _ home shell; do
+    if [ "$uid" -ge 1000 ] 2>/dev/null; then
+        echo "User: $username (UID=$uid) Home=$home Shell=$shell"
+    fi
+done < /etc/passwd
+```
+
+### Reading with a File Descriptor
+
+When you need to read from a file while also reading user input (stdin), use a file descriptor:
+
+```bash
+# Open file on FD 3
+exec 3< /etc/hostname
+
+# Read from FD 3
+while IFS= read -r line <&3; do
+    echo "From file: $line"
+done
+
+# Close FD 3
+exec 3<&-
+```
+
+This is critical in scripts that need to prompt the user inside a file-reading loop — without a separate FD, `read` from stdin would consume the file instead of keyboard input.
+
+### Handling Missing Files
+
+Always check before reading:
+
+```bash
+CONFIG_FILE="/etc/myapp/config.conf"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Error: Config not found: $CONFIG_FILE" >&2
+    exit 1
+fi
+
+while IFS= read -r line; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    echo "Config: $line"
+done < "$CONFIG_FILE"
+```
+
+## Writing Files
+
+### Redirection Operators
+
+```bash
+# Overwrite (creates or truncates)
+echo "Deploy started at $(date)" > /tmp/deploy.log
+
+# Append
+echo "Step 1 complete" >> /tmp/deploy.log
+echo "Step 2 complete" >> /tmp/deploy.log
+
+# Write stderr to a file
+./build.sh 2> /tmp/build-errors.log
+
+# Write both stdout and stderr
+./build.sh > /tmp/build.log 2>&1
+
+# Modern bash: stdout and stderr combined
+./build.sh &> /tmp/build-all.log
+```
+
+### Heredocs for Multi-Line Content
+
+Heredocs let you write multi-line content inline — perfect for generating config files:
+
+```bash
+# Generate an Nginx config
+cat > /tmp/nginx-site.conf << 'EOF'
+server {
+    listen 80;
+    server_name example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+EOF
+
+echo "Generated config:"
+cat /tmp/nginx-site.conf
+```
+
+<Callout type="tip" title="Quoting the Heredoc Delimiter">
+Use `<< 'EOF'` (quoted) to prevent variable expansion inside the heredoc. Use `<< EOF` (unquoted) when you want variables to be expanded. In the Nginx example above, we quote it so that `$host` and `$remote_addr` are written literally, not interpreted by bash.
+</Callout>
+
+### Heredocs with Variable Expansion
+
+```bash
+APP_NAME="myapp"
+APP_PORT=8080
+DEPLOY_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Unquoted EOF — variables ARE expanded
+cat > /tmp/app-manifest.txt << EOF
+Application: $APP_NAME
+Port: $APP_PORT
+Deployed: $DEPLOY_DATE
+Host: $(hostname)
+User: $(whoami)
+EOF
+
+cat /tmp/app-manifest.txt
+```
+
+### Writing with `tee`
+
+`tee` writes to a file and stdout simultaneously — useful for logging:
+
+```bash
+# Write to file AND display on screen
+echo "Deployment started" | tee /tmp/deploy.log
+
+# Append mode
+echo "Step 1 done" | tee -a /tmp/deploy.log
+
+# Write to multiple files
+echo "Broadcast message" | tee /tmp/file1.log /tmp/file2.log
+```
+
+## Temporary Files with `mktemp`
+
+Never hardcode temp file paths like `/tmp/myscript.tmp` — another process (or another run of your own script) could collide with it. Use `mktemp`:
+
+```bash
+# Create a temp file (e.g., /tmp/tmp.Xa3bR9kL2m)
+TEMP_FILE=$(mktemp)
+echo "Temp file: $TEMP_FILE"
+
+# Create a temp file with a template
+TEMP_FILE=$(mktemp /tmp/deploy-XXXXXX)
+echo "Temp file: $TEMP_FILE"
+
+# Create a temp directory
+TEMP_DIR=$(mktemp -d)
+echo "Temp dir: $TEMP_DIR"
+
+# Always clean up temp files
+trap 'rm -rf "$TEMP_FILE" "$TEMP_DIR"' EXIT
+```
+
+### Safe Temp File Pattern
+
+The canonical pattern for scripts that use temp files:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# All temp files go in the temp directory
+RESULTS="$TEMP_DIR/results.txt"
+ERRORS="$TEMP_DIR/errors.txt"
+
+# Do work...
+echo "processing..." > "$RESULTS"
+echo "no errors" > "$ERRORS"
+
+# On script exit (success or failure), the trap removes everything
+```
+
+## File Locking with `flock`
+
+When multiple scripts or cron jobs might write to the same file simultaneously, you need locking:
+
+```bash
+# Simple exclusive lock — run one instance at a time
+LOCK_FILE="/tmp/deploy.lock"
+
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+    echo "Another deployment is already running. Exiting." >&2
+    exit 1
+fi
+
+echo "Lock acquired. Running deployment..."
+# ... do work ...
+echo "Deployment complete."
+
+# Lock is released automatically when the script exits
+```
+
+### Locking a Shared Log File
+
+```bash
+log_message() {
+    local message="$1"
+    local log_file="/var/log/myapp/deploy.log"
+
+    (
+        flock -w 5 200 || { echo "Could not acquire log lock" >&2; return 1; }
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "$log_file"
+    ) 200>"${log_file}.lock"
+}
+
+log_message "Deployment started by $(whoami)"
+log_message "Building artifacts..."
+```
+
+### Preventing Duplicate Cron Jobs
+
+```bash
+#!/bin/bash
+# /etc/cron.d/cleanup — runs every hour but prevents overlap
+LOCK_FILE="/tmp/cleanup.lock"
+
+exec 200>"$LOCK_FILE"
+flock -n 200 || { echo "Previous run still active. Skipping."; exit 0; }
+
+# This cleanup might take longer than an hour on busy systems
+find /var/log -name "*.gz" -mtime +30 -delete
+find /tmp -type f -mtime +7 -delete
+```
+
+<Exercise number={1} title="File Reading and Writing">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# 1. Generate a sample server inventory file
+cat > "$TEMP_DIR/inventory.txt" << 'EOF'
+# Server Inventory
+# Format: hostname:ip:role:datacenter
+
+web01:10.0.1.10:frontend:us-east
+web02:10.0.1.11:frontend:us-east
+web03:10.0.1.12:frontend:us-west
+api01:10.0.2.10:backend:us-east
+api02:10.0.2.11:backend:us-west
+db01:10.0.3.10:database:us-east
+db02:10.0.3.11:database:us-west
+cache01:10.0.4.10:cache:us-east
+EOF
+
+echo "=== Raw Inventory ==="
+cat "$TEMP_DIR/inventory.txt"
+
+# 2. Parse the inventory, skip comments and blank lines
+echo ""
+echo "=== Parsed Inventory ==="
+printf "%-12s %-15s %-12s %s\n" "HOST" "IP" "ROLE" "DATACENTER"
+printf "%-12s %-15s %-12s %s\n" "----" "--" "----" "----------"
+
+declare -A DC_COUNT
+
+while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+    IFS=: read -r hostname ip role dc <<< "$line"
+    printf "%-12s %-15s %-12s %s\n" "$hostname" "$ip" "$role" "$dc"
+
+    # Count servers per datacenter
+    DC_COUNT["$dc"]=$(( ${DC_COUNT["$dc"]:-0} + 1 ))
+done < "$TEMP_DIR/inventory.txt"
+
+# 3. Write a summary report using a heredoc
+TOTAL=0
+for dc in "${!DC_COUNT[@]}"; do
+    TOTAL=$((TOTAL + DC_COUNT[$dc]))
+done
+
+cat > "$TEMP_DIR/report.txt" << EOF
+=== Inventory Report ===
+Generated: $(date '+%Y-%m-%d %H:%M:%S')
+Total Servers: $TOTAL
+
+Servers per Datacenter:
+$(for dc in $(echo "${!DC_COUNT[@]}" | tr ' ' '\n' | sort); do
+    echo "  $dc: ${DC_COUNT[$dc]}"
+done)
+EOF
+
+echo ""
+cat "$TEMP_DIR/report.txt"
+```
+
+</Exercise>
+
+## Processing CSV Data
+
+CSV files are everywhere in DevOps — inventory exports, monitoring reports, billing data:
+
+```bash
+# Sample CSV processing
+process_csv() {
+    local csv_file="$1"
+    local line_num=0
+
+    while IFS=, read -r col1 col2 col3 col4; do
+        line_num=$((line_num + 1))
+
+        # Skip header row
+        [ "$line_num" -eq 1 ] && continue
+
+        echo "Row $line_num: $col1 | $col2 | $col3 | $col4"
+    done < "$csv_file"
+}
+```
+
+### Handling Quoted CSV Fields
+
+Simple `IFS=,` breaks on quoted fields containing commas. For basic CSV without embedded commas, it works fine. For complex CSV, use `awk` or a proper parser:
+
+```bash
+# Works for simple CSV
+while IFS=, read -r name cpu mem status; do
+    if [ "$status" = "critical" ]; then
+        echo "ALERT: $name — CPU: $cpu%, Memory: $mem%"
+    fi
+done << 'CSV'
+server,cpu,memory,status
+web01,45,62,ok
+db01,92,88,critical
+api01,30,45,ok
+cache01,78,91,critical
+CSV
+```
+
+## Processing JSON with `jq`
+
+For JSON data, `jq` is the standard tool:
+
+```bash
+# Sample: Parse a Kubernetes pod list
+PODS_JSON='{
+  "pods": [
+    {"name": "web-abc12", "status": "Running", "restarts": 0},
+    {"name": "api-def34", "status": "Running", "restarts": 3},
+    {"name": "worker-ghi56", "status": "CrashLoopBackOff", "restarts": 15}
+  ]
+}'
+
+# Extract pod names
+echo "$PODS_JSON" | jq -r '.pods[].name'
+
+# Filter unhealthy pods
+echo "$PODS_JSON" | jq -r '.pods[] | select(.status != "Running") | .name'
+
+# Format as a table
+echo "$PODS_JSON" | jq -r '.pods[] | "\(.name)\t\(.status)\t\(.restarts)"'
+```
+
+### Reading JSON into Shell Variables
+
+```bash
+# Parse JSON config into shell variables
+CONFIG_JSON='{"app": "myservice", "port": 8080, "workers": 4, "debug": false}'
+
+APP_NAME=$(echo "$CONFIG_JSON" | jq -r '.app')
+APP_PORT=$(echo "$CONFIG_JSON" | jq -r '.port')
+WORKERS=$(echo "$CONFIG_JSON" | jq -r '.workers')
+
+echo "Starting $APP_NAME on port $APP_PORT with $WORKERS workers"
+```
+
+### Iterating Over JSON Arrays in Bash
+
+```bash
+# Process each item in a JSON array
+SERVERS_JSON='[
+    {"host": "web01", "ip": "10.0.1.10", "port": 80},
+    {"host": "api01", "ip": "10.0.2.10", "port": 3000},
+    {"host": "db01", "ip": "10.0.3.10", "port": 5432}
+]'
+
+echo "$SERVERS_JSON" | jq -c '.[]' | while IFS= read -r server; do
+    host=$(echo "$server" | jq -r '.host')
+    ip=$(echo "$server" | jq -r '.ip')
+    port=$(echo "$server" | jq -r '.port')
+    echo "Checking $host at $ip:$port..."
+done
+```
+
+<Exercise number={2} title="CSV Report Generator">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# 1. Create a sample metrics CSV (simulating monitoring export)
+cat > "$TEMP_DIR/metrics.csv" << 'CSV'
+timestamp,server,cpu_percent,memory_percent,disk_percent,status
+2024-01-15 10:00,web01,45,62,55,ok
+2024-01-15 10:00,web02,38,58,55,ok
+2024-01-15 10:00,api01,72,80,60,warning
+2024-01-15 10:00,db01,91,88,75,critical
+2024-01-15 10:00,cache01,25,45,30,ok
+2024-01-15 10:05,web01,48,63,55,ok
+2024-01-15 10:05,web02,52,61,55,ok
+2024-01-15 10:05,api01,85,82,60,critical
+2024-01-15 10:05,db01,88,85,76,critical
+2024-01-15 10:05,cache01,22,42,30,ok
+CSV
+
+# 2. Analyze the CSV
+echo "=== Metrics Analysis ==="
+
+TOTAL_ROWS=0
+CRITICAL_COUNT=0
+WARNING_COUNT=0
+OK_COUNT=0
+HIGH_CPU_SERVERS=""
+
+tail -n +2 "$TEMP_DIR/metrics.csv" | while IFS=, read -r ts server cpu mem disk status; do
+    TOTAL_ROWS=$((TOTAL_ROWS + 1))
+
+    case "$status" in
+        critical) CRITICAL_COUNT=$((CRITICAL_COUNT + 1)) ;;
+        warning)  WARNING_COUNT=$((WARNING_COUNT + 1)) ;;
+        ok)       OK_COUNT=$((OK_COUNT + 1)) ;;
+    esac
+
+    # Flag servers with CPU > 80%
+    if [ "$cpu" -gt 80 ]; then
+        HIGH_CPU_SERVERS="${HIGH_CPU_SERVERS}  - $server at $ts (CPU: $cpu%)\n"
+    fi
+
+    # At the end, print summary (check if we're at last line)
+    echo "$TOTAL_ROWS|$CRITICAL_COUNT|$WARNING_COUNT|$OK_COUNT|$HIGH_CPU_SERVERS"
+done | tail -1 | {
+    IFS='|' read -r total crit warn ok high_cpu
+    echo "Total data points: $total"
+    echo "Status breakdown:"
+    echo "  Critical: $crit"
+    echo "  Warning:  $warn"
+    echo "  OK:       $ok"
+    echo ""
+    echo "High CPU alerts (>80%):"
+    echo -e "$high_cpu"
+}
+
+# 3. Generate a filtered CSV with only critical entries
+echo "=== Critical Events (filtered CSV) ==="
+head -1 "$TEMP_DIR/metrics.csv"
+tail -n +2 "$TEMP_DIR/metrics.csv" | while IFS=, read -r ts server cpu mem disk status; do
+    [ "$status" = "critical" ] && echo "$ts,$server,$cpu,$mem,$disk,$status"
+done | tee "$TEMP_DIR/critical.csv"
+
+echo ""
+echo "Critical events saved to: $TEMP_DIR/critical.csv"
+echo "Total critical entries: $(wc -l < "$TEMP_DIR/critical.csv")"
+```
+
+</Exercise>
+
+<MiniProject title="Build Manifest Generator">
+
+```bash
+cat > ~/manifest-gen.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Build Manifest Generator
+# Reads source config, generates a deployment manifest,
+# uses temp files safely, and writes structured output.
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+BUILD_ID="build-$(date +%s)"
+MANIFEST="$TEMP_DIR/manifest.txt"
+BUILD_LOG="$TEMP_DIR/build.log"
+
+# --- Logging ---
+log() {
+    local message="[$(date '+%H:%M:%S')] $*"
+    echo "$message" | tee -a "$BUILD_LOG"
+}
+
+# --- Step 1: Create source configuration ---
+cat > "$TEMP_DIR/services.csv" << 'CSV'
+name,image,replicas,port,health_path
+frontend,webapp:2.1.0,3,80,/health
+api,api-server:1.5.2,2,3000,/api/health
+worker,task-runner:1.5.2,4,0,/none
+database,postgres:15,1,5432,/none
+redis,redis:7-alpine,2,6379,/none
+CSV
+
+cat > "$TEMP_DIR/env.conf" << 'CONF'
+# Deployment environment
+CLUSTER=prod-us-east-1
+NAMESPACE=production
+REGISTRY=registry.example.com
+MAX_SURGE=25%
+MAX_UNAVAILABLE=0
+CONF
+
+log "Build $BUILD_ID started"
+
+# --- Step 2: Parse environment config ---
+declare -A ENV_CONFIG
+
+while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    ENV_CONFIG["$key"]="$value"
+done < "$TEMP_DIR/env.conf"
+
+log "Environment: ${ENV_CONFIG[CLUSTER]} / ${ENV_CONFIG[NAMESPACE]}"
+
+# --- Step 3: Generate the manifest ---
+cat > "$MANIFEST" << EOF
+# ===========================================
+# Deployment Manifest
+# ===========================================
+# Build ID:    $BUILD_ID
+# Cluster:     ${ENV_CONFIG[CLUSTER]}
+# Namespace:   ${ENV_CONFIG[NAMESPACE]}
+# Registry:    ${ENV_CONFIG[REGISTRY]}
+# Generated:   $(date '+%Y-%m-%d %H:%M:%S')
+# Generated by: $(whoami)@$(hostname)
+# ===========================================
+
+EOF
+
+# Parse services CSV and append to manifest
+SERVICE_COUNT=0
+TOTAL_REPLICAS=0
+LINE_NUM=0
+
+while IFS=, read -r name image replicas port health_path; do
+    LINE_NUM=$((LINE_NUM + 1))
+    [ "$LINE_NUM" -eq 1 ] && continue  # Skip header
+
+    SERVICE_COUNT=$((SERVICE_COUNT + 1))
+    TOTAL_REPLICAS=$((TOTAL_REPLICAS + replicas))
+
+    FULL_IMAGE="${ENV_CONFIG[REGISTRY]}/$image"
+
+    cat >> "$MANIFEST" << EOF
+---
+# Service: $name
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $name
+  namespace: ${ENV_CONFIG[NAMESPACE]}
+  labels:
+    app: $name
+    build: $BUILD_ID
+spec:
+  replicas: $replicas
+  strategy:
+    rollingUpdate:
+      maxSurge: ${ENV_CONFIG[MAX_SURGE]}
+      maxUnavailable: ${ENV_CONFIG[MAX_UNAVAILABLE]}
+  template:
+    spec:
+      containers:
+      - name: $name
+        image: $FULL_IMAGE
+EOF
+
+    # Add port and health check only if applicable
+    if [ "$port" -ne 0 ] 2>/dev/null; then
+        cat >> "$MANIFEST" << EOF
+        ports:
+        - containerPort: $port
+EOF
+    fi
+
+    if [ "$health_path" != "/none" ]; then
+        cat >> "$MANIFEST" << EOF
+        livenessProbe:
+          httpGet:
+            path: $health_path
+            port: $port
+          initialDelaySeconds: 10
+          periodSeconds: 30
+EOF
+    fi
+
+    echo "" >> "$MANIFEST"
+    log "Added service: $name ($FULL_IMAGE) x$replicas"
+
+done < "$TEMP_DIR/services.csv"
+
+# --- Step 4: Append summary ---
+cat >> "$MANIFEST" << EOF
+# ===========================================
+# Summary
+# ===========================================
+# Services:       $SERVICE_COUNT
+# Total Replicas: $TOTAL_REPLICAS
+# ===========================================
+EOF
+
+# --- Step 5: Display results ---
+echo ""
+echo "=== Generated Manifest ==="
+cat "$MANIFEST"
+
+echo ""
+echo "=== Build Log ==="
+cat "$BUILD_LOG"
+
+echo ""
+log "Build $BUILD_ID complete: $SERVICE_COUNT services, $TOTAL_REPLICAS replicas"
+SCRIPT
+
+chmod +x ~/manifest-gen.sh
+~/manifest-gen.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `while IFS= read -r line` is the safe pattern for reading files line by line
+- Use `<< 'EOF'` (quoted) for literal heredocs; `<< EOF` (unquoted) for variable expansion
+- Always use `mktemp` for temp files and clean up with `trap '...' EXIT`
+- `flock` prevents race conditions when multiple processes write to the same file
+- For CSV, `IFS=, read -r` splits columns; skip headers with a line counter or `tail -n +2`
+- Use `jq` for any non-trivial JSON processing in scripts
+- `tee` lets you write to a file and stdout simultaneously for logging
+- Always check that files exist before reading them
+
+## What's Next
+
+You can read and write files. But real-world DevOps work often requires transforming text inside those files — extracting fields from logs, rewriting config values, aggregating data. In **Text Processing with sed and awk**, you'll learn the two most powerful text transformation tools in the Unix toolkit.

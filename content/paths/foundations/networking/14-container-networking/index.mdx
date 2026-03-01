@@ -1,0 +1,1093 @@
+---
+title: "Container Networking"
+description: "How Docker containers communicate. Understand bridge networks, overlay networks, port mapping, and DNS-based service discovery."
+order: 14
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 13-cloud-networking
+objectives:
+  - Understand Docker networking modes
+  - Create and manage Docker networks
+  - Configure port mapping for container access
+  - Understand container DNS and service discovery
+tags:
+  - networking
+  - docker
+  - containers
+  - bridge
+---
+
+<Callout type="story" title="The Story">
+You deploy two containers — a web app and a database. The web app can't connect to the database. It's using "localhost" to connect, but in container networking, each container has its own network namespace. "localhost" inside the web container is the web container, not the database. You need to use Docker's DNS — just use the container name. Understanding container networking prevents the most common Docker headaches.
+</Callout>
+
+## Container Network Fundamentals
+
+Every Docker container gets its own isolated network environment through Linux network namespaces. This means each container has its own network stack — its own interfaces, its own IP address, its own routing table, and its own `localhost`.
+
+```
+Host Machine:
+  ┌─────────────────────────────────────────────────────┐
+  │  Host Network Namespace                              │
+  │  eth0: 192.168.1.100                                 │
+  │  docker0: 172.17.0.1 (bridge)                        │
+  │                                                      │
+  │  ┌─────────────┐     ┌─────────────┐                │
+  │  │ Container A  │     │ Container B  │               │
+  │  │ Namespace A  │     │ Namespace B  │               │
+  │  │ eth0:        │     │ eth0:        │               │
+  │  │ 172.17.0.2   │     │ 172.17.0.3   │               │
+  │  │ localhost =  │     │ localhost =  │               │
+  │  │ Container A  │     │ Container B  │               │
+  │  └──────┬───────┘     └──────┬───────┘               │
+  │         │    veth pair       │    veth pair           │
+  │         └────────┬───────────┘                       │
+  │                  │                                    │
+  │            ┌─────▼─────┐                             │
+  │            │  docker0   │ (bridge)                    │
+  │            └────────────┘                             │
+  └─────────────────────────────────────────────────────┘
+
+Key concepts:
+  - Network namespace: Isolated network stack per container
+  - veth pair: Virtual ethernet cable connecting container to bridge
+  - Bridge (docker0): Virtual switch connecting containers together
+  - iptables: Rules that handle port mapping and NAT
+```
+
+### How It Works Under the Hood
+
+```bash
+# When Docker creates a container, it:
+# 1. Creates a new network namespace
+# 2. Creates a veth pair (virtual ethernet cable)
+# 3. Puts one end in the container (becomes eth0)
+# 4. Puts the other end on the bridge (docker0)
+# 5. Assigns an IP address from the bridge subnet
+
+# You can see this on the host:
+# List all network namespaces
+ip netns list
+
+# List bridge details
+ip link show docker0
+bridge link show
+
+# List veth pairs connecting to containers
+ip link show type veth
+
+# See the iptables NAT rules Docker creates
+sudo iptables -t nat -L -n | head -20
+```
+
+## Docker Network Types
+
+Docker provides several network drivers, each designed for different use cases.
+
+### Bridge Network (Default)
+
+The default network type. Containers on the same bridge can communicate with each other. This is what you use for single-host setups.
+
+```bash
+# When you run a container without specifying a network,
+# it connects to the default "bridge" network
+docker run -d --name web nginx
+
+# Check which network a container is on
+docker inspect web --format '{{.NetworkSettings.Networks}}'
+
+# The default bridge has limitations:
+#   - No automatic DNS (must use --link or IP addresses)
+#   - All containers share one bridge (no isolation)
+#   - This is why custom bridges are recommended
+```
+
+### Host Network
+
+The container shares the host's network namespace directly. No isolation, no port mapping needed — the container IS the host from a networking perspective.
+
+```bash
+# Container uses the host's network directly
+docker run -d --network host --name web nginx
+
+# Nginx is now listening on host's port 80 directly
+# No port mapping needed — container sees host's interfaces
+curl http://localhost:80
+
+# When to use host mode:
+#   - Maximum network performance (no bridge overhead)
+#   - Container needs to see all host interfaces
+#   - Performance-sensitive networking applications
+# When NOT to use:
+#   - Port conflicts (two containers can't both use port 80)
+#   - Security concerns (no network isolation)
+```
+
+### None Network
+
+The container gets no networking at all. Useful for batch processing, security-sensitive workloads, or containers that only need filesystem access.
+
+```bash
+# Container with no network
+docker run -d --network none --name isolated alpine sleep 3600
+
+# No interfaces except loopback
+docker exec isolated ip addr show
+# Only lo (127.0.0.1) — no external connectivity
+```
+
+### Overlay Network (Multi-Host)
+
+Overlay networks span multiple Docker hosts, allowing containers on different machines to communicate as if they were on the same network. Used with Docker Swarm and Kubernetes.
+
+```bash
+# Create an overlay network (requires Swarm mode)
+docker network create --driver overlay --attachable my-overlay
+
+# Containers on different hosts can communicate:
+# Host A: docker run --network my-overlay --name service-a myapp
+# Host B: docker run --network my-overlay --name service-b myapp
+# service-a can reach service-b by name, even on different hosts
+
+# How it works:
+#   - VXLAN encapsulation wraps container traffic in UDP packets
+#   - These packets travel across the physical network between hosts
+#   - On the destination host, they're unwrapped and delivered
+```
+
+## Creating Custom Bridge Networks
+
+Custom bridge networks are the recommended approach for container communication. They provide automatic DNS, better isolation, and more control.
+
+```bash
+# Create a custom bridge network
+docker network create my-app-network
+
+# Create with specific subnet
+docker network create \
+    --driver bridge \
+    --subnet 172.20.0.0/16 \
+    --gateway 172.20.0.1 \
+    my-custom-network
+
+# List all networks
+docker network ls
+# NETWORK ID    NAME              DRIVER    SCOPE
+# abc123def     bridge            bridge    local
+# 789xyz456     host              host      local
+# 111aaa222     none              null      local
+# 333bbb444     my-app-network    bridge    local
+
+# Inspect a network
+docker network inspect my-app-network
+# Shows: subnet, gateway, connected containers, options
+
+# Remove a network
+docker network rm my-app-network
+
+# Remove all unused networks
+docker network prune
+```
+
+### Why Custom Bridges Are Better Than Default
+
+```
+Feature               Default Bridge     Custom Bridge
+──────────────────────────────────────────────────────
+Automatic DNS         No                 Yes
+Container isolation   Shared bridge      Per-network isolation
+Connect/disconnect    Restart required   Live connect/disconnect
+Network-level config  Limited            Full control
+
+The biggest win: Automatic DNS resolution.
+On a custom bridge, containers can reach each other by name.
+On the default bridge, you'd need to use IP addresses or --link (deprecated).
+```
+
+## Container DNS
+
+Docker provides an embedded DNS server for containers on custom networks. Containers can resolve each other by name — no IP addresses needed.
+
+```bash
+# Create a network
+docker network create app-net
+
+# Start a database container
+docker run -d --name postgres --network app-net \
+    -e POSTGRES_PASSWORD=secret postgres:16
+
+# Start an application container
+docker run -d --name webapp --network app-net \
+    -e DATABASE_HOST=postgres \
+    -e DATABASE_PORT=5432 \
+    my-web-app
+
+# Inside the webapp container, "postgres" resolves to the
+# postgres container's IP address automatically
+docker exec webapp ping -c 2 postgres
+# PING postgres (172.20.0.2): 56 data bytes
+# 64 bytes from 172.20.0.2: seq=0 ttl=64 time=0.087 ms
+
+# DNS resolution happens through Docker's embedded DNS server
+# at 127.0.0.11 inside each container
+docker exec webapp cat /etc/resolv.conf
+# nameserver 127.0.0.11
+# options ndots:0
+```
+
+<Callout type="tip" title="Use Container Names as Hostnames">
+Always configure your applications to connect to other services by container name, not by IP address. Container IPs can change when containers restart, but names remain stable.
+
+```bash
+# BAD: Hardcoded IP (breaks when container restarts)
+DATABASE_HOST=172.20.0.2
+
+# GOOD: Container name (always resolves to current IP)
+DATABASE_HOST=postgres
+```
+</Callout>
+
+### Network Aliases
+
+You can give containers additional DNS names using network aliases:
+
+```bash
+# Run with a network alias
+docker run -d --name postgres-primary --network app-net \
+    --network-alias db \
+    --network-alias database \
+    postgres:16
+
+# Now this container responds to three names:
+#   postgres-primary (container name)
+#   db (alias)
+#   database (alias)
+docker exec webapp ping -c 1 db
+docker exec webapp ping -c 1 database
+docker exec webapp ping -c 1 postgres-primary
+# All resolve to the same container
+```
+
+## Port Mapping
+
+Port mapping exposes container ports to the host machine, making services accessible from outside Docker.
+
+```bash
+# Map host port 8080 to container port 80
+docker run -d -p 8080:80 --name web nginx
+# Access at http://localhost:8080
+
+# Map to a specific host interface
+docker run -d -p 127.0.0.1:8080:80 --name web nginx
+# Only accessible from localhost, not from other machines
+
+# Map multiple ports
+docker run -d \
+    -p 80:80 \
+    -p 443:443 \
+    --name web nginx
+
+# Map a range of ports
+docker run -d -p 8000-8010:8000-8010 --name multi-port my-app
+
+# Let Docker choose a random host port
+docker run -d -P --name web nginx
+# Docker assigns random high ports for all EXPOSE'd ports
+docker port web
+# 80/tcp -> 0.0.0.0:32768
+
+# Map UDP port
+docker run -d -p 53:53/udp --name dns my-dns-server
+
+# Check port mappings
+docker port web
+# 80/tcp -> 0.0.0.0:8080
+```
+
+### How Port Mapping Works
+
+```
+When you run: docker run -p 8080:80 nginx
+
+Docker creates iptables rules:
+  PREROUTING: Redirect traffic arriving on host:8080 to container:80
+  POSTROUTING: Masquerade the source so responses go back correctly
+
+Traffic flow:
+  Client → Host:8080 → iptables DNAT → Container:80
+  Container:80 → iptables MASQUERADE → Host:8080 → Client
+
+# See the rules Docker creates:
+sudo iptables -t nat -L DOCKER -n
+# DNAT  tcp  --  0.0.0.0/0  0.0.0.0/0  tcp dpt:8080 to:172.17.0.2:80
+```
+
+<Callout type="warning" title="Port Conflicts">
+Two containers cannot map to the same host port. If port 8080 is already in use, Docker will fail to start the second container.
+
+```bash
+docker run -d -p 8080:80 --name web1 nginx  # Works
+docker run -d -p 8080:80 --name web2 nginx  # Fails: port already in use
+
+# Solutions:
+docker run -d -p 8081:80 --name web2 nginx  # Use different host port
+docker run -d -P --name web2 nginx          # Let Docker pick a port
+```
+</Callout>
+
+## Docker Compose Networking
+
+Docker Compose automatically creates a network for your application. All services in a compose file can reach each other by service name.
+
+```yaml
+# docker-compose.yml
+version: "3.8"
+
+services:
+  web:
+    image: nginx
+    ports:
+      - "80:80"
+    networks:
+      - frontend
+      - backend
+
+  api:
+    image: my-api
+    environment:
+      - DATABASE_HOST=db      # Use service name as hostname
+      - REDIS_HOST=cache      # Use service name as hostname
+    networks:
+      - backend
+
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_PASSWORD=secret
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  cache:
+    image: redis:7
+    networks:
+      - backend
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true    # No external access — isolated network
+
+volumes:
+  db-data:
+```
+
+```bash
+# What Compose creates automatically:
+# Network: myproject_frontend (bridge)
+# Network: myproject_backend (bridge, internal)
+#
+# DNS resolution:
+#   web → can reach api, db, cache by name
+#   api → can reach db, cache by name
+#   db, cache → only reachable from backend network
+#
+# The "internal: true" flag means the backend network has
+# no connection to the host — completely isolated
+
+# Inspect Compose networks
+docker network ls | grep myproject
+
+# Scale a service — DNS round-robin
+docker compose up --scale api=3
+# Now "api" resolves to all three container IPs (round-robin DNS)
+```
+
+### Network Aliases in Compose
+
+```yaml
+services:
+  db-primary:
+    image: postgres:16
+    networks:
+      backend:
+        aliases:
+          - db
+          - database
+          - postgres
+    # Reachable as: db-primary, db, database, or postgres
+```
+
+## Connecting Containers Across Networks
+
+Containers can be connected to multiple networks simultaneously:
+
+```bash
+# Create two networks
+docker network create frontend
+docker network create backend
+
+# Start a container on the backend network
+docker run -d --name api --network backend my-api
+
+# Connect it to the frontend network as well
+docker network connect frontend api
+
+# Now the api container is on BOTH networks
+# It can talk to containers on frontend AND backend
+
+# Disconnect from a network
+docker network disconnect frontend api
+
+# A container acting as a bridge between networks:
+#
+#   frontend network          backend network
+#   ┌──────────┐             ┌──────────┐
+#   │   web    │             │   db     │
+#   └────┬─────┘             └────┬─────┘
+#        │                        │
+#   ─────┼────── frontend ───────┼──────
+#        │                        │
+#   ┌────▼─────┐                  │
+#   │   api    ├──────────────────┘
+#   │(both nets)│ ──── backend ────
+#   └──────────┘
+```
+
+## Macvlan Networks
+
+Macvlan assigns a real MAC address to each container, making them appear as physical devices on the network. Containers get IPs from the physical network's DHCP server.
+
+```bash
+# Create a macvlan network
+docker network create -d macvlan \
+    --subnet=192.168.1.0/24 \
+    --gateway=192.168.1.1 \
+    -o parent=eth0 \
+    my-macvlan
+
+# Run a container with its own IP on the physical network
+docker run -d --network my-macvlan \
+    --ip 192.168.1.200 \
+    --name web nginx
+
+# The container is now accessible at 192.168.1.200
+# from anywhere on the physical network — no port mapping needed
+
+# Use cases:
+#   - Legacy applications that require a unique IP
+#   - Network monitoring tools that need to see all traffic
+#   - Situations where port mapping is impractical
+```
+
+## Troubleshooting Container Networking
+
+### Common Issues and Fixes
+
+```bash
+# Issue: Container can't resolve another container by name
+# Cause: Using default bridge (no DNS) or different networks
+docker network inspect bridge  # Check if both containers are here
+# Fix: Use a custom network
+docker network create app-net
+docker network connect app-net container-a
+docker network connect app-net container-b
+
+# Issue: "Connection refused" between containers
+# Check: Is the target service running and listening?
+docker exec target-container ss -tlnp
+# Check: Is it listening on 0.0.0.0 (not just 127.0.0.1)?
+# Many apps default to localhost — configure them to listen on 0.0.0.0
+
+# Issue: Port mapping not working
+# Check: Is the container actually running?
+docker ps
+# Check: What port mappings exist?
+docker port container-name
+# Check: Is something else using that host port?
+ss -tlnp | grep :8080
+
+# Issue: Container can't reach the internet
+# Check: DNS resolution
+docker exec container-name nslookup google.com
+# Check: Can it reach IPs directly?
+docker exec container-name ping -c 2 8.8.8.8
+# Check: Docker daemon DNS configuration
+docker info | grep -i dns
+```
+
+### Diagnostic Commands
+
+```bash
+# Inspect container network settings
+docker inspect --format '{{json .NetworkSettings}}' container-name | jq .
+
+# See all networks and containers
+docker network ls
+docker network inspect my-network
+
+# Test connectivity from inside a container
+docker exec container-name ping -c 2 other-container
+docker exec container-name nslookup other-container
+docker exec container-name curl -v http://other-container:8080
+
+# Check iptables rules Docker created
+sudo iptables -t nat -L -n -v | grep -A5 DOCKER
+
+# See veth pairs linking containers to bridges
+ip link show type veth
+
+# Check Docker DNS server inside a container
+docker exec container-name cat /etc/resolv.conf
+# Should show nameserver 127.0.0.11 for custom networks
+
+# Monitor network traffic for a specific container
+# Find the container's veth interface on the host
+CONTAINER_PID=$(docker inspect -f '{{.State.Pid}}' container-name)
+# Then capture on that interface
+```
+
+<Exercise number={1} title="Container Communication">
+
+Create networks, attach containers, and verify DNS-based communication:
+
+```bash
+# ============================================
+# Container Communication Exercise
+# ============================================
+
+echo "============================================="
+echo "  Container Communication Exercise"
+echo "============================================="
+echo ""
+
+# Since Docker may not be available in all environments,
+# we'll build the commands and explain what happens
+
+cat << 'EXERCISE'
+=== Step 1: Create a custom network ===
+
+  docker network create app-network
+  docker network inspect app-network
+
+  Output shows:
+    Subnet: 172.18.0.0/16
+    Gateway: 172.18.0.1
+    Driver: bridge
+
+=== Step 2: Start containers on the network ===
+
+  # Start a database
+  docker run -d --name db --network app-network \
+      -e POSTGRES_PASSWORD=secret \
+      postgres:16
+
+  # Start a Redis cache
+  docker run -d --name cache --network app-network \
+      redis:7
+
+  # Start an application
+  docker run -d --name api --network app-network \
+      -e DB_HOST=db \
+      -e REDIS_HOST=cache \
+      my-api-image
+
+=== Step 3: Verify DNS resolution ===
+
+  docker exec api ping -c 2 db
+  # PING db (172.18.0.2): 56 data bytes
+  # 64 bytes from 172.18.0.2: time=0.087 ms
+
+  docker exec api ping -c 2 cache
+  # PING cache (172.18.0.3): 56 data bytes
+  # 64 bytes from 172.18.0.3: time=0.091 ms
+
+  docker exec api nslookup db
+  # Server:    127.0.0.11
+  # Name:      db
+  # Address:   172.18.0.2
+
+=== Step 4: Test service connectivity ===
+
+  # Test PostgreSQL connection
+  docker exec api pg_isready -h db -p 5432
+  # db:5432 - accepting connections
+
+  # Test Redis connection
+  docker exec api redis-cli -h cache ping
+  # PONG
+
+=== Step 5: Verify network isolation ===
+
+  # Create a second, separate network
+  docker network create isolated-network
+
+  # Start a container on the isolated network
+  docker run -d --name isolated --network isolated-network alpine sleep 3600
+
+  # This container CANNOT reach containers on app-network
+  docker exec isolated ping -c 2 -W 1 db
+  # ping: bad address 'db'  (DNS fails — different network)
+
+=== Step 6: Connect a container to multiple networks ===
+
+  # Connect the API to both networks
+  docker network connect isolated-network api
+
+  # Now API can talk to containers on BOTH networks
+  docker exec api ping -c 1 db        # Works (app-network)
+  docker exec api ping -c 1 isolated   # Works (isolated-network)
+
+EXERCISE
+
+# Generate a test script
+cat > /tmp/container-comm-test.sh << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+echo "=== Container Communication Test Script ==="
+
+# Check if Docker is available
+if ! command -v docker &> /dev/null; then
+    echo "Docker is not installed. Commands to run:"
+    echo ""
+    echo "docker network create app-network"
+    echo "docker run -d --name db --network app-network -e POSTGRES_PASSWORD=secret postgres:16"
+    echo "docker run -d --name cache --network app-network redis:7"
+    echo "docker run -d --name web --network app-network -p 8080:80 nginx"
+    echo ""
+    echo "# Test DNS"
+    echo "docker exec web ping -c 2 db"
+    echo "docker exec web ping -c 2 cache"
+    echo ""
+    echo "# Test isolation"
+    echo "docker network create other-network"
+    echo "docker run -d --name outsider --network other-network alpine sleep 3600"
+    echo "docker exec outsider ping -c 1 -W 1 db  # Should fail"
+    exit 0
+fi
+
+# Clean up any previous run
+docker rm -f db cache web outsider 2>/dev/null || true
+docker network rm app-network other-network 2>/dev/null || true
+
+# Create network
+echo "Creating app-network..."
+docker network create app-network
+
+# Start services
+echo "Starting containers..."
+docker run -d --name db --network app-network -e POSTGRES_PASSWORD=secret postgres:16
+docker run -d --name cache --network app-network redis:7
+docker run -d --name web --network app-network -p 8080:80 nginx
+
+sleep 3
+
+# Test DNS
+echo ""
+echo "Testing DNS resolution:"
+docker exec web ping -c 2 db
+docker exec web ping -c 2 cache
+
+# Test isolation
+echo ""
+echo "Testing network isolation:"
+docker network create other-network
+docker run -d --name outsider --network other-network alpine sleep 3600
+docker exec outsider ping -c 1 -W 1 db 2>&1 || echo "Expected: outsider cannot reach db (different network)"
+
+# Cleanup
+echo ""
+echo "Cleaning up..."
+docker rm -f db cache web outsider 2>/dev/null
+docker network rm app-network other-network 2>/dev/null
+echo "Done!"
+EOF
+chmod +x /tmp/container-comm-test.sh
+
+echo ""
+echo "Test script created at /tmp/container-comm-test.sh"
+echo "Run it when Docker is available."
+echo ""
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Port Mapping and Isolation">
+
+Practice port mapping and test network isolation between different networks:
+
+```bash
+# ============================================
+# Port Mapping and Isolation Exercise
+# ============================================
+
+echo "============================================="
+echo "  Port Mapping and Isolation Exercise"
+echo "============================================="
+echo ""
+
+cat << 'EXERCISE'
+=== Part 1: Port Mapping Patterns ===
+
+# Basic port mapping
+docker run -d -p 8080:80 --name web1 nginx
+# Access: http://localhost:8080
+
+# Bind to specific interface (localhost only)
+docker run -d -p 127.0.0.1:8081:80 --name web2 nginx
+# Access: only from localhost, not from remote machines
+
+# Random port assignment
+docker run -d -P --name web3 nginx
+docker port web3
+# 80/tcp -> 0.0.0.0:32768  (Docker chose 32768)
+
+# Multiple port mappings
+docker run -d \
+    -p 80:80 \
+    -p 443:443 \
+    -p 8443:8443 \
+    --name web4 nginx
+
+# UDP port mapping
+docker run -d -p 514:514/udp --name syslog my-syslog
+
+# Verify what's mapped
+docker port web1
+docker ps --format "table {{.Names}}\t{{.Ports}}"
+
+=== Part 2: Network Isolation ===
+
+# Create isolated networks for different environments
+docker network create --internal prod-backend   # internal = no external access
+docker network create --internal staging-backend
+docker network create frontend
+
+# Production stack
+docker run -d --name prod-db --network prod-backend postgres:16 -e POSTGRES_PASSWORD=secret
+docker run -d --name prod-api --network prod-backend my-api
+docker network connect frontend prod-api
+docker run -d --name prod-web --network frontend -p 80:80 nginx
+
+# Staging stack (completely isolated from production)
+docker run -d --name staging-db --network staging-backend postgres:16 -e POSTGRES_PASSWORD=secret
+docker run -d --name staging-api --network staging-backend my-api
+docker network connect frontend staging-api
+docker run -d --name staging-web --network frontend -p 8080:80 nginx
+
+# Verify isolation: staging cannot reach production database
+docker exec staging-api ping -c 1 -W 1 prod-db
+# FAILS — different networks, cannot communicate
+
+# But both can reach frontend
+docker exec prod-api ping -c 1 prod-web    # Works
+docker exec staging-api ping -c 1 staging-web  # Works
+
+=== Part 3: Inspecting Network Configuration ===
+
+# See all containers on a network
+docker network inspect frontend --format '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{"\n"}}{{end}}'
+
+# See all networks a container is on
+docker inspect prod-api --format '{{range $net, $config := .NetworkSettings.Networks}}{{$net}}: {{$config.IPAddress}}{{"\n"}}{{end}}'
+
+# Check iptables rules for port mapping
+sudo iptables -t nat -L DOCKER -n --line-numbers
+
+EXERCISE
+
+# Create a docker-compose example for network isolation
+cat > /tmp/isolated-networks-compose.yml << 'EOF'
+# docker-compose.yml — Network Isolation Example
+version: "3.8"
+
+services:
+  # --- Frontend Tier ---
+  web:
+    image: nginx
+    ports:
+      - "80:80"
+    networks:
+      - frontend
+    depends_on:
+      - api
+
+  # --- API Tier (bridges frontend and backend) ---
+  api:
+    image: node:20-alpine
+    command: ["node", "server.js"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_HOST=cache
+      - REDIS_PORT=6379
+    networks:
+      - frontend    # Can receive requests from web
+      - backend     # Can reach db and cache
+
+  # --- Backend Tier (isolated) ---
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_PASSWORD=secret
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend     # Only reachable from backend network
+
+  cache:
+    image: redis:7
+    networks:
+      - backend     # Only reachable from backend network
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true    # No external access at all
+
+volumes:
+  db-data:
+
+# Network isolation result:
+#   web → can reach api (frontend network)
+#   api → can reach web (frontend), db (backend), cache (backend)
+#   db → can only be reached from backend network
+#   cache → can only be reached from backend network
+#   db → CANNOT reach the internet (internal network)
+EOF
+
+echo ""
+echo "Docker Compose isolation example:"
+cat /tmp/isolated-networks-compose.yml
+echo ""
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<MiniProject title="Container Network Visualizer">
+
+Build a script that maps all Docker networks, containers, and their connections:
+
+```bash
+cat > ~/container-net-viz.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# ============================================
+# Container Network Visualizer
+# Maps all Docker networks, containers, and connections
+# Usage: ./container-net-viz.sh
+# ============================================
+
+# Check if Docker is available
+if ! command -v docker &> /dev/null; then
+    echo "Docker is not installed or not in PATH."
+    echo "Showing demonstration output instead."
+    echo ""
+
+    cat << 'DEMO'
+╔════════════════════════════════════════════════════════╗
+║           Container Network Visualizer                 ║
+╠════════════════════════════════════════════════════════╣
+║  Host: web-server-01                                   ║
+║  Docker: Docker version 24.0.7                         ║
+║  Date: 2026-03-01 10:30:00                             ║
+╚════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Network Overview
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  NAME              DRIVER    SCOPE    SUBNET            CONTAINERS
+  bridge            bridge    local    172.17.0.0/16     2
+  host              host      local    -                 0
+  none              null      local    -                 0
+  app-frontend      bridge    local    172.18.0.0/16     3
+  app-backend       bridge    local    172.19.0.0/16     3
+  monitoring        bridge    local    172.20.0.0/16     2
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Network: app-frontend (bridge) — 172.18.0.0/16
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CONTAINER         IP              MAC                PORTS
+  nginx             172.18.0.2      02:42:ac:12:00:02  0.0.0.0:80->80/tcp
+  api               172.18.0.3      02:42:ac:12:00:03  0.0.0.0:3000->3000/tcp
+  admin-panel       172.18.0.4      02:42:ac:12:00:04  127.0.0.1:9090->9090/tcp
+
+  Connectivity:
+    nginx ←→ api ←→ admin-panel
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Network: app-backend (bridge, internal) — 172.19.0.0/16
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CONTAINER         IP              MAC                PORTS
+  api               172.19.0.2      02:42:ac:13:00:02  (no host mapping)
+  postgres          172.19.0.3      02:42:ac:13:00:03  (no host mapping)
+  redis             172.19.0.4      02:42:ac:13:00:04  (no host mapping)
+
+  Connectivity:
+    api ←→ postgres ←→ redis
+  Note: INTERNAL network — no external access
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Multi-Network Containers
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CONTAINER    NETWORKS
+  api          app-frontend (172.18.0.3), app-backend (172.19.0.2)
+
+  Topology:
+    ┌─────────────────┐      ┌─────────────────────┐
+    │  app-frontend   │      │  app-backend         │
+    │  ┌───────┐      │      │  ┌──────────┐       │
+    │  │ nginx │      │      │  │ postgres │       │
+    │  └───┬───┘      │      │  └──────────┘       │
+    │      │          │      │       ↑              │
+    │  ┌───▼───┐      │      │  ┌────┴─────┐       │
+    │  │  api  ├──────┼──────┼──┤   api    │       │
+    │  └───────┘      │      │  └────┬─────┘       │
+    │  ┌───────────┐  │      │       │              │
+    │  │admin-panel│  │      │  ┌────▼─────┐       │
+    │  └───────────┘  │      │  │  redis   │       │
+    │                 │      │  └──────────┘       │
+    └─────────────────┘      └─────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Port Mapping Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  HOST PORT    CONTAINER           CONTAINER PORT
+  80           nginx               80/tcp
+  3000         api                 3000/tcp
+  127.0.0.1:9090  admin-panel     9090/tcp
+
+DEMO
+    exit 0
+fi
+
+# --- Docker is available — run live analysis ---
+
+echo "╔════════════════════════════════════════════════════════╗"
+echo "║           Container Network Visualizer                 ║"
+echo "╠════════════════════════════════════════════════════════╣"
+echo "║  Host: $(hostname)"
+echo "║  Docker: $(docker --version 2>/dev/null | head -1)"
+echo "║  Date: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "╚════════════════════════════════════════════════════════╝"
+echo ""
+
+# --- Network Overview ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Network Overview"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+printf "  %-20s %-10s %-8s %-20s %s\n" "NAME" "DRIVER" "SCOPE" "SUBNET" "CONTAINERS"
+printf "  %-20s %-10s %-8s %-20s %s\n" "----" "------" "-----" "------" "----------"
+
+for net_id in $(docker network ls -q); do
+    NET_NAME=$(docker network inspect "$net_id" --format '{{.Name}}')
+    NET_DRIVER=$(docker network inspect "$net_id" --format '{{.Driver}}')
+    NET_SCOPE=$(docker network inspect "$net_id" --format '{{.Scope}}')
+    NET_SUBNET=$(docker network inspect "$net_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+    NET_CONTAINERS=$(docker network inspect "$net_id" --format '{{len .Containers}}')
+
+    [ -z "$NET_SUBNET" ] && NET_SUBNET="-"
+
+    printf "  %-20s %-10s %-8s %-20s %s\n" "$NET_NAME" "$NET_DRIVER" "$NET_SCOPE" "$NET_SUBNET" "$NET_CONTAINERS"
+done
+
+echo ""
+
+# --- Per-Network Details ---
+for net_id in $(docker network ls -q --filter driver=bridge); do
+    NET_NAME=$(docker network inspect "$net_id" --format '{{.Name}}')
+    NET_SUBNET=$(docker network inspect "$net_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+    NET_INTERNAL=$(docker network inspect "$net_id" --format '{{.Internal}}')
+    CONTAINER_COUNT=$(docker network inspect "$net_id" --format '{{len .Containers}}')
+
+    [ "$CONTAINER_COUNT" -eq 0 ] && continue
+
+    INTERNAL_TAG=""
+    [ "$NET_INTERNAL" = "true" ] && INTERNAL_TAG=", internal"
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Network: $NET_NAME (bridge${INTERNAL_TAG}) — $NET_SUBNET"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf "  %-20s %-16s %-20s %s\n" "CONTAINER" "IP" "MAC" "PORTS"
+
+    docker network inspect "$net_id" --format '{{range $id, $config := .Containers}}{{$config.Name}}|{{$config.IPv4Address}}|{{$config.MacAddress}}{{"\n"}}{{end}}' | while IFS='|' read -r cname cip cmac; do
+        [ -z "$cname" ] && continue
+        PORTS=$(docker port "$cname" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+        [ -z "$PORTS" ] && PORTS="(no host mapping)"
+        printf "  %-20s %-16s %-20s %s\n" "$cname" "$cip" "$cmac" "$PORTS"
+    done
+    echo ""
+done
+
+# --- Multi-Network Containers ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Multi-Network Containers"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+docker ps -q 2>/dev/null | while read -r cid; do
+    CNAME=$(docker inspect "$cid" --format '{{.Name}}' | sed 's/\///')
+    NETWORKS=$(docker inspect "$cid" --format '{{range $net, $config := .NetworkSettings.Networks}}{{$net}}({{$config.IPAddress}}) {{end}}')
+    NET_COUNT=$(docker inspect "$cid" --format '{{len .NetworkSettings.Networks}}')
+
+    if [ "$NET_COUNT" -gt 1 ] 2>/dev/null; then
+        printf "  %-20s %s\n" "$CNAME" "$NETWORKS"
+    fi
+done
+
+echo ""
+
+# --- Port Mapping Summary ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Port Mapping Summary"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+printf "  %-25s %-20s %s\n" "HOST PORT" "CONTAINER" "CONTAINER PORT"
+
+docker ps --format '{{.Names}}' 2>/dev/null | while read -r cname; do
+    docker port "$cname" 2>/dev/null | while read -r mapping; do
+        CPORT=$(echo "$mapping" | awk '{print $1}')
+        HPORT=$(echo "$mapping" | awk '{print $3}')
+        printf "  %-25s %-20s %s\n" "$HPORT" "$cname" "$CPORT"
+    done
+done
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Visualization complete"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+SCRIPT
+
+chmod +x ~/container-net-viz.sh
+
+# Run the visualizer
+echo "=== Running Container Network Visualizer ==="
+echo ""
+~/container-net-viz.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Each container has its own network namespace — `localhost` inside a container is that container, not the host
+- Always use custom bridge networks, not the default bridge — custom bridges provide automatic DNS resolution
+- Containers on the same custom network can reach each other by container name (no IP addresses needed)
+- Port mapping (`-p host:container`) is how you expose container services to the outside world
+- Docker Compose creates a default network and enables service-name DNS automatically
+- Use the `internal: true` flag on networks to prevent containers from reaching the internet
+- Containers can connect to multiple networks, acting as bridges between isolated segments
+- Troubleshoot with `docker network inspect`, `docker exec ping/nslookup`, and `docker port`
+
+## What's Next
+
+You understand how containers communicate on a single host and across hosts. In **Networking for DevOps**, you'll tie all your networking knowledge together and apply it to real DevOps scenarios — CI/CD pipelines, microservices architectures, service meshes, monitoring, and incident response.

@@ -1,0 +1,304 @@
+---
+title: "Installing Linux"
+description: "Set up your own Linux environment for hands-on learning — choose from WSL, VirtualBox, or a cloud instance depending on your setup."
+order: 4
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 02-linux-architecture
+objectives:
+  - Set up a Linux environment on your operating system
+  - Configure WSL 2 on Windows
+  - Create a VirtualBox virtual machine with Ubuntu
+  - Launch and connect to a cloud Linux instance
+tags:
+  - linux
+  - installation
+  - setup
+  - wsl
+  - virtualbox
+---
+
+<Callout type="story" title="The Story">
+Every DevOps journey starts with a Linux terminal. But getting one running used to mean wiping your hard drive or buying a new computer. Today, you can have a full Linux environment running in minutes — right alongside your current operating system. Let's get you set up.
+</Callout>
+
+## Choose Your Path
+
+Pick the option that matches your current operating system and comfort level:
+
+<TabGroup>
+<Tab label="WSL 2 (Windows)">
+
+**Best for:** Windows users who want a seamless Linux experience
+
+WSL 2 (Windows Subsystem for Linux) runs a real Linux kernel inside Windows. It's fast, integrated, and the recommended choice for Windows users.
+
+### Prerequisites
+- Windows 10 version 2004+ or Windows 11
+- Admin access to your machine
+
+### Installation
+
+```powershell
+# Open PowerShell as Administrator
+
+# 1. Enable WSL
+wsl --install
+
+# This installs Ubuntu by default.
+# Restart your computer when prompted.
+
+# 2. After restart, open Ubuntu from the Start menu
+# Set your Unix username and password when prompted
+
+# 3. Update the system
+sudo apt update && sudo apt upgrade -y
+```
+
+### Verify Installation
+
+```bash
+# Check you're running WSL 2
+wsl -l -v
+
+# Check Ubuntu version
+lsb_release -a
+
+# Check kernel
+uname -r
+# Should show something like: 5.15.90.1-microsoft-standard-WSL2
+```
+
+### Install Essential Tools
+
+```bash
+sudo apt install -y \
+  build-essential \
+  curl \
+  wget \
+  git \
+  vim \
+  htop \
+  tree \
+  net-tools
+```
+
+<Callout type="tip">
+WSL 2 shares your Windows filesystem. Access Windows files at `/mnt/c/`. Access WSL files from Windows at `\\wsl$\Ubuntu\`.
+</Callout>
+
+</Tab>
+<Tab label="VirtualBox (Any OS)">
+
+**Best for:** Users who want a fully isolated Linux environment
+
+VirtualBox creates a virtual machine running its own copy of Linux.
+
+### Step 1: Download VirtualBox
+Visit virtualbox.org and download the installer for your OS.
+
+### Step 2: Download Ubuntu ISO
+Download Ubuntu Server 22.04 LTS from ubuntu.com/download/server.
+
+### Step 3: Create the VM
+
+1. Open VirtualBox → Click "New"
+2. Name: `ubuntu-lab`, Type: Linux, Version: Ubuntu (64-bit)
+3. Memory: 2048 MB (2 GB minimum)
+4. Hard disk: Create a virtual hard disk, VDI, dynamically allocated, 20 GB
+5. Click "Create"
+
+### Step 4: Install Ubuntu
+
+1. Select your VM → Click "Start"
+2. Select the Ubuntu ISO when prompted
+3. Follow the installer:
+   - Language: English
+   - Install Ubuntu Server
+   - Network: Use defaults
+   - Storage: Use entire disk
+   - Create user: Your name, username, and password
+   - Install OpenSSH server: Yes
+4. Reboot when complete
+
+### Step 5: Connect via SSH
+
+```bash
+# Find your VM's IP address (run inside the VM)
+ip addr show | grep inet
+
+# From your host machine, connect:
+ssh your-username@vm-ip-address
+```
+
+</Tab>
+<Tab label="Cloud Instance">
+
+**Best for:** Users who want a real server experience
+
+Spin up a Linux server on a cloud provider. Most offer free tiers.
+
+### AWS Free Tier
+
+```bash
+# 1. Sign up at aws.amazon.com (requires credit card, but won't charge)
+# 2. Go to EC2 → Launch Instance
+# 3. Choose: Ubuntu Server 22.04 LTS
+# 4. Instance type: t2.micro (free tier)
+# 5. Create a key pair (download the .pem file)
+# 6. Launch
+
+# Connect from your terminal:
+chmod 400 your-key.pem
+ssh -i your-key.pem ubuntu@your-public-ip
+```
+
+### DigitalOcean
+
+```bash
+# 1. Sign up at digitalocean.com ($200 free credit)
+# 2. Create Droplet → Ubuntu 22.04 → Basic → $6/mo
+# 3. Add SSH key or use password
+# 4. Connect:
+ssh root@your-droplet-ip
+```
+
+<Callout type="warning">
+Remember to stop or terminate cloud instances when not in use to avoid charges. Set a billing alert as a safety net.
+</Callout>
+
+</Tab>
+<Tab label="macOS Terminal">
+
+**Best for:** Mac users who want to start immediately
+
+macOS is built on Unix (BSD), so many Linux commands work natively. For a true Linux environment, use Lima or Docker.
+
+```bash
+# Your Mac Terminal already supports most commands:
+ls, cd, mkdir, cp, mv, grep, awk, sed, curl, ssh
+
+# For a full Linux VM using Lima:
+brew install lima
+limactl start default
+
+# Access the Linux VM:
+limactl shell default
+```
+
+</Tab>
+</TabGroup>
+
+<Exercise number={1} title="Verify Your Environment">
+
+Regardless of which method you chose, run these commands to verify everything works:
+
+```bash
+# 1. Check your user
+whoami
+
+# 2. Check the OS
+cat /etc/os-release
+
+# 3. Check available disk space
+df -h /
+
+# 4. Check available memory
+free -h
+
+# 5. Check internet connectivity
+ping -c 3 google.com
+
+# 6. Check package manager works
+sudo apt update 2>/dev/null || sudo yum check-update 2>/dev/null
+```
+
+All commands should run without errors.
+
+</Exercise>
+
+<Exercise number={2} title="Set Up Your Learning Environment">
+
+Configure your system for the rest of this course:
+
+```bash
+# Create a directory for course work
+mkdir -p ~/devops-learning
+cd ~/devops-learning
+
+# Create a log of your progress
+echo "Started DevOps learning on $(date)" > progress.log
+
+# Verify git is installed
+git --version || sudo apt install -y git
+
+# Set up a basic bash configuration
+echo 'export PS1="\[\e[32m\]\u@\h\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ "' >> ~/.bashrc
+source ~/.bashrc
+```
+
+</Exercise>
+
+## Troubleshooting Installation
+
+<Callout type="danger" title="Common Issues">
+
+**WSL won't install:**
+- Ensure virtualization is enabled in BIOS
+- Run `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`
+
+**VirtualBox VM won't start:**
+- Enable VT-x/AMD-V in BIOS settings
+- Disable Hyper-V if on Windows: `bcdedit /set hypervisorlaunchtype off`
+
+**SSH connection refused:**
+- Ensure SSH is installed: `sudo apt install openssh-server`
+- Check it's running: `sudo systemctl status ssh`
+- Check firewall: `sudo ufw allow ssh`
+</Callout>
+
+<MiniProject title="Environment Documentation">
+
+Create a document that records your Linux environment setup. This is a real DevOps practice — documenting your infrastructure:
+
+```bash
+cat > ~/devops-learning/my-environment.md << 'REPORT'
+# My Linux Learning Environment
+
+## Setup Method
+<!-- WSL 2 / VirtualBox / Cloud / macOS -->
+
+## System Info
+- **OS:** (output of `cat /etc/os-release | grep PRETTY_NAME`)
+- **Kernel:** (output of `uname -r`)
+- **Architecture:** (output of `uname -m`)
+- **Memory:** (output of `free -h | grep Mem`)
+- **Disk:** (output of `df -h / | tail -1`)
+
+## Installed Tools
+- git: (output of `git --version`)
+- curl: (output of `curl --version | head -1`)
+
+## Date Setup
+<!-- Today's date -->
+REPORT
+
+echo "Created environment documentation at ~/devops-learning/my-environment.md"
+```
+
+Fill in the details. You've just practiced infrastructure documentation.
+
+</MiniProject>
+
+## Key Takeaways
+
+- WSL 2 is the easiest way for Windows users to get a real Linux environment
+- VirtualBox provides a fully isolated virtual machine on any OS
+- Cloud instances give you a real server experience with free tiers available
+- macOS Terminal supports most Linux commands natively
+- Always verify your installation with basic commands before proceeding
+
+## What's Next
+
+Now that you have a working Linux environment, it's time to master the tool you'll use every day: the terminal. In **Terminal Mastery**, you'll learn bash shortcuts, command history, tab completion, and the skills that make experienced engineers look like wizards.

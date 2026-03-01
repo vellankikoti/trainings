@@ -1,0 +1,868 @@
+{
+  "id": "containerization-docker-fundamentals",
+  "moduleSlug": "docker-fundamentals",
+  "pathSlug": "containerization",
+  "title": "Docker Fundamentals Assessment",
+  "description": "Test your Docker fundamentals knowledge across containers, images, volumes, networking, Compose, and production workflows. 60 questions covering all 15 lessons.",
+  "settings": {
+    "questionsPerAttempt": 35,
+    "passingScore": 80,
+    "timeLimit": 45,
+    "shuffleQuestions": true,
+    "shuffleOptions": true,
+    "showResults": true,
+    "attemptsAllowed": 3
+  },
+  "questions": [
+    {
+      "id": "df-q01",
+      "type": "multiple_choice",
+      "question": "What problem did Docker solve that traditional virtual machines could not efficiently address?",
+      "options": [
+        "Running multiple operating systems on a single machine",
+        "Lightweight, portable application packaging with fast startup times",
+        "Providing hardware-level isolation between processes",
+        "Eliminating the need for an operating system entirely"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Docker uses OS-level containerization to package applications with their dependencies, providing lightweight and portable units that start in seconds, unlike VMs which require full OS boots.",
+      "difficulty": "beginner",
+      "lessonRef": "01-the-docker-story"
+    },
+    {
+      "id": "df-q02",
+      "type": "true_false",
+      "question": "Docker containers include a full guest operating system, just like virtual machines.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "Containers share the host OS kernel and only package the application and its dependencies, making them much lighter than VMs which include a full guest OS.",
+      "difficulty": "beginner",
+      "lessonRef": "01-the-docker-story"
+    },
+    {
+      "id": "df-q03",
+      "type": "multiple_choice",
+      "question": "Which component is responsible for managing containers, images, and resources on a Docker host?",
+      "options": [
+        "Docker CLI",
+        "Docker Compose",
+        "Docker Daemon (dockerd)",
+        "Docker Hub"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The Docker Daemon (dockerd) is the background service that manages Docker objects including containers, images, volumes, and networks. The CLI communicates with the daemon via a REST API.",
+      "difficulty": "beginner",
+      "lessonRef": "01-the-docker-story"
+    },
+    {
+      "id": "df-q04",
+      "type": "multiple_choice",
+      "question": "What container runtime interface does Docker use under the hood to create and run containers?",
+      "options": [
+        "hypervisor",
+        "containerd and runc",
+        "systemd",
+        "LXC exclusively"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Docker uses containerd as its high-level container runtime and runc as the low-level OCI-compliant runtime that actually creates and runs the containers using Linux kernel features like namespaces and cgroups.",
+      "difficulty": "intermediate",
+      "lessonRef": "01-the-docker-story"
+    },
+    {
+      "id": "df-q05",
+      "type": "code_completion",
+      "question": "Complete the command to run an Nginx container in detached mode, mapping host port 8080 to container port 80:\n\ndocker run _____ -p 8080:80 nginx",
+      "options": [
+        "A) -d",
+        "B) -it",
+        "C) --rm",
+        "D) -e"
+      ],
+      "correctAnswer": "A) -d",
+      "explanation": "The -d flag runs the container in detached mode (in the background). -it is for interactive terminal, --rm removes the container on exit, and -e sets environment variables.",
+      "difficulty": "beginner",
+      "lessonRef": "02-running-containers"
+    },
+    {
+      "id": "df-q06",
+      "type": "multiple_choice",
+      "question": "What happens to data inside a container when the container is removed?",
+      "options": [
+        "Data is automatically backed up to Docker Hub",
+        "Data persists on the host filesystem indefinitely",
+        "Data is lost unless it was stored in a volume or bind mount",
+        "Data is moved to a stopped container archive"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Containers have a writable layer that is ephemeral. When a container is removed, all data in its writable layer is lost. Volumes and bind mounts provide persistent storage outside the container's lifecycle.",
+      "difficulty": "beginner",
+      "lessonRef": "02-running-containers"
+    },
+    {
+      "id": "df-q07",
+      "type": "multiple_choice",
+      "question": "Which command allows you to execute an interactive bash shell inside a running container named 'web'?",
+      "options": [
+        "docker attach web bash",
+        "docker exec -it web bash",
+        "docker run -it web bash",
+        "docker shell web"
+      ],
+      "correctAnswer": 1,
+      "explanation": "docker exec -it runs a new command inside a running container. The -i flag keeps stdin open and -t allocates a pseudo-TTY. docker run would create a new container, not enter an existing one.",
+      "difficulty": "intermediate",
+      "lessonRef": "02-running-containers"
+    },
+    {
+      "id": "df-q08",
+      "type": "code_completion",
+      "question": "Complete the command to view the logs of a running container and follow new output in real-time:\n\ndocker logs _____ my-container",
+      "options": [
+        "A) -f",
+        "B) -a",
+        "C) -v",
+        "D) -l"
+      ],
+      "correctAnswer": "A) -f",
+      "explanation": "The -f (or --follow) flag streams container logs in real-time, similar to 'tail -f'. This is essential for debugging running containers.",
+      "difficulty": "beginner",
+      "lessonRef": "02-running-containers"
+    },
+    {
+      "id": "df-q09",
+      "type": "multiple_choice",
+      "question": "In a Dockerfile, what is the difference between the COPY and ADD instructions?",
+      "options": [
+        "There is no difference; they are aliases",
+        "COPY only copies files; ADD can also fetch URLs and auto-extract tar archives",
+        "ADD only works with local files; COPY works with remote URLs",
+        "COPY is deprecated in favor of ADD"
+      ],
+      "correctAnswer": 1,
+      "explanation": "ADD has extra features: it can fetch files from URLs and automatically extract compressed tar archives. COPY is simpler and preferred for straightforward file copying because it is more transparent and predictable.",
+      "difficulty": "intermediate",
+      "lessonRef": "03-dockerfile-basics"
+    },
+    {
+      "id": "df-q10",
+      "type": "code_completion",
+      "question": "Complete the Dockerfile instruction to set the working directory for subsequent commands:\n\n_____ /app\nCOPY . .\nRUN npm install",
+      "options": [
+        "A) WORKDIR",
+        "B) CD",
+        "C) DIR",
+        "D) CHDIR"
+      ],
+      "correctAnswer": "A) WORKDIR",
+      "explanation": "WORKDIR sets the working directory for any RUN, CMD, ENTRYPOINT, COPY, and ADD instructions that follow it. If the directory doesn't exist, it will be created automatically.",
+      "difficulty": "beginner",
+      "lessonRef": "03-dockerfile-basics"
+    },
+    {
+      "id": "df-q11",
+      "type": "multiple_choice",
+      "question": "Which Dockerfile instructions create new layers in the resulting Docker image?",
+      "options": [
+        "Only RUN instructions create layers",
+        "FROM, RUN, COPY, and ADD each create new layers",
+        "Every instruction including ENV and LABEL creates full layers",
+        "Layers are only created when the image is pushed to a registry"
+      ],
+      "correctAnswer": 1,
+      "explanation": "FROM, RUN, COPY, and ADD each create new read-only layers. Other instructions like ENV, LABEL, and CMD add minimal metadata. Layers are cached and reused to speed up subsequent builds.",
+      "difficulty": "intermediate",
+      "lessonRef": "03-dockerfile-basics"
+    },
+    {
+      "id": "df-q12",
+      "type": "multiple_choice",
+      "question": "What is the key difference between CMD and ENTRYPOINT in a Dockerfile?",
+      "options": [
+        "CMD runs at build time, ENTRYPOINT runs at container start",
+        "ENTRYPOINT defines the main executable and CMD provides default arguments that can be overridden",
+        "CMD can only run one command while ENTRYPOINT can run multiple",
+        "There is no practical difference between them"
+      ],
+      "correctAnswer": 1,
+      "explanation": "ENTRYPOINT sets the main command that always executes. CMD provides default arguments to ENTRYPOINT that can be overridden at runtime. When used together, ENTRYPOINT + CMD create a flexible container interface.",
+      "difficulty": "intermediate",
+      "lessonRef": "03-dockerfile-basics"
+    },
+    {
+      "id": "df-q13",
+      "type": "multiple_choice",
+      "question": "How does Docker's Union File System work with image layers?",
+      "options": [
+        "Each layer replaces the previous one entirely",
+        "Layers are stacked; the container sees a merged view with a writable top layer",
+        "Layers are compressed into a single file at runtime",
+        "Only the topmost layer is accessible to the container"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Docker's Union File System (like OverlayFS) stacks read-only image layers and adds a thin writable layer on top for the container. The container sees a unified view of all layers merged together.",
+      "difficulty": "intermediate",
+      "lessonRef": "04-images-and-layers"
+    },
+    {
+      "id": "df-q14",
+      "type": "multiple_choice",
+      "question": "What does the 'docker image prune' command do?",
+      "options": [
+        "Removes all images from the system",
+        "Removes only dangling (untagged) images",
+        "Removes running containers and their images",
+        "Compresses images to save disk space"
+      ],
+      "correctAnswer": 1,
+      "explanation": "docker image prune removes dangling images -- those that are untagged and not referenced by any container. Use 'docker image prune -a' to also remove images not used by any existing container.",
+      "difficulty": "intermediate",
+      "lessonRef": "04-images-and-layers"
+    },
+    {
+      "id": "df-q15",
+      "type": "multiple_choice",
+      "question": "What happens when two Docker images share common base layers on the same host?",
+      "options": [
+        "Each image stores its own copy of every layer",
+        "Docker stores shared layers only once on disk thanks to content-addressable storage",
+        "The second image creates symbolic links to the first image's files",
+        "Shared layers are automatically compressed to save space"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Docker's content-addressable storage means identical layers are stored only once regardless of how many images reference them. This saves significant disk space and speeds up pulls when layers are already present.",
+      "difficulty": "intermediate",
+      "lessonRef": "04-images-and-layers"
+    },
+    {
+      "id": "df-q16",
+      "type": "code_completion",
+      "question": "Complete the command to inspect the layer history and sizes of a Docker image:\n\ndocker _____ nginx:latest",
+      "options": [
+        "A) history",
+        "B) inspect",
+        "C) layers",
+        "D) info"
+      ],
+      "correctAnswer": "A) history",
+      "explanation": "docker history shows each layer of the image, including the instruction that created it and the size. This is useful for understanding image composition and identifying large layers.",
+      "difficulty": "beginner",
+      "lessonRef": "04-images-and-layers"
+    },
+    {
+      "id": "df-q17",
+      "type": "multiple_choice",
+      "question": "What is the primary advantage of using named volumes over bind mounts?",
+      "options": [
+        "Named volumes are faster because they bypass the filesystem",
+        "Named volumes are managed by Docker and portable across hosts, while bind mounts depend on host directory structure",
+        "Named volumes can store more data than bind mounts",
+        "Bind mounts are deprecated and named volumes are the only option"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Named volumes are managed entirely by Docker, stored in Docker's storage area, and are portable. Bind mounts map to specific host paths, creating a dependency on the host's directory structure.",
+      "difficulty": "intermediate",
+      "lessonRef": "05-volumes-and-persistence"
+    },
+    {
+      "id": "df-q18",
+      "type": "code_completion",
+      "question": "Complete the docker run command to mount a named volume called 'db-data' to /var/lib/postgresql/data in the container:\n\ndocker run -d -v _____:/var/lib/postgresql/data postgres",
+      "options": [
+        "A) db-data",
+        "B) /db-data",
+        "C) ./db-data",
+        "D) volume:db-data"
+      ],
+      "correctAnswer": "A) db-data",
+      "explanation": "Named volumes use a simple name without a path prefix. Docker recognizes 'db-data' as a named volume (creates it if it doesn't exist). Paths starting with / or ./ are treated as bind mounts.",
+      "difficulty": "intermediate",
+      "lessonRef": "05-volumes-and-persistence"
+    },
+    {
+      "id": "df-q19",
+      "type": "multiple_choice",
+      "question": "What happens to a named Docker volume when the container using it is removed?",
+      "options": [
+        "The volume is automatically deleted",
+        "The volume persists and can be attached to other containers",
+        "The volume is archived in a backup directory",
+        "The volume becomes read-only"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Named volumes persist independently of containers. Removing a container does not remove its volumes. Volumes must be explicitly removed with 'docker volume rm' or 'docker volume prune'.",
+      "difficulty": "beginner",
+      "lessonRef": "05-volumes-and-persistence"
+    },
+    {
+      "id": "df-q20",
+      "type": "true_false",
+      "question": "The VOLUME instruction in a Dockerfile creates a named volume that persists data even after the container is removed.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "The VOLUME instruction creates an anonymous volume, not a named volume. Anonymous volumes get random names and while they persist after container removal, they are hard to identify and manage. Use named volumes at runtime for reliable persistence.",
+      "difficulty": "advanced",
+      "lessonRef": "05-volumes-and-persistence"
+    },
+    {
+      "id": "df-q21",
+      "type": "multiple_choice",
+      "question": "Which Docker network driver is used by default when you create a container without specifying a network?",
+      "options": [
+        "host",
+        "none",
+        "bridge",
+        "overlay"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The bridge driver is Docker's default network driver. It creates a private internal network on the host and containers connect to it, communicating through NAT. Custom bridge networks also provide DNS resolution between containers.",
+      "difficulty": "beginner",
+      "lessonRef": "06-networking-essentials"
+    },
+    {
+      "id": "df-q22",
+      "type": "multiple_choice",
+      "question": "How can containers on a custom bridge network communicate with each other?",
+      "options": [
+        "Only via IP addresses",
+        "By container name, thanks to Docker's built-in DNS",
+        "Only through published ports on the host",
+        "They cannot communicate with each other"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Custom bridge networks provide automatic DNS resolution, allowing containers to reach each other by name. The default bridge network does NOT provide this -- containers can only communicate by IP address on the default bridge.",
+      "difficulty": "advanced",
+      "lessonRef": "06-networking-essentials"
+    },
+    {
+      "id": "df-q23",
+      "type": "code_completion",
+      "question": "Complete the command to create a custom Docker bridge network named 'app-net':\n\ndocker network _____ app-net",
+      "options": [
+        "A) create",
+        "B) add",
+        "C) new",
+        "D) init"
+      ],
+      "correctAnswer": "A) create",
+      "explanation": "docker network create creates a new network. By default it uses the bridge driver. You can specify --driver overlay for multi-host networking or --driver host for host networking.",
+      "difficulty": "intermediate",
+      "lessonRef": "06-networking-essentials"
+    },
+    {
+      "id": "df-q24",
+      "type": "multiple_choice",
+      "question": "What does the '--network host' flag do when running a container?",
+      "options": [
+        "Creates a new network called 'host'",
+        "Removes all network isolation so the container shares the host's network stack directly",
+        "Assigns the container a public IP address",
+        "Connects the container to all available networks"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The host network mode removes network isolation between the container and the host. The container shares the host's network namespace, meaning it uses the host's IP and ports directly. No port mapping is needed, but you lose network isolation.",
+      "difficulty": "advanced",
+      "lessonRef": "06-networking-essentials"
+    },
+    {
+      "id": "df-q25",
+      "type": "multiple_choice",
+      "question": "In a Docker Compose file, what does the 'depends_on' directive control?",
+      "options": [
+        "It ensures a service is fully healthy before dependents start",
+        "It controls the order in which services are started, but does not wait for readiness",
+        "It shares volumes between services",
+        "It links the network namespaces of services"
+      ],
+      "correctAnswer": 1,
+      "explanation": "depends_on only controls startup order. It starts dependencies first, but does not wait for them to be 'ready'. For readiness checks, you need depends_on with a condition: service_healthy and a healthcheck defined on the dependency.",
+      "difficulty": "intermediate",
+      "lessonRef": "07-docker-compose"
+    },
+    {
+      "id": "df-q26",
+      "type": "code_completion",
+      "question": "Complete the Compose command to start all services in detached mode:\n\ndocker compose _____ -d",
+      "options": [
+        "A) up",
+        "B) start",
+        "C) run",
+        "D) create"
+      ],
+      "correctAnswer": "A) up",
+      "explanation": "docker compose up creates and starts all services defined in the compose file. The -d flag runs them in detached mode. 'start' only starts existing stopped containers, while 'up' creates them if they don't exist.",
+      "difficulty": "beginner",
+      "lessonRef": "07-docker-compose"
+    },
+    {
+      "id": "df-q27",
+      "type": "multiple_choice",
+      "question": "How does Docker Compose handle networking between services by default?",
+      "options": [
+        "All services share the host network",
+        "Each service gets its own isolated network",
+        "Compose creates a default network and all services join it, reachable by service name",
+        "Services must explicitly define network connections"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Docker Compose automatically creates a default bridge network for the project. All services join this network and can reach each other using the service name defined in the compose file as the hostname.",
+      "difficulty": "advanced",
+      "lessonRef": "07-docker-compose"
+    },
+    {
+      "id": "df-q28",
+      "type": "code_completion",
+      "question": "Complete the Compose file snippet to mount a named volume for database persistence:\n\nservices:\n  db:\n    image: postgres:16\n    volumes:\n      - pgdata:/var/lib/postgresql/data\n\n_____:\n  pgdata:",
+      "options": [
+        "A) volumes",
+        "B) mounts",
+        "C) storage",
+        "D) disks"
+      ],
+      "correctAnswer": "A) volumes",
+      "explanation": "Named volumes in Compose must be declared in the top-level 'volumes' section. This tells Compose to create and manage the volume. Without this declaration, Compose will throw an error for undefined volumes.",
+      "difficulty": "intermediate",
+      "lessonRef": "07-docker-compose"
+    },
+    {
+      "id": "df-q29",
+      "type": "multiple_choice",
+      "question": "Why should you avoid running processes as root inside a Docker container?",
+      "options": [
+        "Root processes use more memory",
+        "If a container is compromised, root inside the container could exploit kernel vulnerabilities to gain host access",
+        "Docker does not allow root processes",
+        "Root processes cannot access mounted volumes"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Running as root in a container poses a security risk. If an attacker escapes the container (via a kernel vulnerability), they would have root access on the host. Using a non-root USER reduces the blast radius of a container breakout.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-docker-security"
+    },
+    {
+      "id": "df-q30",
+      "type": "code_completion",
+      "question": "Complete the Dockerfile instruction to run the application as a non-root user:\n\nRUN addgroup -S appgroup && adduser -S appuser -G appgroup\n_____ appuser\nCMD [\"node\", \"server.js\"]",
+      "options": [
+        "A) USER",
+        "B) RUNAS",
+        "C) SWITCH",
+        "D) SETUSER"
+      ],
+      "correctAnswer": "A) USER",
+      "explanation": "The USER instruction sets the user (and optionally group) for subsequent RUN, CMD, and ENTRYPOINT instructions. It is a Docker security best practice to switch to a non-root user before running the application.",
+      "difficulty": "beginner",
+      "lessonRef": "08-docker-security"
+    },
+    {
+      "id": "df-q31",
+      "type": "true_false",
+      "question": "Running a container with the '--privileged' flag gives it full access to all host devices and disables most security features.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "The --privileged flag disables nearly all container security features including seccomp, AppArmor, and capability restrictions. It gives the container access to all host devices. It should be avoided in production unless absolutely necessary.",
+      "difficulty": "advanced",
+      "lessonRef": "08-docker-security"
+    },
+    {
+      "id": "df-q32",
+      "type": "multiple_choice",
+      "question": "What is the purpose of Docker Content Trust (DCT)?",
+      "options": [
+        "Encrypting container traffic",
+        "Verifying the integrity and publisher of Docker images through digital signatures",
+        "Managing user access control for Docker commands",
+        "Compressing images for faster download"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Docker Content Trust uses digital signatures to verify image integrity and publisher identity. When enabled (DOCKER_CONTENT_TRUST=1), Docker will only pull and run signed images, preventing tampered or unofficial images from being used.",
+      "difficulty": "advanced",
+      "lessonRef": "08-docker-security"
+    },
+    {
+      "id": "df-q33",
+      "type": "multiple_choice",
+      "question": "Which environment variable configuration method is preferred for sensitive data like database passwords in production?",
+      "options": [
+        "Hardcoding values in the Dockerfile with ENV",
+        "Passing them with docker run -e on the command line",
+        "Using Docker secrets or a secrets management tool",
+        "Storing them in the image's /etc/environment file"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Docker secrets (in Swarm) or external secrets managers are the most secure approach. ENV in Dockerfiles bakes secrets into the image. Command-line -e values appear in process listings and docker inspect output. Secrets are mounted as files and never exposed in image layers.",
+      "difficulty": "advanced",
+      "lessonRef": "09-environment-configuration"
+    },
+    {
+      "id": "df-q34",
+      "type": "code_completion",
+      "question": "Complete the Dockerfile instruction to set a default environment variable that can be overridden at runtime:\n\n_____ DATABASE_HOST=localhost",
+      "options": [
+        "A) ENV",
+        "B) ARG",
+        "C) SET",
+        "D) VAR"
+      ],
+      "correctAnswer": "A) ENV",
+      "explanation": "ENV sets environment variables that persist in the running container and can be overridden with docker run -e. ARG defines build-time variables only available during the image build process, not at runtime.",
+      "difficulty": "beginner",
+      "lessonRef": "09-environment-configuration"
+    },
+    {
+      "id": "df-q35",
+      "type": "multiple_choice",
+      "question": "What is the difference between ARG and ENV in a Dockerfile?",
+      "options": [
+        "ARG is available at runtime; ENV is only available at build time",
+        "ARG is only available during the build process; ENV persists in the running container",
+        "They are identical and interchangeable",
+        "ARG is for numeric values; ENV is for strings"
+      ],
+      "correctAnswer": 1,
+      "explanation": "ARG defines variables available only during the docker build process and can be set with --build-arg. ENV sets environment variables that persist in the image and are available in running containers.",
+      "difficulty": "intermediate",
+      "lessonRef": "09-environment-configuration"
+    },
+    {
+      "id": "df-q36",
+      "type": "true_false",
+      "question": "Environment variables defined with the ENV instruction in a Dockerfile cannot be overridden when starting a container.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "ENV values serve as defaults but can be overridden at runtime using docker run -e, docker compose environment sections, or .env files. This is a key feature for configuring containers for different environments.",
+      "difficulty": "intermediate",
+      "lessonRef": "09-environment-configuration"
+    },
+    {
+      "id": "df-q37",
+      "type": "multiple_choice",
+      "question": "Which Docker command is used to tag a local image before pushing it to a registry?",
+      "options": [
+        "docker rename",
+        "docker image tag",
+        "docker label",
+        "docker push --tag"
+      ],
+      "correctAnswer": 1,
+      "explanation": "docker image tag (or docker tag) creates a new tag that references an existing image. You must tag images with the registry/repository:tag format before pushing. For example: docker tag myapp registry.example.com/myapp:v1.0.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-working-with-registries"
+    },
+    {
+      "id": "df-q38",
+      "type": "multiple_choice",
+      "question": "What is the correct image naming convention for pushing to a private registry at registry.example.com?",
+      "options": [
+        "myapp:latest",
+        "registry.example.com/myapp:latest",
+        "docker.io/myapp:latest",
+        "private/myapp:latest"
+      ],
+      "correctAnswer": 1,
+      "explanation": "To push to a private registry, the image name must be prefixed with the registry hostname: registry.example.com/myapp:latest. Without a registry prefix, Docker defaults to Docker Hub (docker.io).",
+      "difficulty": "intermediate",
+      "lessonRef": "10-working-with-registries"
+    },
+    {
+      "id": "df-q39",
+      "type": "true_false",
+      "question": "When you pull an image tagged as 'latest', Docker guarantees it is the most recently built version of that image.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "'latest' is just a default tag with no special semantic meaning. It does not automatically track the newest build. It is simply assigned when no tag is specified. Production deployments should always use explicit version tags.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-working-with-registries"
+    },
+    {
+      "id": "df-q40",
+      "type": "code_completion",
+      "question": "Complete the command to push a tagged image to Docker Hub:\n\ndocker _____ myuser/myapp:v2.0",
+      "options": [
+        "A) push",
+        "B) upload",
+        "C) publish",
+        "D) deploy"
+      ],
+      "correctAnswer": "A) push",
+      "explanation": "docker push uploads an image to a registry. The image must be tagged with the appropriate registry/repository:tag format. You must be logged in with 'docker login' before pushing.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-working-with-registries"
+    },
+    {
+      "id": "df-q41",
+      "type": "multiple_choice",
+      "question": "What is the primary benefit of using a multi-stage build in a Dockerfile?",
+      "options": [
+        "It allows running multiple containers from one Dockerfile",
+        "It produces smaller final images by discarding build tools and intermediate artifacts",
+        "It enables parallel execution of build steps",
+        "It allows using multiple base operating systems in one image"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Multi-stage builds use multiple FROM instructions. Build tools, source code, and intermediate artifacts stay in earlier stages. Only the necessary runtime files are copied to the final stage, dramatically reducing image size.",
+      "difficulty": "intermediate",
+      "lessonRef": "11-multi-stage-builds"
+    },
+    {
+      "id": "df-q42",
+      "type": "code_completion",
+      "question": "Complete the multi-stage Dockerfile to copy the built binary from the 'builder' stage:\n\nFROM golang:1.21 AS builder\nWORKDIR /app\nCOPY . .\nRUN go build -o myapp\n\nFROM alpine:3.18\n_____ /app/myapp /usr/local/bin/myapp\nCMD [\"myapp\"]",
+      "options": [
+        "A) COPY --from=builder",
+        "B) COPY --stage=builder",
+        "C) IMPORT --from=builder",
+        "D) ADD --from=builder"
+      ],
+      "correctAnswer": "A) COPY --from=builder",
+      "explanation": "COPY --from=builder copies files from a named build stage. The stage is named using 'AS builder' in the FROM instruction. This is the key mechanism that makes multi-stage builds work.",
+      "difficulty": "advanced",
+      "lessonRef": "11-multi-stage-builds"
+    },
+    {
+      "id": "df-q43",
+      "type": "true_false",
+      "question": "In a multi-stage Docker build, all stages are included in the final image.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "Only the last stage (or a stage specified with --target) produces the final image. Previous stages are used during the build process but are discarded from the final image. Only files explicitly copied from earlier stages are included.",
+      "difficulty": "intermediate",
+      "lessonRef": "11-multi-stage-builds"
+    },
+    {
+      "id": "df-q44",
+      "type": "multiple_choice",
+      "question": "How can you build only a specific stage in a multi-stage Dockerfile?",
+      "options": [
+        "docker build --stage builder .",
+        "docker build --target builder .",
+        "docker build --only builder .",
+        "docker build --from builder ."
+      ],
+      "correctAnswer": 1,
+      "explanation": "The --target flag tells Docker to stop building at a specific stage. This is useful for creating development images (with build tools) from the same Dockerfile that produces lean production images.",
+      "difficulty": "advanced",
+      "lessonRef": "11-multi-stage-builds"
+    },
+    {
+      "id": "df-q45",
+      "type": "multiple_choice",
+      "question": "What is the purpose of the HEALTHCHECK instruction in a Dockerfile?",
+      "options": [
+        "To monitor host system resources",
+        "To automatically restart failed containers",
+        "To define a command that Docker runs periodically to check if the container is still working correctly",
+        "To validate the Dockerfile syntax before building"
+      ],
+      "correctAnswer": 2,
+      "explanation": "HEALTHCHECK defines a command (like curl or wget) that Docker runs periodically to verify the container is healthy. If the health check fails, the container is marked as unhealthy, which orchestrators can use to trigger restarts.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-health-checks-and-restart-policies"
+    },
+    {
+      "id": "df-q46",
+      "type": "code_completion",
+      "question": "Complete the Dockerfile HEALTHCHECK instruction to check if an HTTP server is responding:\n\nHEALTHCHECK --interval=30s --timeout=5s --retries=3 \\\n  _____ curl -f http://localhost:8080/health || exit 1",
+      "options": [
+        "A) CMD",
+        "B) RUN",
+        "C) EXEC",
+        "D) CHECK"
+      ],
+      "correctAnswer": "A) CMD",
+      "explanation": "HEALTHCHECK uses CMD to specify the health check command. The command should return 0 for healthy, 1 for unhealthy. The --interval, --timeout, and --retries flags control the check frequency and failure thresholds.",
+      "difficulty": "advanced",
+      "lessonRef": "12-health-checks-and-restart-policies"
+    },
+    {
+      "id": "df-q47",
+      "type": "multiple_choice",
+      "question": "Which restart policy ensures a container always restarts unless it was explicitly stopped by the user?",
+      "options": [
+        "always",
+        "unless-stopped",
+        "on-failure",
+        "no"
+      ],
+      "correctAnswer": 1,
+      "explanation": "'unless-stopped' restarts the container automatically unless it was explicitly stopped (docker stop). Unlike 'always', it does not restart containers that were stopped before the Docker daemon was restarted.",
+      "difficulty": "advanced",
+      "lessonRef": "12-health-checks-and-restart-policies"
+    },
+    {
+      "id": "df-q48",
+      "type": "true_false",
+      "question": "The restart policy 'on-failure:5' will restart a container a maximum of 5 times if it exits with a non-zero exit code.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "The on-failure policy with a max retry count (on-failure:5) restarts the container only when it exits with a non-zero status, up to the specified maximum number of attempts. This prevents infinite restart loops for fatally broken containers.",
+      "difficulty": "advanced",
+      "lessonRef": "12-health-checks-and-restart-policies"
+    },
+    {
+      "id": "df-q49",
+      "type": "multiple_choice",
+      "question": "What is the primary purpose of the .dockerignore file?",
+      "options": [
+        "To list files that should not be installed in the container",
+        "To exclude files and directories from the Docker build context sent to the daemon",
+        "To prevent certain images from being pulled",
+        "To ignore Docker Compose services during startup"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The .dockerignore file prevents specified files and directories from being sent to the Docker daemon as part of the build context. This speeds up builds and prevents sensitive files (like .git, node_modules, or .env) from being included in images.",
+      "difficulty": "intermediate",
+      "lessonRef": "13-best-practices"
+    },
+    {
+      "id": "df-q50",
+      "type": "multiple_choice",
+      "question": "Why is it important to order Dockerfile instructions from least frequently changed to most frequently changed?",
+      "options": [
+        "Docker requires this order for syntax validation",
+        "It minimizes the number of layers in the image",
+        "It maximizes build cache utilization, making rebuilds faster",
+        "It reduces the final image size"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Docker's build cache invalidates a layer and all subsequent layers when a change is detected. Placing stable layers (OS packages, dependencies) before volatile layers (application code) means Docker can reuse cached layers for unchanged steps.",
+      "difficulty": "intermediate",
+      "lessonRef": "13-best-practices"
+    },
+    {
+      "id": "df-q51",
+      "type": "code_completion",
+      "question": "Complete the Dockerfile to properly leverage build cache for a Node.js app by installing dependencies before copying source code:\n\nWORKDIR /app\nCOPY package.json package-lock.json ./\nRUN npm ci\n_____ . .",
+      "options": [
+        "A) COPY",
+        "B) ADD",
+        "C) IMPORT",
+        "D) MOUNT"
+      ],
+      "correctAnswer": "A) COPY",
+      "explanation": "By copying package.json first, running npm ci, then copying the rest of the source code, you ensure the npm ci layer is cached unless dependencies change. COPY . . adds the application source, which changes frequently.",
+      "difficulty": "intermediate",
+      "lessonRef": "13-best-practices"
+    },
+    {
+      "id": "df-q52",
+      "type": "true_false",
+      "question": "Using 'RUN apt-get update && apt-get install -y curl' in a single RUN instruction is better practice than splitting them into two separate RUN instructions.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "Combining apt-get update and install in one RUN prevents a stale package cache problem. If separated, the cached 'update' layer might be used with a newer 'install' layer, causing package-not-found errors. It also reduces the number of layers.",
+      "difficulty": "advanced",
+      "lessonRef": "13-best-practices"
+    },
+    {
+      "id": "df-q53",
+      "type": "multiple_choice",
+      "question": "Which command shows real-time CPU, memory, and network usage for running containers?",
+      "options": [
+        "docker top",
+        "docker stats",
+        "docker inspect",
+        "docker info"
+      ],
+      "correctAnswer": 1,
+      "explanation": "docker stats displays a live stream of resource usage statistics for running containers, including CPU percentage, memory usage/limit, network I/O, and block I/O.",
+      "difficulty": "beginner",
+      "lessonRef": "14-debugging-and-troubleshooting"
+    },
+    {
+      "id": "df-q54",
+      "type": "multiple_choice",
+      "question": "What does 'docker inspect' return for a container?",
+      "options": [
+        "Only the container's log output",
+        "A JSON object with detailed configuration, state, network settings, and mount information",
+        "A summary of CPU and memory usage",
+        "The Dockerfile used to build the container's image"
+      ],
+      "correctAnswer": 1,
+      "explanation": "docker inspect returns a comprehensive JSON document containing the container's full configuration, current state, network settings, volume mounts, environment variables, and more. Use --format with Go templates to extract specific fields.",
+      "difficulty": "advanced",
+      "lessonRef": "14-debugging-and-troubleshooting"
+    },
+    {
+      "id": "df-q55",
+      "type": "code_completion",
+      "question": "Complete the command to view the processes running inside a container named 'web':\n\ndocker _____ web",
+      "options": [
+        "A) top",
+        "B) ps",
+        "C) procs",
+        "D) list"
+      ],
+      "correctAnswer": "A) top",
+      "explanation": "docker top displays the running processes inside a container, similar to the Linux 'top' or 'ps' command. It shows PID, user, and the command for each process.",
+      "difficulty": "beginner",
+      "lessonRef": "14-debugging-and-troubleshooting"
+    },
+    {
+      "id": "df-q56",
+      "type": "true_false",
+      "question": "The 'docker logs' command can only show logs from currently running containers.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "docker logs can show logs from both running and stopped containers, as long as the container has not been removed. This is essential for debugging containers that have crashed or exited unexpectedly.",
+      "difficulty": "intermediate",
+      "lessonRef": "14-debugging-and-troubleshooting"
+    },
+    {
+      "id": "df-q57",
+      "type": "multiple_choice",
+      "question": "When deploying Docker containers in production, which approach is recommended for log management?",
+      "options": [
+        "Writing logs to files inside the container",
+        "Using Docker's json-file logging driver with log rotation configured",
+        "Disabling logging to improve performance",
+        "Storing logs in container environment variables"
+      ],
+      "correctAnswer": 1,
+      "explanation": "In production, configure the json-file logging driver with max-size and max-file options to prevent disk exhaustion. Even better, use a centralized logging driver (fluentd, syslog, etc.) to ship logs to a log aggregation system.",
+      "difficulty": "advanced",
+      "lessonRef": "15-docker-in-production"
+    },
+    {
+      "id": "df-q58",
+      "type": "multiple_choice",
+      "question": "What is the recommended approach for handling container resource limits in production?",
+      "options": [
+        "Allow containers to use unlimited resources for best performance",
+        "Set memory and CPU limits using --memory and --cpus flags to prevent resource exhaustion",
+        "Only limit network bandwidth",
+        "Use the --privileged flag for better resource management"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Setting --memory and --cpus limits prevents a single container from consuming all host resources. Without limits, a memory leak or CPU spike in one container can starve other containers and crash the host system.",
+      "difficulty": "advanced",
+      "lessonRef": "15-docker-in-production"
+    },
+    {
+      "id": "df-q59",
+      "type": "true_false",
+      "question": "In a production environment, it is considered best practice to use the 'latest' tag for container images to ensure you always run the newest version.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "Using 'latest' in production is dangerous because it is mutable and unpredictable. You may unknowingly deploy breaking changes. Always use specific version tags or image digests (SHA256) for reproducible and auditable deployments.",
+      "difficulty": "advanced",
+      "lessonRef": "15-docker-in-production"
+    },
+    {
+      "id": "df-q60",
+      "type": "code_completion",
+      "question": "Complete the docker run command to set a memory limit of 512MB and a CPU limit of 1.5 cores:\n\ndocker run -d --memory=512m _____ nginx",
+      "options": [
+        "A) --cpus=1.5",
+        "B) --cpu=1.5",
+        "C) --cpu-limit=1.5",
+        "D) --cores=1.5"
+      ],
+      "correctAnswer": "A) --cpus=1.5",
+      "explanation": "The --cpus flag limits the number of CPU cores a container can use. --memory (or -m) limits RAM. Together they prevent containers from monopolizing host resources. Values can be decimals (1.5 means one and a half cores).",
+      "difficulty": "advanced",
+      "lessonRef": "15-docker-in-production"
+    }
+  ]
+}

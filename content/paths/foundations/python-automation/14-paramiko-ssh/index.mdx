@@ -1,0 +1,1153 @@
+---
+title: "SSH Automation with Paramiko"
+description: "Automate SSH from Python. Execute remote commands, transfer files, and manage multiple servers programmatically with Paramiko."
+order: 14
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 13-boto3-aws-basics
+objectives:
+  - Connect to remote servers with Paramiko using passwords and SSH keys
+  - Execute commands on remote hosts and capture output
+  - Transfer files with SFTP
+  - Run commands on multiple servers in parallel
+  - Handle SSH errors and timeouts gracefully
+tags:
+  - python
+  - ssh
+  - paramiko
+  - remote
+---
+
+<Callout type="story" title="The Story">
+Your fleet has 50 servers and you need to check disk space, update a config file, and restart a service on each one. SSH-ing into each server manually would take an hour and is error-prone — you would forget one, mistype a command, or lose track of which servers you have already done. With Paramiko, you write a Python script that connects to every server in parallel, runs the commands, collects the results, and gives you a summary — all in under a minute. This is the difference between being a server administrator and being an automation engineer.
+</Callout>
+
+## Setting Up Paramiko
+
+### Installation and Basic Connection
+
+```python
+# pip install paramiko
+import paramiko
+
+# Create an SSH client
+client = paramiko.SSHClient()
+
+# Automatically accept unknown host keys (for known internal servers)
+client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+# Connect with password
+client.connect(
+    hostname="10.0.1.10",
+    port=22,
+    username="deploy",
+    password="secure-password"
+)
+
+# Execute a command
+stdin, stdout, stderr = client.exec_command("hostname")
+print(stdout.read().decode().strip())
+
+# Always close the connection
+client.close()
+```
+
+<Callout type="warning" title="AutoAddPolicy in Production">
+`AutoAddPolicy()` accepts any host key, which is vulnerable to man-in-the-middle attacks. In production, use `RejectPolicy()` (the default) and manage known hosts via `client.load_host_keys()` or `client.load_system_host_keys()`. Use `AutoAddPolicy` only in trusted internal networks or development environments.
+</Callout>
+
+### Key-Based Authentication
+
+Key-based auth is the standard for automation — no passwords to manage or leak:
+
+```python
+import paramiko
+import os
+
+client = paramiko.SSHClient()
+client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+# Connect with a private key file
+client.connect(
+    hostname="10.0.1.10",
+    username="deploy",
+    key_filename=os.path.expanduser("~/.ssh/id_rsa")
+)
+
+# Or use an RSA key object directly
+private_key = paramiko.RSAKey.from_private_key_file(
+    os.path.expanduser("~/.ssh/id_rsa")
+)
+client.connect(
+    hostname="10.0.1.10",
+    username="deploy",
+    pkey=private_key
+)
+```
+
+### Using SSH Config
+
+Parse `~/.ssh/config` to get host settings:
+
+```python
+import paramiko
+import os
+
+# Parse SSH config
+ssh_config = paramiko.SSHConfig()
+config_path = os.path.expanduser("~/.ssh/config")
+if os.path.exists(config_path):
+    with open(config_path) as f:
+        ssh_config.parse(f)
+
+# Look up a host
+host_config = ssh_config.lookup("web-01")
+# Returns: {'hostname': '10.0.1.10', 'user': 'deploy',
+#           'identityfile': ['~/.ssh/id_rsa'], ...}
+
+client = paramiko.SSHClient()
+client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+client.connect(
+    hostname=host_config.get("hostname", "web-01"),
+    username=host_config.get("user", "root"),
+    key_filename=host_config.get("identityfile", [None])[0],
+    port=int(host_config.get("port", 22))
+)
+```
+
+## Executing Remote Commands
+
+### Basic Command Execution
+
+```python
+import paramiko
+
+def ssh_run(host, command, username="deploy", key_file=None):
+    """Execute a command on a remote host and return the result."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        connect_kwargs = {
+            "hostname": host,
+            "username": username,
+        }
+        if key_file:
+            connect_kwargs["key_filename"] = key_file
+
+        client.connect(**connect_kwargs)
+        stdin, stdout, stderr = client.exec_command(command)
+
+        # Wait for the command to complete
+        exit_code = stdout.channel.recv_exit_status()
+
+        return {
+            "host": host,
+            "command": command,
+            "stdout": stdout.read().decode().strip(),
+            "stderr": stderr.read().decode().strip(),
+            "exit_code": exit_code,
+            "success": exit_code == 0
+        }
+    except paramiko.AuthenticationException:
+        return {"host": host, "error": "Authentication failed", "success": False}
+    except paramiko.SSHException as e:
+        return {"host": host, "error": f"SSH error: {e}", "success": False}
+    except Exception as e:
+        return {"host": host, "error": str(e), "success": False}
+    finally:
+        client.close()
+```
+
+### Streaming Output
+
+For long-running commands, stream output as it arrives:
+
+```python
+import paramiko
+import time
+
+def ssh_run_streaming(host, command, username="deploy", key_file=None):
+    """Execute a command and stream output in real time."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(hostname=host, username=username,
+                       key_filename=key_file)
+
+        # Get the transport channel for streaming
+        stdin, stdout, stderr = client.exec_command(command)
+        channel = stdout.channel
+
+        print(f"[{host}] Running: {command}")
+
+        while not channel.exit_status_ready():
+            if channel.recv_ready():
+                data = channel.recv(4096).decode()
+                for line in data.splitlines():
+                    print(f"[{host}] {line}")
+            time.sleep(0.1)
+
+        # Get any remaining output
+        while channel.recv_ready():
+            data = channel.recv(4096).decode()
+            for line in data.splitlines():
+                print(f"[{host}] {line}")
+
+        exit_code = channel.recv_exit_status()
+        print(f"[{host}] Exit code: {exit_code}")
+        return exit_code
+
+    finally:
+        client.close()
+```
+
+### Command Timeout
+
+Prevent commands from running forever:
+
+```python
+import paramiko
+
+def ssh_run_with_timeout(host, command, timeout=30, **kwargs):
+    """Execute a remote command with a timeout."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(hostname=host, timeout=10, **kwargs)
+
+        stdin, stdout, stderr = client.exec_command(
+            command,
+            timeout=timeout
+        )
+
+        try:
+            output = stdout.read().decode().strip()
+            error = stderr.read().decode().strip()
+            exit_code = stdout.channel.recv_exit_status()
+        except Exception:
+            return {
+                "host": host,
+                "error": f"Command timed out after {timeout}s",
+                "success": False
+            }
+
+        return {
+            "host": host,
+            "stdout": output,
+            "stderr": error,
+            "exit_code": exit_code,
+            "success": exit_code == 0
+        }
+
+    except paramiko.AuthenticationException:
+        return {"host": host, "error": "Auth failed", "success": False}
+    except Exception as e:
+        return {"host": host, "error": str(e), "success": False}
+    finally:
+        client.close()
+```
+
+## Error Handling
+
+Paramiko has specific exceptions for different failure modes:
+
+```python
+import paramiko
+import socket
+
+def safe_ssh_connect(host, username, key_file=None, timeout=10):
+    """Connect to SSH with comprehensive error handling."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(
+            hostname=host,
+            username=username,
+            key_filename=key_file,
+            timeout=timeout
+        )
+        return client
+
+    except paramiko.AuthenticationException:
+        print(f"[{host}] Authentication failed for user '{username}'")
+        return None
+
+    except paramiko.SSHException as e:
+        print(f"[{host}] SSH protocol error: {e}")
+        return None
+
+    except socket.timeout:
+        print(f"[{host}] Connection timed out after {timeout}s")
+        return None
+
+    except socket.error as e:
+        print(f"[{host}] Network error: {e}")
+        return None
+
+    except FileNotFoundError:
+        print(f"[{host}] Key file not found: {key_file}")
+        return None
+```
+
+## SFTP File Transfer
+
+Transfer files to and from remote servers:
+
+```python
+import paramiko
+import os
+
+def sftp_upload(host, local_path, remote_path, username="deploy",
+                key_file=None):
+    """Upload a file to a remote server."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(hostname=host, username=username,
+                       key_filename=key_file)
+        sftp = client.open_sftp()
+
+        # Ensure remote directory exists
+        remote_dir = os.path.dirname(remote_path)
+        try:
+            sftp.stat(remote_dir)
+        except FileNotFoundError:
+            # Create directory tree
+            parts = remote_dir.split("/")
+            for i in range(2, len(parts) + 1):
+                path = "/".join(parts[:i])
+                try:
+                    sftp.stat(path)
+                except FileNotFoundError:
+                    sftp.mkdir(path)
+
+        sftp.put(local_path, remote_path)
+        local_size = os.path.getsize(local_path)
+        remote_size = sftp.stat(remote_path).st_size
+
+        print(f"Uploaded {local_path} -> {host}:{remote_path} "
+              f"({remote_size} bytes)")
+
+        sftp.close()
+        return local_size == remote_size
+
+    finally:
+        client.close()
+
+def sftp_download(host, remote_path, local_path, username="deploy",
+                  key_file=None):
+    """Download a file from a remote server."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(hostname=host, username=username,
+                       key_filename=key_file)
+        sftp = client.open_sftp()
+
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        sftp.get(remote_path, local_path)
+
+        print(f"Downloaded {host}:{remote_path} -> {local_path}")
+        sftp.close()
+        return True
+
+    except FileNotFoundError:
+        print(f"Remote file not found: {host}:{remote_path}")
+        return False
+    finally:
+        client.close()
+
+def sftp_list_dir(host, remote_path, username="deploy", key_file=None):
+    """List files on a remote server."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(hostname=host, username=username,
+                       key_filename=key_file)
+        sftp = client.open_sftp()
+
+        files = []
+        for entry in sftp.listdir_attr(remote_path):
+            files.append({
+                "name": entry.filename,
+                "size": entry.st_size,
+                "modified": entry.st_mtime,
+                "is_dir": entry.st_mode is not None and
+                          (entry.st_mode & 0o40000) != 0,
+            })
+
+        sftp.close()
+        return files
+
+    finally:
+        client.close()
+```
+
+<Callout type="tip" title="SFTP vs SCP">
+Paramiko's SFTP supports file listing, directory creation, and random access — it is a full file transfer protocol. If you just need to copy a file quickly, SFTP works fine. For very large files or bulk transfers, consider using `scp` via subprocess for better throughput.
+</Callout>
+
+## Running on Multiple Servers
+
+### Sequential Execution
+
+```python
+def run_on_servers(servers, command, username="deploy", key_file=None):
+    """Run a command on multiple servers sequentially."""
+    results = []
+    for server in servers:
+        print(f"[{server}] Running: {command}")
+        result = ssh_run(server, command, username=username,
+                         key_file=key_file)
+        results.append(result)
+
+        if result["success"]:
+            print(f"[{server}] OK: {result['stdout'][:80]}")
+        else:
+            error = result.get("error", result.get("stderr", "unknown"))
+            print(f"[{server}] FAILED: {error}")
+
+    return results
+```
+
+### Parallel Execution with ThreadPoolExecutor
+
+For faster execution across many servers:
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def run_on_servers_parallel(servers, command, username="deploy",
+                            key_file=None, max_workers=10):
+    """Run a command on multiple servers in parallel."""
+    results = []
+
+    def _run_one(server):
+        return ssh_run(server, command, username=username,
+                       key_file=key_file)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_server = {
+            executor.submit(_run_one, server): server
+            for server in servers
+        }
+
+        for future in as_completed(future_to_server):
+            server = future_to_server[future]
+            try:
+                result = future.result()
+                results.append(result)
+                status = "OK" if result["success"] else "FAIL"
+                print(f"[{status}] {server}")
+            except Exception as e:
+                results.append({
+                    "host": server,
+                    "error": str(e),
+                    "success": False
+                })
+                print(f"[ERR] {server}: {e}")
+
+    return results
+```
+
+## Jump Hosts and ProxyCommand
+
+Connect through a bastion/jump host:
+
+```python
+import paramiko
+
+def connect_via_jump(jump_host, target_host, username="deploy",
+                     key_file=None):
+    """Connect to a target server through a jump host."""
+    # Connect to jump host
+    jump = paramiko.SSHClient()
+    jump.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    jump.connect(hostname=jump_host, username=username,
+                 key_filename=key_file)
+
+    # Create a channel through the jump host
+    jump_transport = jump.get_transport()
+    dest_addr = (target_host, 22)
+    local_addr = ("127.0.0.1", 0)
+    channel = jump_transport.open_channel(
+        "direct-tcpip", dest_addr, local_addr
+    )
+
+    # Connect to the target through the channel
+    target = paramiko.SSHClient()
+    target.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    target.connect(
+        hostname=target_host,
+        username=username,
+        key_filename=key_file,
+        sock=channel
+    )
+
+    return target, jump  # Remember to close both!
+```
+
+## Fabric Overview
+
+Fabric is a higher-level SSH library built on Paramiko. It simplifies common patterns:
+
+```python
+# pip install fabric
+# Fabric provides a cleaner API for common SSH tasks
+
+# Example: fabric usage (for reference)
+# from fabric import Connection
+#
+# conn = Connection("deploy@web-01")
+# result = conn.run("df -h", hide=True)
+# print(result.stdout)
+#
+# conn.put("config.yaml", "/etc/myapp/config.yaml")
+# conn.sudo("systemctl restart myapp")
+```
+
+<Exercise number={1} title="SSH Connection Manager">
+
+Build a reusable SSH connection manager with connection pooling and error handling.
+
+```python
+import paramiko
+import time
+import socket
+from datetime import datetime
+
+class SSHManager:
+    """Manage SSH connections with pooling and error handling."""
+
+    def __init__(self, username="deploy", key_file=None, timeout=10):
+        self.username = username
+        self.key_file = key_file
+        self.timeout = timeout
+        self.connections = {}
+        self.history = []
+
+    def connect(self, host, port=22):
+        """Get or create a connection to a host."""
+        key = f"{host}:{port}"
+
+        # Reuse existing connection if still active
+        if key in self.connections:
+            client = self.connections[key]
+            transport = client.get_transport()
+            if transport and transport.is_active():
+                return client
+            else:
+                # Connection dropped, remove it
+                del self.connections[key]
+
+        # Create new connection
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        try:
+            client.connect(
+                hostname=host,
+                port=port,
+                username=self.username,
+                key_filename=self.key_file,
+                timeout=self.timeout
+            )
+            self.connections[key] = client
+            self._log(host, "connected")
+            return client
+
+        except paramiko.AuthenticationException:
+            self._log(host, "auth_failed")
+            raise
+        except socket.timeout:
+            self._log(host, "timeout")
+            raise
+        except Exception as e:
+            self._log(host, f"error: {e}")
+            raise
+
+    def run(self, host, command, timeout=30):
+        """Run a command on a host."""
+        start = time.time()
+        try:
+            client = self.connect(host)
+            stdin, stdout, stderr = client.exec_command(
+                command, timeout=timeout
+            )
+
+            exit_code = stdout.channel.recv_exit_status()
+            output = stdout.read().decode().strip()
+            error = stderr.read().decode().strip()
+            duration = round(time.time() - start, 2)
+
+            result = {
+                "host": host,
+                "command": command,
+                "stdout": output,
+                "stderr": error,
+                "exit_code": exit_code,
+                "success": exit_code == 0,
+                "duration": duration
+            }
+            self._log(host, f"run: {command[:40]} -> code {exit_code}")
+            return result
+
+        except Exception as e:
+            duration = round(time.time() - start, 2)
+            result = {
+                "host": host,
+                "command": command,
+                "error": str(e),
+                "success": False,
+                "duration": duration
+            }
+            self._log(host, f"run_failed: {e}")
+            return result
+
+    def run_on_all(self, hosts, command):
+        """Run a command on multiple hosts sequentially."""
+        results = []
+        for host in hosts:
+            result = self.run(host, command)
+            results.append(result)
+        return results
+
+    def close_all(self):
+        """Close all connections."""
+        for key, client in self.connections.items():
+            try:
+                client.close()
+            except Exception:
+                pass
+        count = len(self.connections)
+        self.connections.clear()
+        print(f"Closed {count} connection(s)")
+
+    def _log(self, host, action):
+        self.history.append({
+            "timestamp": datetime.now().isoformat(),
+            "host": host,
+            "action": action
+        })
+
+    def print_history(self):
+        """Print connection history."""
+        print(f"\n{'='*50}")
+        print(f"  SSH Session History ({len(self.history)} events)")
+        print(f"{'='*50}")
+        for entry in self.history:
+            ts = entry["timestamp"][11:19]
+            print(f"  [{ts}] {entry['host']}: {entry['action']}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close_all()
+
+# --- Demo (simulated without real servers) ---
+print("=== SSH Manager Demo ===\n")
+print("Note: This demo shows the structure. In a real environment,")
+print("replace the host IPs with actual server addresses.\n")
+
+# Show the API without connecting
+mgr = SSHManager(username="deploy", timeout=10)
+
+# Simulated server list
+servers = ["10.0.1.10", "10.0.1.11", "10.0.1.12"]
+
+print("Servers to manage:")
+for s in servers:
+    print(f"  - {s}")
+
+print("\nExample usage:")
+print('  with SSHManager(username="deploy") as mgr:')
+print('      result = mgr.run("10.0.1.10", "df -h")')
+print('      results = mgr.run_on_all(servers, "uptime")')
+print()
+
+# Demonstrate error handling patterns
+print("Error handling demonstration:")
+for host in ["unreachable.host"]:
+    result = mgr.run(host, "uptime")
+    if not result["success"]:
+        print(f"  [{host}] Failed: {result.get('error', 'unknown')}")
+    else:
+        print(f"  [{host}] Output: {result['stdout']}")
+
+mgr.print_history()
+mgr.close_all()
+```
+
+</Exercise>
+
+<Exercise number={2} title="Remote File Deployer">
+
+Build a tool that deploys files to multiple servers with verification.
+
+```python
+import paramiko
+import os
+import hashlib
+import json
+from datetime import datetime
+
+class FileDeployer:
+    """Deploy files to remote servers with verification."""
+
+    def __init__(self, username="deploy", key_file=None):
+        self.username = username
+        self.key_file = key_file
+        self.deploy_log = []
+
+    def _connect(self, host):
+        """Create an SSH connection."""
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            hostname=host,
+            username=self.username,
+            key_filename=self.key_file,
+            timeout=10
+        )
+        return client
+
+    def _file_hash(self, filepath):
+        """Calculate SHA256 hash of a local file."""
+        sha256 = hashlib.sha256()
+        with open(filepath, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def deploy_file(self, host, local_path, remote_path,
+                    backup=True, verify=True):
+        """Deploy a single file to a remote server."""
+        entry = {
+            "host": host,
+            "local": local_path,
+            "remote": remote_path,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        try:
+            client = self._connect(host)
+            sftp = client.open_sftp()
+
+            # Backup existing file
+            if backup:
+                try:
+                    sftp.stat(remote_path)
+                    backup_path = f"{remote_path}.bak.{int(datetime.now().timestamp())}"
+                    stdin, stdout, stderr = client.exec_command(
+                        f"cp {remote_path} {backup_path}"
+                    )
+                    stdout.channel.recv_exit_status()
+                    entry["backup"] = backup_path
+                    print(f"  [{host}] Backed up to {backup_path}")
+                except FileNotFoundError:
+                    pass  # No existing file to back up
+
+            # Ensure remote directory exists
+            remote_dir = os.path.dirname(remote_path)
+            client.exec_command(f"mkdir -p {remote_dir}")
+
+            # Upload
+            sftp.put(local_path, remote_path)
+            entry["uploaded"] = True
+            print(f"  [{host}] Uploaded {remote_path}")
+
+            # Verify
+            if verify:
+                local_hash = self._file_hash(local_path)
+                stdin, stdout, stderr = client.exec_command(
+                    f"sha256sum {remote_path}"
+                )
+                remote_output = stdout.read().decode().strip()
+                remote_hash = remote_output.split()[0] if remote_output else ""
+
+                if local_hash == remote_hash:
+                    entry["verified"] = True
+                    print(f"  [{host}] Verified (SHA256 match)")
+                else:
+                    entry["verified"] = False
+                    entry["error"] = "Hash mismatch"
+                    print(f"  [{host}] VERIFICATION FAILED")
+
+            sftp.close()
+            client.close()
+            entry["success"] = entry.get("verified", True)
+
+        except Exception as e:
+            entry["success"] = False
+            entry["error"] = str(e)
+            print(f"  [{host}] FAILED: {e}")
+
+        self.deploy_log.append(entry)
+        return entry
+
+    def deploy_to_servers(self, servers, local_path, remote_path,
+                          stop_on_failure=False):
+        """Deploy a file to multiple servers."""
+        print(f"\nDeploying {local_path} -> {remote_path}")
+        print(f"Targets: {len(servers)} server(s)\n")
+
+        results = []
+        for server in servers:
+            result = self.deploy_file(server, local_path, remote_path)
+            results.append(result)
+
+            if not result["success"] and stop_on_failure:
+                print(f"\nStopping: deployment failed on {server}")
+                break
+
+        # Summary
+        succeeded = sum(1 for r in results if r["success"])
+        failed = len(results) - succeeded
+
+        print(f"\n{'='*50}")
+        print(f"  Deployment Summary")
+        print(f"  Succeeded: {succeeded}/{len(results)}")
+        print(f"  Failed:    {failed}/{len(results)}")
+        if failed > 0:
+            print(f"  Failed hosts:")
+            for r in results:
+                if not r["success"]:
+                    print(f"    - {r['host']}: {r.get('error', 'unknown')}")
+        print(f"{'='*50}")
+
+        return results
+
+# --- Demo ---
+print("=== File Deployer Demo ===\n")
+print("Note: This demo shows the deployment tool structure.")
+print("In a real environment, provide actual server addresses.\n")
+
+deployer = FileDeployer(username="deploy")
+
+# Show the API
+print("Example usage:")
+print('  deployer = FileDeployer(username="deploy", key_file="~/.ssh/id_rsa")')
+print()
+print("  # Deploy to a single server")
+print('  deployer.deploy_file("10.0.1.10", "config.yaml", "/etc/app/config.yaml")')
+print()
+print("  # Deploy to multiple servers")
+print("  servers = ['10.0.1.10', '10.0.1.11', '10.0.1.12']")
+print('  deployer.deploy_to_servers(servers, "config.yaml", "/etc/app/config.yaml")')
+print()
+print("Features:")
+print("  - Automatic backup of existing files")
+print("  - SHA256 hash verification after upload")
+print("  - Stop-on-failure option for rolling deployments")
+print("  - Detailed deployment log")
+```
+
+</Exercise>
+
+<MiniProject title="Multi-Server Command Runner">
+
+Build a tool that executes commands on multiple servers in parallel and collects structured results.
+
+```python
+import paramiko
+import socket
+import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from collections import defaultdict
+
+class ServerResult:
+    """Result from a single server command execution."""
+
+    def __init__(self, host, command):
+        self.host = host
+        self.command = command
+        self.stdout = ""
+        self.stderr = ""
+        self.exit_code = -1
+        self.success = False
+        self.error = None
+        self.duration = 0
+
+    def to_dict(self):
+        d = {
+            "host": self.host,
+            "command": self.command,
+            "exit_code": self.exit_code,
+            "success": self.success,
+            "duration": self.duration,
+        }
+        if self.stdout:
+            d["stdout"] = self.stdout
+        if self.stderr:
+            d["stderr"] = self.stderr
+        if self.error:
+            d["error"] = self.error
+        return d
+
+class MultiServerRunner:
+    """Execute commands on multiple servers in parallel."""
+
+    def __init__(self, username="deploy", key_file=None,
+                 connect_timeout=10, command_timeout=60,
+                 max_workers=20):
+        self.username = username
+        self.key_file = key_file
+        self.connect_timeout = connect_timeout
+        self.command_timeout = command_timeout
+        self.max_workers = max_workers
+        self.run_history = []
+
+    def _execute_on_host(self, host, command):
+        """Execute a command on a single host."""
+        result = ServerResult(host, command)
+        start = time.time()
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        try:
+            client.connect(
+                hostname=host,
+                username=self.username,
+                key_filename=self.key_file,
+                timeout=self.connect_timeout
+            )
+
+            stdin, stdout, stderr = client.exec_command(
+                command,
+                timeout=self.command_timeout
+            )
+
+            result.exit_code = stdout.channel.recv_exit_status()
+            result.stdout = stdout.read().decode().strip()
+            result.stderr = stderr.read().decode().strip()
+            result.success = result.exit_code == 0
+
+        except paramiko.AuthenticationException:
+            result.error = "Authentication failed"
+        except paramiko.SSHException as e:
+            result.error = f"SSH error: {e}"
+        except socket.timeout:
+            result.error = f"Connection timed out ({self.connect_timeout}s)"
+        except socket.error as e:
+            result.error = f"Network error: {e}"
+        except Exception as e:
+            result.error = f"Unexpected error: {e}"
+        finally:
+            result.duration = round(time.time() - start, 2)
+            try:
+                client.close()
+            except Exception:
+                pass
+
+        return result
+
+    def run(self, servers, command, parallel=True):
+        """Run a command on multiple servers."""
+        start_time = time.time()
+        run_id = datetime.now().strftime("%H%M%S")
+
+        print(f"\n[Run {run_id}] Executing on {len(servers)} server(s):")
+        print(f"  Command: {command}")
+        print(f"  Mode:    {'parallel' if parallel else 'sequential'}")
+        print()
+
+        if parallel and len(servers) > 1:
+            results = self._run_parallel(servers, command)
+        else:
+            results = self._run_sequential(servers, command)
+
+        total_duration = round(time.time() - start_time, 2)
+
+        # Store in history
+        run_entry = {
+            "run_id": run_id,
+            "command": command,
+            "servers": len(servers),
+            "results": [r.to_dict() for r in results],
+            "total_duration": total_duration,
+        }
+        self.run_history.append(run_entry)
+
+        # Print summary
+        self._print_summary(results, total_duration)
+        return results
+
+    def _run_parallel(self, servers, command):
+        """Execute on servers in parallel using threads."""
+        results = []
+        workers = min(self.max_workers, len(servers))
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(self._execute_on_host, host, command): host
+                for host in servers
+            }
+
+            for future in as_completed(futures):
+                host = futures[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = ServerResult(host, command)
+                    result.error = str(e)
+
+                results.append(result)
+                status = "OK" if result.success else "FAIL"
+                print(f"  [{status:>4}] {host} ({result.duration}s)")
+
+        return results
+
+    def _run_sequential(self, servers, command):
+        """Execute on servers one at a time."""
+        results = []
+        for host in servers:
+            result = self._execute_on_host(host, command)
+            results.append(result)
+            status = "OK" if result.success else "FAIL"
+            print(f"  [{status:>4}] {host} ({result.duration}s)")
+        return results
+
+    def _print_summary(self, results, total_duration):
+        """Print execution summary."""
+        succeeded = sum(1 for r in results if r.success)
+        failed = len(results) - succeeded
+
+        print(f"\n{'='*55}")
+        print(f"  EXECUTION SUMMARY")
+        print(f"  Total:    {len(results)} server(s)")
+        print(f"  Success:  {succeeded}")
+        print(f"  Failed:   {failed}")
+        print(f"  Duration: {total_duration}s")
+
+        if failed > 0:
+            print(f"\n  Failed hosts:")
+            for r in results:
+                if not r.success:
+                    error = r.error or r.stderr[:80] or f"exit code {r.exit_code}"
+                    print(f"    - {r.host}: {error}")
+
+        # Show output from successful hosts
+        success_with_output = [
+            r for r in results if r.success and r.stdout
+        ]
+        if success_with_output:
+            print(f"\n  Output samples:")
+            for r in success_with_output[:5]:
+                first_line = r.stdout.split("\n")[0][:60]
+                print(f"    [{r.host}] {first_line}")
+
+        print(f"{'='*55}")
+
+    def collect_output(self, results):
+        """Collect and organize output from all servers."""
+        output = {
+            "success": {},
+            "failed": {},
+        }
+        for r in results:
+            if r.success:
+                output["success"][r.host] = r.stdout
+            else:
+                output["failed"][r.host] = r.error or r.stderr
+
+        return output
+
+    def run_playbook(self, servers, commands):
+        """Run a sequence of commands on servers (stops on failure)."""
+        print(f"\n{'='*55}")
+        print(f"  PLAYBOOK EXECUTION")
+        print(f"  Steps:   {len(commands)}")
+        print(f"  Servers: {len(servers)}")
+        print(f"{'='*55}")
+
+        all_results = []
+        for i, cmd in enumerate(commands, 1):
+            print(f"\n--- Step {i}/{len(commands)}: {cmd[:50]} ---")
+            results = self.run(servers, cmd)
+            all_results.append(results)
+
+            failed = [r for r in results if not r.success]
+            if failed:
+                failed_hosts = [r.host for r in failed]
+                print(f"\n  Step {i} failed on: {failed_hosts}")
+                print(f"  Stopping playbook.")
+                break
+
+        return all_results
+
+
+# --- Demo ---
+print("=" * 55)
+print("  MULTI-SERVER COMMAND RUNNER")
+print("=" * 55)
+
+runner = MultiServerRunner(
+    username="deploy",
+    connect_timeout=5,
+    command_timeout=30,
+    max_workers=10
+)
+
+# Simulated server list
+servers = [
+    "10.0.1.10",
+    "10.0.1.11",
+    "10.0.1.12",
+    "10.0.2.10",
+    "10.0.2.11",
+]
+
+print(f"\nTarget servers: {servers}")
+print("\nNote: Without actual servers, connections will fail.")
+print("This demonstrates the tool's error handling and reporting.\n")
+
+# Run a command across all servers
+results = runner.run(servers, "uptime", parallel=True)
+
+# Collect organized output
+output = runner.collect_output(results)
+print(f"\nSucceeded: {len(output['success'])} hosts")
+print(f"Failed:    {len(output['failed'])} hosts")
+
+# Demonstrate playbook mode
+print("\n\nPlaybook example (would run sequentially):")
+playbook_commands = [
+    "systemctl stop myapp",
+    "cp /opt/myapp/config.yaml /opt/myapp/config.yaml.bak",
+    "curl -sO https://releases.example.com/myapp-2.0.tar.gz",
+    "tar xzf myapp-2.0.tar.gz -C /opt/myapp/",
+    "systemctl start myapp",
+    "systemctl is-active myapp",
+]
+for i, cmd in enumerate(playbook_commands, 1):
+    print(f"  Step {i}: {cmd}")
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Use `paramiko.SSHClient()` with key-based authentication for secure, password-free automation
+- Always handle SSH-specific exceptions: `AuthenticationException`, `SSHException`, `socket.timeout`
+- Set timeouts on both connections and commands to prevent scripts from hanging indefinitely
+- Use `ThreadPoolExecutor` to run commands on multiple servers in parallel for significant speedups
+- SFTP supports file upload, download, directory listing, and directory creation on remote servers
+- Verify file transfers with checksums — upload alone does not guarantee integrity
+- Jump host connections use `open_channel("direct-tcpip")` on the bastion's transport
+- Consider Fabric for higher-level SSH automation — it builds on Paramiko with a cleaner API
+
+## What's Next
+
+You can now manage remote servers from Python. But modern infrastructure increasingly runs in containers. In **Docker SDK for Python**, you will learn to build, run, and manage Docker containers programmatically — bringing your automation skills into the container ecosystem.

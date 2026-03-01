@@ -1,0 +1,4284 @@
+{
+  "id": "devops-glossary",
+  "title": "DevOps Glossary",
+  "description": "Comprehensive glossary of DevOps, cloud, and infrastructure terms covering Linux, Shell Scripting, Git, Networking, Python, Docker, Kubernetes, CI/CD, Cloud, Security, and Monitoring.",
+  "lastUpdated": "2026-03-01",
+  "termCount": 248,
+  "categories": [
+    "linux",
+    "shell-scripting",
+    "git",
+    "networking",
+    "python",
+    "docker",
+    "kubernetes",
+    "cicd",
+    "cloud",
+    "security",
+    "monitoring",
+    "general"
+  ],
+  "terms": [
+    {
+      "id": "ack",
+      "term": "ACK",
+      "fullForm": "Acknowledgement",
+      "definition": "A signal sent between networked devices to confirm that a message or packet of data has been received successfully. In TCP, the ACK flag is used during the three-way handshake and throughout data transmission to ensure reliable delivery.",
+      "category": "networking",
+      "tags": [
+        "tcp",
+        "protocols",
+        "reliability"
+      ],
+      "relatedTerms": [
+        "http",
+        "https",
+        "ip-address"
+      ]
+    },
+    {
+      "id": "alpine-linux",
+      "term": "Alpine Linux",
+      "fullForm": "",
+      "definition": "A lightweight, security-oriented Linux distribution built around musl libc and BusyBox. It is widely used as a base image for Docker containers due to its extremely small footprint, typically around 5 MB, which helps reduce image sizes and attack surface.",
+      "category": "linux",
+      "tags": [
+        "distribution",
+        "containers",
+        "minimal"
+      ],
+      "relatedTerms": [
+        "docker",
+        "image",
+        "dockerfile"
+      ]
+    },
+    {
+      "id": "ansible",
+      "term": "Ansible",
+      "fullForm": "",
+      "definition": "An open-source automation tool used for configuration management, application deployment, and infrastructure orchestration. Ansible uses agentless architecture and communicates over SSH, relying on YAML-based playbooks to define desired system states in a declarative manner.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "configuration-management",
+        "infrastructure"
+      ],
+      "relatedTerms": [
+        "cloudformation",
+        "idempotent",
+        "yaml"
+      ]
+    },
+    {
+      "id": "api",
+      "term": "API",
+      "fullForm": "Application Programming Interface",
+      "definition": "A set of defined rules and protocols that allow different software applications to communicate with each other. APIs expose functionality or data from a service, enabling developers to integrate external capabilities without needing to understand the underlying implementation.",
+      "category": "general",
+      "tags": [
+        "integration",
+        "web-services",
+        "development"
+      ],
+      "relatedTerms": [
+        "endpoint",
+        "http",
+        "grpc",
+        "json"
+      ]
+    },
+    {
+      "id": "apt",
+      "term": "APT",
+      "fullForm": "Advanced Package Tool",
+      "definition": "A package management system used by Debian-based Linux distributions such as Ubuntu. APT handles the installation, upgrade, and removal of software packages, automatically resolving dependencies and fetching packages from configured repositories.",
+      "category": "linux",
+      "tags": [
+        "package-management",
+        "debian",
+        "ubuntu"
+      ],
+      "relatedTerms": [
+        "dpkg",
+        "alpine-linux"
+      ]
+    },
+    {
+      "id": "arp",
+      "term": "ARP",
+      "fullForm": "Address Resolution Protocol",
+      "definition": "A network protocol used to map an IP address to a physical MAC address on a local network segment. When a device needs to communicate with another device on the same network, ARP resolves the destination IP to the corresponding hardware address so frames can be delivered at the data link layer.",
+      "category": "networking",
+      "tags": [
+        "protocols",
+        "layer-2",
+        "mac-address"
+      ],
+      "relatedTerms": [
+        "ip-address",
+        "dhcp",
+        "dns"
+      ]
+    },
+    {
+      "id": "artifact",
+      "term": "Artifact",
+      "fullForm": "",
+      "definition": "A byproduct produced during the software development and build process, such as compiled binaries, Docker images, JAR files, or deployment packages. Artifacts are typically stored in artifact repositories and are promoted through various stages of a CI/CD pipeline before reaching production.",
+      "category": "cicd",
+      "tags": [
+        "build",
+        "pipeline",
+        "deliverables"
+      ],
+      "relatedTerms": [
+        "ci",
+        "cd",
+        "image",
+        "docker-hub"
+      ]
+    },
+    {
+      "id": "authentication",
+      "term": "Authentication",
+      "fullForm": "",
+      "definition": "The process of verifying the identity of a user, device, or system attempting to access a resource. Common authentication mechanisms include passwords, API keys, certificates, and multi-factor authentication. It answers the question 'who are you?'",
+      "category": "security",
+      "tags": [
+        "identity",
+        "access-control",
+        "credentials"
+      ],
+      "relatedTerms": [
+        "authorization",
+        "jwt",
+        "iam"
+      ]
+    },
+    {
+      "id": "authorization",
+      "term": "Authorization",
+      "fullForm": "",
+      "definition": "The process of determining what permissions and access rights an authenticated user or system has to specific resources or actions. Authorization answers the question 'what are you allowed to do?' and is typically enforced through roles, policies, or access control lists.",
+      "category": "security",
+      "tags": [
+        "permissions",
+        "access-control",
+        "rbac"
+      ],
+      "relatedTerms": [
+        "authentication",
+        "iam",
+        "jwt"
+      ]
+    },
+    {
+      "id": "auto-scaling",
+      "term": "Auto Scaling",
+      "fullForm": "",
+      "definition": "A cloud computing feature that automatically adjusts the number of running compute instances based on current demand or predefined metrics such as CPU utilization. Auto scaling ensures applications maintain performance during traffic spikes while minimizing costs during periods of low usage.",
+      "category": "cloud",
+      "tags": [
+        "scalability",
+        "elasticity",
+        "cost-optimization"
+      ],
+      "relatedTerms": [
+        "horizontal-pod-autoscaler",
+        "ec2",
+        "availability-zone"
+      ]
+    },
+    {
+      "id": "availability-zone",
+      "term": "Availability Zone",
+      "fullForm": "",
+      "definition": "A physically isolated data center or group of data centers within a cloud provider's region, each with independent power, cooling, and networking. Deploying applications across multiple availability zones provides high availability and fault tolerance, ensuring that a failure in one zone does not take down the entire application.",
+      "category": "cloud",
+      "tags": [
+        "high-availability",
+        "fault-tolerance",
+        "infrastructure"
+      ],
+      "relatedTerms": [
+        "aws",
+        "azure",
+        "gcp",
+        "auto-scaling"
+      ]
+    },
+    {
+      "id": "aws",
+      "term": "AWS",
+      "fullForm": "Amazon Web Services",
+      "definition": "A comprehensive cloud computing platform provided by Amazon, offering over 200 services including compute, storage, databases, networking, and machine learning. AWS is the largest public cloud provider by market share and provides the infrastructure backbone for many modern DevOps workflows.",
+      "category": "cloud",
+      "tags": [
+        "cloud-provider",
+        "infrastructure",
+        "saas"
+      ],
+      "relatedTerms": [
+        "ec2",
+        "eks",
+        "fargate",
+        "azure",
+        "gcp"
+      ]
+    },
+    {
+      "id": "azure",
+      "term": "Azure",
+      "fullForm": "Microsoft Azure",
+      "definition": "Microsoft's cloud computing platform offering a wide range of services including virtual machines, app services, databases, and Kubernetes support. Azure integrates deeply with Microsoft's ecosystem of tools and services, making it a popular choice for enterprises already using Microsoft technologies.",
+      "category": "cloud",
+      "tags": [
+        "cloud-provider",
+        "microsoft",
+        "infrastructure"
+      ],
+      "relatedTerms": [
+        "aws",
+        "gcp",
+        "kubernetes"
+      ]
+    },
+    {
+      "id": "bash",
+      "term": "Bash",
+      "fullForm": "Bourne Again Shell",
+      "definition": "A Unix shell and command-line interpreter that serves as the default shell on most Linux distributions and macOS. Bash provides scripting capabilities including variables, loops, conditionals, and functions, making it essential for automating system administration tasks and CI/CD pipelines.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "scripting",
+        "automation"
+      ],
+      "relatedTerms": [
+        "environment-variable",
+        "cron",
+        "here-document",
+        "exit-code"
+      ]
+    },
+    {
+      "id": "bind-mount",
+      "term": "Bind Mount",
+      "fullForm": "",
+      "definition": "A Docker storage mechanism that maps a specific file or directory on the host machine directly into a container. Unlike named volumes, bind mounts rely on the host's filesystem path and are commonly used during development to sync source code into a running container for live reloading.",
+      "category": "docker",
+      "tags": [
+        "storage",
+        "volumes",
+        "development"
+      ],
+      "relatedTerms": [
+        "docker",
+        "container",
+        "compose"
+      ]
+    },
+    {
+      "id": "blue-green-deployment",
+      "term": "Blue-Green Deployment",
+      "fullForm": "",
+      "definition": "A deployment strategy that maintains two identical production environments called 'blue' and 'green.' At any time, one environment serves live traffic while the other is idle or staging the new release. Traffic is switched to the updated environment once validated, enabling zero-downtime deployments and easy rollback.",
+      "category": "cicd",
+      "tags": [
+        "deployment-strategy",
+        "zero-downtime",
+        "rollback"
+      ],
+      "relatedTerms": [
+        "canary-deployment",
+        "feature-flag",
+        "continuous-deployment"
+      ]
+    },
+    {
+      "id": "boto3",
+      "term": "Boto3",
+      "fullForm": "",
+      "definition": "The official AWS SDK for Python, providing a Pythonic interface to interact with AWS services such as S3, EC2, Lambda, and DynamoDB. Boto3 supports both low-level client interfaces and high-level resource abstractions, making it the standard tool for automating AWS infrastructure with Python scripts.",
+      "category": "python",
+      "tags": [
+        "aws",
+        "sdk",
+        "automation"
+      ],
+      "relatedTerms": [
+        "aws",
+        "ec2",
+        "python"
+      ]
+    },
+    {
+      "id": "bridge-network",
+      "term": "Bridge Network",
+      "fullForm": "",
+      "definition": "The default network driver in Docker that creates a private internal network on the host, allowing containers connected to the same bridge to communicate with each other. Containers on a bridge network are isolated from external networks unless ports are explicitly published to the host.",
+      "category": "docker",
+      "tags": [
+        "networking",
+        "isolation",
+        "containers"
+      ],
+      "relatedTerms": [
+        "docker",
+        "container",
+        "docker-compose"
+      ]
+    },
+    {
+      "id": "buildkit",
+      "term": "BuildKit",
+      "fullForm": "",
+      "definition": "A modern build subsystem for Docker that provides improved performance, caching, and security for building container images. BuildKit supports parallel build stages, secret mounting, SSH forwarding during builds, and more efficient layer caching compared to the legacy Docker builder.",
+      "category": "docker",
+      "tags": [
+        "build",
+        "performance",
+        "caching"
+      ],
+      "relatedTerms": [
+        "dockerfile",
+        "docker",
+        "image"
+      ]
+    },
+    {
+      "id": "cadvisor",
+      "term": "cAdvisor",
+      "fullForm": "Container Advisor",
+      "definition": "An open-source container resource usage and performance analysis agent developed by Google. cAdvisor runs as a daemon that collects, aggregates, and exports metrics about running containers, including CPU, memory, filesystem, and network usage, and is often used with Prometheus and Grafana.",
+      "category": "monitoring",
+      "tags": [
+        "containers",
+        "metrics",
+        "resource-monitoring"
+      ],
+      "relatedTerms": [
+        "grafana",
+        "datadog",
+        "container"
+      ]
+    },
+    {
+      "id": "canary-deployment",
+      "term": "Canary Deployment",
+      "fullForm": "",
+      "definition": "A deployment strategy where a new version of an application is gradually rolled out to a small subset of users or servers before being deployed to the entire infrastructure. This approach allows teams to detect issues early by monitoring the canary instances for errors or performance degradation before full rollout.",
+      "category": "cicd",
+      "tags": [
+        "deployment-strategy",
+        "progressive-delivery",
+        "risk-reduction"
+      ],
+      "relatedTerms": [
+        "blue-green-deployment",
+        "feature-flag",
+        "continuous-deployment"
+      ]
+    },
+    {
+      "id": "capability",
+      "term": "Capability",
+      "fullForm": "",
+      "definition": "A Linux kernel feature that breaks down the privileges traditionally associated with the root user into distinct units that can be independently enabled or disabled. In container security, capabilities allow fine-grained control over what privileged operations a container can perform, following the principle of least privilege.",
+      "category": "security",
+      "tags": [
+        "linux",
+        "containers",
+        "least-privilege"
+      ],
+      "relatedTerms": [
+        "container",
+        "kernel",
+        "cgroup"
+      ]
+    },
+    {
+      "id": "cd",
+      "term": "CD",
+      "fullForm": "Continuous Delivery / Continuous Deployment",
+      "definition": "CD refers to either Continuous Delivery or Continuous Deployment. Continuous Delivery ensures code changes are automatically built, tested, and prepared for release to production. Continuous Deployment goes further by automatically releasing every change that passes the pipeline to production without manual intervention.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "pipeline",
+        "release"
+      ],
+      "relatedTerms": [
+        "ci",
+        "continuous-delivery",
+        "continuous-deployment"
+      ]
+    },
+    {
+      "id": "cgroup",
+      "term": "Cgroup",
+      "fullForm": "Control Group",
+      "definition": "A Linux kernel feature that limits, accounts for, and isolates the resource usage (CPU, memory, disk I/O, network) of a collection of processes. Cgroups are a foundational technology for containers, enabling Docker and Kubernetes to enforce resource constraints and prevent a single container from consuming all host resources.",
+      "category": "linux",
+      "tags": [
+        "kernel",
+        "resource-management",
+        "containers"
+      ],
+      "relatedTerms": [
+        "container",
+        "kernel",
+        "capability"
+      ]
+    },
+    {
+      "id": "cherry-pick",
+      "term": "Cherry-Pick",
+      "fullForm": "",
+      "definition": "A Git operation that applies the changes introduced by a specific commit from one branch onto another branch. Unlike merging, which integrates all changes from a branch, cherry-picking selectively copies individual commits, which is useful for applying hotfixes or backporting specific changes.",
+      "category": "git",
+      "tags": [
+        "branching",
+        "commits",
+        "selective-merge"
+      ],
+      "relatedTerms": [
+        "commit",
+        "git",
+        "diff"
+      ]
+    },
+    {
+      "id": "chmod",
+      "term": "chmod",
+      "fullForm": "Change Mode",
+      "definition": "A Unix/Linux command used to change the access permissions of files and directories. Permissions are specified for three classes of users (owner, group, others) and three types of access (read, write, execute), using either symbolic notation (e.g., u+x) or octal notation (e.g., 755).",
+      "category": "linux",
+      "tags": [
+        "permissions",
+        "file-system",
+        "security"
+      ],
+      "relatedTerms": [
+        "chown",
+        "inode",
+        "bash"
+      ]
+    },
+    {
+      "id": "chown",
+      "term": "chown",
+      "fullForm": "Change Owner",
+      "definition": "A Unix/Linux command used to change the owner and/or group ownership of files and directories. Proper ownership management is critical for system security and is frequently used in Dockerfiles to ensure files inside containers are owned by non-root users.",
+      "category": "linux",
+      "tags": [
+        "permissions",
+        "file-system",
+        "ownership"
+      ],
+      "relatedTerms": [
+        "chmod",
+        "inode",
+        "dockerfile"
+      ]
+    },
+    {
+      "id": "ci",
+      "term": "CI",
+      "fullForm": "Continuous Integration",
+      "definition": "A development practice where developers frequently merge their code changes into a shared repository, triggering automated builds and tests with each integration. CI aims to detect integration errors early, reduce merge conflicts, and ensure the codebase remains in a consistently deployable state.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "testing",
+        "integration"
+      ],
+      "relatedTerms": [
+        "cd",
+        "continuous-integration",
+        "jenkins",
+        "github-actions"
+      ]
+    },
+    {
+      "id": "cidr",
+      "term": "CIDR",
+      "fullForm": "Classless Inter-Domain Routing",
+      "definition": "A method for allocating IP addresses and defining network boundaries using a prefix notation (e.g., 192.168.1.0/24). CIDR replaces the older classful addressing scheme and allows more flexible subnetting, enabling efficient use of IP address space in cloud VPC configurations and firewall rules.",
+      "category": "networking",
+      "tags": [
+        "ip-addressing",
+        "subnetting",
+        "routing"
+      ],
+      "relatedTerms": [
+        "ip-address",
+        "ipv6",
+        "firewall"
+      ]
+    },
+    {
+      "id": "click",
+      "term": "Click",
+      "fullForm": "",
+      "definition": "A Python package for creating command-line interfaces in a composable and user-friendly way. Click uses decorators to define commands, options, and arguments, and provides features like automatic help generation, input validation, and nested command groups, making it popular for building DevOps CLI tools.",
+      "category": "python",
+      "tags": [
+        "cli",
+        "library",
+        "automation"
+      ],
+      "relatedTerms": [
+        "python",
+        "decorator",
+        "function"
+      ]
+    },
+    {
+      "id": "clone",
+      "term": "Clone",
+      "fullForm": "",
+      "definition": "A Git operation that creates a local copy of a remote repository, including all its files, branches, and commit history. Cloning is typically the first step when beginning work on an existing project and establishes a connection to the remote repository for future push and pull operations.",
+      "category": "git",
+      "tags": [
+        "repository",
+        "remote",
+        "initialization"
+      ],
+      "relatedTerms": [
+        "git",
+        "fork",
+        "commit"
+      ]
+    },
+    {
+      "id": "cloud-native",
+      "term": "Cloud Native",
+      "fullForm": "",
+      "definition": "An approach to building and running applications that fully exploits the advantages of cloud computing, including containerization, microservices, declarative APIs, and dynamic orchestration. Cloud-native technologies enable loosely coupled, resilient, and scalable systems that can be managed through automated DevOps practices.",
+      "category": "cloud",
+      "tags": [
+        "architecture",
+        "microservices",
+        "scalability"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "container",
+        "docker",
+        "immutable-infrastructure"
+      ]
+    },
+    {
+      "id": "cloudformation",
+      "term": "CloudFormation",
+      "fullForm": "AWS CloudFormation",
+      "definition": "An AWS infrastructure-as-code service that allows you to define and provision cloud resources using declarative JSON or YAML templates. CloudFormation manages resource dependencies, supports rollback on failure, and enables version-controlled, repeatable infrastructure deployments across multiple AWS accounts and regions.",
+      "category": "cloud",
+      "tags": [
+        "iac",
+        "aws",
+        "automation"
+      ],
+      "relatedTerms": [
+        "aws",
+        "ansible",
+        "immutable-infrastructure"
+      ]
+    },
+    {
+      "id": "cluster",
+      "term": "Cluster",
+      "fullForm": "",
+      "definition": "A group of interconnected computers or nodes that work together as a single system to provide high availability, load balancing, or distributed computing capabilities. In Kubernetes, a cluster consists of a control plane and worker nodes that collectively run containerized workloads.",
+      "category": "kubernetes",
+      "tags": [
+        "infrastructure",
+        "high-availability",
+        "distributed"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "kubelet",
+        "kube-api-server",
+        "etcd"
+      ]
+    },
+    {
+      "id": "cmd-instruction",
+      "term": "CMD Instruction",
+      "fullForm": "",
+      "definition": "A Dockerfile instruction that specifies the default command to execute when a container starts from the image. Unlike RUN, which executes during build time, CMD runs at container launch and can be overridden by passing arguments to docker run. Only the last CMD instruction in a Dockerfile takes effect.",
+      "category": "docker",
+      "tags": [
+        "dockerfile",
+        "build",
+        "runtime"
+      ],
+      "relatedTerms": [
+        "dockerfile",
+        "entrypoint",
+        "image"
+      ]
+    },
+    {
+      "id": "commit",
+      "term": "Commit",
+      "fullForm": "",
+      "definition": "A Git operation that records a snapshot of the staged changes in the repository's history, creating a unique SHA-1 hash as an identifier. Each commit includes a message describing the changes, author information, and a pointer to the parent commit, forming a directed acyclic graph of the project's history.",
+      "category": "git",
+      "tags": [
+        "version-control",
+        "snapshot",
+        "history"
+      ],
+      "relatedTerms": [
+        "git",
+        "diff",
+        "cherry-pick",
+        "clone"
+      ]
+    },
+    {
+      "id": "compose",
+      "term": "Compose",
+      "fullForm": "Docker Compose",
+      "definition": "A tool for defining and running multi-container Docker applications using a YAML configuration file. Docker Compose allows you to specify services, networks, and volumes in a single docker-compose.yml file, making it easy to spin up complex application stacks with a single command for development and testing.",
+      "category": "docker",
+      "tags": [
+        "multi-container",
+        "orchestration",
+        "yaml"
+      ],
+      "relatedTerms": [
+        "docker",
+        "docker-compose",
+        "container"
+      ]
+    },
+    {
+      "id": "configmap",
+      "term": "ConfigMap",
+      "fullForm": "",
+      "definition": "A Kubernetes API object used to store non-confidential configuration data as key-value pairs. ConfigMaps decouple configuration from container images, allowing the same image to be used across different environments by injecting environment-specific settings as environment variables or mounted files.",
+      "category": "kubernetes",
+      "tags": [
+        "configuration",
+        "decoupling",
+        "environment"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "deployment",
+        "environment-variable"
+      ]
+    },
+    {
+      "id": "container",
+      "term": "Container",
+      "fullForm": "",
+      "definition": "A lightweight, standalone executable package that includes everything needed to run a piece of software: code, runtime, system tools, libraries, and settings. Containers use OS-level virtualization through cgroups and namespaces to provide process isolation while sharing the host kernel, making them faster and more efficient than traditional virtual machines.",
+      "category": "docker",
+      "tags": [
+        "virtualization",
+        "isolation",
+        "portability"
+      ],
+      "relatedTerms": [
+        "docker",
+        "image",
+        "cgroup",
+        "containerd"
+      ]
+    },
+    {
+      "id": "containerd",
+      "term": "containerd",
+      "fullForm": "",
+      "definition": "An industry-standard container runtime that manages the complete container lifecycle on a host, including image transfer, storage, container execution, and supervision. Originally developed as a component of Docker, containerd is now a standalone project and serves as the default runtime for Kubernetes and Docker Engine.",
+      "category": "docker",
+      "tags": [
+        "runtime",
+        "cncf",
+        "container-lifecycle"
+      ],
+      "relatedTerms": [
+        "container",
+        "docker",
+        "kubernetes",
+        "gvisor"
+      ]
+    },
+    {
+      "id": "continuous-delivery",
+      "term": "Continuous Delivery",
+      "fullForm": "",
+      "definition": "A software development practice where code changes are automatically built, tested, and prepared for release to production at any time. Continuous delivery ensures the codebase is always in a deployable state but requires a manual approval step before the actual production deployment occurs.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "release",
+        "pipeline"
+      ],
+      "relatedTerms": [
+        "ci",
+        "cd",
+        "continuous-deployment",
+        "continuous-integration"
+      ]
+    },
+    {
+      "id": "continuous-deployment",
+      "term": "Continuous Deployment",
+      "fullForm": "",
+      "definition": "An extension of continuous delivery where every change that passes all stages of the production pipeline is automatically released to production without manual intervention. This practice requires a robust automated testing suite and monitoring infrastructure to ensure quality and quickly detect issues in production.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "release",
+        "zero-touch"
+      ],
+      "relatedTerms": [
+        "ci",
+        "cd",
+        "continuous-delivery",
+        "continuous-integration"
+      ]
+    },
+    {
+      "id": "continuous-integration",
+      "term": "Continuous Integration",
+      "fullForm": "",
+      "definition": "A development practice where developers integrate code into a shared repository frequently, ideally several times a day, with each integration verified by an automated build and test suite. CI catches bugs early in the development cycle and reduces the risk of integration issues that arise from long-lived feature branches.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "testing",
+        "integration"
+      ],
+      "relatedTerms": [
+        "ci",
+        "cd",
+        "jenkins",
+        "github-actions"
+      ]
+    },
+    {
+      "id": "cron",
+      "term": "Cron",
+      "fullForm": "",
+      "definition": "A time-based job scheduler in Unix-like operating systems that enables users to schedule commands or scripts to run at specified intervals. Cron uses a daemon process that reads configuration from crontab files and is widely used for automating repetitive tasks such as backups, log rotation, and system maintenance.",
+      "category": "linux",
+      "tags": [
+        "scheduling",
+        "automation",
+        "daemon"
+      ],
+      "relatedTerms": [
+        "crontab",
+        "bash",
+        "daemon"
+      ]
+    },
+    {
+      "id": "crontab",
+      "term": "Crontab",
+      "fullForm": "Cron Table",
+      "definition": "A configuration file or command used to manage cron job schedules for individual users. Each line in a crontab defines a schedule using five time fields (minute, hour, day-of-month, month, day-of-week) followed by the command to execute. The crontab command provides options to list, edit, and remove scheduled jobs.",
+      "category": "linux",
+      "tags": [
+        "scheduling",
+        "configuration",
+        "automation"
+      ],
+      "relatedTerms": [
+        "cron",
+        "bash",
+        "daemon"
+      ]
+    },
+    {
+      "id": "curl",
+      "term": "curl",
+      "fullForm": "Client URL",
+      "definition": "A command-line tool and library for transferring data using various network protocols including HTTP, HTTPS, FTP, and more. curl is extensively used in DevOps for testing APIs, downloading files, and interacting with web services from scripts and CI/CD pipelines.",
+      "category": "networking",
+      "tags": [
+        "http",
+        "cli",
+        "data-transfer"
+      ],
+      "relatedTerms": [
+        "http",
+        "https",
+        "api",
+        "endpoint"
+      ]
+    },
+    {
+      "id": "cve",
+      "term": "CVE",
+      "fullForm": "Common Vulnerabilities and Exposures",
+      "definition": "A standardized system for identifying and cataloging publicly known cybersecurity vulnerabilities, each assigned a unique identifier (e.g., CVE-2021-44228). CVE entries are maintained by MITRE and are used by security tools like Docker Scout to scan images and dependencies for known vulnerabilities.",
+      "category": "security",
+      "tags": [
+        "vulnerabilities",
+        "scanning",
+        "compliance"
+      ],
+      "relatedTerms": [
+        "docker-scout",
+        "encryption",
+        "firewall"
+      ]
+    },
+    {
+      "id": "daemon",
+      "term": "Daemon",
+      "fullForm": "",
+      "definition": "A background process that runs continuously on a Unix/Linux system without direct user interaction, typically started at boot time. Daemons handle system services such as web serving (httpd), logging (syslogd), and container management (dockerd), and are conventionally named with a trailing 'd'.",
+      "category": "linux",
+      "tags": [
+        "process",
+        "background",
+        "services"
+      ],
+      "relatedTerms": [
+        "cron",
+        "docker",
+        "containerd"
+      ]
+    },
+    {
+      "id": "daemonset",
+      "term": "DaemonSet",
+      "fullForm": "",
+      "definition": "A Kubernetes workload resource that ensures a copy of a specific pod runs on every node (or a selected subset of nodes) in the cluster. DaemonSets are commonly used for deploying cluster-wide services such as log collectors, monitoring agents, and network plugins that need to be present on every node.",
+      "category": "kubernetes",
+      "tags": [
+        "workload",
+        "per-node",
+        "cluster-wide"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "deployment",
+        "kubelet"
+      ]
+    },
+    {
+      "id": "dashboard",
+      "term": "Dashboard",
+      "fullForm": "",
+      "definition": "A visual interface that displays key metrics, status indicators, and data visualizations in a centralized view. In DevOps, dashboards from tools like Grafana, Datadog, or the Kubernetes Dashboard provide real-time visibility into application performance, infrastructure health, and deployment status.",
+      "category": "monitoring",
+      "tags": [
+        "visualization",
+        "metrics",
+        "observability"
+      ],
+      "relatedTerms": [
+        "grafana",
+        "datadog",
+        "kubernetes"
+      ]
+    },
+    {
+      "id": "datadog",
+      "term": "Datadog",
+      "fullForm": "",
+      "definition": "A cloud-based monitoring and analytics platform that provides full-stack observability including infrastructure monitoring, application performance management, log management, and security monitoring. Datadog integrates with hundreds of technologies and is widely used in DevOps for real-time alerting and troubleshooting.",
+      "category": "monitoring",
+      "tags": [
+        "saas",
+        "observability",
+        "alerting"
+      ],
+      "relatedTerms": [
+        "grafana",
+        "elk-stack",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "decorator",
+      "term": "Decorator",
+      "fullForm": "",
+      "definition": "A Python design pattern that allows you to modify or extend the behavior of a function or class without changing its source code. Decorators use the @syntax and are functions that take another function as input and return a modified version, commonly used in frameworks like Flask and Click for routing and CLI definition.",
+      "category": "python",
+      "tags": [
+        "design-pattern",
+        "functions",
+        "metaprogramming"
+      ],
+      "relatedTerms": [
+        "function",
+        "flask",
+        "click",
+        "fastapi"
+      ]
+    },
+    {
+      "id": "deployment",
+      "term": "Deployment",
+      "fullForm": "",
+      "definition": "A Kubernetes resource that provides declarative updates for pods and replica sets, managing the desired state of your application. Deployments support rolling updates, rollbacks, scaling, and self-healing, ensuring the specified number of pod replicas are always running and healthy.",
+      "category": "kubernetes",
+      "tags": [
+        "workload",
+        "rollout",
+        "scaling"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "configmap",
+        "horizontal-pod-autoscaler"
+      ]
+    },
+    {
+      "id": "devops",
+      "term": "DevOps",
+      "fullForm": "Development and Operations",
+      "definition": "A cultural and technical movement that emphasizes collaboration between software development and IT operations teams to deliver software faster and more reliably. DevOps practices include continuous integration, continuous delivery, infrastructure as code, monitoring, and automated testing, all aimed at shortening the development lifecycle.",
+      "category": "general",
+      "tags": [
+        "culture",
+        "methodology",
+        "collaboration"
+      ],
+      "relatedTerms": [
+        "ci",
+        "cd",
+        "gitops",
+        "immutable-infrastructure"
+      ]
+    },
+    {
+      "id": "dhcp",
+      "term": "DHCP",
+      "fullForm": "Dynamic Host Configuration Protocol",
+      "definition": "A network management protocol that automatically assigns IP addresses and other network configuration parameters to devices on a network. DHCP eliminates the need for manual IP address configuration and is used in both physical networks and cloud environments to dynamically allocate addressing to new instances.",
+      "category": "networking",
+      "tags": [
+        "protocols",
+        "ip-addressing",
+        "automation"
+      ],
+      "relatedTerms": [
+        "ip-address",
+        "dns",
+        "arp"
+      ]
+    },
+    {
+      "id": "dictionary",
+      "term": "Dictionary",
+      "fullForm": "",
+      "definition": "A built-in Python data structure that stores data as key-value pairs, providing O(1) average-case lookup time. Dictionaries are mutable, ordered (as of Python 3.7+), and are extensively used in DevOps scripting for handling JSON data, configuration parsing, and API response processing.",
+      "category": "python",
+      "tags": [
+        "data-structure",
+        "key-value",
+        "fundamentals"
+      ],
+      "relatedTerms": [
+        "json",
+        "python",
+        "function"
+      ]
+    },
+    {
+      "id": "diff",
+      "term": "Diff",
+      "fullForm": "",
+      "definition": "A command and concept that shows the differences between two files, directories, or Git commits by comparing them line by line. In Git, diff is used to review unstaged changes, compare branches, and inspect commit history, producing output in a unified format that highlights additions, deletions, and modifications.",
+      "category": "git",
+      "tags": [
+        "comparison",
+        "code-review",
+        "changes"
+      ],
+      "relatedTerms": [
+        "git",
+        "commit",
+        "cherry-pick"
+      ]
+    },
+    {
+      "id": "dig",
+      "term": "dig",
+      "fullForm": "Domain Information Groper",
+      "definition": "A command-line DNS lookup utility used to query DNS servers and retrieve information about DNS records such as A, AAAA, MX, CNAME, and NS records. dig is an essential troubleshooting tool for diagnosing DNS resolution issues and verifying DNS configurations in networked environments.",
+      "category": "networking",
+      "tags": [
+        "dns",
+        "troubleshooting",
+        "cli"
+      ],
+      "relatedTerms": [
+        "dns",
+        "ip-address",
+        "curl"
+      ]
+    },
+    {
+      "id": "dns",
+      "term": "DNS",
+      "fullForm": "Domain Name System",
+      "definition": "A hierarchical, distributed naming system that translates human-readable domain names (e.g., example.com) into IP addresses that computers use to communicate. DNS is fundamental to internet infrastructure and plays a critical role in service discovery, load balancing, and routing in cloud and Kubernetes environments.",
+      "category": "networking",
+      "tags": [
+        "name-resolution",
+        "infrastructure",
+        "protocols"
+      ],
+      "relatedTerms": [
+        "dig",
+        "ip-address",
+        "dhcp",
+        "ingress"
+      ]
+    },
+    {
+      "id": "docker",
+      "term": "Docker",
+      "fullForm": "",
+      "definition": "An open-source platform for building, shipping, and running applications in containers. Docker provides tools for creating container images from Dockerfiles, managing container lifecycles, and networking between containers, and has become the de facto standard for containerization in modern DevOps workflows.",
+      "category": "docker",
+      "tags": [
+        "containerization",
+        "platform",
+        "devops"
+      ],
+      "relatedTerms": [
+        "container",
+        "dockerfile",
+        "docker-compose",
+        "containerd"
+      ]
+    },
+    {
+      "id": "docker-compose",
+      "term": "Docker Compose",
+      "fullForm": "",
+      "definition": "A tool for defining and managing multi-container Docker applications through a YAML file (docker-compose.yml). It allows developers to configure application services, networks, and volumes declaratively and manage them as a cohesive unit with simple commands like docker compose up and docker compose down.",
+      "category": "docker",
+      "tags": [
+        "multi-container",
+        "yaml",
+        "orchestration"
+      ],
+      "relatedTerms": [
+        "docker",
+        "compose",
+        "container",
+        "bridge-network"
+      ]
+    },
+    {
+      "id": "docker-hub",
+      "term": "Docker Hub",
+      "fullForm": "",
+      "definition": "The default public container image registry provided by Docker, hosting millions of pre-built images for popular software. Docker Hub supports both public and private repositories, automated builds, and image vulnerability scanning, serving as the primary distribution point for container images.",
+      "category": "docker",
+      "tags": [
+        "registry",
+        "images",
+        "distribution"
+      ],
+      "relatedTerms": [
+        "docker",
+        "image",
+        "artifact"
+      ]
+    },
+    {
+      "id": "docker-scout",
+      "term": "Docker Scout",
+      "fullForm": "",
+      "definition": "A Docker tool that analyzes container images to provide insights into their security posture, including known vulnerabilities (CVEs), outdated base images, and remediation recommendations. Docker Scout integrates into the Docker CLI and CI/CD pipelines to enable proactive security scanning throughout the software supply chain.",
+      "category": "docker",
+      "tags": [
+        "security",
+        "scanning",
+        "vulnerabilities"
+      ],
+      "relatedTerms": [
+        "docker",
+        "image",
+        "cve"
+      ]
+    },
+    {
+      "id": "docker-swarm",
+      "term": "Docker Swarm",
+      "fullForm": "",
+      "definition": "Docker's native clustering and orchestration solution that turns a pool of Docker hosts into a single virtual host. Swarm provides built-in load balancing, service discovery, rolling updates, and scaling capabilities, though it has largely been superseded by Kubernetes for production container orchestration.",
+      "category": "docker",
+      "tags": [
+        "orchestration",
+        "clustering",
+        "scaling"
+      ],
+      "relatedTerms": [
+        "docker",
+        "kubernetes",
+        "cluster"
+      ]
+    },
+    {
+      "id": "dockerfile",
+      "term": "Dockerfile",
+      "fullForm": "",
+      "definition": "A text file containing a series of instructions that Docker uses to build a container image layer by layer. Dockerfiles define the base image, copy application code, install dependencies, set environment variables, and specify the default command, enabling reproducible and automated image creation.",
+      "category": "docker",
+      "tags": [
+        "build",
+        "image",
+        "automation"
+      ],
+      "relatedTerms": [
+        "docker",
+        "image",
+        "cmd-instruction",
+        "entrypoint",
+        "buildkit"
+      ]
+    },
+    {
+      "id": "dpkg",
+      "term": "dpkg",
+      "fullForm": "Debian Package",
+      "definition": "The low-level package manager for Debian-based Linux distributions that handles the installation, removal, and management of .deb packages. Unlike APT, dpkg does not automatically resolve dependencies, making it more suitable for direct package manipulation while APT serves as a higher-level frontend.",
+      "category": "linux",
+      "tags": [
+        "package-management",
+        "debian",
+        "low-level"
+      ],
+      "relatedTerms": [
+        "apt",
+        "alpine-linux"
+      ]
+    },
+    {
+      "id": "ec2",
+      "term": "EC2",
+      "fullForm": "Elastic Compute Cloud",
+      "definition": "An AWS service that provides resizable virtual server instances in the cloud. EC2 allows users to launch and manage virtual machines with various configurations of CPU, memory, storage, and networking, and forms the backbone of many cloud-based applications and Kubernetes clusters on AWS.",
+      "category": "cloud",
+      "tags": [
+        "compute",
+        "aws",
+        "virtual-machines"
+      ],
+      "relatedTerms": [
+        "aws",
+        "auto-scaling",
+        "availability-zone",
+        "eks"
+      ]
+    },
+    {
+      "id": "eks",
+      "term": "EKS",
+      "fullForm": "Elastic Kubernetes Service",
+      "definition": "A managed Kubernetes service provided by AWS that simplifies running Kubernetes clusters without needing to install, operate, and maintain the control plane. EKS automatically manages the availability and scalability of the Kubernetes API servers and etcd persistence layer across multiple availability zones.",
+      "category": "cloud",
+      "tags": [
+        "kubernetes",
+        "aws",
+        "managed-service"
+      ],
+      "relatedTerms": [
+        "aws",
+        "kubernetes",
+        "fargate",
+        "ec2"
+      ]
+    },
+    {
+      "id": "elastic-load-balancer",
+      "term": "Elastic Load Balancer",
+      "fullForm": "AWS Elastic Load Balancer",
+      "definition": "An AWS service that automatically distributes incoming application traffic across multiple targets such as EC2 instances, containers, and IP addresses. ELB supports three types: Application Load Balancer (Layer 7), Network Load Balancer (Layer 4), and Gateway Load Balancer, each optimized for different use cases.",
+      "category": "cloud",
+      "tags": [
+        "load-balancing",
+        "aws",
+        "high-availability"
+      ],
+      "relatedTerms": [
+        "aws",
+        "ec2",
+        "haproxy",
+        "ingress"
+      ]
+    },
+    {
+      "id": "elk-stack",
+      "term": "ELK Stack",
+      "fullForm": "Elasticsearch, Logstash, Kibana",
+      "definition": "A popular open-source log management platform consisting of three components: Elasticsearch for searching and storing logs, Logstash for collecting and processing log data, and Kibana for visualizing and exploring logs through dashboards. The ELK Stack is widely used in DevOps for centralized logging and troubleshooting.",
+      "category": "monitoring",
+      "tags": [
+        "logging",
+        "search",
+        "visualization"
+      ],
+      "relatedTerms": [
+        "grafana",
+        "datadog",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "encryption",
+      "term": "Encryption",
+      "fullForm": "",
+      "definition": "The process of converting plaintext data into an unreadable ciphertext using cryptographic algorithms and keys to protect data confidentiality. In DevOps, encryption is applied both at rest (stored data) and in transit (network communication via TLS/SSL) to safeguard sensitive information such as secrets, credentials, and user data.",
+      "category": "security",
+      "tags": [
+        "cryptography",
+        "data-protection",
+        "tls"
+      ],
+      "relatedTerms": [
+        "https",
+        "jwt",
+        "authentication"
+      ]
+    },
+    {
+      "id": "endpoint",
+      "term": "Endpoint",
+      "fullForm": "",
+      "definition": "A specific URL or network address where an API or service can be accessed. In REST APIs, endpoints represent specific resources or actions (e.g., /api/users). In Kubernetes, endpoints are objects that track the IP addresses of pods backing a service, enabling service discovery and load balancing.",
+      "category": "general",
+      "tags": [
+        "api",
+        "networking",
+        "services"
+      ],
+      "relatedTerms": [
+        "api",
+        "http",
+        "ingress",
+        "dns"
+      ]
+    },
+    {
+      "id": "entrypoint",
+      "term": "ENTRYPOINT",
+      "fullForm": "",
+      "definition": "A Dockerfile instruction that configures a container to run as an executable, specifying the main process that starts when the container launches. Unlike CMD, ENTRYPOINT is not easily overridden at runtime and is often combined with CMD to provide default arguments that users can override.",
+      "category": "docker",
+      "tags": [
+        "dockerfile",
+        "runtime",
+        "configuration"
+      ],
+      "relatedTerms": [
+        "cmd-instruction",
+        "dockerfile",
+        "container"
+      ]
+    },
+    {
+      "id": "environment-variable",
+      "term": "Environment Variable",
+      "fullForm": "",
+      "definition": "A dynamic key-value pair set in the operating system or container runtime that configures application behavior without modifying code. Environment variables are widely used in DevOps to inject configuration such as database URLs, API keys, and feature flags into applications, following the twelve-factor app methodology.",
+      "category": "linux",
+      "tags": [
+        "configuration",
+        "twelve-factor",
+        "runtime"
+      ],
+      "relatedTerms": [
+        "bash",
+        "configmap",
+        "dockerfile"
+      ]
+    },
+    {
+      "id": "etcd",
+      "term": "etcd",
+      "fullForm": "",
+      "definition": "A distributed, reliable key-value store used as Kubernetes' backing store for all cluster data, including configuration, state, and metadata. etcd uses the Raft consensus algorithm to ensure data consistency across the cluster and is critical to the functioning of the Kubernetes control plane.",
+      "category": "kubernetes",
+      "tags": [
+        "key-value-store",
+        "distributed",
+        "control-plane"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "kube-api-server",
+        "cluster"
+      ]
+    },
+    {
+      "id": "exit-code",
+      "term": "Exit Code",
+      "fullForm": "",
+      "definition": "A numeric value returned by a process to its parent when it terminates, indicating success or failure. By convention, an exit code of 0 means success, while any non-zero value indicates an error. Exit codes are essential in shell scripting and CI/CD pipelines for controlling workflow logic and error handling.",
+      "category": "shell-scripting",
+      "tags": [
+        "process",
+        "error-handling",
+        "scripting"
+      ],
+      "relatedTerms": [
+        "bash",
+        "ci",
+        "function"
+      ]
+    },
+    {
+      "id": "fargate",
+      "term": "Fargate",
+      "fullForm": "AWS Fargate",
+      "definition": "A serverless compute engine for containers provided by AWS that works with both ECS and EKS. Fargate eliminates the need to provision and manage EC2 instances for running containers, automatically allocating the right amount of compute resources based on container specifications and scaling as needed.",
+      "category": "cloud",
+      "tags": [
+        "serverless",
+        "containers",
+        "aws"
+      ],
+      "relatedTerms": [
+        "aws",
+        "eks",
+        "ec2",
+        "container"
+      ]
+    },
+    {
+      "id": "fastapi",
+      "term": "FastAPI",
+      "fullForm": "",
+      "definition": "A modern, high-performance Python web framework for building APIs, based on standard Python type hints. FastAPI automatically generates OpenAPI documentation, provides built-in data validation using Pydantic, and supports asynchronous request handling, making it increasingly popular for building microservices in DevOps environments.",
+      "category": "python",
+      "tags": [
+        "web-framework",
+        "api",
+        "async"
+      ],
+      "relatedTerms": [
+        "flask",
+        "api",
+        "decorator",
+        "json"
+      ]
+    },
+    {
+      "id": "feature-flag",
+      "term": "Feature Flag",
+      "fullForm": "",
+      "definition": "A software development technique that uses conditional logic to enable or disable features in an application without deploying new code. Feature flags allow teams to perform dark launches, A/B testing, and gradual rollouts, decoupling feature release from code deployment and reducing the risk of introducing new functionality.",
+      "category": "cicd",
+      "tags": [
+        "progressive-delivery",
+        "toggles",
+        "risk-reduction"
+      ],
+      "relatedTerms": [
+        "canary-deployment",
+        "blue-green-deployment",
+        "continuous-deployment"
+      ]
+    },
+    {
+      "id": "fileystem",
+      "term": "Filesystem",
+      "fullForm": "",
+      "definition": "The method and data structure an operating system uses to organize, store, and retrieve files on storage devices. Common Linux filesystems include ext4, XFS, and Btrfs. In containers, a layered union filesystem (such as OverlayFS) is used to combine read-only image layers with a writable container layer.",
+      "category": "linux",
+      "tags": [
+        "storage",
+        "organization",
+        "layers"
+      ],
+      "relatedTerms": [
+        "inode",
+        "bind-mount",
+        "container"
+      ]
+    },
+    {
+      "id": "firewall",
+      "term": "Firewall",
+      "fullForm": "",
+      "definition": "A network security system that monitors and controls incoming and outgoing network traffic based on predetermined security rules. Firewalls can be hardware-based, software-based (such as iptables on Linux), or cloud-native (such as AWS Security Groups), and form a critical layer of defense in any infrastructure.",
+      "category": "security",
+      "tags": [
+        "network-security",
+        "access-control",
+        "infrastructure"
+      ],
+      "relatedTerms": [
+        "iptables",
+        "cidr",
+        "ip-address"
+      ]
+    },
+    {
+      "id": "flask",
+      "term": "Flask",
+      "fullForm": "",
+      "definition": "A lightweight Python web framework that provides the essential tools for building web applications and APIs without imposing rigid project structures. Flask follows a microframework philosophy, offering routing, templating, and request handling while allowing developers to choose their own database, authentication, and other components.",
+      "category": "python",
+      "tags": [
+        "web-framework",
+        "microframework",
+        "api"
+      ],
+      "relatedTerms": [
+        "fastapi",
+        "decorator",
+        "api"
+      ]
+    },
+    {
+      "id": "fork",
+      "term": "Fork",
+      "fullForm": "",
+      "definition": "A server-side copy of a repository that creates an independent version under a different user or organization's account. Forking is fundamental to open-source collaboration, allowing contributors to freely experiment with changes without affecting the original project, then submit pull requests to propose their changes back upstream.",
+      "category": "git",
+      "tags": [
+        "collaboration",
+        "open-source",
+        "repository"
+      ],
+      "relatedTerms": [
+        "clone",
+        "git",
+        "commit"
+      ]
+    },
+    {
+      "id": "function",
+      "term": "Function",
+      "fullForm": "",
+      "definition": "A reusable block of code that performs a specific task, defined with parameters and optionally returning a value. In Python, functions are first-class objects that can be passed as arguments, returned from other functions, and assigned to variables. In shell scripting, functions help organize and modularize automation scripts.",
+      "category": "python",
+      "tags": [
+        "fundamentals",
+        "code-reuse",
+        "modularity"
+      ],
+      "relatedTerms": [
+        "decorator",
+        "bash",
+        "click"
+      ]
+    },
+    {
+      "id": "gcp",
+      "term": "GCP",
+      "fullForm": "Google Cloud Platform",
+      "definition": "Google's suite of cloud computing services offering compute, storage, networking, machine learning, and data analytics capabilities. GCP is known for its strengths in Kubernetes (having originated the project), BigQuery for data analytics, and its global network infrastructure.",
+      "category": "cloud",
+      "tags": [
+        "cloud-provider",
+        "google",
+        "infrastructure"
+      ],
+      "relatedTerms": [
+        "aws",
+        "azure",
+        "kubernetes"
+      ]
+    },
+    {
+      "id": "git",
+      "term": "Git",
+      "fullForm": "",
+      "definition": "A distributed version control system designed to track changes in source code during software development. Git enables multiple developers to work on the same codebase simultaneously through branching and merging, maintains a complete history of all changes, and is the foundation of modern DevOps collaboration workflows.",
+      "category": "git",
+      "tags": [
+        "version-control",
+        "distributed",
+        "collaboration"
+      ],
+      "relatedTerms": [
+        "commit",
+        "clone",
+        "diff",
+        "cherry-pick",
+        "gitignore"
+      ]
+    },
+    {
+      "id": "github-actions",
+      "term": "GitHub Actions",
+      "fullForm": "",
+      "definition": "A CI/CD platform integrated directly into GitHub that allows you to automate build, test, and deployment workflows using YAML-defined workflow files. GitHub Actions supports event-driven triggers, reusable actions from a marketplace, matrix builds, and self-hosted runners, making it a popular choice for projects hosted on GitHub.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "github",
+        "workflows"
+      ],
+      "relatedTerms": [
+        "ci",
+        "cd",
+        "gitlab-ci",
+        "jenkins"
+      ]
+    },
+    {
+      "id": "gitignore",
+      "term": ".gitignore",
+      "fullForm": "",
+      "definition": "A special file in a Git repository that specifies which files and directories Git should ignore and not track. Patterns in .gitignore prevent accidentally committing build artifacts, dependency directories, environment files with secrets, IDE configurations, and other files that should not be version controlled.",
+      "category": "git",
+      "tags": [
+        "configuration",
+        "patterns",
+        "repository-hygiene"
+      ],
+      "relatedTerms": [
+        "git",
+        "commit",
+        "glob"
+      ]
+    },
+    {
+      "id": "gitlab-ci",
+      "term": "GitLab CI",
+      "fullForm": "GitLab Continuous Integration",
+      "definition": "A CI/CD system built into GitLab that uses a .gitlab-ci.yml file to define pipeline stages, jobs, and deployment workflows. GitLab CI provides an integrated experience with source control, issue tracking, container registry, and deployment environments, supporting the full DevOps lifecycle within a single platform.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "gitlab",
+        "pipeline"
+      ],
+      "relatedTerms": [
+        "ci",
+        "cd",
+        "github-actions",
+        "jenkins"
+      ]
+    },
+    {
+      "id": "gitops",
+      "term": "GitOps",
+      "fullForm": "",
+      "definition": "An operational framework that uses Git repositories as the single source of truth for declarative infrastructure and application configurations. GitOps leverages Git pull requests for change management and automated reconciliation to ensure that the live state of systems matches the desired state defined in Git.",
+      "category": "cicd",
+      "tags": [
+        "methodology",
+        "declarative",
+        "automation"
+      ],
+      "relatedTerms": [
+        "git",
+        "kubernetes",
+        "devops",
+        "kustomize"
+      ]
+    },
+    {
+      "id": "glob",
+      "term": "Glob",
+      "fullForm": "",
+      "definition": "A pattern-matching syntax used in shells and programming languages to match file names and paths using wildcard characters. Common glob patterns include * (any characters), ? (single character), and [...] (character set). Globs are widely used in .gitignore files, CI/CD pipelines, and shell scripts for file selection.",
+      "category": "shell-scripting",
+      "tags": [
+        "pattern-matching",
+        "wildcards",
+        "file-selection"
+      ],
+      "relatedTerms": [
+        "bash",
+        "grep",
+        "gitignore"
+      ]
+    },
+    {
+      "id": "go",
+      "term": "Go",
+      "fullForm": "Golang",
+      "definition": "A statically typed, compiled programming language developed by Google, known for its simplicity, strong concurrency support, and fast compilation. Go is the language behind many core DevOps tools including Docker, Kubernetes, Terraform, and Prometheus, making it an important language in the cloud-native ecosystem.",
+      "category": "general",
+      "tags": [
+        "programming-language",
+        "compiled",
+        "cloud-native"
+      ],
+      "relatedTerms": [
+        "docker",
+        "kubernetes",
+        "grpc"
+      ]
+    },
+    {
+      "id": "grafana",
+      "term": "Grafana",
+      "fullForm": "",
+      "definition": "An open-source analytics and interactive visualization platform that connects to various data sources including Prometheus, Elasticsearch, and CloudWatch. Grafana enables teams to create rich, customizable dashboards for monitoring infrastructure and application metrics, and supports alerting based on metric thresholds.",
+      "category": "monitoring",
+      "tags": [
+        "visualization",
+        "dashboards",
+        "open-source"
+      ],
+      "relatedTerms": [
+        "datadog",
+        "elk-stack",
+        "dashboard",
+        "cadvisor"
+      ]
+    },
+    {
+      "id": "grep",
+      "term": "grep",
+      "fullForm": "Global Regular Expression Print",
+      "definition": "A command-line utility for searching plain-text data for lines matching a regular expression pattern. grep is one of the most frequently used tools in Linux administration and DevOps, used for log analysis, configuration file inspection, and filtering output from other commands through piping.",
+      "category": "shell-scripting",
+      "tags": [
+        "text-search",
+        "regex",
+        "cli"
+      ],
+      "relatedTerms": [
+        "bash",
+        "glob",
+        "curl"
+      ]
+    },
+    {
+      "id": "grpc",
+      "term": "gRPC",
+      "fullForm": "Google Remote Procedure Call",
+      "definition": "A high-performance, open-source universal RPC framework that uses Protocol Buffers as its serialization format and HTTP/2 for transport. gRPC supports bidirectional streaming, built-in authentication, and is widely used for microservice communication in cloud-native architectures due to its efficiency and strong typing.",
+      "category": "networking",
+      "tags": [
+        "rpc",
+        "microservices",
+        "protocol-buffers"
+      ],
+      "relatedTerms": [
+        "http",
+        "api",
+        "go"
+      ]
+    },
+    {
+      "id": "gvisor",
+      "term": "gVisor",
+      "fullForm": "",
+      "definition": "An open-source container sandbox runtime developed by Google that provides an additional layer of isolation between containerized applications and the host kernel. gVisor implements a user-space kernel that intercepts and handles application system calls, reducing the attack surface compared to running containers directly on the host kernel.",
+      "category": "security",
+      "tags": [
+        "container-runtime",
+        "sandbox",
+        "isolation"
+      ],
+      "relatedTerms": [
+        "containerd",
+        "container",
+        "kata-containers",
+        "kernel"
+      ]
+    },
+    {
+      "id": "haproxy",
+      "term": "HAProxy",
+      "fullForm": "High Availability Proxy",
+      "definition": "A free, open-source software that provides high availability load balancing and proxying for TCP and HTTP-based applications. HAProxy is known for its reliability, performance, and feature-rich configuration, commonly used as a reverse proxy, load balancer, and ingress controller in containerized environments.",
+      "category": "networking",
+      "tags": [
+        "load-balancing",
+        "proxy",
+        "high-availability"
+      ],
+      "relatedTerms": [
+        "elastic-load-balancer",
+        "ingress",
+        "http"
+      ]
+    },
+    {
+      "id": "healthcheck",
+      "term": "Healthcheck",
+      "fullForm": "",
+      "definition": "A mechanism for monitoring whether an application or service is functioning correctly and ready to handle requests. In Docker, the HEALTHCHECK instruction defines a command to test container health. In Kubernetes, liveness and readiness probes serve similar purposes, enabling automated restarts of unhealthy containers.",
+      "category": "docker",
+      "tags": [
+        "monitoring",
+        "reliability",
+        "probes"
+      ],
+      "relatedTerms": [
+        "docker",
+        "kubernetes",
+        "deployment"
+      ]
+    },
+    {
+      "id": "helm",
+      "term": "Helm",
+      "fullForm": "",
+      "definition": "A package manager for Kubernetes that simplifies the deployment and management of complex applications using reusable, versioned charts. Helm charts are collections of templated Kubernetes manifests that can be customized with values files, enabling consistent deployments across environments and easy application upgrades and rollbacks.",
+      "category": "kubernetes",
+      "tags": [
+        "package-manager",
+        "charts",
+        "templating"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "kustomize",
+        "deployment"
+      ]
+    },
+    {
+      "id": "here-document",
+      "term": "Here Document",
+      "fullForm": "",
+      "definition": "A shell scripting construct that allows you to pass a multi-line block of text as input to a command, delimited by a user-defined token (e.g., <<EOF...EOF). Here documents are commonly used for embedding multi-line strings in scripts, generating configuration files, and providing inline input to commands without creating temporary files.",
+      "category": "shell-scripting",
+      "tags": [
+        "bash",
+        "input-redirection",
+        "multi-line"
+      ],
+      "relatedTerms": [
+        "bash",
+        "environment-variable",
+        "function"
+      ]
+    },
+    {
+      "id": "horizontal-pod-autoscaler",
+      "term": "Horizontal Pod Autoscaler",
+      "fullForm": "",
+      "definition": "A Kubernetes resource that automatically scales the number of pod replicas in a deployment, replica set, or stateful set based on observed metrics such as CPU utilization or custom metrics. The HPA periodically evaluates metrics against defined targets and adjusts the replica count to maintain desired performance levels.",
+      "category": "kubernetes",
+      "tags": [
+        "autoscaling",
+        "metrics",
+        "performance"
+      ],
+      "relatedTerms": [
+        "deployment",
+        "auto-scaling",
+        "kubernetes"
+      ]
+    },
+    {
+      "id": "http",
+      "term": "HTTP",
+      "fullForm": "Hypertext Transfer Protocol",
+      "definition": "The foundational application-layer protocol for transmitting hypermedia documents and API data on the World Wide Web. HTTP follows a request-response model between clients and servers, using methods like GET, POST, PUT, and DELETE. It is stateless by design and forms the basis for RESTful API communication.",
+      "category": "networking",
+      "tags": [
+        "protocols",
+        "web",
+        "api"
+      ],
+      "relatedTerms": [
+        "https",
+        "api",
+        "curl",
+        "grpc"
+      ]
+    },
+    {
+      "id": "https",
+      "term": "HTTPS",
+      "fullForm": "Hypertext Transfer Protocol Secure",
+      "definition": "The encrypted version of HTTP that uses TLS (Transport Layer Security) to secure communication between clients and servers. HTTPS ensures data integrity, confidentiality, and authentication through certificate-based encryption, and is now considered the standard for all web traffic and API communication.",
+      "category": "networking",
+      "tags": [
+        "protocols",
+        "tls",
+        "security"
+      ],
+      "relatedTerms": [
+        "http",
+        "encryption",
+        "api"
+      ]
+    },
+    {
+      "id": "iaas",
+      "term": "IaaS",
+      "fullForm": "Infrastructure as a Service",
+      "definition": "A cloud computing model where the provider offers virtualized computing resources over the internet, including servers, storage, and networking. IaaS gives users full control over the operating system and applications while the cloud provider manages the physical hardware, enabling scalable and flexible infrastructure without capital expenditure.",
+      "category": "cloud",
+      "tags": [
+        "cloud-model",
+        "infrastructure",
+        "virtualization"
+      ],
+      "relatedTerms": [
+        "aws",
+        "azure",
+        "gcp",
+        "ec2"
+      ]
+    },
+    {
+      "id": "iam",
+      "term": "IAM",
+      "fullForm": "Identity and Access Management",
+      "definition": "A framework of policies, processes, and technologies for managing digital identities and controlling access to resources. In AWS, IAM is a core service that enables you to create users, groups, roles, and policies to securely manage who can access what resources with fine-grained permissions.",
+      "category": "security",
+      "tags": [
+        "access-control",
+        "policies",
+        "cloud"
+      ],
+      "relatedTerms": [
+        "authentication",
+        "authorization",
+        "aws"
+      ]
+    },
+    {
+      "id": "icmp",
+      "term": "ICMP",
+      "fullForm": "Internet Control Message Protocol",
+      "definition": "A network protocol used by network devices to send error messages and operational information, such as whether a service is available or a host is reachable. ICMP is the protocol behind the ping and traceroute utilities and is essential for network diagnostics, though it is often restricted by firewalls for security reasons.",
+      "category": "networking",
+      "tags": [
+        "protocols",
+        "diagnostics",
+        "ping"
+      ],
+      "relatedTerms": [
+        "ip-address",
+        "firewall",
+        "arp"
+      ]
+    },
+    {
+      "id": "idempotent",
+      "term": "Idempotent",
+      "fullForm": "",
+      "definition": "A property of an operation meaning it produces the same result regardless of how many times it is executed. In DevOps, idempotency is crucial for configuration management tools like Ansible, infrastructure-as-code, and API design, ensuring that rerunning a deployment or applying a configuration does not cause unintended side effects.",
+      "category": "general",
+      "tags": [
+        "design-principle",
+        "reliability",
+        "automation"
+      ],
+      "relatedTerms": [
+        "ansible",
+        "cloudformation",
+        "api"
+      ]
+    },
+    {
+      "id": "image",
+      "term": "Image",
+      "fullForm": "",
+      "definition": "A read-only template containing a layered filesystem with application code, dependencies, libraries, and configuration needed to create a container. Docker images are built from Dockerfiles and stored in registries like Docker Hub. Each layer is cached and shared across images, making them storage-efficient and fast to distribute.",
+      "category": "docker",
+      "tags": [
+        "template",
+        "layers",
+        "registry"
+      ],
+      "relatedTerms": [
+        "dockerfile",
+        "container",
+        "docker-hub",
+        "buildkit"
+      ]
+    },
+    {
+      "id": "immutable-infrastructure",
+      "term": "Immutable Infrastructure",
+      "fullForm": "",
+      "definition": "An infrastructure paradigm where servers and components are never modified after deployment. Instead of patching or updating running systems, new instances are built from a common base image with the desired changes and replace the old ones entirely. This approach eliminates configuration drift and ensures consistency across environments.",
+      "category": "general",
+      "tags": [
+        "infrastructure",
+        "design-principle",
+        "consistency"
+      ],
+      "relatedTerms": [
+        "cloud-native",
+        "container",
+        "image",
+        "devops"
+      ]
+    },
+    {
+      "id": "incident-management",
+      "term": "Incident Management",
+      "fullForm": "",
+      "definition": "The process of identifying, responding to, resolving, and learning from unplanned service disruptions or degradations. Incident management encompasses alerting, triage, communication, mitigation, root cause analysis, and post-incident reviews, and is a critical practice in DevOps for maintaining service reliability and improving system resilience.",
+      "category": "general",
+      "tags": [
+        "reliability",
+        "on-call",
+        "postmortem"
+      ],
+      "relatedTerms": [
+        "monitoring",
+        "dashboard",
+        "datadog"
+      ]
+    },
+    {
+      "id": "ingress",
+      "term": "Ingress",
+      "fullForm": "",
+      "definition": "A Kubernetes API object that manages external access to services within a cluster, typically HTTP and HTTPS traffic. Ingress defines routing rules that map hostnames and URL paths to backend services and supports features like TLS termination, name-based virtual hosting, and load balancing through an ingress controller.",
+      "category": "kubernetes",
+      "tags": [
+        "networking",
+        "routing",
+        "external-access"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "haproxy",
+        "istio",
+        "endpoint"
+      ]
+    },
+    {
+      "id": "inode",
+      "term": "Inode",
+      "fullForm": "Index Node",
+      "definition": "A data structure in Unix-like filesystems that stores metadata about a file or directory, including permissions, ownership, timestamps, size, and pointers to the data blocks on disk. Every file has a unique inode number, and understanding inodes is important for troubleshooting filesystem issues such as running out of inodes despite having free disk space.",
+      "category": "linux",
+      "tags": [
+        "filesystem",
+        "metadata",
+        "internals"
+      ],
+      "relatedTerms": [
+        "chmod",
+        "chown",
+        "fileystem"
+      ]
+    },
+    {
+      "id": "ip-address",
+      "term": "IP Address",
+      "fullForm": "Internet Protocol Address",
+      "definition": "A unique numerical label assigned to each device connected to a network that uses the Internet Protocol for communication. IPv4 addresses use a 32-bit format (e.g., 192.168.1.1) while IPv6 uses 128-bit. IP addresses are fundamental to routing network traffic and are central to cloud networking, container networking, and service discovery.",
+      "category": "networking",
+      "tags": [
+        "addressing",
+        "routing",
+        "fundamentals"
+      ],
+      "relatedTerms": [
+        "cidr",
+        "ipv6",
+        "dns",
+        "dhcp"
+      ]
+    },
+    {
+      "id": "iptables",
+      "term": "iptables",
+      "fullForm": "",
+      "definition": "A user-space utility for configuring the Linux kernel's packet filtering and NAT rules. iptables defines chains of rules that determine how network packets are handled, including accepting, dropping, or forwarding traffic. It underpins container networking in Docker and Kubernetes, where it manages port mapping and service routing.",
+      "category": "networking",
+      "tags": [
+        "firewall",
+        "packet-filtering",
+        "linux"
+      ],
+      "relatedTerms": [
+        "firewall",
+        "ip-address",
+        "kube-proxy"
+      ]
+    },
+    {
+      "id": "ipv6",
+      "term": "IPv6",
+      "fullForm": "Internet Protocol Version 6",
+      "definition": "The most recent version of the Internet Protocol, using 128-bit addresses to provide a vastly larger address space than IPv4. IPv6 addresses are written in hexadecimal colon notation (e.g., 2001:db8::1) and include improvements in routing efficiency, security through mandatory IPsec support, and simplified network configuration.",
+      "category": "networking",
+      "tags": [
+        "addressing",
+        "protocols",
+        "next-generation"
+      ],
+      "relatedTerms": [
+        "ip-address",
+        "cidr",
+        "dns"
+      ]
+    },
+    {
+      "id": "istio",
+      "term": "Istio",
+      "fullForm": "",
+      "definition": "An open-source service mesh platform that provides a uniform way to connect, secure, control, and observe microservices running on Kubernetes. Istio injects sidecar proxies (Envoy) alongside application containers to handle traffic management, mutual TLS authentication, access policies, and distributed tracing without requiring code changes.",
+      "category": "kubernetes",
+      "tags": [
+        "service-mesh",
+        "traffic-management",
+        "observability"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "ingress",
+        "grpc"
+      ]
+    },
+    {
+      "id": "jenkins",
+      "term": "Jenkins",
+      "fullForm": "",
+      "definition": "An open-source automation server widely used for implementing CI/CD pipelines. Jenkins supports building, testing, and deploying software through a web interface, a vast plugin ecosystem with over 1,800 plugins, and pipeline-as-code via Jenkinsfiles. It can run on-premises or in the cloud and supports distributed builds across multiple agents.",
+      "category": "cicd",
+      "tags": [
+        "automation",
+        "pipeline",
+        "open-source"
+      ],
+      "relatedTerms": [
+        "ci",
+        "cd",
+        "github-actions",
+        "gitlab-ci"
+      ]
+    },
+    {
+      "id": "json",
+      "term": "JSON",
+      "fullForm": "JavaScript Object Notation",
+      "definition": "A lightweight, text-based data interchange format that uses human-readable key-value pairs and arrays. JSON is the dominant format for REST API communication, configuration files, and data serialization in DevOps tools. It is natively supported by most programming languages and is used extensively in cloud service APIs and Kubernetes manifests.",
+      "category": "general",
+      "tags": [
+        "data-format",
+        "serialization",
+        "api"
+      ],
+      "relatedTerms": [
+        "api",
+        "dictionary",
+        "endpoint"
+      ]
+    },
+    {
+      "id": "jwt",
+      "term": "JWT",
+      "fullForm": "JSON Web Token",
+      "definition": "A compact, URL-safe token format used for securely transmitting information between parties as a JSON object. JWTs consist of three Base64-encoded parts (header, payload, signature) and are commonly used for authentication and authorization in APIs and microservices, allowing stateless session management without server-side storage.",
+      "category": "security",
+      "tags": [
+        "tokens",
+        "authentication",
+        "stateless"
+      ],
+      "relatedTerms": [
+        "authentication",
+        "authorization",
+        "json",
+        "api"
+      ]
+    },
+    {
+      "id": "kata-containers",
+      "term": "Kata Containers",
+      "fullForm": "",
+      "definition": "An open-source project that provides lightweight virtual machines offering the security of VMs with the speed and manageability of containers. Kata Containers run each container inside its own lightweight VM with a dedicated kernel, providing stronger isolation than traditional containers while remaining compatible with container ecosystem tools.",
+      "category": "security",
+      "tags": [
+        "container-runtime",
+        "isolation",
+        "virtual-machines"
+      ],
+      "relatedTerms": [
+        "gvisor",
+        "containerd",
+        "container"
+      ]
+    },
+    {
+      "id": "kernel",
+      "term": "Kernel",
+      "fullForm": "",
+      "definition": "The core component of an operating system that manages hardware resources and provides essential services to all other software. The Linux kernel handles process scheduling, memory management, device drivers, and system calls. Containers share the host's kernel, which is why kernel-level features like cgroups and namespaces are fundamental to container technology.",
+      "category": "linux",
+      "tags": [
+        "os-core",
+        "system",
+        "fundamentals"
+      ],
+      "relatedTerms": [
+        "cgroup",
+        "capability",
+        "container",
+        "gvisor"
+      ]
+    },
+    {
+      "id": "kube-api-server",
+      "term": "kube-apiserver",
+      "fullForm": "Kubernetes API Server",
+      "definition": "The central management component of the Kubernetes control plane that exposes the Kubernetes API. All cluster operations from kubectl, controllers, and other components go through the API server, which validates and processes REST requests, updates the cluster state in etcd, and serves as the frontend for the control plane.",
+      "category": "kubernetes",
+      "tags": [
+        "control-plane",
+        "api",
+        "core-component"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "etcd",
+        "kubectl",
+        "kubelet"
+      ]
+    },
+    {
+      "id": "kube-proxy",
+      "term": "kube-proxy",
+      "fullForm": "",
+      "definition": "A network proxy that runs on each node in a Kubernetes cluster, maintaining network rules that allow communication to pods from inside and outside the cluster. kube-proxy uses iptables or IPVS to implement service abstraction by forwarding traffic destined for a service's virtual IP to the appropriate backend pods.",
+      "category": "kubernetes",
+      "tags": [
+        "networking",
+        "services",
+        "load-balancing"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "iptables",
+        "kubelet"
+      ]
+    },
+    {
+      "id": "kubeadm",
+      "term": "kubeadm",
+      "fullForm": "",
+      "definition": "A command-line tool that provides the minimum viable steps to bootstrap a production-ready Kubernetes cluster. kubeadm handles the initialization of the control plane, joining worker nodes, and managing cluster certificates, following Kubernetes best practices while leaving infrastructure provisioning and add-on installation to the administrator.",
+      "category": "kubernetes",
+      "tags": [
+        "cluster-setup",
+        "bootstrapping",
+        "cli"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "kubectl",
+        "kubelet"
+      ]
+    },
+    {
+      "id": "kubectl",
+      "term": "kubectl",
+      "fullForm": "Kubernetes Control",
+      "definition": "The official command-line interface for interacting with Kubernetes clusters. kubectl communicates with the Kubernetes API server to create, inspect, update, and delete resources such as pods, deployments, services, and config maps. It is the primary tool for administrators and developers working with Kubernetes.",
+      "category": "kubernetes",
+      "tags": [
+        "cli",
+        "management",
+        "api-client"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "kube-api-server",
+        "kubeadm"
+      ]
+    },
+    {
+      "id": "kubelet",
+      "term": "Kubelet",
+      "fullForm": "",
+      "definition": "An agent that runs on each worker node in a Kubernetes cluster, responsible for ensuring that containers described in pod specifications are running and healthy. The kubelet receives pod definitions from the API server, manages container lifecycles through the container runtime, and reports node and pod status back to the control plane.",
+      "category": "kubernetes",
+      "tags": [
+        "node-agent",
+        "pod-management",
+        "control-plane"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "kube-api-server",
+        "containerd"
+      ]
+    },
+    {
+      "id": "kubernetes",
+      "term": "Kubernetes",
+      "fullForm": "",
+      "definition": "An open-source container orchestration platform originally developed by Google that automates the deployment, scaling, and management of containerized applications. Kubernetes provides features including service discovery, load balancing, storage orchestration, automated rollouts, self-healing, and secret management, and has become the industry standard for running containers in production.",
+      "category": "kubernetes",
+      "tags": [
+        "orchestration",
+        "cncf",
+        "platform"
+      ],
+      "relatedTerms": [
+        "cluster",
+        "kubectl",
+        "helm",
+        "docker"
+      ]
+    },
+    {
+      "id": "kustomize",
+      "term": "Kustomize",
+      "fullForm": "",
+      "definition": "A Kubernetes-native configuration management tool that allows you to customize YAML manifests without modifying the original files. Kustomize uses overlays and patches to adapt base configurations for different environments (dev, staging, production), and is built into kubectl, enabling template-free customization through declarative kustomization.yaml files.",
+      "category": "kubernetes",
+      "tags": [
+        "configuration",
+        "overlays",
+        "declarative"
+      ],
+      "relatedTerms": [
+        "kubernetes",
+        "helm",
+        "gitops",
+        "kubectl"
+      ]
+    },
+    {
+      "id": "lambda",
+      "term": "Lambda",
+      "fullForm": "AWS Lambda",
+      "definition": "A serverless compute service provided by AWS that lets you run code without provisioning or managing servers. Lambda executes code in response to events such as HTTP requests, file uploads, or scheduled triggers, and automatically scales based on demand.",
+      "category": "cloud",
+      "tags": [
+        "serverless",
+        "aws",
+        "functions"
+      ],
+      "relatedTerms": [
+        "saas",
+        "paas",
+        "rest-api"
+      ]
+    },
+    {
+      "id": "latency",
+      "term": "Latency",
+      "fullForm": "",
+      "definition": "The time delay between a request being sent and a response being received, typically measured in milliseconds. Low latency is critical for responsive applications, and high latency can degrade user experience and trigger cascading failures in distributed systems.",
+      "category": "networking",
+      "tags": [
+        "performance",
+        "networking",
+        "monitoring"
+      ],
+      "relatedTerms": [
+        "metrics",
+        "sli-slo-sla",
+        "observability"
+      ]
+    },
+    {
+      "id": "layer",
+      "term": "Layer",
+      "fullForm": "",
+      "definition": "In Docker, a layer is a read-only filesystem change produced by each instruction in a Dockerfile. Layers are cached and shared between images to optimize storage and build speed. Understanding layers is essential for writing efficient Dockerfiles and minimizing image size.",
+      "category": "docker",
+      "tags": [
+        "docker",
+        "image",
+        "filesystem"
+      ],
+      "relatedTerms": [
+        "multi-stage-build",
+        "overlay2",
+        "storage-driver"
+      ]
+    },
+    {
+      "id": "linkerd",
+      "term": "Linkerd",
+      "fullForm": "",
+      "definition": "A lightweight, open-source service mesh for Kubernetes that provides observability, reliability, and security features for microservices. Linkerd adds capabilities like mutual TLS, traffic splitting, and retries without requiring changes to application code.",
+      "category": "kubernetes",
+      "tags": [
+        "service-mesh",
+        "kubernetes",
+        "networking"
+      ],
+      "relatedTerms": [
+        "service-mesh",
+        "microservices",
+        "tls"
+      ]
+    },
+    {
+      "id": "linux",
+      "term": "Linux",
+      "fullForm": "",
+      "definition": "An open-source, Unix-like operating system kernel first released by Linus Torvalds in 1991. Linux forms the foundation of most server environments, containers, and cloud infrastructure, and is available in many distributions such as Ubuntu, CentOS, and Debian.",
+      "category": "linux",
+      "tags": [
+        "os",
+        "kernel",
+        "open-source"
+      ],
+      "relatedTerms": [
+        "shell",
+        "systemd",
+        "sudo"
+      ]
+    },
+    {
+      "id": "list-comprehension",
+      "term": "List Comprehension",
+      "fullForm": "",
+      "definition": "A concise Python syntax for creating lists by applying an expression to each item in an iterable, optionally filtering with a condition. List comprehensions are more readable and often faster than equivalent for-loop constructions, following the pattern [expression for item in iterable if condition].",
+      "category": "python",
+      "tags": [
+        "python",
+        "syntax",
+        "data-structures"
+      ],
+      "relatedTerms": [
+        "python",
+        "loop",
+        "variable"
+      ]
+    },
+    {
+      "id": "load-balancer",
+      "term": "Load Balancer",
+      "fullForm": "",
+      "definition": "A network device or software component that distributes incoming traffic across multiple backend servers to ensure high availability and reliability. Load balancers use algorithms such as round-robin, least connections, or IP hash to route requests and can perform health checks to avoid sending traffic to unhealthy instances.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "high-availability",
+        "scaling"
+      ],
+      "relatedTerms": [
+        "reverse-proxy",
+        "nginx",
+        "service"
+      ]
+    },
+    {
+      "id": "logging",
+      "term": "Logging",
+      "fullForm": "",
+      "definition": "The practice of recording events, errors, and informational messages generated by applications and systems for debugging, auditing, and monitoring purposes. Effective logging strategies include structured log formats, appropriate log levels, and centralized log aggregation for analysis.",
+      "category": "monitoring",
+      "tags": [
+        "monitoring",
+        "debugging",
+        "observability"
+      ],
+      "relatedTerms": [
+        "observability",
+        "metrics",
+        "stdout"
+      ]
+    },
+    {
+      "id": "loop",
+      "term": "Loop",
+      "fullForm": "",
+      "definition": "A control flow structure that repeatedly executes a block of code while a specified condition is true or for each item in a collection. Common loop types include for loops, while loops, and do-while loops, and they are fundamental to automation in both shell scripting and programming languages.",
+      "category": "shell-scripting",
+      "tags": [
+        "control-flow",
+        "scripting",
+        "automation"
+      ],
+      "relatedTerms": [
+        "shell",
+        "variable",
+        "list-comprehension"
+      ]
+    },
+    {
+      "id": "macvlan",
+      "term": "Macvlan",
+      "fullForm": "",
+      "definition": "A Linux network driver that allows you to assign multiple MAC addresses to a single physical network interface, effectively creating virtual network interfaces. In Docker, macvlan networking gives containers direct access to the physical network, making them appear as physical devices on the LAN.",
+      "category": "docker",
+      "tags": [
+        "networking",
+        "docker",
+        "virtualization"
+      ],
+      "relatedTerms": [
+        "overlay-network",
+        "network-policy",
+        "namespace"
+      ]
+    },
+    {
+      "id": "merge",
+      "term": "Merge",
+      "fullForm": "",
+      "definition": "A Git operation that combines changes from one branch into another, creating a merge commit that has two parent commits. Merges preserve the complete history of both branches and are commonly used to integrate feature branches into the main branch.",
+      "category": "git",
+      "tags": [
+        "git",
+        "branching",
+        "collaboration"
+      ],
+      "relatedTerms": [
+        "rebase",
+        "pull-request",
+        "remote"
+      ]
+    },
+    {
+      "id": "metrics",
+      "term": "Metrics",
+      "fullForm": "",
+      "definition": "Quantitative measurements collected over time that represent the health and performance of systems and applications. Metrics typically include counters, gauges, and histograms covering areas such as CPU usage, request rates, error rates, and response times.",
+      "category": "monitoring",
+      "tags": [
+        "monitoring",
+        "observability",
+        "performance"
+      ],
+      "relatedTerms": [
+        "prometheus",
+        "observability",
+        "sli-slo-sla"
+      ]
+    },
+    {
+      "id": "microservices",
+      "term": "Microservices",
+      "fullForm": "",
+      "definition": "An architectural pattern where an application is composed of small, independently deployable services that communicate over a network. Each microservice owns its own data and business logic, enabling teams to develop, deploy, and scale services independently.",
+      "category": "general",
+      "tags": [
+        "architecture",
+        "distributed-systems",
+        "scaling"
+      ],
+      "relatedTerms": [
+        "monolith",
+        "service-mesh",
+        "rest-api"
+      ]
+    },
+    {
+      "id": "monolith",
+      "term": "Monolith",
+      "fullForm": "",
+      "definition": "A software architecture where the entire application is built and deployed as a single, tightly coupled unit. While simpler to develop and deploy initially, monolithic architectures can become difficult to scale and maintain as the codebase grows, which often motivates a transition to microservices.",
+      "category": "general",
+      "tags": [
+        "architecture",
+        "deployment",
+        "design"
+      ],
+      "relatedTerms": [
+        "microservices",
+        "twelve-factor-app"
+      ]
+    },
+    {
+      "id": "mount",
+      "term": "Mount",
+      "fullForm": "",
+      "definition": "The process of attaching a filesystem or storage device to a directory in the Linux file hierarchy, making its contents accessible. In containers, mounts are used to provide persistent storage or inject configuration files from the host into the container filesystem.",
+      "category": "linux",
+      "tags": [
+        "filesystem",
+        "storage",
+        "linux"
+      ],
+      "relatedTerms": [
+        "volume",
+        "nfs",
+        "persistent-volume"
+      ]
+    },
+    {
+      "id": "multi-stage-build",
+      "term": "Multi-Stage Build",
+      "fullForm": "",
+      "definition": "A Dockerfile technique that uses multiple FROM statements to create intermediate build stages, copying only the necessary artifacts into the final image. Multi-stage builds significantly reduce image size by excluding build tools, source code, and dependencies not needed at runtime.",
+      "category": "docker",
+      "tags": [
+        "docker",
+        "optimization",
+        "image"
+      ],
+      "relatedTerms": [
+        "layer",
+        "registry",
+        "oci"
+      ]
+    },
+    {
+      "id": "mutex",
+      "term": "Mutex",
+      "fullForm": "Mutual Exclusion",
+      "definition": "A synchronization primitive used to prevent multiple threads or processes from simultaneously accessing a shared resource. When a thread acquires a mutex lock, other threads must wait until the lock is released before they can proceed, preventing race conditions and data corruption.",
+      "category": "general",
+      "tags": [
+        "concurrency",
+        "threading",
+        "synchronization"
+      ],
+      "relatedTerms": [
+        "thread",
+        "process",
+        "signal"
+      ]
+    },
+    {
+      "id": "namespace",
+      "term": "Namespace",
+      "fullForm": "",
+      "definition": "A Linux kernel feature that provides isolation for system resources such as process IDs, network interfaces, mount points, and user IDs. In Kubernetes, namespaces provide a mechanism for isolating groups of resources within a single cluster, enabling multi-tenancy and resource organization.",
+      "category": "kubernetes",
+      "tags": [
+        "isolation",
+        "linux",
+        "kubernetes"
+      ],
+      "relatedTerms": [
+        "pod",
+        "rbac",
+        "network-policy"
+      ]
+    },
+    {
+      "id": "nat",
+      "term": "NAT",
+      "fullForm": "Network Address Translation",
+      "definition": "A networking technique that modifies IP address information in packet headers as they pass through a router or firewall. NAT allows multiple devices on a private network to share a single public IP address and is fundamental to how most home and office networks connect to the internet.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "routing",
+        "security"
+      ],
+      "relatedTerms": [
+        "subnet",
+        "vpc",
+        "port"
+      ]
+    },
+    {
+      "id": "network-policy",
+      "term": "Network Policy",
+      "fullForm": "",
+      "definition": "A Kubernetes resource that controls the flow of network traffic between pods and external endpoints using rules based on labels, namespaces, and IP blocks. Network policies act as a firewall for pod-to-pod communication, implementing the principle of least privilege at the network level.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "security",
+        "networking"
+      ],
+      "relatedTerms": [
+        "namespace",
+        "pod",
+        "zero-trust"
+      ]
+    },
+    {
+      "id": "nfs",
+      "term": "NFS",
+      "fullForm": "Network File System",
+      "definition": "A distributed filesystem protocol that allows clients to access files over a network as if they were on local storage. NFS is commonly used in Kubernetes for shared persistent volumes and in Linux environments for centralized file sharing across multiple servers.",
+      "category": "linux",
+      "tags": [
+        "storage",
+        "networking",
+        "filesystem"
+      ],
+      "relatedTerms": [
+        "mount",
+        "persistent-volume",
+        "volume"
+      ]
+    },
+    {
+      "id": "nginx",
+      "term": "NGINX",
+      "fullForm": "",
+      "definition": "A high-performance, open-source web server and reverse proxy server known for its stability, rich feature set, and low resource consumption. NGINX is widely used as a load balancer, HTTP cache, and API gateway in modern web architectures and Kubernetes ingress controllers.",
+      "category": "networking",
+      "tags": [
+        "web-server",
+        "reverse-proxy",
+        "load-balancing"
+      ],
+      "relatedTerms": [
+        "reverse-proxy",
+        "load-balancer",
+        "port"
+      ]
+    },
+    {
+      "id": "node",
+      "term": "Node",
+      "fullForm": "",
+      "definition": "In Kubernetes, a node is a worker machine (physical or virtual) that runs containerized workloads managed by the control plane. Each node runs a kubelet agent, a container runtime, and a kube-proxy, and is responsible for executing the pods scheduled to it.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "infrastructure",
+        "compute"
+      ],
+      "relatedTerms": [
+        "pod",
+        "namespace",
+        "resource-limit"
+      ]
+    },
+    {
+      "id": "npm",
+      "term": "npm",
+      "fullForm": "Node Package Manager",
+      "definition": "The default package manager for the Node.js JavaScript runtime, used to install, share, and manage project dependencies. npm uses a package.json file to track dependencies and provides a vast registry of open-source packages for building applications.",
+      "category": "general",
+      "tags": [
+        "package-manager",
+        "javascript",
+        "dependencies"
+      ],
+      "relatedTerms": [
+        "package-manager",
+        "pip",
+        "semantic-versioning"
+      ]
+    },
+    {
+      "id": "oauth",
+      "term": "OAuth",
+      "fullForm": "Open Authorization",
+      "definition": "An open standard authorization framework that enables third-party applications to access user resources without exposing credentials. OAuth 2.0 uses access tokens and scopes to grant limited permissions and is widely used for social logins and API authorization flows.",
+      "category": "security",
+      "tags": [
+        "authentication",
+        "authorization",
+        "api"
+      ],
+      "relatedTerms": [
+        "rbac",
+        "ssl",
+        "zero-trust"
+      ]
+    },
+    {
+      "id": "observability",
+      "term": "Observability",
+      "fullForm": "",
+      "definition": "The ability to understand the internal state of a system by examining its external outputs, typically through the three pillars of logs, metrics, and traces. Observability goes beyond traditional monitoring by enabling engineers to ask novel questions about system behavior without deploying new instrumentation.",
+      "category": "monitoring",
+      "tags": [
+        "monitoring",
+        "debugging",
+        "sre"
+      ],
+      "relatedTerms": [
+        "logging",
+        "metrics",
+        "prometheus"
+      ]
+    },
+    {
+      "id": "oci",
+      "term": "OCI",
+      "fullForm": "Open Container Initiative",
+      "definition": "An open governance structure and set of industry standards for container image formats and runtimes. OCI specifications ensure interoperability between container tools, meaning images built with Docker can run with Podman, containerd, or any OCI-compliant runtime.",
+      "category": "docker",
+      "tags": [
+        "containers",
+        "standards",
+        "runtime"
+      ],
+      "relatedTerms": [
+        "runc",
+        "podman",
+        "registry"
+      ]
+    },
+    {
+      "id": "osi-model",
+      "term": "OSI Model",
+      "fullForm": "Open Systems Interconnection Model",
+      "definition": "A conceptual framework that standardizes network communication into seven layers: Physical, Data Link, Network, Transport, Session, Presentation, and Application. The OSI model helps network engineers understand and troubleshoot how data flows between systems at each abstraction level.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "model",
+        "fundamentals"
+      ],
+      "relatedTerms": [
+        "tcp",
+        "udp",
+        "socket"
+      ]
+    },
+    {
+      "id": "overlay-network",
+      "term": "Overlay Network",
+      "fullForm": "",
+      "definition": "A virtual network built on top of an existing physical network that enables communication between containers or services across multiple hosts. Overlay networks use encapsulation protocols like VXLAN to tunnel traffic, and are essential for multi-host Docker Swarm and Kubernetes networking.",
+      "category": "docker",
+      "tags": [
+        "networking",
+        "docker",
+        "distributed"
+      ],
+      "relatedTerms": [
+        "macvlan",
+        "subnet",
+        "vpc"
+      ]
+    },
+    {
+      "id": "overlay2",
+      "term": "Overlay2",
+      "fullForm": "",
+      "definition": "The preferred storage driver for Docker on Linux, which uses the OverlayFS union filesystem to efficiently layer container images. Overlay2 merges multiple directory layers into a single unified view, providing good performance and efficient use of disk space for container operations.",
+      "category": "docker",
+      "tags": [
+        "docker",
+        "storage",
+        "filesystem"
+      ],
+      "relatedTerms": [
+        "layer",
+        "storage-driver",
+        "mount"
+      ]
+    },
+    {
+      "id": "paas",
+      "term": "PaaS",
+      "fullForm": "Platform as a Service",
+      "definition": "A cloud computing model that provides a platform allowing customers to develop, run, and manage applications without the complexity of building and maintaining infrastructure. PaaS offerings like Heroku and Google App Engine handle servers, storage, networking, and middleware, letting developers focus on code.",
+      "category": "cloud",
+      "tags": [
+        "cloud",
+        "platform",
+        "deployment"
+      ],
+      "relatedTerms": [
+        "saas",
+        "lambda",
+        "twelve-factor-app"
+      ]
+    },
+    {
+      "id": "package-manager",
+      "term": "Package Manager",
+      "fullForm": "",
+      "definition": "A tool that automates the process of installing, upgrading, configuring, and removing software packages and their dependencies. Examples include apt and yum for Linux distributions, pip for Python, and npm for Node.js, each maintaining a repository of available packages.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "tools",
+        "dependencies"
+      ],
+      "relatedTerms": [
+        "pip",
+        "npm",
+        "yum"
+      ]
+    },
+    {
+      "id": "paramiko",
+      "term": "Paramiko",
+      "fullForm": "",
+      "definition": "A Python library that implements the SSH2 protocol for secure remote connections and file transfers. Paramiko enables Python scripts to programmatically execute commands on remote servers, transfer files via SFTP, and manage SSH keys for automation tasks.",
+      "category": "python",
+      "tags": [
+        "python",
+        "ssh",
+        "automation"
+      ],
+      "relatedTerms": [
+        "ssh",
+        "subprocess",
+        "requests-library"
+      ]
+    },
+    {
+      "id": "path-variable",
+      "term": "PATH Variable",
+      "fullForm": "",
+      "definition": "An environment variable that specifies a list of directories the operating system searches when looking for executable files. When a command is entered in the shell, the system searches each directory in PATH sequentially until it finds a matching executable or reports the command as not found.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "environment",
+        "shell"
+      ],
+      "relatedTerms": [
+        "variable",
+        "shell",
+        "shebang"
+      ]
+    },
+    {
+      "id": "penetration-testing",
+      "term": "Penetration Testing",
+      "fullForm": "",
+      "definition": "A simulated cyberattack against a system performed to evaluate its security posture and identify exploitable vulnerabilities. Penetration tests follow a structured methodology including reconnaissance, scanning, exploitation, and reporting, helping organizations discover weaknesses before malicious actors do.",
+      "category": "security",
+      "tags": [
+        "security",
+        "testing",
+        "vulnerability"
+      ],
+      "relatedTerms": [
+        "vulnerability",
+        "trivy",
+        "zero-trust"
+      ]
+    },
+    {
+      "id": "persistent-volume",
+      "term": "Persistent Volume",
+      "fullForm": "",
+      "definition": "A Kubernetes storage resource that provides durable storage independent of any individual pod's lifecycle. Persistent volumes are provisioned by administrators or dynamically by storage classes and are bound to pods through persistent volume claims, ensuring data survives pod restarts and rescheduling.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "storage",
+        "persistence"
+      ],
+      "relatedTerms": [
+        "volume",
+        "statefulset",
+        "nfs"
+      ]
+    },
+    {
+      "id": "pid",
+      "term": "PID",
+      "fullForm": "Process ID",
+      "definition": "A unique numeric identifier assigned by the operating system to each running process. PID 1 is the init process (or systemd on modern Linux systems), and PIDs are used to manage, monitor, and send signals to processes via commands like kill and ps.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "process",
+        "system"
+      ],
+      "relatedTerms": [
+        "process",
+        "signal",
+        "namespace"
+      ]
+    },
+    {
+      "id": "ping",
+      "term": "Ping",
+      "fullForm": "",
+      "definition": "A network diagnostic utility that tests connectivity between two hosts by sending ICMP Echo Request packets and measuring the round-trip time of replies. Ping is one of the most basic troubleshooting tools for verifying network reachability, detecting packet loss, and measuring latency.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "diagnostics",
+        "tools"
+      ],
+      "relatedTerms": [
+        "traceroute",
+        "latency",
+        "tcp"
+      ]
+    },
+    {
+      "id": "pip",
+      "term": "pip",
+      "fullForm": "Pip Installs Packages",
+      "definition": "The standard package manager for Python, used to install and manage libraries and dependencies from the Python Package Index (PyPI). Pip supports requirements files for reproducible installations and integrates with virtual environments to isolate project dependencies.",
+      "category": "python",
+      "tags": [
+        "python",
+        "package-manager",
+        "dependencies"
+      ],
+      "relatedTerms": [
+        "virtualenv",
+        "package-manager",
+        "python"
+      ]
+    },
+    {
+      "id": "pipeline",
+      "term": "Pipeline",
+      "fullForm": "",
+      "definition": "An automated sequence of stages that code passes through from development to production, typically including build, test, security scan, and deploy steps. CI/CD pipelines are defined as code and triggered by events such as commits or pull requests, ensuring consistent and repeatable delivery processes.",
+      "category": "cicd",
+      "tags": [
+        "cicd",
+        "automation",
+        "deployment"
+      ],
+      "relatedTerms": [
+        "rolling-update",
+        "semantic-versioning",
+        "webhook"
+      ]
+    },
+    {
+      "id": "pod",
+      "term": "Pod",
+      "fullForm": "",
+      "definition": "The smallest deployable unit in Kubernetes, consisting of one or more containers that share network namespace, IP address, and storage volumes. Pods are ephemeral by design and are typically managed by higher-level controllers like Deployments or StatefulSets rather than created directly.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "containers",
+        "workload"
+      ],
+      "relatedTerms": [
+        "node",
+        "namespace",
+        "statefulset"
+      ]
+    },
+    {
+      "id": "podman",
+      "term": "Podman",
+      "fullForm": "",
+      "definition": "An open-source, daemonless container engine for developing, managing, and running OCI-compatible containers on Linux. Podman is compatible with Docker CLI commands but runs containers as rootless processes without requiring a background daemon, improving security.",
+      "category": "docker",
+      "tags": [
+        "containers",
+        "security",
+        "tools"
+      ],
+      "relatedTerms": [
+        "oci",
+        "runc",
+        "registry"
+      ]
+    },
+    {
+      "id": "port",
+      "term": "Port",
+      "fullForm": "",
+      "definition": "A numeric identifier (0-65535) used in TCP and UDP protocols to distinguish different services running on the same host. Well-known ports include 80 for HTTP, 443 for HTTPS, and 22 for SSH, while ephemeral ports are dynamically assigned for client-side connections.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "tcp",
+        "services"
+      ],
+      "relatedTerms": [
+        "port-mapping",
+        "tcp",
+        "socket"
+      ]
+    },
+    {
+      "id": "port-mapping",
+      "term": "Port Mapping",
+      "fullForm": "",
+      "definition": "The process of forwarding network traffic from a port on the host to a port inside a container, enabling external access to containerized services. In Docker, port mappings are specified with the -p flag, such as -p 8080:80, which maps host port 8080 to container port 80.",
+      "category": "docker",
+      "tags": [
+        "docker",
+        "networking",
+        "containers"
+      ],
+      "relatedTerms": [
+        "port",
+        "nat",
+        "proxy"
+      ]
+    },
+    {
+      "id": "postmortem",
+      "term": "Postmortem",
+      "fullForm": "",
+      "definition": "A structured review conducted after an incident to document what happened, why it happened, and how to prevent recurrence. Blameless postmortems focus on systemic improvements rather than individual fault and typically produce action items that strengthen system reliability.",
+      "category": "general",
+      "tags": [
+        "sre",
+        "incident-management",
+        "process"
+      ],
+      "relatedTerms": [
+        "sre",
+        "runbook",
+        "toil"
+      ]
+    },
+    {
+      "id": "process",
+      "term": "Process",
+      "fullForm": "",
+      "definition": "An instance of a running program in the operating system, with its own memory space, file descriptors, and execution context. Processes are managed by the kernel scheduler and can create child processes through forking, forming process trees visible with commands like ps and pstree.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "system",
+        "fundamentals"
+      ],
+      "relatedTerms": [
+        "pid",
+        "thread",
+        "signal"
+      ]
+    },
+    {
+      "id": "prometheus",
+      "term": "Prometheus",
+      "fullForm": "",
+      "definition": "An open-source monitoring and alerting toolkit designed for reliability and scalability, originally built at SoundCloud. Prometheus collects time-series metrics via a pull model, stores them efficiently, and provides a powerful query language (PromQL) for analysis and alerting.",
+      "category": "monitoring",
+      "tags": [
+        "monitoring",
+        "metrics",
+        "alerting"
+      ],
+      "relatedTerms": [
+        "metrics",
+        "observability",
+        "sli-slo-sla"
+      ]
+    },
+    {
+      "id": "proxy",
+      "term": "Proxy",
+      "fullForm": "",
+      "definition": "An intermediary server that sits between clients and backend servers, forwarding requests and responses on behalf of either party. Forward proxies act on behalf of clients to access external resources, while reverse proxies sit in front of servers to distribute load, cache content, or provide SSL termination.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "security",
+        "performance"
+      ],
+      "relatedTerms": [
+        "reverse-proxy",
+        "nginx",
+        "load-balancer"
+      ]
+    },
+    {
+      "id": "pull-request",
+      "term": "Pull Request",
+      "fullForm": "",
+      "definition": "A collaboration mechanism in Git hosting platforms where a developer requests that changes from one branch be reviewed and merged into another. Pull requests provide a forum for code review, discussion, and automated checks before changes are integrated into the main codebase.",
+      "category": "git",
+      "tags": [
+        "git",
+        "collaboration",
+        "code-review"
+      ],
+      "relatedTerms": [
+        "merge",
+        "rebase",
+        "repository"
+      ]
+    },
+    {
+      "id": "pytest",
+      "term": "pytest",
+      "fullForm": "",
+      "definition": "A popular Python testing framework that simplifies writing and running tests with features like automatic test discovery, fixtures, and parameterization. Pytest uses plain assert statements instead of special assertion methods and supports plugins for coverage reporting, parallel execution, and more.",
+      "category": "python",
+      "tags": [
+        "python",
+        "testing",
+        "automation"
+      ],
+      "relatedTerms": [
+        "python",
+        "pipeline",
+        "virtualenv"
+      ]
+    },
+    {
+      "id": "python",
+      "term": "Python",
+      "fullForm": "",
+      "definition": "A high-level, interpreted programming language known for its readability, versatility, and extensive standard library. Python is widely used in DevOps for automation, scripting, infrastructure management, and building tools, with a rich ecosystem of packages for tasks ranging from web development to data analysis.",
+      "category": "python",
+      "tags": [
+        "programming",
+        "scripting",
+        "automation"
+      ],
+      "relatedTerms": [
+        "pip",
+        "virtualenv",
+        "subprocess"
+      ]
+    },
+    {
+      "id": "rbac",
+      "term": "RBAC",
+      "fullForm": "Role-Based Access Control",
+      "definition": "A security model that restricts system access based on roles assigned to users rather than individual permissions. In Kubernetes, RBAC uses Roles, ClusterRoles, RoleBindings, and ClusterRoleBindings to control who can perform which actions on which resources within a cluster.",
+      "category": "security",
+      "tags": [
+        "security",
+        "kubernetes",
+        "authorization"
+      ],
+      "relatedTerms": [
+        "namespace",
+        "oauth",
+        "zero-trust"
+      ]
+    },
+    {
+      "id": "rebase",
+      "term": "Rebase",
+      "fullForm": "",
+      "definition": "A Git operation that moves or replays a series of commits onto a new base commit, creating a linear history without merge commits. Rebasing is commonly used to keep feature branches up to date with the main branch and to clean up commit history before merging.",
+      "category": "git",
+      "tags": [
+        "git",
+        "history",
+        "branching"
+      ],
+      "relatedTerms": [
+        "merge",
+        "reflog",
+        "stash"
+      ]
+    },
+    {
+      "id": "redirect",
+      "term": "Redirect",
+      "fullForm": "",
+      "definition": "A shell mechanism that changes where a command's input comes from or where its output goes, using operators like >, >>, <, and 2>. Redirection enables writing command output to files, appending to logs, discarding output to /dev/null, or combining standard output and standard error streams.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "io",
+        "scripting"
+      ],
+      "relatedTerms": [
+        "stdin",
+        "stdout",
+        "stderr"
+      ]
+    },
+    {
+      "id": "redis",
+      "term": "Redis",
+      "fullForm": "Remote Dictionary Server",
+      "definition": "An open-source, in-memory data structure store used as a database, cache, message broker, and queue. Redis supports various data structures including strings, hashes, lists, sets, and sorted sets, delivering sub-millisecond response times for high-performance applications.",
+      "category": "general",
+      "tags": [
+        "database",
+        "caching",
+        "performance"
+      ],
+      "relatedTerms": [
+        "microservices",
+        "rest-api",
+        "latency"
+      ]
+    },
+    {
+      "id": "reflog",
+      "term": "Reflog",
+      "fullForm": "Reference Log",
+      "definition": "A Git mechanism that records updates to the tip of branches and other references, providing a safety net for recovering lost commits. The reflog tracks every change to HEAD, including commits, rebases, resets, and checkouts, and is invaluable for undoing mistakes.",
+      "category": "git",
+      "tags": [
+        "git",
+        "recovery",
+        "history"
+      ],
+      "relatedTerms": [
+        "rebase",
+        "stash",
+        "staging-area"
+      ]
+    },
+    {
+      "id": "regex",
+      "term": "Regex",
+      "fullForm": "Regular Expression",
+      "definition": "A sequence of characters that defines a search pattern used for matching, finding, and manipulating text. Regular expressions are used extensively in DevOps for log analysis, text processing with tools like grep and sed, input validation, and configuration parsing.",
+      "category": "general",
+      "tags": [
+        "text-processing",
+        "pattern-matching",
+        "tools"
+      ],
+      "relatedTerms": [
+        "sed",
+        "shell",
+        "logging"
+      ]
+    },
+    {
+      "id": "registry",
+      "term": "Registry",
+      "fullForm": "",
+      "definition": "A storage and distribution system for container images, allowing users to push, pull, and manage tagged images. Docker Hub is the default public registry, while organizations often run private registries using solutions like Harbor, Amazon ECR, or Google Artifact Registry for security and performance.",
+      "category": "docker",
+      "tags": [
+        "docker",
+        "images",
+        "distribution"
+      ],
+      "relatedTerms": [
+        "oci",
+        "tag",
+        "multi-stage-build"
+      ]
+    },
+    {
+      "id": "remote",
+      "term": "Remote",
+      "fullForm": "",
+      "definition": "A reference to a version of a Git repository hosted on a server, such as GitHub or GitLab, that enables collaboration between developers. The default remote is typically named 'origin', and Git operations like push, pull, and fetch synchronize changes between local and remote repositories.",
+      "category": "git",
+      "tags": [
+        "git",
+        "collaboration",
+        "repository"
+      ],
+      "relatedTerms": [
+        "repository",
+        "pull-request",
+        "merge"
+      ]
+    },
+    {
+      "id": "repository",
+      "term": "Repository",
+      "fullForm": "",
+      "definition": "A storage location for a project's files, complete version history, and metadata, managed by a version control system like Git. Repositories can be local or remote and contain branches, tags, and configuration that track the entire evolution of a project.",
+      "category": "git",
+      "tags": [
+        "git",
+        "version-control",
+        "project"
+      ],
+      "relatedTerms": [
+        "remote",
+        "registry",
+        "tag"
+      ]
+    },
+    {
+      "id": "requests-library",
+      "term": "Requests Library",
+      "fullForm": "",
+      "definition": "A popular Python HTTP library that simplifies making web requests with an elegant, human-friendly API. Requests handles connection pooling, sessions, cookies, authentication, and response parsing, making it the de facto standard for interacting with REST APIs in Python scripts.",
+      "category": "python",
+      "tags": [
+        "python",
+        "http",
+        "api"
+      ],
+      "relatedTerms": [
+        "rest-api",
+        "python",
+        "paramiko"
+      ]
+    },
+    {
+      "id": "resource-limit",
+      "term": "Resource Limit",
+      "fullForm": "",
+      "definition": "A constraint placed on the CPU, memory, or other resources that a container or pod can consume in a Kubernetes cluster. Resource limits prevent individual workloads from monopolizing cluster resources, while resource requests guarantee minimum allocations for scheduling decisions.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "resources",
+        "scheduling"
+      ],
+      "relatedTerms": [
+        "pod",
+        "node",
+        "namespace"
+      ]
+    },
+    {
+      "id": "rest-api",
+      "term": "REST API",
+      "fullForm": "Representational State Transfer Application Programming Interface",
+      "definition": "An architectural style for building web services that use standard HTTP methods (GET, POST, PUT, DELETE) to perform CRUD operations on resources identified by URLs. REST APIs are stateless, cacheable, and widely adopted for building scalable and interoperable web services.",
+      "category": "general",
+      "tags": [
+        "api",
+        "web",
+        "architecture"
+      ],
+      "relatedTerms": [
+        "requests-library",
+        "webhook",
+        "microservices"
+      ]
+    },
+    {
+      "id": "restart-policy",
+      "term": "Restart Policy",
+      "fullForm": "",
+      "definition": "A configuration that determines how a container runtime or orchestrator handles container failures and exits. Docker supports policies like 'no', 'always', 'on-failure', and 'unless-stopped', while Kubernetes uses restartPolicy values of 'Always', 'OnFailure', and 'Never' at the pod level.",
+      "category": "docker",
+      "tags": [
+        "docker",
+        "reliability",
+        "containers"
+      ],
+      "relatedTerms": [
+        "pod",
+        "rolling-update",
+        "process"
+      ]
+    },
+    {
+      "id": "reverse-proxy",
+      "term": "Reverse Proxy",
+      "fullForm": "",
+      "definition": "A server that sits in front of backend servers and forwards client requests to the appropriate backend, hiding the internal infrastructure. Reverse proxies provide benefits including load balancing, SSL termination, caching, compression, and protection against DDoS attacks.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "security",
+        "load-balancing"
+      ],
+      "relatedTerms": [
+        "nginx",
+        "proxy",
+        "load-balancer"
+      ]
+    },
+    {
+      "id": "rolling-update",
+      "term": "Rolling Update",
+      "fullForm": "",
+      "definition": "A deployment strategy that gradually replaces instances of the old version of an application with the new version, ensuring zero downtime. In Kubernetes, rolling updates incrementally update pods in a Deployment while maintaining availability by controlling the maximum number of unavailable pods.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "deployment",
+        "zero-downtime"
+      ],
+      "relatedTerms": [
+        "pipeline",
+        "pod",
+        "restart-policy"
+      ]
+    },
+    {
+      "id": "rsync",
+      "term": "rsync",
+      "fullForm": "Remote Sync",
+      "definition": "A fast, versatile file synchronization tool that efficiently transfers and synchronizes files between local and remote systems. Rsync uses a delta-transfer algorithm that only sends the differences between source and destination files, minimizing network bandwidth usage.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "file-transfer",
+        "synchronization"
+      ],
+      "relatedTerms": [
+        "scp",
+        "ssh",
+        "symlink"
+      ]
+    },
+    {
+      "id": "runbook",
+      "term": "Runbook",
+      "fullForm": "",
+      "definition": "A documented set of standardized procedures for handling routine operations or specific incidents in a production environment. Runbooks reduce response times during outages by providing step-by-step instructions that any on-call engineer can follow, and are a key component of operational readiness.",
+      "category": "general",
+      "tags": [
+        "sre",
+        "documentation",
+        "operations"
+      ],
+      "relatedTerms": [
+        "postmortem",
+        "sre",
+        "toil"
+      ]
+    },
+    {
+      "id": "runc",
+      "term": "runc",
+      "fullForm": "",
+      "definition": "A lightweight, portable container runtime that implements the OCI runtime specification for spawning and running containers. Runc is the low-level runtime used by Docker, containerd, and other container platforms to create and manage the actual container processes on Linux.",
+      "category": "docker",
+      "tags": [
+        "containers",
+        "runtime",
+        "oci"
+      ],
+      "relatedTerms": [
+        "oci",
+        "podman",
+        "namespace"
+      ]
+    },
+    {
+      "id": "s3",
+      "term": "S3",
+      "fullForm": "Amazon Simple Storage Service",
+      "definition": "An AWS object storage service that provides highly scalable, durable, and available storage for any amount of data. S3 organizes data into buckets and objects, supports versioning, lifecycle policies, and fine-grained access control, and is widely used for backups, static hosting, and data lakes.",
+      "category": "cloud",
+      "tags": [
+        "aws",
+        "storage",
+        "cloud"
+      ],
+      "relatedTerms": [
+        "lambda",
+        "vpc",
+        "terraform"
+      ]
+    },
+    {
+      "id": "saas",
+      "term": "SaaS",
+      "fullForm": "Software as a Service",
+      "definition": "A cloud computing model where software is hosted and managed by a provider and delivered to users over the internet on a subscription basis. SaaS eliminates the need for local installation and maintenance, with examples including Slack, GitHub, and Datadog.",
+      "category": "cloud",
+      "tags": [
+        "cloud",
+        "software",
+        "delivery"
+      ],
+      "relatedTerms": [
+        "paas",
+        "lambda",
+        "twelve-factor-app"
+      ]
+    },
+    {
+      "id": "scp",
+      "term": "SCP",
+      "fullForm": "Secure Copy Protocol",
+      "definition": "A command-line utility that securely transfers files between hosts over an SSH connection. SCP encrypts both the file data and authentication credentials during transfer, making it suitable for copying files to and from remote servers in a secure manner.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "file-transfer",
+        "security"
+      ],
+      "relatedTerms": [
+        "ssh",
+        "rsync",
+        "paramiko"
+      ]
+    },
+    {
+      "id": "secret",
+      "term": "Secret",
+      "fullForm": "",
+      "definition": "Sensitive information such as passwords, API keys, tokens, or certificates that must be protected from unauthorized access. In Kubernetes, Secrets are API objects that store sensitive data separately from pod definitions and can be mounted as files or exposed as environment variables.",
+      "category": "security",
+      "tags": [
+        "security",
+        "kubernetes",
+        "configuration"
+      ],
+      "relatedTerms": [
+        "rbac",
+        "namespace",
+        "zero-trust"
+      ]
+    },
+    {
+      "id": "sed",
+      "term": "sed",
+      "fullForm": "Stream Editor",
+      "definition": "A Unix command-line utility that performs text transformations on input streams or files using pattern-based rules. Sed is commonly used for find-and-replace operations, line deletion, and text extraction in shell scripts and CI/CD pipelines.",
+      "category": "shell-scripting",
+      "tags": [
+        "text-processing",
+        "shell",
+        "automation"
+      ],
+      "relatedTerms": [
+        "regex",
+        "shell",
+        "redirect"
+      ]
+    },
+    {
+      "id": "semantic-versioning",
+      "term": "Semantic Versioning",
+      "fullForm": "",
+      "definition": "A versioning scheme that uses a three-part number format MAJOR.MINOR.PATCH to convey the nature of changes. Major version increments indicate breaking changes, minor versions add backward-compatible features, and patch versions include backward-compatible bug fixes.",
+      "category": "general",
+      "tags": [
+        "versioning",
+        "release",
+        "standards"
+      ],
+      "relatedTerms": [
+        "tag",
+        "registry",
+        "pipeline"
+      ]
+    },
+    {
+      "id": "service",
+      "term": "Service",
+      "fullForm": "",
+      "definition": "A Kubernetes resource that provides a stable network endpoint for accessing a set of pods, abstracting away pod IP changes due to scaling or restarts. Services support types including ClusterIP for internal access, NodePort for external access, and LoadBalancer for cloud provider integration.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "networking",
+        "discovery"
+      ],
+      "relatedTerms": [
+        "pod",
+        "load-balancer",
+        "port"
+      ]
+    },
+    {
+      "id": "service-mesh",
+      "term": "Service Mesh",
+      "fullForm": "",
+      "definition": "A dedicated infrastructure layer that manages service-to-service communication in microservices architectures using sidecar proxies. Service meshes provide capabilities like traffic management, mutual TLS, observability, and fault injection without requiring application code changes.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "networking",
+        "microservices"
+      ],
+      "relatedTerms": [
+        "linkerd",
+        "microservices",
+        "tls"
+      ]
+    },
+    {
+      "id": "shebang",
+      "term": "Shebang",
+      "fullForm": "",
+      "definition": "The character sequence #! at the beginning of a script file that specifies the interpreter to use when executing the script. Common shebangs include #!/bin/bash for Bash scripts and #!/usr/bin/env python3 for Python scripts, enabling them to be run directly as executables.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "scripting",
+        "linux"
+      ],
+      "relatedTerms": [
+        "shell",
+        "path-variable",
+        "python"
+      ]
+    },
+    {
+      "id": "shell",
+      "term": "Shell",
+      "fullForm": "",
+      "definition": "A command-line interpreter that provides an interface between the user and the operating system kernel, processing commands and returning output. Popular shells include Bash, Zsh, and Fish, each offering features like command history, tab completion, scripting capabilities, and customizable prompts.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "cli",
+        "linux"
+      ],
+      "relatedTerms": [
+        "subshell",
+        "shebang",
+        "redirect"
+      ]
+    },
+    {
+      "id": "signal",
+      "term": "Signal",
+      "fullForm": "",
+      "definition": "An asynchronous notification sent to a process by the operating system or another process to indicate an event or request an action. Common signals include SIGTERM (graceful termination), SIGKILL (forced termination), SIGHUP (hangup), and SIGINT (interrupt from Ctrl+C).",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "process",
+        "system"
+      ],
+      "relatedTerms": [
+        "process",
+        "pid",
+        "trap"
+      ]
+    },
+    {
+      "id": "sli-slo-sla",
+      "term": "SLI/SLO/SLA",
+      "fullForm": "Service Level Indicator / Service Level Objective / Service Level Agreement",
+      "definition": "Three related concepts for measuring and committing to service reliability. SLIs are quantitative metrics like latency or error rate, SLOs are target values for those metrics that define acceptable service levels, and SLAs are formal contracts with consequences if SLOs are not met.",
+      "category": "monitoring",
+      "tags": [
+        "sre",
+        "reliability",
+        "metrics"
+      ],
+      "relatedTerms": [
+        "metrics",
+        "prometheus",
+        "observability"
+      ]
+    },
+    {
+      "id": "socket",
+      "term": "Socket",
+      "fullForm": "",
+      "definition": "A communication endpoint defined by an IP address and port number that enables bidirectional data exchange between processes over a network. Sockets are the fundamental building blocks of network programming, supporting both connection-oriented (TCP) and connectionless (UDP) communication.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "programming",
+        "communication"
+      ],
+      "relatedTerms": [
+        "tcp",
+        "udp",
+        "port"
+      ]
+    },
+    {
+      "id": "sre",
+      "term": "SRE",
+      "fullForm": "Site Reliability Engineering",
+      "definition": "A discipline that applies software engineering principles to infrastructure and operations to create scalable, reliable systems. Pioneered at Google, SRE practices include error budgets, blameless postmortems, toil reduction, and treating operations as a software problem.",
+      "category": "general",
+      "tags": [
+        "sre",
+        "operations",
+        "reliability"
+      ],
+      "relatedTerms": [
+        "sli-slo-sla",
+        "postmortem",
+        "toil"
+      ]
+    },
+    {
+      "id": "ssh",
+      "term": "SSH",
+      "fullForm": "Secure Shell",
+      "definition": "A cryptographic network protocol for secure remote login, command execution, and file transfer over an unsecured network. SSH uses public-key cryptography for authentication and encrypts all traffic, replacing insecure protocols like Telnet and rlogin for remote system administration.",
+      "category": "security",
+      "tags": [
+        "security",
+        "networking",
+        "remote-access"
+      ],
+      "relatedTerms": [
+        "scp",
+        "ssl",
+        "paramiko"
+      ]
+    },
+    {
+      "id": "ssl",
+      "term": "SSL",
+      "fullForm": "Secure Sockets Layer",
+      "definition": "A deprecated cryptographic protocol that was used to secure communications over computer networks, now succeeded by TLS. Although the term SSL is still widely used colloquially, modern implementations use TLS to provide encryption, authentication, and data integrity for HTTPS and other protocols.",
+      "category": "security",
+      "tags": [
+        "security",
+        "encryption",
+        "networking"
+      ],
+      "relatedTerms": [
+        "tls",
+        "ssh",
+        "reverse-proxy"
+      ]
+    },
+    {
+      "id": "staging-area",
+      "term": "Staging Area",
+      "fullForm": "",
+      "definition": "An intermediate area in Git, also known as the index, where changes are collected before being committed to the repository. The staging area allows developers to selectively choose which modifications to include in the next commit, enabling more granular and meaningful commit history.",
+      "category": "git",
+      "tags": [
+        "git",
+        "workflow",
+        "version-control"
+      ],
+      "relatedTerms": [
+        "stash",
+        "merge",
+        "reflog"
+      ]
+    },
+    {
+      "id": "stash",
+      "term": "Stash",
+      "fullForm": "",
+      "definition": "A Git feature that temporarily shelves uncommitted changes so you can work on a different task and reapply them later. Git stash saves both staged and unstaged modifications to a stack, restoring a clean working directory without losing work in progress.",
+      "category": "git",
+      "tags": [
+        "git",
+        "workflow",
+        "temporary"
+      ],
+      "relatedTerms": [
+        "staging-area",
+        "rebase",
+        "reflog"
+      ]
+    },
+    {
+      "id": "statefulset",
+      "term": "StatefulSet",
+      "fullForm": "",
+      "definition": "A Kubernetes workload controller designed for applications that require stable network identities, persistent storage, and ordered deployment and scaling. Unlike Deployments, StatefulSets maintain a sticky identity for each pod across rescheduling, making them suitable for databases and clustered applications.",
+      "category": "kubernetes",
+      "tags": [
+        "kubernetes",
+        "workload",
+        "persistence"
+      ],
+      "relatedTerms": [
+        "persistent-volume",
+        "pod",
+        "service"
+      ]
+    },
+    {
+      "id": "stderr",
+      "term": "stderr",
+      "fullForm": "Standard Error",
+      "definition": "The default output stream (file descriptor 2) used by programs to write error messages and diagnostic information. Stderr is separate from stdout, allowing error messages to be redirected independently, which is crucial for logging and debugging in shell scripts and pipelines.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "io",
+        "debugging"
+      ],
+      "relatedTerms": [
+        "stdout",
+        "stdin",
+        "redirect"
+      ]
+    },
+    {
+      "id": "stdin",
+      "term": "stdin",
+      "fullForm": "Standard Input",
+      "definition": "The default input stream (file descriptor 0) from which programs read data, typically connected to the keyboard in interactive sessions. Stdin can be redirected from files or piped from other commands, forming the basis of Unix pipeline composition.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "io",
+        "input"
+      ],
+      "relatedTerms": [
+        "stdout",
+        "stderr",
+        "redirect"
+      ]
+    },
+    {
+      "id": "stdout",
+      "term": "stdout",
+      "fullForm": "Standard Output",
+      "definition": "The default output stream (file descriptor 1) where programs write their normal output, typically displayed on the terminal. Stdout can be redirected to files, piped to other commands, or captured by container runtimes for centralized logging in production environments.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "io",
+        "output"
+      ],
+      "relatedTerms": [
+        "stdin",
+        "stderr",
+        "redirect"
+      ]
+    },
+    {
+      "id": "storage-driver",
+      "term": "Storage Driver",
+      "fullForm": "",
+      "definition": "A component in Docker that manages how container image layers are stacked and how the writable container layer stores data. Storage drivers like overlay2, aufs, and devicemapper each use different strategies for layering filesystems, with trade-offs in performance, stability, and compatibility.",
+      "category": "docker",
+      "tags": [
+        "docker",
+        "storage",
+        "filesystem"
+      ],
+      "relatedTerms": [
+        "overlay2",
+        "layer",
+        "volume"
+      ]
+    },
+    {
+      "id": "subnet",
+      "term": "Subnet",
+      "fullForm": "Subnetwork",
+      "definition": "A logical subdivision of an IP network that partitions a larger network into smaller, more manageable segments. Subnets are defined by a network address and subnet mask (e.g., 10.0.1.0/24) and are used to organize resources, improve security through isolation, and optimize routing.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "ip",
+        "architecture"
+      ],
+      "relatedTerms": [
+        "vpc",
+        "nat",
+        "overlay-network"
+      ]
+    },
+    {
+      "id": "subprocess",
+      "term": "Subprocess",
+      "fullForm": "",
+      "definition": "A Python standard library module that allows scripts to spawn new operating system processes, connect to their input/output/error pipes, and obtain return codes. Subprocess is the recommended way to execute shell commands from Python, replacing older functions like os.system() and os.popen().",
+      "category": "python",
+      "tags": [
+        "python",
+        "system",
+        "automation"
+      ],
+      "relatedTerms": [
+        "python",
+        "process",
+        "paramiko"
+      ]
+    },
+    {
+      "id": "subshell",
+      "term": "Subshell",
+      "fullForm": "",
+      "definition": "A child shell process spawned by the current shell to execute commands in an isolated environment. Subshells inherit the parent's environment variables but cannot modify the parent's state, and are commonly created using parentheses (), pipes, or command substitution $().",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "process",
+        "scripting"
+      ],
+      "relatedTerms": [
+        "shell",
+        "process",
+        "variable"
+      ]
+    },
+    {
+      "id": "sudo",
+      "term": "sudo",
+      "fullForm": "Superuser Do",
+      "definition": "A Linux command that allows permitted users to execute commands with the security privileges of another user, typically the root superuser. Sudo provides fine-grained access control through the /etc/sudoers file and logs all commands for auditing purposes.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "security",
+        "permissions"
+      ],
+      "relatedTerms": [
+        "linux",
+        "process",
+        "rbac"
+      ]
+    },
+    {
+      "id": "swap",
+      "term": "Swap",
+      "fullForm": "",
+      "definition": "A portion of disk space used as an extension of physical RAM when the system's memory is fully utilized. Swap allows the kernel to move inactive memory pages to disk, preventing out-of-memory crashes but at the cost of significantly slower access compared to RAM.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "memory",
+        "performance"
+      ],
+      "relatedTerms": [
+        "resource-limit",
+        "process",
+        "mount"
+      ]
+    },
+    {
+      "id": "symlink",
+      "term": "Symlink",
+      "fullForm": "Symbolic Link",
+      "definition": "A special file that acts as a pointer to another file or directory in the filesystem, similar to a shortcut. Symlinks are created with the ln -s command and are widely used for managing multiple versions of software, organizing configuration files, and creating convenient path aliases.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "filesystem",
+        "tools"
+      ],
+      "relatedTerms": [
+        "mount",
+        "path-variable",
+        "linux"
+      ]
+    },
+    {
+      "id": "systemd",
+      "term": "systemd",
+      "fullForm": "",
+      "definition": "The most widely adopted init system and service manager for modern Linux distributions, responsible for bootstrapping the system and managing services throughout their lifecycle. Systemd uses unit files to define services, timers, mounts, and other system components, and provides tools like systemctl and journalctl for administration.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "init",
+        "services"
+      ],
+      "relatedTerms": [
+        "process",
+        "pid",
+        "signal"
+      ]
+    },
+    {
+      "id": "tag",
+      "term": "Tag",
+      "fullForm": "",
+      "definition": "A label applied to a specific point in a repository's history or to a container image version. In Git, tags mark release points like v1.0.0 for easy reference. In Docker, tags identify specific image versions within a repository, with 'latest' being the default tag.",
+      "category": "git",
+      "tags": [
+        "git",
+        "docker",
+        "versioning"
+      ],
+      "relatedTerms": [
+        "semantic-versioning",
+        "registry",
+        "repository"
+      ]
+    },
+    {
+      "id": "tcp",
+      "term": "TCP",
+      "fullForm": "Transmission Control Protocol",
+      "definition": "A connection-oriented transport layer protocol that provides reliable, ordered delivery of data between applications. TCP uses a three-way handshake to establish connections and employs acknowledgments, retransmissions, and flow control to ensure data integrity.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "protocol",
+        "transport"
+      ],
+      "relatedTerms": [
+        "udp",
+        "socket",
+        "port"
+      ]
+    },
+    {
+      "id": "terraform",
+      "term": "Terraform",
+      "fullForm": "",
+      "definition": "An open-source Infrastructure as Code tool by HashiCorp that enables defining and provisioning cloud infrastructure using a declarative configuration language called HCL. Terraform manages resource lifecycles through plan and apply workflows, maintains state files, and supports providers for all major cloud platforms.",
+      "category": "cloud",
+      "tags": [
+        "iac",
+        "cloud",
+        "automation"
+      ],
+      "relatedTerms": [
+        "s3",
+        "vpc",
+        "pipeline"
+      ]
+    },
+    {
+      "id": "thread",
+      "term": "Thread",
+      "fullForm": "",
+      "definition": "A lightweight unit of execution within a process that shares the same memory space and resources with other threads in that process. Threads enable concurrent execution of tasks, but require careful synchronization to avoid race conditions when accessing shared data.",
+      "category": "general",
+      "tags": [
+        "concurrency",
+        "programming",
+        "performance"
+      ],
+      "relatedTerms": [
+        "process",
+        "mutex",
+        "pid"
+      ]
+    },
+    {
+      "id": "tls",
+      "term": "TLS",
+      "fullForm": "Transport Layer Security",
+      "definition": "A cryptographic protocol that provides privacy and data integrity between communicating applications over a network. TLS is the successor to SSL and is used to secure HTTPS connections, email, VPN tunnels, and service-to-service communication in modern microservices architectures.",
+      "category": "security",
+      "tags": [
+        "security",
+        "encryption",
+        "networking"
+      ],
+      "relatedTerms": [
+        "ssl",
+        "service-mesh",
+        "zero-trust"
+      ]
+    },
+    {
+      "id": "toil",
+      "term": "Toil",
+      "fullForm": "",
+      "definition": "Repetitive, manual, automatable operational work that scales linearly with service size and provides no lasting value, as defined in SRE practice. Reducing toil through automation is a core SRE principle, freeing engineers to focus on projects that improve reliability and capability.",
+      "category": "general",
+      "tags": [
+        "sre",
+        "automation",
+        "operations"
+      ],
+      "relatedTerms": [
+        "sre",
+        "runbook",
+        "postmortem"
+      ]
+    },
+    {
+      "id": "traceroute",
+      "term": "Traceroute",
+      "fullForm": "",
+      "definition": "A network diagnostic tool that traces the path packets take from source to destination, showing each intermediate hop and its latency. Traceroute works by sending packets with incrementally increasing TTL values, revealing the route and helping identify where network delays or failures occur.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "diagnostics",
+        "tools"
+      ],
+      "relatedTerms": [
+        "ping",
+        "latency",
+        "osi-model"
+      ]
+    },
+    {
+      "id": "trap",
+      "term": "Trap",
+      "fullForm": "",
+      "definition": "A shell built-in command that catches signals and executes specified commands when those signals are received. Trap is essential for writing robust shell scripts that perform cleanup tasks like removing temporary files or releasing locks when interrupted or terminated.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "signals",
+        "error-handling"
+      ],
+      "relatedTerms": [
+        "signal",
+        "shell",
+        "process"
+      ]
+    },
+    {
+      "id": "trivy",
+      "term": "Trivy",
+      "fullForm": "",
+      "definition": "An open-source vulnerability scanner by Aqua Security that detects security issues in container images, filesystems, Git repositories, and Kubernetes clusters. Trivy scans for known vulnerabilities in OS packages and application dependencies, as well as misconfigurations in infrastructure-as-code files.",
+      "category": "security",
+      "tags": [
+        "security",
+        "scanning",
+        "containers"
+      ],
+      "relatedTerms": [
+        "vulnerability",
+        "registry",
+        "pipeline"
+      ]
+    },
+    {
+      "id": "twelve-factor-app",
+      "term": "Twelve-Factor App",
+      "fullForm": "",
+      "definition": "A methodology for building modern, cloud-native software-as-a-service applications, consisting of twelve best practices. The principles cover areas including codebase management, dependency declaration, configuration, backing services, and disposability, promoting portable and resilient applications.",
+      "category": "general",
+      "tags": [
+        "architecture",
+        "best-practices",
+        "cloud-native"
+      ],
+      "relatedTerms": [
+        "microservices",
+        "paas",
+        "saas"
+      ]
+    },
+    {
+      "id": "udp",
+      "term": "UDP",
+      "fullForm": "User Datagram Protocol",
+      "definition": "A connectionless transport layer protocol that sends data without establishing a connection or guaranteeing delivery. UDP is faster than TCP due to lower overhead and is used for time-sensitive applications like DNS lookups, video streaming, and online gaming where occasional packet loss is acceptable.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "protocol",
+        "transport"
+      ],
+      "relatedTerms": [
+        "tcp",
+        "socket",
+        "port"
+      ]
+    },
+    {
+      "id": "variable",
+      "term": "Variable",
+      "fullForm": "",
+      "definition": "A named storage location in programming or shell scripting that holds a value which can be referenced and modified. In shell scripting, variables are assigned without spaces (VAR=value) and referenced with a dollar sign ($VAR), while environment variables are exported to be available to child processes.",
+      "category": "shell-scripting",
+      "tags": [
+        "shell",
+        "programming",
+        "fundamentals"
+      ],
+      "relatedTerms": [
+        "path-variable",
+        "loop",
+        "subshell"
+      ]
+    },
+    {
+      "id": "virtualenv",
+      "term": "virtualenv",
+      "fullForm": "Virtual Environment",
+      "definition": "A tool that creates isolated Python environments with their own independent set of installed packages, preventing dependency conflicts between projects. Virtual environments are a Python best practice that ensures reproducible builds and clean dependency management across different applications.",
+      "category": "python",
+      "tags": [
+        "python",
+        "dependencies",
+        "isolation"
+      ],
+      "relatedTerms": [
+        "pip",
+        "python",
+        "package-manager"
+      ]
+    },
+    {
+      "id": "volume",
+      "term": "Volume",
+      "fullForm": "",
+      "definition": "A mechanism for persisting data generated by and used by containers beyond the container's lifecycle. Docker volumes are managed by the Docker daemon and stored outside the container's writable layer, providing better performance and easier backup compared to bind mounts.",
+      "category": "docker",
+      "tags": [
+        "docker",
+        "storage",
+        "persistence"
+      ],
+      "relatedTerms": [
+        "persistent-volume",
+        "mount",
+        "storage-driver"
+      ]
+    },
+    {
+      "id": "vpc",
+      "term": "VPC",
+      "fullForm": "Virtual Private Cloud",
+      "definition": "A logically isolated section of a cloud provider's network where you can launch resources in a virtual network that you define. VPCs provide control over IP address ranges, subnets, route tables, and network gateways, enabling secure and organized cloud network architectures.",
+      "category": "cloud",
+      "tags": [
+        "cloud",
+        "networking",
+        "security"
+      ],
+      "relatedTerms": [
+        "subnet",
+        "nat",
+        "vpn"
+      ]
+    },
+    {
+      "id": "vpn",
+      "term": "VPN",
+      "fullForm": "Virtual Private Network",
+      "definition": "A technology that creates an encrypted tunnel between two points over a public network, providing secure communication as if connected to a private network. VPNs are used to protect data in transit, provide remote access to corporate networks, and connect geographically distributed sites.",
+      "category": "networking",
+      "tags": [
+        "networking",
+        "security",
+        "encryption"
+      ],
+      "relatedTerms": [
+        "vpc",
+        "tls",
+        "ssh"
+      ]
+    },
+    {
+      "id": "vulnerability",
+      "term": "Vulnerability",
+      "fullForm": "",
+      "definition": "A weakness in a system, application, or process that can be exploited by an attacker to gain unauthorized access or cause harm. Vulnerabilities are tracked using CVE identifiers and severity scores (CVSS), and should be regularly scanned for and remediated as part of a security program.",
+      "category": "security",
+      "tags": [
+        "security",
+        "risk",
+        "compliance"
+      ],
+      "relatedTerms": [
+        "trivy",
+        "penetration-testing",
+        "zero-trust"
+      ]
+    },
+    {
+      "id": "webhook",
+      "term": "Webhook",
+      "fullForm": "",
+      "definition": "A mechanism for sending automated HTTP POST notifications from one application to another when a specific event occurs. Webhooks enable real-time integration between services, commonly used to trigger CI/CD pipelines on code pushes, send alerts to chat platforms, or synchronize data between systems.",
+      "category": "cicd",
+      "tags": [
+        "integration",
+        "automation",
+        "events"
+      ],
+      "relatedTerms": [
+        "rest-api",
+        "pipeline",
+        "pull-request"
+      ]
+    },
+    {
+      "id": "yaml",
+      "term": "YAML",
+      "fullForm": "YAML Ain't Markup Language",
+      "definition": "A human-readable data serialization format widely used for configuration files in DevOps tools like Kubernetes, Docker Compose, Ansible, and CI/CD systems. YAML uses indentation-based structure with key-value pairs, lists, and nested objects, prioritizing readability over compactness.",
+      "category": "general",
+      "tags": [
+        "configuration",
+        "format",
+        "devops"
+      ],
+      "relatedTerms": [
+        "pipeline",
+        "pod",
+        "terraform"
+      ]
+    },
+    {
+      "id": "yum",
+      "term": "yum",
+      "fullForm": "Yellowdog Updater, Modified",
+      "definition": "A package manager for RPM-based Linux distributions like CentOS and Red Hat Enterprise Linux that handles installing, updating, and removing software packages. Yum automatically resolves dependencies and downloads packages from configured repositories, and has been succeeded by dnf in newer distributions.",
+      "category": "linux",
+      "tags": [
+        "linux",
+        "package-manager",
+        "rpm"
+      ],
+      "relatedTerms": [
+        "package-manager",
+        "pip",
+        "npm"
+      ]
+    },
+    {
+      "id": "zero-trust",
+      "term": "Zero Trust",
+      "fullForm": "",
+      "definition": "A security model based on the principle of 'never trust, always verify,' requiring strict identity verification for every person and device accessing resources regardless of their network location. Zero trust eliminates implicit trust within network perimeters and enforces least-privilege access, micro-segmentation, and continuous validation.",
+      "category": "security",
+      "tags": [
+        "security",
+        "architecture",
+        "access-control"
+      ],
+      "relatedTerms": [
+        "rbac",
+        "tls",
+        "network-policy"
+      ]
+    }
+  ]
+}

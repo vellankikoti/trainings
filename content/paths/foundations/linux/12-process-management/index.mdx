@@ -1,0 +1,384 @@
+---
+title: "Process Management"
+description: "Master Linux process management with ps, top, htop, kill, and job control. Learn to monitor system resources, identify runaway processes, and manage background tasks."
+order: 12
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 11-package-management
+objectives:
+  - Monitor processes with ps, top, and htop
+  - Send signals to processes with kill and killall
+  - Manage foreground and background jobs
+  - Identify and troubleshoot resource-heavy processes
+tags:
+  - linux
+  - processes
+  - monitoring
+  - administration
+---
+
+<Callout type="story" title="The Story">
+It's 2 AM and your pager goes off: "Production server at 100% CPU." You SSH in and need to figure out what's consuming all the CPU, decide whether to kill it or let it finish, and prevent it from happening again. Process management is the first thing you reach for when a server is in trouble.
+</Callout>
+
+## What Is a Process?
+
+Every running program is a process. Each process has:
+- **PID** (Process ID) — unique identifier
+- **PPID** (Parent PID) — the process that started it
+- **UID** — user the process runs as
+- **State** — running, sleeping, stopped, zombie
+- **Priority** — how much CPU time it gets
+
+```bash
+# Every command you run creates a process
+sleep 60 &
+echo "PID of sleep: $!"
+
+# The very first process
+ps -p 1 -o pid,comm
+# PID 1 is init/systemd — the parent of all processes
+```
+
+## Viewing Processes — `ps`
+
+```bash
+# Show your processes
+ps
+
+# Show all processes (full format)
+ps aux
+#  a = all users
+#  u = user-oriented format
+#  x = include processes without a terminal
+
+# Show as a tree (parent-child relationships)
+ps axf
+
+# Show specific columns
+ps -eo pid,ppid,user,%cpu,%mem,stat,start,comm --sort=-%cpu | head -20
+
+# Find a specific process
+ps aux | grep nginx
+
+# Better: use pgrep
+pgrep -a nginx
+```
+
+### Understanding `ps aux` Output
+
+```bash
+ps aux | head -3
+# USER       PID %CPU %MEM    VSZ   RSS TTY  STAT START   TIME COMMAND
+# root         1  0.0  0.1 169460 13312 ?    Ss   Jan15   0:12 /sbin/init
+# root         2  0.0  0.0      0     0 ?    S    Jan15   0:00 [kthreadd]
+```
+
+| Column | Meaning |
+|---|---|
+| USER | Process owner |
+| PID | Process ID |
+| %CPU | CPU usage percentage |
+| %MEM | Memory usage percentage |
+| VSZ | Virtual memory size (KB) |
+| RSS | Resident Set Size — actual physical memory (KB) |
+| TTY | Terminal (? = no terminal) |
+| STAT | Process state |
+| TIME | Cumulative CPU time |
+
+### Process States (STAT Column)
+
+| State | Meaning |
+|---|---|
+| `R` | Running or runnable |
+| `S` | Interruptible sleep (waiting for I/O) |
+| `D` | Uninterruptible sleep (usually disk I/O) |
+| `Z` | Zombie — finished but parent hasn't collected exit status |
+| `T` | Stopped (by signal or debugger) |
+| `s` | Session leader |
+| `+` | Foreground process |
+| `l` | Multi-threaded |
+| `<` | High priority |
+| `N` | Low priority (nice) |
+
+## Interactive Monitoring — `top` and `htop`
+
+### `top`
+
+```bash
+top
+```
+
+Key commands inside `top`:
+| Key | Action |
+|---|---|
+| `P` | Sort by CPU usage |
+| `M` | Sort by memory usage |
+| `k` | Kill a process (enter PID) |
+| `u` | Filter by user |
+| `1` | Show individual CPU cores |
+| `c` | Show full command line |
+| `q` | Quit |
+
+### `htop` (Better)
+
+```bash
+# Install htop
+sudo apt install -y htop
+
+htop
+```
+
+`htop` advantages over `top`:
+- Color-coded CPU and memory bars
+- Mouse support
+- Easier process killing
+- Tree view built-in
+- Scroll through process list
+
+<Exercise number={1} title="Process Monitoring">
+
+```bash
+# 1. Create some background processes
+for i in $(seq 1 5); do
+    sleep 300 &
+done
+
+# 2. List your processes
+ps aux | grep sleep
+
+# 3. Use pgrep to find them
+pgrep -a sleep
+
+# 4. Count them
+pgrep -c sleep
+
+# 5. View the process tree
+ps axf | grep -A1 sleep | head -15
+
+# 6. Check top consumers
+ps aux --sort=-%cpu | head -10
+echo "--- Top CPU consumers ---"
+
+ps aux --sort=-%mem | head -10
+echo "--- Top memory consumers ---"
+
+# 7. Kill all sleep processes
+killall sleep
+
+# 8. Verify they're gone
+pgrep -a sleep    # should return nothing
+```
+
+</Exercise>
+
+## Sending Signals — `kill`
+
+Processes are controlled with signals:
+
+```bash
+# Send SIGTERM (graceful shutdown — default)
+kill PID
+kill -15 PID    # same as above
+
+# Send SIGKILL (force kill — can't be caught or ignored)
+kill -9 PID
+
+# Send SIGHUP (reload configuration)
+kill -1 PID
+
+# Kill by name
+killall nginx
+pkill -f "python3 app.py"
+
+# Kill all processes of a user
+sudo pkill -u baduser
+```
+
+### Important Signals
+
+| Signal | Number | Action | Use Case |
+|---|---|---|---|
+| SIGHUP | 1 | Hangup/reload | Reload config without restart |
+| SIGINT | 2 | Interrupt | Same as Ctrl+C |
+| SIGQUIT | 3 | Quit with core dump | Debug a hanging process |
+| SIGKILL | 9 | Force kill | Last resort — process won't respond |
+| SIGTERM | 15 | Graceful termination | Default kill signal — always try first |
+| SIGSTOP | 19 | Pause process | Freeze a process |
+| SIGCONT | 18 | Resume process | Unfreeze a paused process |
+
+<Callout type="tip" title="Kill Order">
+Always try signals in this order: **SIGTERM (15)** first, wait a few seconds, then **SIGKILL (9)** only if needed. SIGTERM lets the process clean up (close files, flush data). SIGKILL terminates instantly — no cleanup, possible data corruption.
+</Callout>
+
+## Job Control
+
+Manage foreground and background processes in your terminal:
+
+```bash
+# Run a command in the background
+long-running-command &
+
+# Move a running foreground process to background
+# Press Ctrl+Z first (suspends it), then:
+bg
+
+# List background jobs
+jobs
+# [1]+  Running    sleep 300 &
+# [2]-  Stopped    vim notes.txt
+
+# Bring a background job to foreground
+fg %1     # bring job 1 to foreground
+fg        # bring the most recent job to foreground
+
+# Run something and don't let it die when you disconnect
+nohup ./long-script.sh &
+# Output goes to nohup.out
+
+# Even better: use disown
+./script.sh &
+disown %1    # detach from terminal
+```
+
+## Process Priority — `nice` and `renice`
+
+Linux processes have a "niceness" value from -20 (highest priority) to 19 (lowest priority). Default is 0.
+
+```bash
+# Start a process with lower priority
+nice -n 10 ./heavy-computation.sh
+
+# Start with high priority (requires root)
+sudo nice -n -10 ./critical-service
+
+# Change priority of a running process
+renice 10 -p PID         # lower priority
+sudo renice -5 -p PID    # higher priority
+
+# See nice values
+ps -eo pid,ni,comm --sort=-ni | head -10
+```
+
+<Exercise number={2} title="Signal and Job Control">
+
+```bash
+# 1. Start a background process
+sleep 600 &
+SLEEP_PID=$!
+echo "Started sleep with PID: $SLEEP_PID"
+
+# 2. Verify it's running
+ps -p $SLEEP_PID -o pid,stat,comm
+
+# 3. Pause it with SIGSTOP
+kill -STOP $SLEEP_PID
+ps -p $SLEEP_PID -o pid,stat,comm    # STAT should show T (stopped)
+
+# 4. Resume it with SIGCONT
+kill -CONT $SLEEP_PID
+ps -p $SLEEP_PID -o pid,stat,comm    # STAT should show S (sleeping)
+
+# 5. Send SIGTERM (graceful kill)
+kill $SLEEP_PID
+ps -p $SLEEP_PID 2>/dev/null || echo "Process terminated"
+
+# 6. Job control practice
+sleep 500 &
+sleep 501 &
+sleep 502 &
+
+# 7. List jobs
+jobs
+
+# 8. Kill them all
+kill $(jobs -p)
+jobs    # should be empty
+```
+
+</Exercise>
+
+<MiniProject title="Process Monitor Script">
+
+Create a script that monitors processes and alerts on high resource usage:
+
+```bash
+cat > ~/proc-monitor.sh << 'SCRIPT'
+#!/bin/bash
+# Process Monitor — check for resource hogs
+
+CPU_THRESHOLD="${1:-80}"
+MEM_THRESHOLD="${2:-80}"
+
+echo "=== Process Monitor ==="
+echo "CPU Threshold: ${CPU_THRESHOLD}%"
+echo "Memory Threshold: ${MEM_THRESHOLD}%"
+echo "Time: $(date)"
+echo ""
+
+# System overview
+echo "--- System Load ---"
+uptime
+
+echo ""
+echo "--- Memory Usage ---"
+free -h | head -2
+
+echo ""
+echo "--- CPU Hogs (>${CPU_THRESHOLD}%) ---"
+FOUND_CPU=0
+ps aux --sort=-%cpu | awk -v threshold="$CPU_THRESHOLD" 'NR>1 && $3>threshold {
+    printf "  PID=%-8s CPU=%-6s MEM=%-6s USER=%-10s CMD=%s\n", $2, $3, $4, $1, $11
+    found++
+} END { if (!found) print "  None found" }'
+
+echo ""
+echo "--- Memory Hogs (>${MEM_THRESHOLD}%) ---"
+ps aux --sort=-%mem | awk -v threshold="$MEM_THRESHOLD" 'NR>1 && $4>threshold {
+    printf "  PID=%-8s CPU=%-6s MEM=%-6s USER=%-10s CMD=%s\n", $2, $3, $4, $1, $11
+    found++
+} END { if (!found) print "  None found" }'
+
+echo ""
+echo "--- Zombie Processes ---"
+ZOMBIES=$(ps aux | awk '$8 ~ /Z/ {print $2, $11}')
+if [ -n "$ZOMBIES" ]; then
+    echo "$ZOMBIES" | while read line; do
+        echo "  $line"
+    done
+else
+    echo "  None found"
+fi
+
+echo ""
+echo "--- Top 10 by CPU ---"
+ps aux --sort=-%cpu | head -11 | awk 'NR==1 || NR>1 {printf "  %-8s %-6s %-6s %s\n", $2, $3, $4, $11}'
+
+echo ""
+echo "--- Process Count by User ---"
+ps aux | awk 'NR>1 {users[$1]++} END {for (u in users) printf "  %-15s %d processes\n", u, users[u]}' | sort -t' ' -k2 -rn
+
+echo ""
+echo "=== Monitor Complete ==="
+SCRIPT
+
+chmod +x ~/proc-monitor.sh
+~/proc-monitor.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `ps aux` shows all running processes; `ps axf` shows the process tree
+- `top`/`htop` provide real-time interactive monitoring
+- Always send SIGTERM (15) before SIGKILL (9) — allow graceful shutdown
+- `Ctrl+Z` suspends, `bg` backgrounds, `fg` foregrounds, `jobs` lists
+- `nohup` and `disown` keep processes running after you disconnect
+- `nice` controls process priority — lower niceness = higher priority
+- Zombie processes indicate the parent isn't collecting exit statuses
+
+## What's Next
+
+Individual processes are useful, but modern Linux manages long-running processes as **services** through systemd. In **Service Management with systemd**, you'll learn to start, stop, enable, and troubleshoot the services that power production servers.

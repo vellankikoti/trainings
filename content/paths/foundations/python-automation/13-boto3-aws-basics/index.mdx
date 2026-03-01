@@ -1,0 +1,975 @@
+---
+title: "AWS Automation with Boto3"
+description: "Automate AWS with Python. Use boto3 to manage EC2, S3, and IAM — the foundation for cloud automation that scales."
+order: 13
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 12-regex-text-processing
+objectives:
+  - Set up boto3 with credentials and profiles
+  - Manage EC2 instances programmatically
+  - Work with S3 buckets and objects
+  - Query IAM users and policies
+  - Handle AWS errors and pagination
+tags:
+  - python
+  - aws
+  - boto3
+  - cloud
+---
+
+<Callout type="story" title="The Story">
+Your company runs 300 EC2 instances across three AWS accounts and four regions. Every Friday, someone asks: "How much are we spending on stopped instances? Which instances have no tags? Are there any unencrypted S3 buckets?" Clicking through the AWS console for each account would take hours. With boto3, you write a Python script that queries every account, every region, compiles a report, and emails it to the team — automatically, every Friday at 6 AM. This is cloud automation: turning manual console clicks into repeatable, auditable code.
+</Callout>
+
+## Setting Up Boto3
+
+### Installation and Credentials
+
+```python
+# pip install boto3
+import boto3
+
+# boto3 looks for credentials in this order:
+# 1. Explicit parameters (boto3.Session(aws_access_key_id=...))
+# 2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+# 3. Shared credentials file (~/.aws/credentials)
+# 4. AWS config file (~/.aws/config)
+# 5. Instance metadata (EC2 instance role, ECS task role, Lambda role)
+```
+
+### Using Profiles
+
+```python
+import boto3
+
+# Default profile
+session = boto3.Session()
+
+# Named profile from ~/.aws/credentials
+dev_session = boto3.Session(profile_name="dev")
+prod_session = boto3.Session(profile_name="production")
+
+# Explicit region
+session = boto3.Session(region_name="us-east-1")
+
+# Create clients from a session
+ec2 = session.client("ec2")
+s3 = session.client("s3")
+```
+
+### Environment-Based Configuration
+
+```python
+import boto3
+import os
+
+def get_aws_session():
+    """Create a boto3 session from environment or profile."""
+    profile = os.getenv("AWS_PROFILE")
+    region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+
+    if profile:
+        return boto3.Session(profile_name=profile, region_name=region)
+
+    # Fall back to environment variables or instance role
+    return boto3.Session(region_name=region)
+
+session = get_aws_session()
+```
+
+<Callout type="tip" title="Never Hardcode AWS Credentials">
+Use IAM roles for EC2 instances, ECS tasks, and Lambda functions. Use profiles for local development. Use environment variables in CI/CD. Never put access keys in source code — even in private repos, credentials leak through git history.
+</Callout>
+
+## Client vs Resource APIs
+
+Boto3 offers two interfaces to AWS services:
+
+```python
+import boto3
+
+# Client API — low-level, maps 1:1 to AWS API calls
+# Returns raw dictionaries
+ec2_client = boto3.client("ec2")
+response = ec2_client.describe_instances()
+# response is a dict with 'Reservations' key
+
+# Resource API — high-level, object-oriented
+# Returns Python objects with attributes and methods
+ec2_resource = boto3.resource("ec2")
+instances = ec2_resource.instances.all()
+# instances is an iterable of Instance objects
+
+# When to use which:
+# Client: full API coverage, pagination control, batch operations
+# Resource: cleaner code, simpler iteration, but not all services supported
+```
+
+## EC2 Operations
+
+### Listing Instances
+
+```python
+import boto3
+
+ec2 = boto3.client("ec2")
+
+# List all instances
+response = ec2.describe_instances()
+
+for reservation in response["Reservations"]:
+    for instance in reservation["Instances"]:
+        # Get the Name tag
+        name = "unnamed"
+        for tag in instance.get("Tags", []):
+            if tag["Key"] == "Name":
+                name = tag["Value"]
+
+        print(
+            f"  {instance['InstanceId']}: {name} "
+            f"({instance['InstanceType']}) "
+            f"State={instance['State']['Name']}"
+        )
+```
+
+### Filtering Instances
+
+```python
+import boto3
+
+ec2 = boto3.client("ec2")
+
+# Filter by state and tags
+response = ec2.describe_instances(
+    Filters=[
+        {"Name": "instance-state-name", "Values": ["running"]},
+        {"Name": "tag:Environment", "Values": ["production"]},
+    ]
+)
+
+# Filter by instance type
+response = ec2.describe_instances(
+    Filters=[
+        {"Name": "instance-type", "Values": ["t3.micro", "t3.small"]},
+    ]
+)
+
+# Get specific instances by ID
+response = ec2.describe_instances(
+    InstanceIds=["i-0abc123def456789"]
+)
+```
+
+### Starting and Stopping Instances
+
+```python
+import boto3
+
+ec2 = boto3.client("ec2")
+
+# Stop instances
+instance_ids = ["i-0abc123def456789", "i-0def789abc123456"]
+response = ec2.stop_instances(InstanceIds=instance_ids)
+print(f"Stopping: {instance_ids}")
+
+# Start instances
+response = ec2.start_instances(InstanceIds=instance_ids)
+print(f"Starting: {instance_ids}")
+```
+
+### Using the Resource API
+
+```python
+import boto3
+
+ec2 = boto3.resource("ec2")
+
+# Iterate all instances (cleaner than client API)
+for instance in ec2.instances.all():
+    name = ""
+    for tag in (instance.tags or []):
+        if tag["Key"] == "Name":
+            name = tag["Value"]
+    print(f"  {instance.id}: {name} ({instance.state['Name']})")
+
+# Filter with resource API
+running = ec2.instances.filter(
+    Filters=[{"Name": "instance-state-name", "Values": ["running"]}]
+)
+for instance in running:
+    print(f"  Running: {instance.id} ({instance.instance_type})")
+```
+
+## S3 Operations
+
+### Listing Buckets
+
+```python
+import boto3
+
+s3 = boto3.client("s3")
+
+response = s3.list_buckets()
+for bucket in response["Buckets"]:
+    print(f"  {bucket['Name']} (created: {bucket['CreationDate']})")
+```
+
+### Uploading and Downloading
+
+```python
+import boto3
+
+s3 = boto3.client("s3")
+
+# Upload a file
+s3.upload_file(
+    Filename="/tmp/report.pdf",
+    Bucket="my-reports-bucket",
+    Key="reports/2024/january/report.pdf"
+)
+
+# Download a file
+s3.download_file(
+    Bucket="my-reports-bucket",
+    Key="reports/2024/january/report.pdf",
+    Filename="/tmp/downloaded-report.pdf"
+)
+
+# Upload from string/bytes
+s3.put_object(
+    Bucket="my-configs-bucket",
+    Key="configs/app.json",
+    Body='{"version": "2.0"}',
+    ContentType="application/json"
+)
+
+# Read an object directly
+response = s3.get_object(
+    Bucket="my-configs-bucket",
+    Key="configs/app.json"
+)
+content = response["Body"].read().decode("utf-8")
+print(content)
+```
+
+### Presigned URLs
+
+Generate temporary download links without making objects public:
+
+```python
+import boto3
+
+s3 = boto3.client("s3")
+
+# Generate a presigned URL (valid for 1 hour)
+url = s3.generate_presigned_url(
+    "get_object",
+    Params={
+        "Bucket": "my-reports-bucket",
+        "Key": "reports/2024/report.pdf"
+    },
+    ExpiresIn=3600  # seconds
+)
+print(f"Download link (1hr): {url}")
+```
+
+### Listing Objects
+
+```python
+import boto3
+
+s3 = boto3.client("s3")
+
+# List objects with prefix (like a "directory")
+response = s3.list_objects_v2(
+    Bucket="my-bucket",
+    Prefix="logs/2024/01/",
+    MaxKeys=100
+)
+
+for obj in response.get("Contents", []):
+    size_mb = obj["Size"] / (1024 * 1024)
+    print(f"  {obj['Key']} ({size_mb:.2f} MB)")
+```
+
+## IAM Operations
+
+### Listing Users
+
+```python
+import boto3
+
+iam = boto3.client("iam")
+
+response = iam.list_users()
+for user in response["Users"]:
+    print(f"  {user['UserName']} (created: {user['CreateDate']})")
+
+    # Check when they last used their access keys
+    keys = iam.list_access_keys(UserName=user["UserName"])
+    for key in keys["AccessKeyMetadata"]:
+        status = key["Status"]
+        key_id = key["AccessKeyId"]
+        print(f"    Key {key_id}: {status}")
+```
+
+### Listing Policies
+
+```python
+import boto3
+
+iam = boto3.client("iam")
+
+# List attached user policies
+response = iam.list_attached_user_policies(UserName="admin")
+for policy in response["AttachedPolicies"]:
+    print(f"  {policy['PolicyName']}: {policy['PolicyArn']}")
+```
+
+## Error Handling
+
+AWS errors come through `botocore.exceptions`:
+
+```python
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
+
+ec2 = boto3.client("ec2")
+
+try:
+    response = ec2.describe_instances(InstanceIds=["i-nonexistent"])
+except ClientError as e:
+    error_code = e.response["Error"]["Code"]
+    error_msg = e.response["Error"]["Message"]
+
+    if error_code == "InvalidInstanceID.NotFound":
+        print(f"Instance not found: {error_msg}")
+    elif error_code == "UnauthorizedOperation":
+        print(f"Permission denied: {error_msg}")
+    else:
+        print(f"AWS error ({error_code}): {error_msg}")
+
+except NoCredentialsError:
+    print("No AWS credentials found. Configure with 'aws configure'")
+```
+
+<Callout type="warning" title="Always Catch ClientError">
+Every boto3 call can raise `ClientError`. The error code tells you what went wrong — `InvalidInstanceID.NotFound`, `AccessDenied`, `ThrottlingException`, etc. Always catch it and handle the specific codes your script might encounter.
+</Callout>
+
+## Pagination
+
+Many AWS APIs return paginated results. Use paginators to handle this automatically:
+
+```python
+import boto3
+
+s3 = boto3.client("s3")
+
+# Manual pagination (tedious)
+all_objects = []
+continuation_token = None
+
+while True:
+    kwargs = {"Bucket": "my-bucket", "MaxKeys": 1000}
+    if continuation_token:
+        kwargs["ContinuationToken"] = continuation_token
+
+    response = s3.list_objects_v2(**kwargs)
+    all_objects.extend(response.get("Contents", []))
+
+    if not response.get("IsTruncated"):
+        break
+    continuation_token = response["NextContinuationToken"]
+
+# Using a paginator (much better)
+paginator = s3.get_paginator("list_objects_v2")
+all_objects = []
+
+for page in paginator.paginate(Bucket="my-bucket"):
+    for obj in page.get("Contents", []):
+        all_objects.append(obj)
+
+print(f"Total objects: {len(all_objects)}")
+```
+
+## Waiters
+
+Wait for AWS resources to reach a specific state:
+
+```python
+import boto3
+
+ec2 = boto3.client("ec2")
+
+# Start an instance
+instance_ids = ["i-0abc123def456789"]
+ec2.start_instances(InstanceIds=instance_ids)
+
+# Wait for it to be running (polls every 15s, up to 40 attempts)
+print("Waiting for instance to be running...")
+waiter = ec2.get_waiter("instance_running")
+waiter.wait(
+    InstanceIds=instance_ids,
+    WaiterConfig={"Delay": 10, "MaxAttempts": 30}
+)
+print("Instance is now running!")
+```
+
+<Exercise number={1} title="EC2 Instance Inventory">
+
+Build a script that inventories EC2 instances with filtering and reporting.
+
+```python
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
+from collections import defaultdict
+from datetime import datetime, timezone
+
+def get_ec2_inventory(region="us-east-1"):
+    """Get a full inventory of EC2 instances."""
+    try:
+        ec2 = boto3.client("ec2", region_name=region)
+    except NoCredentialsError:
+        print("No AWS credentials. Running with mock data.")
+        return get_mock_inventory()
+
+    try:
+        paginator = ec2.get_paginator("describe_instances")
+        instances = []
+
+        for page in paginator.paginate():
+            for reservation in page["Reservations"]:
+                for inst in reservation["Instances"]:
+                    # Extract tags into a dict
+                    tags = {}
+                    for tag in inst.get("Tags", []):
+                        tags[tag["Key"]] = tag["Value"]
+
+                    instances.append({
+                        "id": inst["InstanceId"],
+                        "name": tags.get("Name", "unnamed"),
+                        "type": inst["InstanceType"],
+                        "state": inst["State"]["Name"],
+                        "az": inst.get("Placement", {}).get(
+                            "AvailabilityZone", ""
+                        ),
+                        "private_ip": inst.get("PrivateIpAddress", "N/A"),
+                        "public_ip": inst.get("PublicIpAddress", "N/A"),
+                        "launch_time": inst.get("LaunchTime"),
+                        "tags": tags,
+                        "environment": tags.get("Environment", "untagged"),
+                        "team": tags.get("Team", "untagged"),
+                    })
+
+        return instances
+
+    except ClientError as e:
+        print(f"AWS error: {e.response['Error']['Message']}")
+        return get_mock_inventory()
+
+def get_mock_inventory():
+    """Return mock data for demonstration."""
+    return [
+        {"id": "i-0abc1", "name": "web-01", "type": "t3.medium",
+         "state": "running", "az": "us-east-1a",
+         "private_ip": "10.0.1.10", "public_ip": "54.1.2.3",
+         "environment": "production", "team": "platform",
+         "tags": {"Name": "web-01", "Environment": "production"}},
+        {"id": "i-0abc2", "name": "web-02", "type": "t3.medium",
+         "state": "running", "az": "us-east-1b",
+         "private_ip": "10.0.1.11", "public_ip": "54.1.2.4",
+         "environment": "production", "team": "platform",
+         "tags": {"Name": "web-02", "Environment": "production"}},
+        {"id": "i-0abc3", "name": "api-01", "type": "t3.large",
+         "state": "running", "az": "us-east-1a",
+         "private_ip": "10.0.2.10", "public_ip": "N/A",
+         "environment": "production", "team": "backend",
+         "tags": {"Name": "api-01", "Environment": "production"}},
+        {"id": "i-0def1", "name": "dev-server", "type": "t3.micro",
+         "state": "stopped", "az": "us-east-1a",
+         "private_ip": "10.0.3.10", "public_ip": "N/A",
+         "environment": "development", "team": "backend",
+         "tags": {"Name": "dev-server", "Environment": "development"}},
+        {"id": "i-0def2", "name": "unnamed", "type": "t3.small",
+         "state": "running", "az": "us-east-1c",
+         "private_ip": "10.0.4.10", "public_ip": "N/A",
+         "environment": "untagged", "team": "untagged",
+         "tags": {}},
+        {"id": "i-0ghi1", "name": "staging-db", "type": "r5.large",
+         "state": "stopped", "az": "us-east-1a",
+         "private_ip": "10.0.5.10", "public_ip": "N/A",
+         "environment": "staging", "team": "data",
+         "tags": {"Name": "staging-db", "Environment": "staging"}},
+    ]
+
+def print_inventory_report(instances):
+    """Print a formatted inventory report."""
+    print("=" * 75)
+    print("  EC2 INSTANCE INVENTORY")
+    print("=" * 75)
+
+    # Summary
+    by_state = defaultdict(int)
+    by_type = defaultdict(int)
+    by_env = defaultdict(int)
+    untagged = []
+
+    for inst in instances:
+        by_state[inst["state"]] += 1
+        by_type[inst["type"]] += 1
+        by_env[inst["environment"]] += 1
+        if inst["environment"] == "untagged":
+            untagged.append(inst)
+
+    print(f"\n  Total instances: {len(instances)}")
+    print(f"\n  By State:")
+    for state, count in sorted(by_state.items()):
+        print(f"    {state:<15} {count}")
+    print(f"\n  By Type:")
+    for itype, count in sorted(by_type.items()):
+        print(f"    {itype:<15} {count}")
+    print(f"\n  By Environment:")
+    for env, count in sorted(by_env.items()):
+        marker = " [!]" if env == "untagged" else ""
+        print(f"    {env:<15} {count}{marker}")
+
+    # Instance table
+    print(f"\n  {'ID':<12} {'Name':<15} {'Type':<12} {'State':<10} {'IP':<16} {'Env':<12}")
+    print(f"  {'-'*12} {'-'*15} {'-'*12} {'-'*10} {'-'*16} {'-'*12}")
+    for inst in instances:
+        print(
+            f"  {inst['id']:<12} {inst['name']:<15} {inst['type']:<12} "
+            f"{inst['state']:<10} {inst['private_ip']:<16} {inst['environment']:<12}"
+        )
+
+    # Warnings
+    if untagged:
+        print(f"\n  WARNING: {len(untagged)} untagged instance(s):")
+        for inst in untagged:
+            print(f"    - {inst['id']} ({inst['type']})")
+
+    stopped = [i for i in instances if i["state"] == "stopped"]
+    if stopped:
+        print(f"\n  NOTE: {len(stopped)} stopped instance(s) (still incurring EBS costs):")
+        for inst in stopped:
+            print(f"    - {inst['id']}: {inst['name']}")
+
+    print("\n" + "=" * 75)
+
+# --- Run ---
+instances = get_ec2_inventory()
+print_inventory_report(instances)
+```
+
+</Exercise>
+
+<Exercise number={2} title="S3 Bucket Analyzer">
+
+Build a tool that analyzes S3 buckets for size, object count, and configuration.
+
+```python
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
+from datetime import datetime, timezone
+
+def analyze_s3_buckets():
+    """Analyze all S3 buckets in the account."""
+    try:
+        s3 = boto3.client("s3")
+        response = s3.list_buckets()
+        buckets = response["Buckets"]
+    except (NoCredentialsError, ClientError):
+        print("No AWS credentials. Using mock data.\n")
+        buckets = None
+
+    if not buckets:
+        return analyze_mock_buckets()
+
+    results = []
+    for bucket in buckets:
+        name = bucket["Name"]
+        info = {"name": name, "created": bucket["CreationDate"]}
+
+        # Get bucket location
+        try:
+            loc = s3.get_bucket_location(Bucket=name)
+            info["region"] = loc["LocationConstraint"] or "us-east-1"
+        except ClientError:
+            info["region"] = "unknown"
+
+        # Count objects and total size
+        try:
+            paginator = s3.get_paginator("list_objects_v2")
+            total_size = 0
+            total_objects = 0
+            for page in paginator.paginate(Bucket=name):
+                for obj in page.get("Contents", []):
+                    total_size += obj["Size"]
+                    total_objects += 1
+            info["object_count"] = total_objects
+            info["total_size_bytes"] = total_size
+        except ClientError:
+            info["object_count"] = "?"
+            info["total_size_bytes"] = 0
+
+        # Check versioning
+        try:
+            versioning = s3.get_bucket_versioning(Bucket=name)
+            info["versioning"] = versioning.get("Status", "Disabled")
+        except ClientError:
+            info["versioning"] = "unknown"
+
+        results.append(info)
+
+    return results
+
+def analyze_mock_buckets():
+    """Return mock S3 bucket data."""
+    return [
+        {"name": "prod-app-assets", "region": "us-east-1",
+         "object_count": 15420, "total_size_bytes": 2_500_000_000,
+         "versioning": "Enabled",
+         "created": datetime(2023, 3, 15, tzinfo=timezone.utc)},
+        {"name": "prod-db-backups", "region": "us-east-1",
+         "object_count": 365, "total_size_bytes": 50_000_000_000,
+         "versioning": "Enabled",
+         "created": datetime(2023, 1, 1, tzinfo=timezone.utc)},
+        {"name": "staging-logs", "region": "us-west-2",
+         "object_count": 89000, "total_size_bytes": 8_000_000_000,
+         "versioning": "Disabled",
+         "created": datetime(2023, 6, 1, tzinfo=timezone.utc)},
+        {"name": "dev-test-bucket", "region": "us-east-1",
+         "object_count": 23, "total_size_bytes": 1_500_000,
+         "versioning": "Disabled",
+         "created": datetime(2024, 1, 10, tzinfo=timezone.utc)},
+        {"name": "terraform-state-prod", "region": "us-east-1",
+         "object_count": 45, "total_size_bytes": 5_000_000,
+         "versioning": "Enabled",
+         "created": datetime(2023, 2, 1, tzinfo=timezone.utc)},
+    ]
+
+def format_size(bytes_val):
+    """Format bytes as human-readable size."""
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if bytes_val < 1024:
+            return f"{bytes_val:.1f} {unit}"
+        bytes_val /= 1024
+    return f"{bytes_val:.1f} PB"
+
+def print_s3_report(buckets):
+    """Print formatted S3 analysis."""
+    print("=" * 70)
+    print("  S3 BUCKET ANALYSIS")
+    print("=" * 70)
+
+    total_size = sum(b.get("total_size_bytes", 0) for b in buckets)
+    total_objects = sum(
+        b["object_count"] for b in buckets
+        if isinstance(b.get("object_count"), int)
+    )
+
+    print(f"\n  Total buckets:  {len(buckets)}")
+    print(f"  Total objects:  {total_objects:,}")
+    print(f"  Total size:     {format_size(total_size)}")
+
+    # Bucket table
+    print(f"\n  {'Bucket':<30} {'Region':<15} {'Objects':>10} {'Size':>12} {'Versioning'}")
+    print(f"  {'-'*30} {'-'*15} {'-'*10} {'-'*12} {'-'*10}")
+
+    for b in sorted(buckets, key=lambda x: x.get("total_size_bytes", 0),
+                    reverse=True):
+        obj_count = (f"{b['object_count']:,}"
+                     if isinstance(b.get("object_count"), int) else "?")
+        size = format_size(b.get("total_size_bytes", 0))
+        ver = b.get("versioning", "?")
+        print(f"  {b['name']:<30} {b.get('region', '?'):<15} "
+              f"{obj_count:>10} {size:>12} {ver}")
+
+    # Warnings
+    no_versioning = [b for b in buckets if b.get("versioning") == "Disabled"]
+    if no_versioning:
+        print(f"\n  WARNING: {len(no_versioning)} bucket(s) without versioning:")
+        for b in no_versioning:
+            print(f"    - {b['name']}")
+
+    print("\n" + "=" * 70)
+
+# --- Run ---
+buckets = analyze_s3_buckets()
+print_s3_report(buckets)
+```
+
+</Exercise>
+
+<MiniProject title="AWS Infrastructure Reporter">
+
+Build a comprehensive AWS infrastructure reporter that covers EC2, S3, and IAM.
+
+```python
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
+from collections import defaultdict
+from datetime import datetime, timezone
+import json
+
+class AWSReporter:
+    """Generate infrastructure reports across AWS services."""
+
+    def __init__(self, region="us-east-1", profile=None):
+        self.region = region
+        self.use_mock = False
+
+        try:
+            kwargs = {"region_name": region}
+            if profile:
+                kwargs["profile_name"] = profile
+            self.session = boto3.Session(**kwargs)
+            # Test credentials
+            self.session.client("sts").get_caller_identity()
+        except (NoCredentialsError, ClientError):
+            print("[INFO] No AWS credentials. Using mock data.\n")
+            self.use_mock = True
+
+    def _client(self, service):
+        if self.use_mock:
+            return None
+        return self.session.client(service)
+
+    # --- EC2 ---
+    def get_ec2_summary(self):
+        """Get EC2 instance summary."""
+        if self.use_mock:
+            return self._mock_ec2()
+
+        ec2 = self._client("ec2")
+        instances = []
+        paginator = ec2.get_paginator("describe_instances")
+
+        for page in paginator.paginate():
+            for res in page["Reservations"]:
+                for inst in res["Instances"]:
+                    tags = {t["Key"]: t["Value"]
+                            for t in inst.get("Tags", [])}
+                    instances.append({
+                        "id": inst["InstanceId"],
+                        "name": tags.get("Name", "unnamed"),
+                        "type": inst["InstanceType"],
+                        "state": inst["State"]["Name"],
+                        "az": inst["Placement"]["AvailabilityZone"],
+                        "environment": tags.get("Environment", "untagged"),
+                    })
+        return instances
+
+    def _mock_ec2(self):
+        return [
+            {"id": "i-0a1b2c", "name": "web-01", "type": "t3.medium",
+             "state": "running", "az": "us-east-1a", "environment": "production"},
+            {"id": "i-0d3e4f", "name": "web-02", "type": "t3.medium",
+             "state": "running", "az": "us-east-1b", "environment": "production"},
+            {"id": "i-0g5h6i", "name": "api-01", "type": "t3.large",
+             "state": "running", "az": "us-east-1a", "environment": "production"},
+            {"id": "i-0j7k8l", "name": "worker-01", "type": "c5.xlarge",
+             "state": "running", "az": "us-east-1a", "environment": "production"},
+            {"id": "i-0m9n0o", "name": "dev-box", "type": "t3.micro",
+             "state": "stopped", "az": "us-east-1a", "environment": "development"},
+            {"id": "i-0p1q2r", "name": "staging-api", "type": "t3.small",
+             "state": "running", "az": "us-east-1a", "environment": "staging"},
+            {"id": "i-0s3t4u", "name": "unnamed", "type": "t3.micro",
+             "state": "running", "az": "us-east-1c", "environment": "untagged"},
+        ]
+
+    # --- S3 ---
+    def get_s3_summary(self):
+        """Get S3 bucket summary."""
+        if self.use_mock:
+            return self._mock_s3()
+
+        s3 = self._client("s3")
+        buckets = []
+        for bucket in s3.list_buckets()["Buckets"]:
+            info = {
+                "name": bucket["Name"],
+                "created": bucket["CreationDate"].isoformat(),
+            }
+            try:
+                loc = s3.get_bucket_location(Bucket=bucket["Name"])
+                info["region"] = loc["LocationConstraint"] or "us-east-1"
+            except ClientError:
+                info["region"] = "unknown"
+            buckets.append(info)
+        return buckets
+
+    def _mock_s3(self):
+        return [
+            {"name": "prod-app-assets", "region": "us-east-1",
+             "created": "2023-03-15"},
+            {"name": "prod-db-backups", "region": "us-east-1",
+             "created": "2023-01-01"},
+            {"name": "staging-logs", "region": "us-west-2",
+             "created": "2023-06-01"},
+            {"name": "terraform-state", "region": "us-east-1",
+             "created": "2023-02-01"},
+            {"name": "dev-artifacts", "region": "us-east-1",
+             "created": "2024-01-10"},
+        ]
+
+    # --- IAM ---
+    def get_iam_summary(self):
+        """Get IAM users summary."""
+        if self.use_mock:
+            return self._mock_iam()
+
+        iam = self._client("iam")
+        users = []
+        for user in iam.list_users()["Users"]:
+            info = {
+                "username": user["UserName"],
+                "created": user["CreateDate"].isoformat(),
+                "has_mfa": False,
+                "access_keys": 0,
+            }
+            try:
+                mfa = iam.list_mfa_devices(UserName=user["UserName"])
+                info["has_mfa"] = len(mfa["MFADevices"]) > 0
+            except ClientError:
+                pass
+            try:
+                keys = iam.list_access_keys(UserName=user["UserName"])
+                info["access_keys"] = len(keys["AccessKeyMetadata"])
+            except ClientError:
+                pass
+            users.append(info)
+        return users
+
+    def _mock_iam(self):
+        return [
+            {"username": "admin", "created": "2023-01-01",
+             "has_mfa": True, "access_keys": 1},
+            {"username": "deploy-bot", "created": "2023-03-15",
+             "has_mfa": False, "access_keys": 2},
+            {"username": "dev-alice", "created": "2023-06-01",
+             "has_mfa": True, "access_keys": 1},
+            {"username": "dev-bob", "created": "2023-08-15",
+             "has_mfa": False, "access_keys": 1},
+            {"username": "readonly-ci", "created": "2024-01-10",
+             "has_mfa": False, "access_keys": 1},
+        ]
+
+    # --- Full Report ---
+    def generate_report(self):
+        """Generate a complete infrastructure report."""
+        print("Collecting AWS infrastructure data...")
+        ec2_data = self.get_ec2_summary()
+        s3_data = self.get_s3_summary()
+        iam_data = self.get_iam_summary()
+
+        report = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "region": self.region,
+            "ec2": ec2_data,
+            "s3": s3_data,
+            "iam": iam_data,
+        }
+
+        self._print_report(report)
+        return report
+
+    def _print_report(self, report):
+        """Print the full formatted report."""
+        print()
+        print("=" * 65)
+        print("  AWS INFRASTRUCTURE REPORT")
+        print(f"  Region: {report['region']}")
+        print(f"  Generated: {report['generated_at'][:19]} UTC")
+        print("=" * 65)
+
+        # EC2 Section
+        ec2 = report["ec2"]
+        by_state = defaultdict(int)
+        by_env = defaultdict(int)
+        by_type = defaultdict(int)
+        for inst in ec2:
+            by_state[inst["state"]] += 1
+            by_env[inst["environment"]] += 1
+            by_type[inst["type"]] += 1
+
+        print(f"\n  --- EC2 Instances ({len(ec2)}) ---")
+        print(f"  By State:       {dict(by_state)}")
+        print(f"  By Environment: {dict(by_env)}")
+        print(f"  By Type:        {dict(by_type)}")
+
+        print(f"\n  {'ID':<12} {'Name':<15} {'Type':<12} {'State':<10} {'Env'}")
+        for inst in ec2:
+            print(f"  {inst['id']:<12} {inst['name']:<15} "
+                  f"{inst['type']:<12} {inst['state']:<10} "
+                  f"{inst['environment']}")
+
+        # S3 Section
+        s3 = report["s3"]
+        print(f"\n  --- S3 Buckets ({len(s3)}) ---")
+        for bucket in s3:
+            print(f"  {bucket['name']:<35} {bucket['region']:<15} "
+                  f"Created: {str(bucket['created'])[:10]}")
+
+        # IAM Section
+        iam = report["iam"]
+        print(f"\n  --- IAM Users ({len(iam)}) ---")
+        no_mfa = [u for u in iam if not u["has_mfa"]]
+        print(f"  Users without MFA: {len(no_mfa)}")
+
+        for user in iam:
+            mfa_status = "MFA" if user["has_mfa"] else "NO MFA"
+            print(f"  {user['username']:<20} Keys: {user['access_keys']}  "
+                  f"[{mfa_status}]")
+
+        # Security Warnings
+        print(f"\n  --- Security Warnings ---")
+        warnings = []
+        untagged = [i for i in ec2 if i["environment"] == "untagged"]
+        if untagged:
+            warnings.append(
+                f"{len(untagged)} EC2 instance(s) without Environment tag"
+            )
+        if no_mfa:
+            warnings.append(
+                f"{len(no_mfa)} IAM user(s) without MFA: "
+                f"{', '.join(u['username'] for u in no_mfa)}"
+            )
+        stopped = [i for i in ec2 if i["state"] == "stopped"]
+        if stopped:
+            warnings.append(
+                f"{len(stopped)} stopped instance(s) (EBS costs continue)"
+            )
+
+        if warnings:
+            for w in warnings:
+                print(f"  [!] {w}")
+        else:
+            print("  No warnings.")
+
+        print("\n" + "=" * 65)
+
+
+# --- Run ---
+reporter = AWSReporter(region="us-east-1")
+report = reporter.generate_report()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- boto3 finds credentials automatically: environment variables, profiles, or IAM roles — never hardcode keys
+- Use the **client** API for full control and pagination; use the **resource** API for cleaner iteration
+- Always catch `ClientError` and check `e.response["Error"]["Code"]` for specific AWS error handling
+- Use **paginators** (`client.get_paginator()`) to handle multi-page AWS API responses automatically
+- Use **waiters** (`client.get_waiter()`) to wait for resources to reach a desired state
+- Filter EC2 instances with the `Filters` parameter to reduce API calls and response size
+- S3 `generate_presigned_url()` creates temporary download links without making objects public
+
+## What's Next
+
+You can automate AWS from Python. But not everything runs in the cloud console — sometimes you need to reach into servers directly. In **SSH Automation with Paramiko**, you will learn to execute commands on remote servers, transfer files over SFTP, and manage fleets of machines programmatically.

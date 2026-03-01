@@ -1,0 +1,883 @@
+{
+  "id": "assessment-foundations-networking",
+  "title": "Networking Foundations Assessment",
+  "description": "Comprehensive assessment testing your networking knowledge from Internet basics through DevOps networking. Pass this to earn your Networking Foundations certificate.",
+  "lessonSlug": "_assessment",
+  "moduleSlug": "networking",
+  "pathSlug": "foundations",
+  "passingScore": 80,
+  "timeLimit": 2700,
+  "questionsPerAttempt": 25,
+  "isAssessment": true,
+  "xpRewards": {
+    "pass": 200,
+    "perfect": 300,
+    "retry": 50
+  },
+  "questions": [
+    {
+      "id": "a-net-q1",
+      "type": "multiple_choice",
+      "question": "What is packet switching?",
+      "options": [
+        "A method of encrypting network traffic",
+        "A technique where data is broken into small packets that are routed independently across the network",
+        "A way to physically connect network cables",
+        "A method of assigning IP addresses to devices"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Packet switching breaks data into small packets that travel independently across the network and are reassembled at the destination. This is more efficient than circuit switching because it allows multiple communications to share the same network links.",
+      "difficulty": "easy",
+      "lessonRef": "01-internet-basics"
+    },
+    {
+      "id": "a-net-q2",
+      "type": "multiple_choice",
+      "question": "How many layers does the OSI (Open Systems Interconnection) model have?",
+      "options": [
+        "4",
+        "5",
+        "7",
+        "10"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The OSI model has 7 layers: Physical, Data Link, Network, Transport, Session, Presentation, and Application. Each layer has specific responsibilities in the process of network communication.",
+      "difficulty": "easy",
+      "lessonRef": "02-osi-model"
+    },
+    {
+      "id": "a-net-q3",
+      "type": "multiple_choice",
+      "question": "At which OSI layer do routers operate?",
+      "options": [
+        "Layer 1 - Physical",
+        "Layer 2 - Data Link",
+        "Layer 3 - Network",
+        "Layer 4 - Transport"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Routers operate at Layer 3 (Network layer) where they make forwarding decisions based on IP addresses. Switches operate at Layer 2 (Data Link) using MAC addresses, and hubs operate at Layer 1 (Physical).",
+      "difficulty": "easy",
+      "lessonRef": "02-osi-model"
+    },
+    {
+      "id": "a-net-q4",
+      "type": "multiple_choice",
+      "question": "Which OSI layer is responsible for end-to-end communication, flow control, and error recovery?",
+      "options": [
+        "Layer 2 - Data Link",
+        "Layer 3 - Network",
+        "Layer 4 - Transport",
+        "Layer 5 - Session"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The Transport layer (Layer 4) provides end-to-end communication services including segmentation, flow control, and error recovery. TCP and UDP are the primary protocols at this layer.",
+      "difficulty": "easy",
+      "lessonRef": "02-osi-model"
+    },
+    {
+      "id": "a-net-q5",
+      "type": "multiple_choice",
+      "question": "How does the TCP/IP model differ from the OSI model?",
+      "options": [
+        "The TCP/IP model has 4 layers and combines OSI layers 5-7 into the Application layer",
+        "The TCP/IP model has 8 layers with more granularity",
+        "They are identical models with different names",
+        "The TCP/IP model only covers wireless networking"
+      ],
+      "correctAnswer": 0,
+      "explanation": "The TCP/IP model has 4 layers: Network Access (OSI 1-2), Internet (OSI 3), Transport (OSI 4), and Application (OSI 5-7). It is the practical model used on the Internet, while OSI is more of a theoretical reference framework.",
+      "difficulty": "medium",
+      "lessonRef": "02-osi-model"
+    },
+    {
+      "id": "a-net-q6",
+      "type": "multiple_choice",
+      "question": "Which of the following is a private IPv4 address range?",
+      "options": [
+        "8.8.8.0/24",
+        "192.168.0.0/16",
+        "200.100.50.0/24",
+        "1.1.1.0/24"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The three private IPv4 ranges defined by RFC 1918 are: 10.0.0.0/8, 172.16.0.0/12, and 192.168.0.0/16. These addresses are not routable on the public Internet and are used for internal networks.",
+      "difficulty": "easy",
+      "lessonRef": "03-ip-addressing"
+    },
+    {
+      "id": "a-net-q7",
+      "type": "multiple_choice",
+      "question": "How many usable host addresses are available in a /24 subnet?",
+      "options": [
+        "256",
+        "254",
+        "255",
+        "252"
+      ],
+      "correctAnswer": 1,
+      "explanation": "A /24 subnet has 256 total addresses (2^8), but the first address is the network address and the last is the broadcast address, leaving 254 usable host addresses.",
+      "difficulty": "medium",
+      "lessonRef": "03-ip-addressing"
+    },
+    {
+      "id": "a-net-q8",
+      "type": "multiple_choice",
+      "question": "What does CIDR notation /16 represent as a subnet mask?",
+      "options": [
+        "255.0.0.0",
+        "255.255.0.0",
+        "255.255.255.0",
+        "255.255.255.128"
+      ],
+      "correctAnswer": 1,
+      "explanation": "/16 means the first 16 bits are the network portion. Since each octet is 8 bits, /16 = 255.255.0.0. This gives 65,534 usable host addresses (2^16 - 2).",
+      "difficulty": "medium",
+      "lessonRef": "03-ip-addressing"
+    },
+    {
+      "id": "a-net-q9",
+      "type": "true_false",
+      "question": "The IP address 172.20.5.100 falls within the private address range.",
+      "correctAnswer": true,
+      "explanation": "The private range 172.16.0.0/12 covers 172.16.0.0 through 172.31.255.255. Since 172.20.5.100 falls within this range, it is a private address.",
+      "difficulty": "medium",
+      "lessonRef": "03-ip-addressing"
+    },
+    {
+      "id": "a-net-q10",
+      "type": "multiple_choice",
+      "question": "What type of DNS record maps a domain name to an IPv4 address?",
+      "options": [
+        "CNAME",
+        "MX",
+        "A",
+        "TXT"
+      ],
+      "correctAnswer": 2,
+      "explanation": "An A (Address) record maps a domain name to an IPv4 address. AAAA records map to IPv6 addresses. CNAME creates an alias, MX handles mail routing, and TXT stores arbitrary text (often for verification).",
+      "difficulty": "easy",
+      "lessonRef": "04-dns"
+    },
+    {
+      "id": "a-net-q11",
+      "type": "multiple_choice",
+      "question": "What is a CNAME record used for?",
+      "options": [
+        "Mapping a domain to an IP address",
+        "Creating an alias that points one domain name to another domain name",
+        "Specifying the mail server for a domain",
+        "Storing the domain's encryption certificate"
+      ],
+      "correctAnswer": 1,
+      "explanation": "A CNAME (Canonical Name) record creates an alias from one domain to another. For example, www.example.com CNAME example.com means www.example.com resolves to whatever IP example.com resolves to.",
+      "difficulty": "easy",
+      "lessonRef": "04-dns"
+    },
+    {
+      "id": "a-net-q12",
+      "type": "multiple_choice",
+      "question": "What is the purpose of TTL (Time to Live) in DNS records?",
+      "options": [
+        "It determines how long a DNS record is valid before it must be refreshed from the authoritative server",
+        "It limits how many hops a DNS query can make",
+        "It sets the maximum number of DNS records a domain can have",
+        "It specifies the encryption lifetime of a DNS response"
+      ],
+      "correctAnswer": 0,
+      "explanation": "DNS TTL tells resolvers how long (in seconds) to cache a DNS response before querying the authoritative server again. Lower TTLs mean faster propagation of changes but more DNS traffic; higher TTLs reduce load but delay updates.",
+      "difficulty": "medium",
+      "lessonRef": "04-dns"
+    },
+    {
+      "id": "a-net-q13",
+      "type": "multiple_choice",
+      "question": "In recursive DNS resolution, what happens when your local resolver does not have the answer cached?",
+      "options": [
+        "It returns an error to the client",
+        "It queries the root servers, then TLD servers, then authoritative servers on the client's behalf",
+        "It forwards the request to Google's DNS servers",
+        "It sends the query directly to the website's server"
+      ],
+      "correctAnswer": 1,
+      "explanation": "In recursive resolution, the resolver queries the DNS hierarchy on behalf of the client: first root servers (.), then TLD servers (.com), then the authoritative name server for the domain, caching results along the way.",
+      "difficulty": "medium",
+      "lessonRef": "04-dns"
+    },
+    {
+      "id": "a-net-q14",
+      "type": "multiple_choice",
+      "question": "Which HTTP method is used to retrieve a resource without modifying it?",
+      "options": [
+        "POST",
+        "PUT",
+        "GET",
+        "PATCH"
+      ],
+      "correctAnswer": 2,
+      "explanation": "GET requests retrieve data without side effects (they are idempotent and safe). POST creates resources, PUT replaces resources, PATCH partially updates resources, and DELETE removes resources.",
+      "difficulty": "easy",
+      "lessonRef": "05-http"
+    },
+    {
+      "id": "a-net-q15",
+      "type": "multiple_choice",
+      "question": "What does the HTTP status code 301 indicate?",
+      "options": [
+        "OK - request succeeded",
+        "Moved Permanently - the resource has a new URL",
+        "Not Found - the resource does not exist",
+        "Internal Server Error"
+      ],
+      "correctAnswer": 1,
+      "explanation": "301 Moved Permanently indicates the resource has been permanently moved to a new URL. Browsers and search engines will update their references. 302 is for temporary redirects.",
+      "difficulty": "easy",
+      "lessonRef": "05-http"
+    },
+    {
+      "id": "a-net-q16",
+      "type": "multiple_choice",
+      "question": "What does a 502 Bad Gateway status code typically indicate?",
+      "options": [
+        "The client sent an invalid request",
+        "The server acting as a gateway received an invalid response from an upstream server",
+        "The requested resource requires authentication",
+        "The server is performing scheduled maintenance"
+      ],
+      "correctAnswer": 1,
+      "explanation": "502 Bad Gateway means a server acting as a reverse proxy or gateway received an invalid or no response from the upstream/backend server. This often indicates the backend application has crashed or is unreachable.",
+      "difficulty": "medium",
+      "lessonRef": "05-http"
+    },
+    {
+      "id": "a-net-q17",
+      "type": "multiple_choice",
+      "question": "What does a 503 Service Unavailable status code mean?",
+      "options": [
+        "The server cannot find the requested resource",
+        "The server is temporarily unable to handle the request, often due to overload or maintenance",
+        "The client is not authorized",
+        "The request was too large"
+      ],
+      "correctAnswer": 1,
+      "explanation": "503 Service Unavailable indicates the server is temporarily unable to handle the request. This is usually temporary and may be due to server overload, maintenance, or a crashed application. It often includes a Retry-After header.",
+      "difficulty": "medium",
+      "lessonRef": "05-http"
+    },
+    {
+      "id": "a-net-q18",
+      "type": "multiple_choice",
+      "question": "What is the primary purpose of TLS in HTTPS?",
+      "options": [
+        "To speed up web page loading",
+        "To compress data for faster transfer",
+        "To encrypt communication between client and server and verify server identity",
+        "To cache web pages on the client"
+      ],
+      "correctAnswer": 2,
+      "explanation": "TLS (Transport Layer Security) provides three key security properties: encryption (confidentiality), authentication (verifying the server's identity via certificates), and integrity (ensuring data is not tampered with in transit).",
+      "difficulty": "easy",
+      "lessonRef": "06-https-tls"
+    },
+    {
+      "id": "a-net-q19",
+      "type": "true_false",
+      "question": "HTTPS uses port 443 by default, while HTTP uses port 80.",
+      "correctAnswer": true,
+      "explanation": "HTTP communicates on port 80 by default, while HTTPS (HTTP over TLS) uses port 443. These are well-known port assignments registered with IANA.",
+      "difficulty": "easy",
+      "lessonRef": "06-https-tls"
+    },
+    {
+      "id": "a-net-q20",
+      "type": "multiple_choice",
+      "question": "What is the key difference between TCP and UDP?",
+      "options": [
+        "TCP is faster than UDP",
+        "TCP provides reliable, ordered delivery with error checking; UDP is connectionless with no delivery guarantees",
+        "UDP is encrypted while TCP is not",
+        "TCP is for wireless networks; UDP is for wired networks"
+      ],
+      "correctAnswer": 1,
+      "explanation": "TCP (Transmission Control Protocol) establishes a connection, guarantees delivery, and ensures packets arrive in order. UDP (User Datagram Protocol) is connectionless, faster, but provides no delivery guarantees — ideal for streaming, gaming, and DNS queries.",
+      "difficulty": "easy",
+      "lessonRef": "07-tcp-udp"
+    },
+    {
+      "id": "a-net-q21",
+      "type": "multiple_choice",
+      "question": "What are the three steps of the TCP three-way handshake?",
+      "options": [
+        "HELLO, ACK, BEGIN",
+        "SYN, SYN-ACK, ACK",
+        "CONNECT, ACCEPT, START",
+        "REQUEST, RESPONSE, CONFIRM"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The TCP three-way handshake establishes a connection: 1) Client sends SYN, 2) Server responds with SYN-ACK, 3) Client sends ACK. After this exchange, both sides have agreed on sequence numbers and the connection is established.",
+      "difficulty": "medium",
+      "lessonRef": "07-tcp-udp"
+    },
+    {
+      "id": "a-net-q22",
+      "type": "multiple_choice",
+      "question": "Which well-known port is used by SSH?",
+      "options": [
+        "21",
+        "22",
+        "23",
+        "25"
+      ],
+      "correctAnswer": 1,
+      "explanation": "SSH (Secure Shell) uses port 22 by default. Port 21 is FTP, port 23 is Telnet, and port 25 is SMTP. These are well-known ports (0-1023) assigned by IANA.",
+      "difficulty": "easy",
+      "lessonRef": "08-ports-sockets"
+    },
+    {
+      "id": "a-net-q23",
+      "type": "multiple_choice",
+      "question": "Which port is commonly used by PostgreSQL?",
+      "options": [
+        "3306",
+        "5432",
+        "6379",
+        "27017"
+      ],
+      "correctAnswer": 1,
+      "explanation": "PostgreSQL uses port 5432 by default. Port 3306 is MySQL, port 6379 is Redis, and port 27017 is MongoDB. Knowing default ports is essential for configuring firewalls and troubleshooting connectivity.",
+      "difficulty": "medium",
+      "lessonRef": "08-ports-sockets"
+    },
+    {
+      "id": "a-net-q24",
+      "type": "multiple_choice",
+      "question": "What is a network socket?",
+      "options": [
+        "A physical port on a network device",
+        "A combination of IP address and port number that serves as an endpoint for communication",
+        "A type of network cable",
+        "A DNS record type"
+      ],
+      "correctAnswer": 1,
+      "explanation": "A socket is an endpoint defined by an IP address and port number (e.g., 192.168.1.10:8080). It enables multiple services to run on the same host and allows the OS to route incoming data to the correct application.",
+      "difficulty": "medium",
+      "lessonRef": "08-ports-sockets"
+    },
+    {
+      "id": "a-net-q25",
+      "type": "multiple_choice",
+      "question": "Which port does Redis use by default?",
+      "options": [
+        "3306",
+        "5432",
+        "6379",
+        "8080"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Redis uses port 6379 by default. MySQL uses 3306, PostgreSQL uses 5432, and 8080 is a common alternative HTTP port.",
+      "difficulty": "medium",
+      "lessonRef": "08-ports-sockets"
+    },
+    {
+      "id": "a-net-q26",
+      "type": "multiple_choice",
+      "question": "What is the purpose of a default gateway in a network?",
+      "options": [
+        "To assign IP addresses to devices via DHCP",
+        "To serve as the router that forwards traffic destined for networks outside the local subnet",
+        "To translate domain names to IP addresses",
+        "To filter malicious traffic from the Internet"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The default gateway is the router address used when a device needs to send traffic to a destination outside its local subnet. Packets with no specific route matching in the routing table are sent to the default gateway.",
+      "difficulty": "easy",
+      "lessonRef": "09-routing"
+    },
+    {
+      "id": "a-net-q27",
+      "type": "multiple_choice",
+      "question": "What does ARP (Address Resolution Protocol) do?",
+      "options": [
+        "Resolves domain names to IP addresses",
+        "Resolves IP addresses to MAC addresses on a local network",
+        "Assigns IP addresses to new devices",
+        "Encrypts traffic between two hosts"
+      ],
+      "correctAnswer": 1,
+      "explanation": "ARP maps a known IP address to the corresponding MAC (hardware) address on the local network segment. When a device needs to send a frame to a local IP, it broadcasts an ARP request to discover the destination's MAC address.",
+      "difficulty": "medium",
+      "lessonRef": "09-routing"
+    },
+    {
+      "id": "a-net-q28",
+      "type": "multiple_choice",
+      "question": "What does a routing table contain?",
+      "options": [
+        "A list of all devices on the Internet",
+        "DNS records for the local network",
+        "Network destinations, subnet masks, gateways, and interfaces that determine where to forward packets",
+        "A log of all network traffic"
+      ],
+      "correctAnswer": 2,
+      "explanation": "A routing table contains entries with destination networks, subnet masks, next-hop gateways, interfaces, and metrics. When a packet arrives, the router finds the most specific matching route and forwards the packet accordingly.",
+      "difficulty": "medium",
+      "lessonRef": "09-routing"
+    },
+    {
+      "id": "a-net-q29",
+      "type": "multiple_choice",
+      "question": "What is the difference between a stateful and stateless firewall?",
+      "options": [
+        "Stateful firewalls are hardware; stateless are software",
+        "Stateful firewalls track connection state and allow return traffic automatically; stateless firewalls evaluate each packet independently",
+        "Stateless firewalls are more secure than stateful firewalls",
+        "There is no practical difference"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Stateful firewalls track the state of connections (e.g., established TCP sessions) and automatically allow return traffic. Stateless firewalls filter each packet based solely on rules (source, destination, port) without connection context.",
+      "difficulty": "medium",
+      "lessonRef": "10-firewalls"
+    },
+    {
+      "id": "a-net-q30",
+      "type": "multiple_choice",
+      "question": "In iptables, what are the three default chains in the filter table?",
+      "options": [
+        "ALLOW, DENY, FORWARD",
+        "INPUT, OUTPUT, FORWARD",
+        "INBOUND, OUTBOUND, TRANSIT",
+        "ACCEPT, DROP, REJECT"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The iptables filter table has three built-in chains: INPUT (incoming packets destined for the host), OUTPUT (packets originating from the host), and FORWARD (packets being routed through the host). ACCEPT, DROP, and REJECT are targets, not chains.",
+      "difficulty": "medium",
+      "lessonRef": "10-firewalls"
+    },
+    {
+      "id": "a-net-q31",
+      "type": "multiple_choice",
+      "question": "What is the difference between AWS Security Groups and Network ACLs (NACLs)?",
+      "options": [
+        "Security Groups are stateful and operate at the instance level; NACLs are stateless and operate at the subnet level",
+        "NACLs are stateful and Security Groups are stateless",
+        "They are identical and interchangeable",
+        "Security Groups operate at the VPC level; NACLs operate at the region level"
+      ],
+      "correctAnswer": 0,
+      "explanation": "Security Groups are stateful (return traffic is automatically allowed) and attach to instances/ENIs. NACLs are stateless (you must define rules for both inbound and outbound), operate at the subnet level, and support explicit deny rules.",
+      "difficulty": "hard",
+      "lessonRef": "10-firewalls"
+    },
+    {
+      "id": "a-net-q32",
+      "type": "multiple_choice",
+      "question": "Which ufw command allows incoming SSH connections?",
+      "options": [
+        "ufw enable ssh",
+        "ufw allow 22",
+        "ufw open ssh",
+        "ufw permit 22/tcp"
+      ],
+      "correctAnswer": 1,
+      "explanation": "'ufw allow 22' (or 'ufw allow ssh') opens port 22 for incoming connections. UFW (Uncomplicated Firewall) is a user-friendly frontend for iptables on Ubuntu/Debian systems.",
+      "difficulty": "easy",
+      "lessonRef": "10-firewalls"
+    },
+    {
+      "id": "a-net-q33",
+      "type": "multiple_choice",
+      "question": "What is the primary difference between Layer 4 and Layer 7 load balancing?",
+      "options": [
+        "Layer 4 is faster but Layer 7 does not exist",
+        "Layer 4 routes based on IP/port (transport); Layer 7 routes based on application-level data like HTTP headers, URLs, or cookies",
+        "Layer 7 is for UDP only; Layer 4 is for TCP only",
+        "Layer 4 is for internal traffic; Layer 7 is for external traffic"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Layer 4 load balancers route traffic based on TCP/UDP port and IP address without inspecting packet content. Layer 7 load balancers understand application protocols (HTTP) and can route based on URL paths, headers, cookies, or content.",
+      "difficulty": "hard",
+      "lessonRef": "11-load-balancing"
+    },
+    {
+      "id": "a-net-q34",
+      "type": "multiple_choice",
+      "question": "Which load balancing algorithm distributes requests evenly in sequential order across all servers?",
+      "options": [
+        "Least Connections",
+        "Random",
+        "Round Robin",
+        "IP Hash"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Round Robin sends each new request to the next server in the list, cycling through all available servers. It is simple and works well when servers have similar capacity. Weighted Round Robin adds server capacity awareness.",
+      "difficulty": "easy",
+      "lessonRef": "11-load-balancing"
+    },
+    {
+      "id": "a-net-q35",
+      "type": "multiple_choice",
+      "question": "What is a reverse proxy?",
+      "options": [
+        "A proxy that hides the client's identity from the server",
+        "A server that sits in front of backend servers, forwarding client requests and returning the responses as if they originated from the proxy itself",
+        "A proxy that reverses the direction of network traffic",
+        "A backup proxy used when the primary fails"
+      ],
+      "correctAnswer": 1,
+      "explanation": "A reverse proxy (like Nginx or HAProxy) receives client requests and forwards them to backend servers. It can provide load balancing, SSL termination, caching, and compression. The client only communicates with the proxy, not the backend directly.",
+      "difficulty": "medium",
+      "lessonRef": "11-load-balancing"
+    },
+    {
+      "id": "a-net-q36",
+      "type": "multiple_choice",
+      "question": "What is the 'least connections' load balancing algorithm?",
+      "options": [
+        "It sends traffic to the server with the fastest response time",
+        "It sends new requests to the server currently handling the fewest active connections",
+        "It limits the maximum number of connections per server",
+        "It disconnects idle connections to free up resources"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The Least Connections algorithm routes each new request to the backend server with the fewest active connections. This is especially effective when requests have varying processing times, as it naturally balances load.",
+      "difficulty": "medium",
+      "lessonRef": "11-load-balancing"
+    },
+    {
+      "id": "a-net-q37",
+      "type": "multiple_choice",
+      "question": "What does SSH tunneling (port forwarding) allow you to do?",
+      "options": [
+        "Transfer files faster over SSH",
+        "Securely forward network traffic through an encrypted SSH connection to access services behind firewalls",
+        "Create multiple SSH user accounts",
+        "Speed up SSH key generation"
+      ],
+      "correctAnswer": 1,
+      "explanation": "SSH tunneling creates an encrypted channel through which you can forward local or remote ports. This allows secure access to services on remote networks (like databases behind firewalls) by tunneling traffic through the SSH connection.",
+      "difficulty": "hard",
+      "lessonRef": "12-ssh-vpn"
+    },
+    {
+      "id": "a-net-q38",
+      "type": "multiple_choice",
+      "question": "Which VPN protocol is built into the Linux kernel and is known for its simplicity and high performance?",
+      "options": [
+        "OpenVPN",
+        "IPSec",
+        "WireGuard",
+        "PPTP"
+      ],
+      "correctAnswer": 2,
+      "explanation": "WireGuard is a modern VPN protocol built into the Linux kernel since version 5.6. It has a much smaller codebase than OpenVPN or IPSec, uses state-of-the-art cryptography, and offers excellent performance with minimal configuration.",
+      "difficulty": "hard",
+      "lessonRef": "12-ssh-vpn"
+    },
+    {
+      "id": "a-net-q39",
+      "type": "multiple_choice",
+      "question": "When troubleshooting network connectivity, which command tests basic reachability to a host?",
+      "options": [
+        "traceroute",
+        "nslookup",
+        "ping",
+        "netstat"
+      ],
+      "correctAnswer": 2,
+      "explanation": "'ping' sends ICMP echo request packets to a host and waits for replies, testing basic network reachability and measuring round-trip time. It is typically the first tool used in network troubleshooting.",
+      "difficulty": "easy",
+      "lessonRef": "13-troubleshooting"
+    },
+    {
+      "id": "a-net-q40",
+      "type": "multiple_choice",
+      "question": "What does 'tcpdump' do?",
+      "options": [
+        "Measures network bandwidth",
+        "Captures and displays network packets on a network interface for analysis",
+        "Tests TCP connection speed",
+        "Dumps the TCP connection table"
+      ],
+      "correctAnswer": 1,
+      "explanation": "'tcpdump' is a command-line packet analyzer that captures packets on a network interface. It can filter by protocol, port, host, and more. It is essential for debugging network issues, verifying traffic flow, and security analysis.",
+      "difficulty": "medium",
+      "lessonRef": "13-troubleshooting"
+    },
+    {
+      "id": "a-net-q41",
+      "type": "multiple_choice",
+      "question": "What is the recommended troubleshooting methodology for network issues?",
+      "options": [
+        "Start by reinstalling the operating system",
+        "Work bottom-up from physical connectivity through layers: cable/link, IP, DNS, application",
+        "Always start by checking the application logs",
+        "Reboot all network devices simultaneously"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The systematic approach works up the network stack: verify physical/link layer (cable, interface up), network layer (IP config, routing, ping gateway), DNS resolution, then application layer (ports, services). This avoids wasting time on higher layers when the problem is lower.",
+      "difficulty": "medium",
+      "lessonRef": "13-troubleshooting"
+    },
+    {
+      "id": "a-net-q42",
+      "type": "multiple_choice",
+      "question": "What is a VPC (Virtual Private Cloud)?",
+      "options": [
+        "A type of VPN connection",
+        "An isolated virtual network within a cloud provider where you can launch resources with your own IP address range",
+        "A physical data center owned by the cloud provider",
+        "A caching service for cloud applications"
+      ],
+      "correctAnswer": 1,
+      "explanation": "A VPC is a logically isolated virtual network in a cloud provider (AWS, GCP, Azure). You define the IP address range (CIDR block), create subnets, configure route tables, and control access with security groups and NACLs.",
+      "difficulty": "medium",
+      "lessonRef": "14-cloud-networking"
+    },
+    {
+      "id": "a-net-q43",
+      "type": "multiple_choice",
+      "question": "What is the purpose of a NAT Gateway in a cloud VPC?",
+      "options": [
+        "To allow instances in private subnets to access the Internet for outbound traffic without being directly reachable from the Internet",
+        "To translate domain names to IP addresses",
+        "To load balance traffic across multiple instances",
+        "To encrypt traffic between subnets"
+      ],
+      "correctAnswer": 0,
+      "explanation": "A NAT (Network Address Translation) Gateway allows instances in private subnets to initiate outbound connections to the Internet (for updates, API calls, etc.) while preventing unsolicited inbound connections from the Internet.",
+      "difficulty": "hard",
+      "lessonRef": "14-cloud-networking"
+    },
+    {
+      "id": "a-net-q44",
+      "type": "multiple_choice",
+      "question": "What is the difference between a public subnet and a private subnet in a VPC?",
+      "options": [
+        "Public subnets have larger IP ranges",
+        "A public subnet has a route to an Internet Gateway; a private subnet does not",
+        "Private subnets cannot communicate with other subnets",
+        "Public subnets are encrypted; private subnets are not"
+      ],
+      "correctAnswer": 1,
+      "explanation": "A public subnet has a route table entry directing 0.0.0.0/0 traffic to an Internet Gateway, allowing instances with public IPs to communicate directly with the Internet. Private subnets lack this route and typically use a NAT Gateway for outbound Internet access.",
+      "difficulty": "hard",
+      "lessonRef": "14-cloud-networking"
+    },
+    {
+      "id": "a-net-q45",
+      "type": "multiple_choice",
+      "question": "What is Docker's default network driver that creates an isolated network on the host?",
+      "options": [
+        "overlay",
+        "host",
+        "bridge",
+        "macvlan"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The 'bridge' driver is Docker's default. It creates a virtual bridge (docker0) on the host, and each container gets its own network namespace connected to this bridge. Containers on the same bridge can communicate; external access requires port mapping.",
+      "difficulty": "medium",
+      "lessonRef": "15-devops-networking"
+    },
+    {
+      "id": "a-net-q46",
+      "type": "multiple_choice",
+      "question": "How do containers on the same Docker network discover each other by name?",
+      "options": [
+        "They cannot; you must use IP addresses",
+        "Docker provides built-in DNS resolution that maps container names to their IP addresses",
+        "You must manually edit /etc/hosts in each container",
+        "Container names are broadcast via ARP"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Docker's embedded DNS server (127.0.0.11) automatically resolves container names to IP addresses for containers on user-defined networks. This allows services to reference each other by name (e.g., 'db', 'api') in configuration.",
+      "difficulty": "medium",
+      "lessonRef": "15-devops-networking"
+    },
+    {
+      "id": "a-net-q47",
+      "type": "multiple_choice",
+      "question": "What is a Docker overlay network used for?",
+      "options": [
+        "Connecting containers across multiple Docker hosts in a swarm or cluster",
+        "Providing faster disk I/O for containers",
+        "Overlaying container logs onto the host filesystem",
+        "Creating backup copies of container networks"
+      ],
+      "correctAnswer": 0,
+      "explanation": "Overlay networks enable communication between containers running on different Docker hosts by encapsulating container traffic in VXLAN tunnels. They are essential for Docker Swarm and Kubernetes multi-node clusters.",
+      "difficulty": "hard",
+      "lessonRef": "15-devops-networking"
+    },
+    {
+      "id": "a-net-q48",
+      "type": "true_false",
+      "question": "In the OSI model, the Presentation layer (Layer 6) handles data encryption, compression, and format translation.",
+      "correctAnswer": true,
+      "explanation": "The Presentation layer is responsible for data translation between the application and network formats, including encryption/decryption (like SSL/TLS), compression, and character encoding conversions.",
+      "difficulty": "medium",
+      "lessonRef": "02-osi-model"
+    },
+    {
+      "id": "a-net-q49",
+      "type": "multiple_choice",
+      "question": "Which DNS record type specifies the mail server responsible for accepting email for a domain?",
+      "options": [
+        "A",
+        "CNAME",
+        "MX",
+        "NS"
+      ],
+      "correctAnswer": 2,
+      "explanation": "MX (Mail Exchanger) records specify the mail server(s) responsible for receiving email for a domain. They include a priority value so that backup mail servers can be configured with higher priority numbers.",
+      "difficulty": "easy",
+      "lessonRef": "04-dns"
+    },
+    {
+      "id": "a-net-q50",
+      "type": "multiple_choice",
+      "question": "What HTTP status code indicates that the server successfully processed the request?",
+      "options": [
+        "100 Continue",
+        "200 OK",
+        "301 Moved Permanently",
+        "404 Not Found"
+      ],
+      "correctAnswer": 1,
+      "explanation": "200 OK indicates the request was successful. 2xx codes are success codes, 3xx are redirections, 4xx are client errors, and 5xx are server errors.",
+      "difficulty": "easy",
+      "lessonRef": "05-http"
+    },
+    {
+      "id": "a-net-q51",
+      "type": "true_false",
+      "question": "UDP is preferred over TCP for real-time applications like video streaming and online gaming because it has lower latency.",
+      "correctAnswer": true,
+      "explanation": "UDP's lack of connection setup, acknowledgments, and retransmissions results in lower latency. For real-time applications, receiving slightly imperfect data quickly is better than receiving perfect data with delay, making UDP the preferred choice.",
+      "difficulty": "easy",
+      "lessonRef": "07-tcp-udp"
+    },
+    {
+      "id": "a-net-q52",
+      "type": "multiple_choice",
+      "question": "What does the 'traceroute' (or 'tracert' on Windows) command show?",
+      "options": [
+        "The DNS resolution path for a domain",
+        "The path packets take through the network, showing each hop (router) along the way",
+        "The list of open ports on a remote host",
+        "The bandwidth between two hosts"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Traceroute maps the path packets take from source to destination by sending packets with incrementing TTL values. Each router that decrements TTL to zero sends back an ICMP Time Exceeded message, revealing the hop-by-hop path.",
+      "difficulty": "medium",
+      "lessonRef": "13-troubleshooting"
+    },
+    {
+      "id": "a-net-q53",
+      "type": "multiple_choice",
+      "question": "What is the purpose of an AAAA DNS record?",
+      "options": [
+        "To map a domain to an IPv4 address",
+        "To map a domain to an IPv6 address",
+        "To specify multiple A records for load balancing",
+        "To create an advanced alias record"
+      ],
+      "correctAnswer": 1,
+      "explanation": "An AAAA (quad-A) record maps a domain name to an IPv6 address, just as an A record maps to an IPv4 address. The name comes from the fact that IPv6 addresses are four times the size of IPv4 addresses (128 bits vs 32 bits).",
+      "difficulty": "easy",
+      "lessonRef": "04-dns"
+    },
+    {
+      "id": "a-net-q54",
+      "type": "multiple_choice",
+      "question": "Which command can you use to check which process is listening on a specific port?",
+      "options": [
+        "ping -p 8080",
+        "ss -tlnp or netstat -tlnp",
+        "traceroute -p 8080",
+        "dig @localhost:8080"
+      ],
+      "correctAnswer": 1,
+      "explanation": "'ss -tlnp' (or the older 'netstat -tlnp') shows TCP listening sockets with process information. The flags: -t (TCP), -l (listening), -n (numeric ports), -p (show process). This is essential for troubleshooting port conflicts.",
+      "difficulty": "medium",
+      "lessonRef": "08-ports-sockets"
+    },
+    {
+      "id": "a-net-q55",
+      "type": "true_false",
+      "question": "In AWS, Security Groups can have explicit deny rules just like Network ACLs.",
+      "correctAnswer": false,
+      "explanation": "Security Groups only support allow rules. Any traffic not explicitly allowed is implicitly denied. NACLs support both explicit allow and deny rules, evaluated in numbered order. This is a key distinction between the two.",
+      "difficulty": "hard",
+      "lessonRef": "10-firewalls"
+    },
+    {
+      "id": "a-net-q56",
+      "type": "multiple_choice",
+      "question": "What is the IP hash load balancing algorithm used for?",
+      "options": [
+        "Encrypting client IP addresses for security",
+        "Ensuring a client's requests always go to the same backend server based on their IP address (session persistence)",
+        "Distributing traffic evenly by hashing server IPs",
+        "Blocking traffic from specific IP addresses"
+      ],
+      "correctAnswer": 1,
+      "explanation": "IP Hash uses the client's IP address to determine which backend server handles the request. This ensures session persistence (sticky sessions) — the same client always reaches the same server, useful for applications that store session state locally.",
+      "difficulty": "hard",
+      "lessonRef": "11-load-balancing"
+    },
+    {
+      "id": "a-net-q57",
+      "type": "multiple_choice",
+      "question": "What is SSH local port forwarding?",
+      "options": [
+        "Allowing remote users to SSH into your machine",
+        "Forwarding a local port through an SSH tunnel to access a service on the remote network",
+        "Changing the default SSH port from 22 to another port",
+        "Forwarding SSH logs to a local file"
+      ],
+      "correctAnswer": 1,
+      "explanation": "SSH local port forwarding (-L) maps a port on your local machine to a destination through the SSH server. For example, 'ssh -L 5432:db-server:5432 bastion' lets you access a remote database at localhost:5432 through the bastion host.",
+      "difficulty": "hard",
+      "lessonRef": "12-ssh-vpn"
+    },
+    {
+      "id": "a-net-q58",
+      "type": "true_false",
+      "question": "A /28 subnet provides 14 usable host addresses.",
+      "correctAnswer": true,
+      "explanation": "A /28 subnet has 2^4 = 16 total addresses. Subtracting the network address and broadcast address leaves 14 usable host addresses. In AWS VPCs, 3 additional addresses are reserved, leaving only 11.",
+      "difficulty": "hard",
+      "lessonRef": "03-ip-addressing"
+    },
+    {
+      "id": "a-net-q59",
+      "type": "multiple_choice",
+      "question": "Which HTTP method is idempotent and used to completely replace a resource?",
+      "options": [
+        "POST",
+        "PATCH",
+        "PUT",
+        "DELETE"
+      ],
+      "correctAnswer": 2,
+      "explanation": "PUT is idempotent (multiple identical requests have the same effect as a single one) and replaces the entire resource at the given URL. POST creates new resources and is not idempotent. PATCH partially updates a resource.",
+      "difficulty": "medium",
+      "lessonRef": "05-http"
+    },
+    {
+      "id": "a-net-q60",
+      "type": "multiple_choice",
+      "question": "During the TLS handshake, what is the primary purpose of the digital certificate presented by the server?",
+      "options": [
+        "To encrypt all subsequent data",
+        "To prove the server's identity and provide its public key",
+        "To authenticate the client",
+        "To establish the TCP connection"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The server's digital certificate, signed by a trusted Certificate Authority (CA), proves the server's identity and contains its public key. The client verifies the certificate chain, then uses the public key to establish an encrypted session.",
+      "difficulty": "hard",
+      "lessonRef": "06-https-tls"
+    }
+  ]
+}

@@ -1,0 +1,410 @@
+---
+title: "Permissions Deep Dive"
+description: "Master Linux file permissions with chmod, chown, and chgrp. Learn symbolic and numeric notation, understand permission inheritance, and debug access issues."
+order: 9
+xpReward: 100
+estimatedMinutes: 45
+prerequisites:
+  - 08-users-and-groups
+objectives:
+  - Read and interpret permission strings (rwxr-xr--)
+  - Set permissions with both symbolic and numeric notation
+  - Change file ownership with chown and chgrp
+  - Debug "Permission denied" errors systematically
+tags:
+  - linux
+  - permissions
+  - security
+  - chmod
+  - chown
+---
+
+<Callout type="story" title="The Story">
+Your web application is returning 403 Forbidden errors. The code is correct, the server is running, but Nginx can't read the files. "It's always permissions," your senior engineer says. You SSH in and discover the deployment script set files to `600` instead of `644`. A single digit change in permissions brought down the site. Understanding permissions isn't optional in DevOps — it's survival.
+</Callout>
+
+## The Permission Model
+
+Every file and directory in Linux has three sets of permissions for three classes of users:
+
+```
+-rwxr-xr--  1  alice  developers  4096  Jan 15 10:00  deploy.sh
+ │││ │││ │││     │      │
+ │││ │││ │││     │      └── Group owner
+ │││ │││ │││     └── User owner
+ │││ │││ └── Other (everyone else): r-- (read only)
+ │││ └── Group: r-x (read + execute)
+ └── Owner: rwx (read + write + execute)
+```
+
+### Permission Types
+
+| Symbol | Numeric | On Files | On Directories |
+|---|---|---|---|
+| `r` (read) | 4 | Read file contents | List directory contents (`ls`) |
+| `w` (write) | 2 | Modify file contents | Create/delete files in directory |
+| `x` (execute) | 1 | Run as program | Enter directory (`cd`) |
+
+<Callout type="info">
+A directory without `x` is like a locked room — you can see through the window (`r` lets you `ls`) but can't walk in (`cd` requires `x`).
+</Callout>
+
+## Reading Permissions
+
+```bash
+ls -l /etc/passwd
+# -rw-r--r-- 1 root root 2847 Jan 15 10:32 /etc/passwd
+
+ls -l /usr/bin/passwd
+# -rwsr-xr-x 1 root root 68208 Jan 15 10:32 /usr/bin/passwd
+```
+
+Breaking down `-rw-r--r--`:
+
+| Position | Value | Meaning |
+|---|---|---|
+| 1 | `-` | File type: `-` = regular file, `d` = directory, `l` = symlink |
+| 2-4 | `rw-` | Owner can read and write, not execute |
+| 5-7 | `r--` | Group can read only |
+| 8-10 | `r--` | Others can read only |
+
+## Numeric (Octal) Notation
+
+Each permission set is a number from 0-7:
+
+```
+r = 4,  w = 2,  x = 1
+
+rwx = 4+2+1 = 7
+rw- = 4+2+0 = 6
+r-x = 4+0+1 = 5
+r-- = 4+0+0 = 4
+--- = 0+0+0 = 0
+```
+
+### Common Permission Numbers
+
+| Numeric | Symbolic | Typical Use |
+|---|---|---|
+| `755` | `rwxr-xr-x` | Directories, executable scripts |
+| `644` | `rw-r--r--` | Regular files, config files |
+| `600` | `rw-------` | Private files (SSH keys, secrets) |
+| `700` | `rwx------` | Private directories, `.ssh/` |
+| `775` | `rwxrwxr-x` | Shared directories (group writable) |
+| `664` | `rw-rw-r--` | Shared files (group writable) |
+| `400` | `r--------` | Read-only private files (SSH keys, certificates) |
+
+## Changing Permissions — `chmod`
+
+### Symbolic Notation
+
+```bash
+# Add execute for owner
+chmod u+x script.sh
+
+# Remove write for group and others
+chmod go-w config.yaml
+
+# Set exact permissions
+chmod u=rwx,g=rx,o=r deploy.sh
+
+# Add read for everyone
+chmod a+r public-file.txt
+
+# Recursive: apply to directory and all contents
+chmod -R 755 /var/www/html/
+```
+
+Symbolic notation parts:
+- **Who**: `u` (user/owner), `g` (group), `o` (others), `a` (all)
+- **Action**: `+` (add), `-` (remove), `=` (set exactly)
+- **Permission**: `r`, `w`, `x`
+
+### Numeric Notation
+
+```bash
+# Standard web file
+chmod 644 index.html
+
+# Executable script
+chmod 755 deploy.sh
+
+# Private SSH key
+chmod 600 ~/.ssh/id_rsa
+
+# Private directory
+chmod 700 ~/.ssh
+
+# Shared project directory
+chmod 775 /opt/shared-project/
+```
+
+## Changing Ownership — `chown` and `chgrp`
+
+```bash
+# Change owner
+sudo chown alice file.txt
+
+# Change owner and group
+sudo chown alice:developers file.txt
+
+# Change only the group
+sudo chown :developers file.txt
+# or
+sudo chgrp developers file.txt
+
+# Recursive
+sudo chown -R www-data:www-data /var/www/html/
+```
+
+<Exercise number={1} title="Permission Practice">
+
+Set up and test different permission scenarios:
+
+```bash
+# 1. Create test files
+mkdir -p ~/perm-lab && cd ~/perm-lab
+echo "Secret data" > secret.txt
+echo "Shared data" > shared.txt
+echo '#!/bin/bash\necho "Hello"' > script.sh
+
+# 2. Set private permissions
+chmod 600 secret.txt
+ls -l secret.txt    # What do you see?
+
+# 3. Set shared permissions
+chmod 664 shared.txt
+ls -l shared.txt
+
+# 4. Make the script executable
+chmod 755 script.sh
+ls -l script.sh
+
+# 5. Try to run the script
+./script.sh
+
+# 6. Remove execute permission and try again
+chmod 644 script.sh
+./script.sh    # What happens?
+
+# 7. Create a directory with restrictive permissions
+mkdir restricted
+chmod 700 restricted
+touch restricted/inside.txt
+
+# 8. Remove your own read permission on a file
+chmod 000 secret.txt
+cat secret.txt    # What happens?
+
+# 9. Fix it
+chmod 644 secret.txt
+cat secret.txt
+
+# 10. Clean up
+cd ~ && rm -rf ~/perm-lab
+```
+
+</Exercise>
+
+## The `umask`
+
+`umask` sets default permissions for newly created files and directories:
+
+```bash
+# Check current umask
+umask
+# 0022 (typical default)
+
+# How umask works:
+# Files default:    666 - 022 = 644 (rw-r--r--)
+# Directories:      777 - 022 = 755 (rwxr-xr-x)
+
+# Set a more restrictive umask
+umask 077
+touch private.txt
+ls -l private.txt    # -rw------- (600)
+
+# Set for a shared environment
+umask 002
+touch shared.txt
+ls -l shared.txt     # -rw-rw-r-- (664)
+```
+
+To make permanent, add `umask 022` to `~/.bashrc` or `/etc/profile`.
+
+## Real-World Permission Scenarios
+
+### Web Server Files
+
+```bash
+# Nginx needs to read files, but shouldn't write to them
+sudo chown -R www-data:www-data /var/www/html
+sudo find /var/www/html -type d -exec chmod 755 {} \;
+sudo find /var/www/html -type f -exec chmod 644 {} \;
+
+# Upload directory needs write permission
+sudo chmod 775 /var/www/html/uploads
+```
+
+### SSH Key Permissions
+
+```bash
+# SSH is very strict about permissions
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/id_rsa          # private key
+chmod 644 ~/.ssh/id_rsa.pub      # public key
+chmod 600 ~/.ssh/authorized_keys
+chmod 644 ~/.ssh/config
+
+# If permissions are wrong, SSH will refuse to use your keys
+```
+
+### Application Configuration
+
+```bash
+# Database config with credentials: only app user can read
+sudo chown appuser:appgroup /etc/myapp/database.yml
+sudo chmod 600 /etc/myapp/database.yml
+
+# Logs directory: app writes, group can read
+sudo chown appuser:devops /var/log/myapp/
+sudo chmod 2750 /var/log/myapp/
+```
+
+## Debugging "Permission Denied"
+
+When you get "Permission denied," check systematically:
+
+```bash
+# 1. Check the file itself
+ls -la /path/to/file
+
+# 2. Check every directory in the path
+namei -l /path/to/file
+
+# 3. Check who you are
+whoami
+id
+groups
+
+# 4. Check if SELinux is blocking (RHEL/CentOS)
+getenforce
+ls -Z /path/to/file
+
+# 5. Common fixes:
+# File not readable by your user/group
+sudo chmod o+r /path/to/file
+# or add yourself to the group
+sudo usermod -aG filegroup $(whoami)
+# NOTE: group changes require re-login
+```
+
+<Exercise number={2} title="Debug Permission Denied">
+
+Simulate and fix permission issues:
+
+```bash
+# 1. Create a scenario
+mkdir -p ~/debug-perms/app/config
+echo "db_password=secret123" > ~/debug-perms/app/config/db.yaml
+echo "Hello World" > ~/debug-perms/app/index.html
+
+# 2. Break permissions (simulate misconfiguration)
+chmod 000 ~/debug-perms/app/config/db.yaml
+chmod 600 ~/debug-perms/app/index.html
+chmod 000 ~/debug-perms/app/config
+
+# 3. Try to access (each should fail — why?)
+cat ~/debug-perms/app/config/db.yaml
+cat ~/debug-perms/app/index.html
+ls ~/debug-perms/app/config/
+
+# 4. Debug using namei
+namei -l ~/debug-perms/app/config/db.yaml
+
+# 5. Fix: restore proper permissions
+chmod 755 ~/debug-perms/app/config
+chmod 644 ~/debug-perms/app/config/db.yaml
+chmod 644 ~/debug-perms/app/index.html
+
+# 6. Verify everything works
+cat ~/debug-perms/app/config/db.yaml
+cat ~/debug-perms/app/index.html
+
+# 7. Clean up
+rm -rf ~/debug-perms
+```
+
+</Exercise>
+
+<MiniProject title="Permission Fixer Script">
+
+Create a script that sets standard permissions for a web project:
+
+```bash
+cat > ~/fix-perms.sh << 'SCRIPT'
+#!/bin/bash
+# Fix permissions for a web project directory
+
+TARGET="${1:?Usage: $0 /path/to/webroot}"
+WEB_USER="${2:-www-data}"
+WEB_GROUP="${3:-www-data}"
+
+if [ ! -d "$TARGET" ]; then
+    echo "Error: '$TARGET' is not a directory"
+    exit 1
+fi
+
+echo "Fixing permissions for: $TARGET"
+echo "Owner: $WEB_USER:$WEB_GROUP"
+echo ""
+
+# Set ownership
+echo "Setting ownership..."
+sudo chown -R "$WEB_USER:$WEB_GROUP" "$TARGET"
+
+# Directories: 755 (rwxr-xr-x)
+echo "Setting directory permissions to 755..."
+sudo find "$TARGET" -type d -exec chmod 755 {} \;
+
+# Files: 644 (rw-r--r--)
+echo "Setting file permissions to 644..."
+sudo find "$TARGET" -type f -exec chmod 644 {} \;
+
+# Scripts: make executable
+echo "Making scripts executable..."
+sudo find "$TARGET" -name "*.sh" -exec chmod 755 {} \;
+
+# Config files with secrets: restrict
+echo "Restricting config files..."
+sudo find "$TARGET" -name "*.env" -exec chmod 600 {} \;
+sudo find "$TARGET" -name "*.key" -exec chmod 600 {} \;
+sudo find "$TARGET" -name "*.pem" -exec chmod 600 {} \;
+
+echo ""
+echo "Done! Summary:"
+echo "  Directories: 755"
+echo "  Files:       644"
+echo "  Scripts:     755"
+echo "  Secrets:     600"
+SCRIPT
+
+chmod +x ~/fix-perms.sh
+echo "Created ~/fix-perms.sh — run with: ~/fix-perms.sh /var/www/html www-data"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Three permission types (rwx) for three classes (user, group, other) = 9 permission bits
+- Numeric notation: `r=4`, `w=2`, `x=1`. Common: `755`, `644`, `600`
+- `chmod` changes permissions; `chown` changes ownership
+- SSH is very strict: private keys must be `600`, `.ssh/` must be `700`
+- `umask` controls default permissions for new files
+- Always debug permission issues with `namei -l` to check the entire path
+- Principle of least privilege: give minimum permissions needed
+
+## What's Next
+
+Standard rwx permissions cover most cases, but sometimes you need more. In **Special Permissions & ACLs**, you'll learn SUID, SGID, sticky bit, and Access Control Lists — the advanced permission tools for complex environments.

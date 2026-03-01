@@ -1,0 +1,384 @@
+---
+title: "Filesystem Navigation"
+description: "Master the Linux filesystem with cd, ls, pwd, find, locate, and tree. Learn to navigate directories efficiently and locate files instantly."
+order: 6
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 05-terminal-mastery
+objectives:
+  - Navigate the filesystem with cd, ls, and pwd
+  - Understand absolute vs relative paths
+  - Find files with find, locate, and which
+  - Visualize directory structures with tree
+tags:
+  - linux
+  - filesystem
+  - navigation
+  - commands
+---
+
+<Callout type="story" title="The Story">
+You just joined a DevOps team and your first task is debugging a production issue. "The config file is somewhere in /etc," your lead says. "Find it, check the logs in /var/log, then look at the service definition in /usr/lib/systemd." You need to navigate dozens of directories quickly, find files by name or content, and never get lost. This lesson teaches you exactly that.
+</Callout>
+
+## Where Am I? — `pwd`
+
+At any moment, `pwd` (print working directory) tells you exactly where you are:
+
+```bash
+pwd
+# /home/ubuntu
+
+cd /etc/nginx
+pwd
+# /etc/nginx
+```
+
+Your shell prompt often shows the current directory, but `pwd` gives you the full absolute path — no ambiguity.
+
+## Listing Directory Contents — `ls`
+
+`ls` is the command you'll type most often. Master its options:
+
+```bash
+# Basic listing
+ls
+
+# Long format with permissions, owner, size, date
+ls -l
+
+# Show hidden files (dotfiles)
+ls -a
+
+# Combined: all files, long format, human-readable sizes
+ls -lah
+
+# Sort by modification time (newest first)
+ls -lt
+
+# Sort by size (largest first)
+ls -lS
+
+# Reverse any sort order
+ls -ltr    # oldest first
+```
+
+### Understanding `ls -l` Output
+
+```bash
+ls -l /etc/passwd
+# -rw-r--r-- 1 root root 2847 Jan 15 10:32 /etc/passwd
+#  |  |  |   |  |    |    |    |             |
+#  |  |  |   |  |    |    |    timestamp     filename
+#  |  |  |   |  |    |    size in bytes
+#  |  |  |   |  |    group owner
+#  |  |  |   |  file owner
+#  |  |  |   number of hard links
+#  |  |  other permissions
+#  |  group permissions
+#  owner permissions
+#  file type (- = file, d = directory, l = symlink)
+```
+
+## Changing Directories — `cd`
+
+```bash
+# Go to an absolute path
+cd /var/log
+
+# Go to your home directory (three ways)
+cd ~
+cd $HOME
+cd        # cd with no argument = go home
+
+# Go to the previous directory
+cd -
+
+# Go up one directory
+cd ..
+
+# Go up two directories
+cd ../..
+
+# Go to a subdirectory
+cd nginx/    # relative to current location
+```
+
+### Absolute vs Relative Paths
+
+| Type | Starts with | Example | Meaning |
+|---|---|---|---|
+| Absolute | `/` | `/var/log/nginx/error.log` | Full path from root |
+| Relative | anything else | `../log/nginx/error.log` | Relative to current directory |
+| Home | `~` | `~/scripts/backup.sh` | Relative to home directory |
+
+```bash
+# These are equivalent if you're in /var:
+cat /var/log/syslog
+cat log/syslog
+
+# These are equivalent if you're /home/ubuntu:
+cat /home/ubuntu/.bashrc
+cat ~/.bashrc
+cat .bashrc
+```
+
+<Callout type="tip" title="Pro Tip">
+Use `Tab` completion aggressively. Type the first few characters of a directory name, then press `Tab`. This prevents typos and is faster than typing full paths.
+</Callout>
+
+<Exercise number={1} title="Navigation Drill">
+
+Practice navigating without using your mouse:
+
+```bash
+# 1. Start from home
+cd ~
+pwd
+
+# 2. Navigate to /var/log
+cd /var/log
+ls -lt | head -10
+
+# 3. Jump to /etc without using absolute path
+cd ../../etc
+pwd
+
+# 4. Go back to the previous directory
+cd -
+pwd    # Should be /var/log
+
+# 5. Go home in one keystroke
+cd
+pwd    # Should be /home/your-username
+
+# 6. Create a practice structure
+mkdir -p ~/nav-practice/{alpha,beta,gamma}/{docs,src,tests}
+
+# 7. Navigate using relative paths only
+cd ~/nav-practice/alpha/src
+cd ../../beta/docs
+cd ../../../gamma/tests
+pwd    # Should be /home/your-username/nav-practice/gamma/tests
+```
+
+</Exercise>
+
+## Finding Files — `find`
+
+`find` searches the filesystem in real-time. It's powerful but can be slow on large directory trees:
+
+```bash
+# Find by name
+find /etc -name "nginx.conf"
+
+# Find by name (case-insensitive)
+find /home -iname "readme*"
+
+# Find by type (f=file, d=directory, l=symlink)
+find /var/log -type f -name "*.log"
+find /etc -type d -name "nginx"
+
+# Find by size
+find /var/log -size +100M      # files larger than 100MB
+find /tmp -size -1k            # files smaller than 1KB
+
+# Find by modification time
+find /etc -mtime -7            # modified in last 7 days
+find /tmp -mtime +30           # modified more than 30 days ago
+
+# Find by permissions
+find /usr/bin -perm -4000      # find SUID files
+
+# Find and execute a command on results
+find /var/log -name "*.log" -exec ls -lh {} \;
+find /tmp -name "*.tmp" -exec rm {} \;
+
+# Find empty files and directories
+find /home -empty -type f
+```
+
+### Common `find` Patterns for DevOps
+
+```bash
+# Find large log files eating disk space
+find /var/log -type f -size +50M -exec ls -lh {} \;
+
+# Find config files modified recently (possible unauthorized changes)
+find /etc -type f -mtime -1
+
+# Find files owned by a specific user
+find / -user nginx -type f 2>/dev/null
+
+# Find world-writable files (security concern)
+find / -perm -o+w -type f 2>/dev/null | head -20
+
+# Find broken symlinks
+find /etc -xtype l
+```
+
+## Quick File Search — `locate`
+
+`locate` uses a pre-built database, making it much faster than `find`:
+
+```bash
+# Search for a file by name
+locate nginx.conf
+
+# Case-insensitive search
+locate -i readme
+
+# Update the database (run periodically or after adding files)
+sudo updatedb
+
+# Count matches instead of listing
+locate -c "*.conf"
+```
+
+<Callout type="info">
+`locate` searches a database that's updated periodically (usually via a daily cron job). If you just created a file, `locate` won't find it until you run `sudo updatedb`. Use `find` for real-time searches.
+</Callout>
+
+## Finding Commands — `which` and `type`
+
+```bash
+# Find where a command binary lives
+which python3
+# /usr/bin/python3
+
+which -a python    # show all matches in PATH
+
+# More detailed: is it a builtin, alias, or binary?
+type cd
+# cd is a shell builtin
+
+type ls
+# ls is aliased to 'ls --color=auto'
+
+type python3
+# python3 is /usr/bin/python3
+```
+
+## Visualizing with `tree`
+
+```bash
+# Install tree
+sudo apt install tree    # Debian/Ubuntu
+sudo yum install tree    # RHEL/CentOS
+
+# Show directory structure
+tree /etc/nginx
+
+# Limit depth
+tree -L 2 /etc
+
+# Show only directories
+tree -d /var/log
+
+# Show with file sizes
+tree -sh /home/ubuntu/project
+
+# Show hidden files
+tree -a ~/
+```
+
+<Exercise number={2} title="Find the Files">
+
+Complete these real-world file-finding challenges:
+
+```bash
+# 1. Find all .conf files in /etc (how many are there?)
+find /etc -name "*.conf" -type f 2>/dev/null | wc -l
+
+# 2. Find the 5 largest files in /var
+find /var -type f -exec du -h {} + 2>/dev/null | sort -rh | head -5
+
+# 3. Find all shell scripts in /usr (files ending in .sh)
+find /usr -name "*.sh" -type f 2>/dev/null | head -10
+
+# 4. Find files modified in the last hour anywhere under /etc
+find /etc -type f -mmin -60 2>/dev/null
+
+# 5. Find where the 'bash' binary actually lives
+which bash
+readlink -f $(which bash)
+
+# 6. Create a project and visualize it
+mkdir -p ~/find-exercise/{src/{components,utils},tests,docs,config}
+touch ~/find-exercise/src/components/{Header,Footer,Nav}.tsx
+touch ~/find-exercise/src/utils/{helpers,format}.ts
+touch ~/find-exercise/tests/{unit,integration}.test.ts
+touch ~/find-exercise/config/{dev,prod}.json
+tree ~/find-exercise
+```
+
+</Exercise>
+
+<MiniProject title="File System Explorer Script">
+
+Create a script that generates a report about any directory:
+
+```bash
+cat > ~/fs-explorer.sh << 'SCRIPT'
+#!/bin/bash
+# File System Explorer — report on any directory
+
+TARGET="${1:-.}"    # Default to current directory
+
+if [ ! -d "$TARGET" ]; then
+    echo "Error: '$TARGET' is not a directory"
+    exit 1
+fi
+
+echo "=== File System Report: $TARGET ==="
+echo "Generated: $(date)"
+echo ""
+
+echo "--- Directory Count ---"
+find "$TARGET" -type d 2>/dev/null | wc -l
+
+echo ""
+echo "--- File Count ---"
+find "$TARGET" -type f 2>/dev/null | wc -l
+
+echo ""
+echo "--- Total Size ---"
+du -sh "$TARGET" 2>/dev/null
+
+echo ""
+echo "--- 5 Largest Files ---"
+find "$TARGET" -type f -exec du -h {} + 2>/dev/null | sort -rh | head -5
+
+echo ""
+echo "--- File Types ---"
+find "$TARGET" -type f 2>/dev/null | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -10
+
+echo ""
+echo "--- Recently Modified (last 24h) ---"
+find "$TARGET" -type f -mtime -1 2>/dev/null | head -10
+
+echo ""
+echo "--- Directory Structure (2 levels) ---"
+tree -L 2 -d "$TARGET" 2>/dev/null || find "$TARGET" -maxdepth 2 -type d
+SCRIPT
+
+chmod +x ~/fs-explorer.sh
+~/fs-explorer.sh /etc
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `pwd` shows where you are; `cd` moves you; `ls` shows what's here
+- Absolute paths start with `/`; relative paths start from your current directory
+- `find` searches in real-time (powerful but slow on large trees)
+- `locate` searches a database (fast but may be stale)
+- `which` and `type` find command locations and types
+- `tree` visualizes directory structures at a glance
+- Use `2>/dev/null` to suppress "Permission denied" noise from `find`
+
+## What's Next
+
+You can navigate anywhere and find anything. Now it's time to manipulate files — creating, copying, moving, and deleting. In **File Operations**, you'll learn `cp`, `mv`, `rm`, `mkdir`, `ln`, and the safety habits that prevent catastrophic mistakes.

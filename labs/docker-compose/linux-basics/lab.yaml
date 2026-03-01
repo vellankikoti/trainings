@@ -1,0 +1,44 @@
+name: linux-basics
+title: "Linux Basics Lab"
+description: "Practice essential Linux commands in a real Ubuntu environment."
+lesson_ref: foundations/linux/the-linux-story
+difficulty: easy
+duration: 30
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: ex-1
+    title: "Find your user"
+    description: "Use a command to display the current username."
+    hints:
+      - "The command starts with 'who'"
+      - "Try running 'whoami'"
+    validation:
+      type: command
+      command: "whoami"
+      expected_output: "root"
+
+  - id: ex-2
+    title: "Create a directory"
+    description: "Create a directory called 'devops-lab' in the home directory."
+    hints:
+      - "Use the 'mkdir' command"
+      - "Try: mkdir ~/devops-lab"
+    validation:
+      type: file
+      path: "/root/devops-lab"
+      contains: ""
+
+  - id: ex-3
+    title: "Create a file with content"
+    description: "Create a file called 'hello.txt' inside devops-lab with the text 'Hello DevOps'."
+    hints:
+      - "Use 'echo' and redirection"
+      - "Try: echo 'Hello DevOps' > ~/devops-lab/hello.txt"
+    validation:
+      type: command
+      command: "cat /root/devops-lab/hello.txt"
+      expected_output: "Hello DevOps"

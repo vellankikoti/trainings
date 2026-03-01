@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import { Toaster } from "sonner";
+import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,6 +21,16 @@ export const metadata: Metadata = {
     "sre",
     "learning platform",
   ],
+  manifest: "/manifest.json",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "DevOps Eng",
+  },
 };
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -41,7 +53,10 @@ export default function RootLayout({
     <AuthProvider>
       <html lang="en" suppressHydrationWarning>
         <body className="min-h-screen bg-background font-sans antialiased">
-          {children}
+          <ThemeProvider>
+            {children}
+            <Toaster richColors position="bottom-right" />
+          </ThemeProvider>
         </body>
       </html>
     </AuthProvider>

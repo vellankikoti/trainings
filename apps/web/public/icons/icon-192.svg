@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" fill="none">
+  <rect width="192" height="192" rx="32" fill="#3b82f6"/>
+  <text x="96" y="72" text-anchor="middle" font-family="system-ui, sans-serif" font-size="28" font-weight="bold" fill="white">DEVOPS</text>
+  <text x="96" y="108" text-anchor="middle" font-family="system-ui, sans-serif" font-size="20" font-weight="600" fill="white">ENGINEERS</text>
+  <rect x="48" y="124" width="96" height="4" rx="2" fill="white" opacity="0.6"/>
+  <text x="96" y="152" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="white" opacity="0.8">Learn. Build. Ship.</text>
+</svg>

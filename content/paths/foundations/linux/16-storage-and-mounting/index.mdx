@@ -1,0 +1,367 @@
+---
+title: "Storage and Mounting"
+description: "Understand Linux storage: disks, partitions, filesystems, mounting, fstab, and LVM. Learn to manage storage like a production sysadmin."
+order: 16
+xpReward: 100
+estimatedMinutes: 45
+prerequisites:
+  - 15-logs-and-journald
+objectives:
+  - Understand disk partitions and filesystems
+  - Mount and unmount filesystems manually and via fstab
+  - Use LVM for flexible volume management
+  - Troubleshoot storage issues
+tags:
+  - linux
+  - storage
+  - filesystems
+  - lvm
+  - administration
+---
+
+<Callout type="story" title="The Story">
+Your database server's `/var/lib/postgresql` partition is at 95%. The database is 200GB and the partition is 250GB. You can't just add more space to a traditional partition — you'd have to backup, repartition, and restore. But if you'd set it up with LVM, you could add a new disk and extend the volume in 30 seconds with zero downtime. This lesson teaches you storage management that prevents emergencies.
+</Callout>
+
+## Storage Hierarchy
+
+```
+Physical Disk (/dev/sda)
+  └── Partition Table (GPT or MBR)
+       ├── Partition 1 (/dev/sda1) → Filesystem (ext4) → Mounted at /boot
+       ├── Partition 2 (/dev/sda2) → Filesystem (ext4) → Mounted at /
+       └── Partition 3 (/dev/sda3) → Swap
+```
+
+## Viewing Disks and Partitions
+
+```bash
+# List all block devices
+lsblk
+# NAME   MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
+# sda      8:0    0   100G  0 disk
+# ├─sda1   8:1    0     1G  0 part /boot
+# ├─sda2   8:2    0    97G  0 part /
+# └─sda3   8:3    0     2G  0 part [SWAP]
+
+# Detailed disk info
+sudo fdisk -l /dev/sda
+
+# Filesystem info
+df -Th
+# Shows filesystem type (ext4, xfs, etc.) with -T
+
+# View UUIDs (used in fstab)
+sudo blkid
+```
+
+## Filesystems
+
+| Filesystem | Use Case | Notes |
+|---|---|---|
+| ext4 | Default for most Linux | Mature, reliable, supports up to 1EB |
+| xfs | RHEL default, large files | Better for large files, can't shrink |
+| btrfs | Snapshots, compression | Copy-on-write, good for backups |
+| tmpfs | RAM-based temp storage | `/tmp`, `/run` — lost on reboot |
+| swap | Virtual memory | Used when RAM is full |
+
+### Creating a Filesystem
+
+```bash
+# Format a partition as ext4
+sudo mkfs.ext4 /dev/sdb1
+
+# Format as XFS
+sudo mkfs.xfs /dev/sdb1
+
+# Format with a label
+sudo mkfs.ext4 -L "data-vol" /dev/sdb1
+
+# Check filesystem integrity
+sudo fsck /dev/sdb1        # ext4
+sudo xfs_repair /dev/sdb1  # XFS (must be unmounted)
+```
+
+## Mounting Filesystems
+
+### Manual Mount
+
+```bash
+# Create a mount point
+sudo mkdir -p /mnt/data
+
+# Mount a partition
+sudo mount /dev/sdb1 /mnt/data
+
+# Mount with specific options
+sudo mount -o rw,noexec,nosuid /dev/sdb1 /mnt/data
+
+# Mount a read-only filesystem
+sudo mount -o ro /dev/sdb1 /mnt/data
+
+# Verify the mount
+mount | grep sdb1
+df -h /mnt/data
+
+# Unmount
+sudo umount /mnt/data
+# or by device:
+sudo umount /dev/sdb1
+```
+
+### Common Mount Options
+
+| Option | Meaning |
+|---|---|
+| `rw` / `ro` | Read-write / Read-only |
+| `noexec` | Can't execute binaries (security) |
+| `nosuid` | Ignore SUID/SGID bits (security) |
+| `nodev` | Ignore device files (security) |
+| `noatime` | Don't update access time (performance) |
+| `defaults` | rw, suid, dev, exec, auto, nouser, async |
+
+### Permanent Mounts with `/etc/fstab`
+
+```bash
+# View current fstab
+cat /etc/fstab
+
+# Format:
+# <device>              <mount point>  <type>  <options>        <dump>  <pass>
+# UUID=abc-123-def      /mnt/data      ext4    defaults,noatime 0       2
+# /dev/sdb1             /mnt/backup    xfs     defaults         0       0
+```
+
+| Field | Meaning |
+|---|---|
+| device | UUID, device path, or LABEL |
+| mount point | Where to mount |
+| type | Filesystem type (ext4, xfs, etc.) |
+| options | Mount options |
+| dump | Backup flag (0 = no backup) |
+| pass | fsck order (0 = skip, 1 = root, 2 = others) |
+
+```bash
+# Add a permanent mount
+echo "UUID=$(sudo blkid -s UUID -o value /dev/sdb1) /mnt/data ext4 defaults,noatime 0 2" | sudo tee -a /etc/fstab
+
+# Test fstab without rebooting
+sudo mount -a
+
+# ALWAYS test before rebooting — a bad fstab can prevent boot!
+sudo findmnt --verify
+```
+
+<Callout type="warning" title="fstab Safety">
+A mistake in `/etc/fstab` can prevent your system from booting. Always use `UUID=` instead of device paths (device names can change), and always test with `mount -a` before rebooting.
+</Callout>
+
+<Exercise number={1} title="Disk and Mount Exploration">
+
+```bash
+# 1. View all block devices
+lsblk
+
+# 2. Check filesystem types
+df -Th | head -10
+
+# 3. View UUIDs
+sudo blkid 2>/dev/null || echo "Need sudo for blkid"
+
+# 4. Check current fstab
+cat /etc/fstab
+
+# 5. View mount options for root filesystem
+mount | grep "on / "
+
+# 6. Check tmpfs mounts (RAM-based)
+mount | grep tmpfs
+
+# 7. Create and use a tmpfs mount
+sudo mkdir -p /mnt/ramdisk
+sudo mount -t tmpfs -o size=50M tmpfs /mnt/ramdisk
+df -h /mnt/ramdisk
+echo "This is in RAM!" > /mnt/ramdisk/test.txt
+cat /mnt/ramdisk/test.txt
+
+# 8. Clean up
+sudo umount /mnt/ramdisk
+sudo rmdir /mnt/ramdisk
+```
+
+</Exercise>
+
+## LVM — Logical Volume Manager
+
+LVM adds a flexible layer between physical disks and filesystems. You can resize volumes, span multiple disks, and create snapshots.
+
+```
+Physical Volumes (PVs): /dev/sdb, /dev/sdc
+         ↓
+Volume Group (VG): vg-data (combines PVs into a pool)
+         ↓
+Logical Volumes (LVs): lv-app (50GB), lv-db (100GB), lv-logs (20GB)
+         ↓
+Filesystems: ext4 on each LV, mounted at /opt/app, /var/lib/db, /var/log
+```
+
+### LVM Commands
+
+```bash
+# View physical volumes
+sudo pvs
+sudo pvdisplay
+
+# View volume groups
+sudo vgs
+sudo vgdisplay
+
+# View logical volumes
+sudo lvs
+sudo lvdisplay
+
+# Create LVM setup (example with /dev/sdb)
+# 1. Create physical volume
+sudo pvcreate /dev/sdb
+
+# 2. Create volume group
+sudo vgcreate vg-data /dev/sdb
+
+# 3. Create logical volumes
+sudo lvcreate -L 50G -n lv-app vg-data
+sudo lvcreate -L 100G -n lv-db vg-data
+sudo lvcreate -l 100%FREE -n lv-logs vg-data    # use remaining space
+
+# 4. Create filesystems
+sudo mkfs.ext4 /dev/vg-data/lv-app
+sudo mkfs.ext4 /dev/vg-data/lv-db
+
+# 5. Mount
+sudo mkdir -p /opt/app /var/lib/db
+sudo mount /dev/vg-data/lv-app /opt/app
+sudo mount /dev/vg-data/lv-db /var/lib/db
+```
+
+### Extending Volumes (The Killer Feature)
+
+```bash
+# Extend a logical volume by 20GB
+sudo lvextend -L +20G /dev/vg-data/lv-db
+
+# Resize the filesystem to use the new space
+sudo resize2fs /dev/vg-data/lv-db     # ext4
+# or
+sudo xfs_growfs /dev/vg-data/lv-db    # XFS
+
+# Do both in one command
+sudo lvextend -L +20G --resizefs /dev/vg-data/lv-db
+
+# Add a new disk to an existing volume group
+sudo pvcreate /dev/sdc
+sudo vgextend vg-data /dev/sdc
+# Now you have more space to allocate!
+```
+
+<Exercise number={2} title="LVM Exploration">
+
+```bash
+# 1. Check if LVM is available
+which lvm && echo "LVM installed" || echo "Install with: sudo apt install lvm2"
+
+# 2. View existing LVM setup (if any)
+sudo pvs 2>/dev/null && echo "Physical volumes found" || echo "No PVs"
+sudo vgs 2>/dev/null && echo "Volume groups found" || echo "No VGs"
+sudo lvs 2>/dev/null && echo "Logical volumes found" || echo "No LVs"
+
+# 3. Check disk layout
+lsblk
+
+# 4. View filesystem usage
+df -Th | grep -v tmpfs
+
+# 5. Check for unpartitioned space
+sudo fdisk -l 2>/dev/null | grep "Disk /dev" | head -5
+```
+
+</Exercise>
+
+<MiniProject title="Storage Health Report">
+
+```bash
+cat > ~/storage-report.sh << 'SCRIPT'
+#!/bin/bash
+# Storage Health Report
+
+echo "============================================="
+echo "  Storage Health Report"
+echo "  Host: $(hostname)"
+echo "  Date: $(date)"
+echo "============================================="
+
+echo ""
+echo "--- Block Devices ---"
+lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
+
+echo ""
+echo "--- Filesystem Usage ---"
+df -Th | grep -v tmpfs | grep -v udev
+
+echo ""
+echo "--- Disk Usage Warnings ---"
+df -h | awk 'NR>1 {
+    gsub(/%/, "", $5)
+    if ($5+0 >= 90) printf "  CRITICAL: %s at %s%% (%s available)\n", $6, $5, $4
+    else if ($5+0 >= 80) printf "  WARNING:  %s at %s%% (%s available)\n", $6, $5, $4
+}'
+
+echo ""
+echo "--- Inode Usage ---"
+df -i | awk 'NR>1 && $5 != "-" {
+    gsub(/%/, "", $5)
+    if ($5+0 >= 80) printf "  WARNING: %s inodes at %s%%\n", $6, $5
+}'
+
+echo ""
+echo "--- Largest Directories in / ---"
+sudo du -h --max-depth=1 / 2>/dev/null | sort -rh | head -10
+
+echo ""
+echo "--- LVM Status ---"
+if command -v pvs &>/dev/null; then
+    echo "Physical Volumes:"
+    sudo pvs 2>/dev/null | sed 's/^/  /'
+    echo "Volume Groups:"
+    sudo vgs 2>/dev/null | sed 's/^/  /'
+    echo "Logical Volumes:"
+    sudo lvs 2>/dev/null | sed 's/^/  /'
+else
+    echo "  LVM not installed"
+fi
+
+echo ""
+echo "--- Mount Options ---"
+mount | grep "^/dev" | awk '{printf "  %-20s → %-20s (%s)\n", $1, $3, $6}'
+
+echo ""
+echo "============================================="
+SCRIPT
+
+chmod +x ~/storage-report.sh
+~/storage-report.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `lsblk` shows disk layout; `df -Th` shows filesystem usage with types
+- Always use `UUID=` in `/etc/fstab`, not device paths (they can change)
+- Test fstab changes with `mount -a` before rebooting
+- LVM allows live-resizing of volumes — essential for production servers
+- Use `noexec,nosuid,nodev` mount options for security on data partitions
+- Monitor disk usage — 90%+ needs immediate attention
+- Check inodes too (`df -i`) — you can run out before running out of space
+
+## What's Next
+
+Storage holds your data, but networking connects it to the world. In **Networking Essentials**, you'll learn IP configuration, DNS, firewall basics, and the networking commands every DevOps engineer uses daily.

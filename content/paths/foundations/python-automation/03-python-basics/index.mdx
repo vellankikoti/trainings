@@ -1,0 +1,777 @@
+---
+title: "Python Basics"
+description: "Learn Python fundamentals through DevOps examples. Variables, types, strings, and operators — everything you need to start writing automation scripts."
+order: 3
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 02-installation-and-setup
+objectives:
+  - Use variables and understand Python's core data types
+  - Master f-strings and string manipulation for DevOps output
+  - Apply operators for comparisons, logic, and membership checks
+  - Follow PEP 8 conventions for readable automation code
+tags:
+  - python
+  - basics
+  - variables
+  - strings
+---
+
+<Callout type="story" title="The Story">
+Your first Python automation script needed to check server health, format the results as a Slack message, and exit with the right code. You found yourself asking: "How do I concatenate strings? How do I check if a value is None? How do I format a number as a percentage?" These basics are what separate someone who can read Python from someone who can write it. Every DevOps script starts here.
+</Callout>
+
+## Variables and Types
+
+Python is dynamically typed — you don't declare types, but every value has a type. Understanding types prevents bugs in automation scripts.
+
+### Core Types
+
+```python
+# Integers — port numbers, counts, exit codes
+port = 8080
+max_retries = 3
+exit_code = 0
+
+# Floats — percentages, thresholds
+cpu_usage = 87.5
+threshold = 90.0
+uptime_hours = 720.5
+
+# Strings — hostnames, paths, messages
+hostname = "web-server-01"
+log_path = "/var/log/nginx/access.log"
+status = "healthy"
+
+# Booleans — flags, conditions
+is_production = True
+debug_mode = False
+service_running = True
+
+# None — absence of a value, unset configuration
+database_url = None
+last_backup = None
+```
+
+### Type Checking and Conversion
+
+```python
+# Check types — useful for debugging
+port = 8080
+print(type(port))        # <class 'int'>
+print(isinstance(port, int))  # True
+
+# Convert between types — common in DevOps scripts
+# String to int (reading from config/env)
+port_str = "8080"
+port = int(port_str)
+
+# Int to string (building messages)
+count = 42
+message = "Found " + str(count) + " errors"
+
+# String to float (parsing metrics)
+cpu_str = "87.5"
+cpu = float(cpu_str)
+
+# String to bool — careful! This is a common trap
+bool("False")   # True!  Non-empty strings are truthy
+bool("")        # False  Empty string is falsy
+bool(0)         # False
+bool(1)         # True
+bool(None)      # False
+```
+
+<Callout type="warning" title="The bool('False') Trap">
+`bool("False")` returns `True` because any non-empty string is truthy. When reading boolean values from environment variables or config files, compare strings explicitly: `value.lower() in ("true", "1", "yes")`.
+</Callout>
+
+### Environment Variables — Your First Real Use Case
+
+```python
+import os
+
+# Reading environment variables (returns string or None)
+db_host = os.environ.get("DB_HOST", "localhost")
+db_port = int(os.environ.get("DB_PORT", "5432"))
+debug = os.environ.get("DEBUG", "false").lower() == "true"
+api_key = os.environ.get("API_KEY")  # None if not set
+
+if api_key is None:
+    print("ERROR: API_KEY environment variable is required")
+    exit(1)
+
+print(f"Connecting to {db_host}:{db_port} (debug={debug})")
+```
+
+## Strings — The DevOps Workhorse
+
+Strings are everywhere in DevOps: hostnames, paths, log messages, API payloads, configuration values. Master them.
+
+### f-strings (Formatted String Literals)
+
+f-strings are Python 3.6+ and the preferred way to build strings:
+
+```python
+# Basic f-string
+server = "web-01"
+status = "healthy"
+print(f"Server {server} is {status}")
+# Server web-01 is healthy
+
+# Expressions inside f-strings
+cpu = 87.5
+print(f"CPU usage: {cpu:.1f}%")          # CPU usage: 87.5%
+print(f"CPU status: {'WARN' if cpu > 80 else 'OK'}")  # CPU status: WARN
+
+# Formatting numbers
+total_bytes = 1_073_741_824
+print(f"Disk: {total_bytes:,} bytes")      # Disk: 1,073,741,824 bytes
+print(f"Disk: {total_bytes / 1024**3:.2f} GB")  # Disk: 1.00 GB
+
+# Padding and alignment — great for tables
+services = [("nginx", "running"), ("postgres", "stopped"), ("redis", "running")]
+for name, state in services:
+    print(f"  {name:<12} {state:>10}")
+#   nginx           running
+#   postgres        stopped
+#   redis           running
+
+# Multiline f-strings
+report = f"""
+Server Health Report
+====================
+Host:     {server}
+CPU:      {cpu:.1f}%
+Status:   {status}
+"""
+print(report)
+```
+
+### String Methods for DevOps
+
+```python
+# Parsing hostnames and paths
+hostname = "web-server-01.us-east-1.prod.example.com"
+
+hostname.split(".")           # ['web-server-01', 'us-east-1', 'prod', 'example', 'com']
+hostname.split(".")[0]         # 'web-server-01'
+hostname.endswith(".com")      # True
+hostname.startswith("web")     # True
+
+# Parsing log lines
+log_line = "2024-03-15 10:30:45 ERROR [auth] Failed login from 10.0.0.5"
+
+parts = log_line.split()
+date = parts[0]               # '2024-03-15'
+time = parts[1]               # '10:30:45'
+level = parts[2]              # 'ERROR'
+ip = parts[-1]                # '10.0.0.5'
+
+# Checking and cleaning
+user_input = "  production  \n"
+env = user_input.strip()             # 'production'
+env_upper = env.upper()              # 'PRODUCTION'
+env_lower = env.lower()              # 'production'
+
+# Search and replace
+config_line = "listen_port=8080"
+config_line.replace("8080", "9090")  # 'listen_port=9090'
+
+# Check content
+"ERROR" in log_line                  # True
+log_line.count("ERROR")              # 1
+
+# Join — build command strings
+servers = ["web-01", "web-02", "web-03"]
+print(", ".join(servers))            # 'web-01, web-02, web-03'
+```
+
+### Multiline and Raw Strings
+
+```python
+# Triple-quoted strings for templates
+nginx_config = """
+server {{
+    listen {port};
+    server_name {domain};
+    root {doc_root};
+}}
+"""
+
+# Raw strings — perfect for regex and Windows paths
+import re
+pattern = r"\d{4}-\d{2}-\d{2}"  # Date pattern: 2024-03-15
+windows_path = r"C:\Users\admin\scripts"  # No need to escape backslashes
+```
+
+## Operators
+
+### Arithmetic Operators
+
+```python
+# Basic math — used in metric calculations
+total = 1024 + 512        # 1536
+remaining = 1024 - 768    # 256
+replicas = 3 * 4          # 12
+per_node = 12 / 4         # 3.0 (float division)
+per_node = 12 // 4        # 3 (integer division)
+remainder = 17 % 5        # 2 (modulo — useful for round-robin)
+power = 2 ** 10           # 1024 (2^10 = 1KB)
+
+# DevOps calculations
+total_memory_mb = 16384
+used_memory_mb = 12288
+usage_percent = (used_memory_mb / total_memory_mb) * 100  # 75.0
+free_percent = 100 - usage_percent                          # 25.0
+```
+
+### Comparison Operators
+
+```python
+# Comparisons return True or False
+cpu_usage = 87.5
+threshold = 80.0
+
+cpu_usage > threshold     # True
+cpu_usage >= 90           # False
+cpu_usage < 50            # False
+cpu_usage == 87.5         # True
+cpu_usage != 0            # True
+
+# String comparisons
+env = "production"
+env == "production"       # True
+env != "staging"          # True
+
+# Identity — use 'is' for None, True, False
+result = None
+result is None            # True  (correct)
+result == None            # True  (works but not Pythonic)
+result is not None        # False
+```
+
+<Callout type="tip" title="== vs is">
+Use `==` to compare values. Use `is` only with `None`, `True`, and `False`. `is` checks identity (same object in memory), while `==` checks equality (same value).
+</Callout>
+
+### Logical Operators
+
+```python
+# and, or, not — plain English, not symbols
+cpu_high = True
+memory_high = False
+disk_high = True
+
+# All conditions must be true
+if cpu_high and disk_high:
+    print("Multiple resource alerts!")
+
+# Any condition true
+if cpu_high or memory_high or disk_high:
+    print("At least one resource alert")
+
+# Negation
+if not memory_high:
+    print("Memory is fine")
+
+# Combining in real checks
+port = 8080
+host = "web-01"
+is_valid = host is not None and isinstance(port, int) and 1 <= port <= 65535
+```
+
+### Membership Operators
+
+```python
+# 'in' — check if something is contained
+allowed_envs = ["production", "staging", "development"]
+env = "production"
+
+if env in allowed_envs:
+    print(f"Deploying to {env}")
+
+if env not in ["test", "dev"]:
+    print("This is not a test environment")
+
+# Works with strings too
+log_line = "2024-03-15 ERROR Connection timeout"
+if "ERROR" in log_line:
+    print("Error detected in logs")
+
+# Works with dictionaries (checks keys)
+config = {"host": "localhost", "port": 8080}
+if "host" in config:
+    print(f"Host: {config['host']}")
+```
+
+## Input and Output
+
+### print() — More Than Just Debugging
+
+```python
+# Basic output
+print("Deployment starting...")
+
+# Multiple values
+print("Server:", hostname, "Port:", port)
+
+# Separators and endings
+servers = ["web-01", "web-02", "web-03"]
+print(*servers, sep=", ")         # web-01, web-02, web-03
+print("Processing", end="... ")   # No newline
+print("done!")                     # Processing... done!
+
+# Print to stderr (for error messages)
+import sys
+print("ERROR: Connection failed", file=sys.stderr)
+```
+
+### input() — Interactive Scripts
+
+```python
+# Simple confirmation prompt
+env = input("Deploy to which environment? [staging/production]: ")
+if env == "production":
+    confirm = input("Are you sure? Type 'yes' to confirm: ")
+    if confirm != "yes":
+        print("Deployment cancelled.")
+        exit(0)
+
+# With a default value
+response = input("Enter port [8080]: ").strip() or "8080"
+port = int(response)
+```
+
+## Comments and Docstrings
+
+```python
+# Single-line comment — explain WHY, not what
+max_retries = 3  # API rate limit resets after 3 failed attempts
+
+# Block comments for sections
+# ============================================
+# Server Health Check Configuration
+# ============================================
+
+def check_health(host, port=80, timeout=5):
+    """Check if a server is responding on the given port.
+
+    Args:
+        host: Hostname or IP address to check.
+        port: Port number to connect to (default: 80).
+        timeout: Connection timeout in seconds (default: 5).
+
+    Returns:
+        True if the server responds, False otherwise.
+    """
+    pass  # Implementation here
+
+# Docstrings are accessible at runtime
+print(check_health.__doc__)
+```
+
+## Python Conventions (PEP 8)
+
+PEP 8 is Python's style guide. Following it makes your code readable to every Python developer.
+
+```python
+# Variables and functions: snake_case
+server_name = "web-01"
+max_retry_count = 3
+
+def check_server_health(hostname):
+    pass
+
+# Constants: UPPER_SNAKE_CASE
+MAX_RETRIES = 3
+DEFAULT_PORT = 8080
+API_BASE_URL = "https://api.example.com/v1"
+
+# Classes: PascalCase
+class ServerMonitor:
+    pass
+
+# Private/internal: leading underscore
+_internal_cache = {}
+
+def _helper_function():
+    pass
+
+# Indentation: 4 spaces (never tabs)
+if True:
+    print("4 spaces")
+
+# Line length: 79-88 characters (Black uses 88)
+# Long lines — use parentheses for implicit continuation
+long_message = (
+    f"Server {server_name} has been running for "
+    f"{uptime_hours} hours with {cpu_usage}% CPU usage"
+)
+```
+
+<Exercise number={1} title="Parse and Format Server Metrics">
+
+Write a script that takes raw metrics and formats them for a monitoring dashboard:
+
+```python
+#!/usr/bin/env python3
+"""Format server metrics for a monitoring dashboard."""
+
+# Raw metrics (simulating data from a monitoring API)
+server_name = "prod-web-03"
+cpu_usage = 73.256789
+memory_total_mb = 16384
+memory_used_mb = 12103
+disk_total_gb = 500
+disk_used_gb = 387
+uptime_seconds = 1_209_600  # 14 days
+request_count = 2_847_291
+error_count = 142
+network_in_bytes = 54_783_209_472
+network_out_bytes = 12_345_678_901
+
+# Calculate derived metrics
+memory_percent = (memory_used_mb / memory_total_mb) * 100
+disk_percent = (disk_used_gb / disk_total_gb) * 100
+error_rate = (error_count / request_count) * 100
+uptime_days = uptime_seconds // 86400
+uptime_hours = (uptime_seconds % 86400) // 3600
+
+# Determine status levels
+cpu_status = "CRITICAL" if cpu_usage > 90 else "WARNING" if cpu_usage > 70 else "OK"
+mem_status = "CRITICAL" if memory_percent > 90 else "WARNING" if memory_percent > 70 else "OK"
+disk_status = "CRITICAL" if disk_percent > 85 else "WARNING" if disk_percent > 70 else "OK"
+
+# Format the dashboard
+dashboard = f"""
+{'=' * 60}
+  Server Dashboard: {server_name}
+  Uptime: {uptime_days} days, {uptime_hours} hours
+{'=' * 60}
+
+  CPU Usage:    {cpu_usage:6.1f}%  [{cpu_status}]
+  Memory:       {memory_used_mb:,} / {memory_total_mb:,} MB ({memory_percent:.1f}%)  [{mem_status}]
+  Disk:         {disk_used_gb} / {disk_total_gb} GB ({disk_percent:.1f}%)  [{disk_status}]
+
+  Requests:     {request_count:>12,}
+  Errors:       {error_count:>12,}  ({error_rate:.3f}%)
+  Network In:   {network_in_bytes / 1024**3:>10.2f} GB
+  Network Out:  {network_out_bytes / 1024**3:>10.2f} GB
+
+{'=' * 60}
+"""
+
+print(dashboard)
+
+# Build a one-line status for logging
+status_line = (
+    f"[{server_name}] "
+    f"CPU={cpu_usage:.0f}% "
+    f"MEM={memory_percent:.0f}% "
+    f"DISK={disk_percent:.0f}% "
+    f"ERR_RATE={error_rate:.3f}%"
+)
+print(f"Log line: {status_line}")
+```
+
+</Exercise>
+
+<Exercise number={2} title="Environment Variable Configuration Parser">
+
+Write a script that reads and validates configuration from environment variables:
+
+```python
+#!/usr/bin/env python3
+"""Parse and validate configuration from environment variables."""
+
+import os
+import sys
+
+def get_required_env(name):
+    """Get a required environment variable or exit with an error."""
+    value = os.environ.get(name)
+    if value is None:
+        print(f"ERROR: Required environment variable '{name}' is not set", file=sys.stderr)
+        return None
+    return value
+
+def get_env_bool(name, default=False):
+    """Get an environment variable as a boolean."""
+    value = os.environ.get(name, str(default))
+    return value.lower() in ("true", "1", "yes", "on")
+
+def get_env_int(name, default=0):
+    """Get an environment variable as an integer."""
+    value = os.environ.get(name, str(default))
+    try:
+        return int(value)
+    except ValueError:
+        print(f"WARNING: '{name}={value}' is not a valid integer, using {default}")
+        return default
+
+def get_env_list(name, default=None, separator=","):
+    """Get an environment variable as a list."""
+    value = os.environ.get(name)
+    if value is None:
+        return default or []
+    return [item.strip() for item in value.split(separator) if item.strip()]
+
+# Set some example environment variables (in real scripts, these come from the environment)
+os.environ["APP_NAME"] = "deploy-bot"
+os.environ["APP_PORT"] = "8080"
+os.environ["APP_DEBUG"] = "false"
+os.environ["APP_WORKERS"] = "4"
+os.environ["ALLOWED_HOSTS"] = "web-01,web-02,web-03"
+os.environ["LOG_LEVEL"] = "INFO"
+# Intentionally NOT setting DATABASE_URL to test required var handling
+
+# Parse configuration
+config = {
+    "app_name": get_required_env("APP_NAME"),
+    "port": get_env_int("APP_PORT", 3000),
+    "debug": get_env_bool("APP_DEBUG"),
+    "workers": get_env_int("APP_WORKERS", 2),
+    "allowed_hosts": get_env_list("ALLOWED_HOSTS"),
+    "log_level": os.environ.get("LOG_LEVEL", "WARNING"),
+    "database_url": get_required_env("DATABASE_URL"),
+}
+
+# Validate
+errors = [key for key, value in config.items() if value is None]
+
+print(f"{'Configuration':=^50}")
+for key, value in config.items():
+    status = "MISSING" if value is None else "OK"
+    display = value if value is not None else "(not set)"
+    print(f"  {key:<20} = {str(display):<20} [{status}]")
+
+if errors:
+    print(f"\nFATAL: {len(errors)} required variable(s) missing: {', '.join(errors)}")
+    print("Cannot start application.")
+else:
+    print(f"\nAll configuration valid. Ready to start {config['app_name']}.")
+```
+
+</Exercise>
+
+<MiniProject title="Server Info Script">
+
+Build a comprehensive system information script that gathers and displays system data in formatted output:
+
+```python
+#!/usr/bin/env python3
+"""server_info.py — Gather and display system information.
+
+A practical DevOps script that collects system info and formats
+it for monitoring dashboards, Slack messages, or log files.
+
+Usage:
+    python3 server_info.py          # Human-readable output
+    python3 server_info.py --json   # JSON output for pipelines
+"""
+
+import os
+import sys
+import platform
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
+
+def get_hostname():
+    """Get the system hostname."""
+    return platform.node()
+
+def get_os_info():
+    """Get operating system details."""
+    return {
+        "system": platform.system(),
+        "release": platform.release(),
+        "version": platform.version(),
+        "architecture": platform.machine(),
+        "python_version": platform.python_version(),
+    }
+
+def get_uptime():
+    """Get system uptime from /proc/uptime."""
+    try:
+        with open("/proc/uptime") as f:
+            uptime_seconds = float(f.read().split()[0])
+        days = int(uptime_seconds // 86400)
+        hours = int((uptime_seconds % 86400) // 3600)
+        minutes = int((uptime_seconds % 3600) // 60)
+        return {
+            "seconds": int(uptime_seconds),
+            "human": f"{days}d {hours}h {minutes}m",
+        }
+    except FileNotFoundError:
+        return {"seconds": 0, "human": "unknown"}
+
+def get_cpu_info():
+    """Get CPU information."""
+    cpu_count = os.cpu_count() or 0
+    load_avg = {"1min": 0.0, "5min": 0.0, "15min": 0.0}
+    try:
+        load = os.getloadavg()
+        load_avg = {"1min": load[0], "5min": load[1], "15min": load[2]}
+    except (OSError, AttributeError):
+        pass
+    return {
+        "cores": cpu_count,
+        "load_average": load_avg,
+    }
+
+def get_memory_info():
+    """Get memory information from /proc/meminfo."""
+    meminfo = {}
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split(":")
+                key = parts[0].strip()
+                value = int(parts[1].strip().split()[0])  # Value in kB
+                meminfo[key] = value
+
+        total = meminfo.get("MemTotal", 0)
+        available = meminfo.get("MemAvailable", 0)
+        used = total - available
+        percent = (used / total * 100) if total > 0 else 0
+
+        return {
+            "total_mb": total // 1024,
+            "used_mb": used // 1024,
+            "available_mb": available // 1024,
+            "percent_used": round(percent, 1),
+        }
+    except FileNotFoundError:
+        return {"total_mb": 0, "used_mb": 0, "available_mb": 0, "percent_used": 0}
+
+def get_disk_info():
+    """Get disk usage for root filesystem."""
+    try:
+        import shutil
+        usage = shutil.disk_usage("/")
+        return {
+            "total_gb": round(usage.total / (1024**3), 1),
+            "used_gb": round(usage.used / (1024**3), 1),
+            "free_gb": round(usage.free / (1024**3), 1),
+            "percent_used": round((usage.used / usage.total) * 100, 1),
+        }
+    except Exception:
+        return {"total_gb": 0, "used_gb": 0, "free_gb": 0, "percent_used": 0}
+
+def get_network_interfaces():
+    """Get network interface information."""
+    interfaces = []
+    net_path = Path("/sys/class/net")
+    if net_path.exists():
+        for iface in sorted(net_path.iterdir()):
+            name = iface.name
+            if name == "lo":
+                continue
+            state = "unknown"
+            try:
+                state = (iface / "operstate").read_text().strip()
+            except FileNotFoundError:
+                pass
+            interfaces.append({"name": name, "state": state})
+    return interfaces
+
+def gather_all_info():
+    """Gather all system information into a single dict."""
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "hostname": get_hostname(),
+        "os": get_os_info(),
+        "uptime": get_uptime(),
+        "cpu": get_cpu_info(),
+        "memory": get_memory_info(),
+        "disk": get_disk_info(),
+        "network": get_network_interfaces(),
+    }
+
+def print_human_readable(info):
+    """Print system info in a formatted, human-readable layout."""
+    print(f"\n{'=' * 60}")
+    print(f"  System Information Report")
+    print(f"  Generated: {info['timestamp']}")
+    print(f"{'=' * 60}\n")
+
+    # Host info
+    os_info = info["os"]
+    print(f"  Hostname:       {info['hostname']}")
+    print(f"  OS:             {os_info['system']} {os_info['release']}")
+    print(f"  Architecture:   {os_info['architecture']}")
+    print(f"  Python:         {os_info['python_version']}")
+    print(f"  Uptime:         {info['uptime']['human']}")
+
+    # CPU
+    cpu = info["cpu"]
+    load = cpu["load_average"]
+    print(f"\n  {'--- CPU ---':^50}")
+    print(f"  Cores:          {cpu['cores']}")
+    print(f"  Load Average:   {load['1min']:.2f} / {load['5min']:.2f} / {load['15min']:.2f}")
+
+    # Memory
+    mem = info["memory"]
+    bar_len = 30
+    filled = int(mem["percent_used"] / 100 * bar_len)
+    bar = "#" * filled + "-" * (bar_len - filled)
+    print(f"\n  {'--- Memory ---':^50}")
+    print(f"  Total:          {mem['total_mb']:,} MB")
+    print(f"  Used:           {mem['used_mb']:,} MB")
+    print(f"  Available:      {mem['available_mb']:,} MB")
+    print(f"  Usage:          [{bar}] {mem['percent_used']}%")
+
+    # Disk
+    disk = info["disk"]
+    filled = int(disk["percent_used"] / 100 * bar_len)
+    bar = "#" * filled + "-" * (bar_len - filled)
+    print(f"\n  {'--- Disk (/) ---':^50}")
+    print(f"  Total:          {disk['total_gb']} GB")
+    print(f"  Used:           {disk['used_gb']} GB")
+    print(f"  Free:           {disk['free_gb']} GB")
+    print(f"  Usage:          [{bar}] {disk['percent_used']}%")
+
+    # Network
+    net = info["network"]
+    if net:
+        print(f"\n  {'--- Network ---':^50}")
+        for iface in net:
+            state_symbol = "UP" if iface["state"] == "up" else "DOWN"
+            print(f"  {iface['name']:<15} {state_symbol}")
+
+    print(f"\n{'=' * 60}")
+
+def main():
+    info = gather_all_info()
+
+    if "--json" in sys.argv:
+        print(json.dumps(info, indent=2))
+    else:
+        print_human_readable(info)
+
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Run it: `python3 server_info.py` for readable output, or `python3 server_info.py --json` for machine-parseable JSON. This dual-output pattern is essential for DevOps scripts that need to work both for humans and in automated pipelines.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Python has six core types for DevOps: `int`, `float`, `str`, `bool`, `None`, and later `list`/`dict`
+- f-strings are the best way to format output — use them everywhere
+- `os.environ.get()` is how you read configuration in production scripts
+- Use `is` for `None` comparisons, `==` for value comparisons
+- `in` is Python's membership operator — works with strings, lists, and dicts
+- Follow PEP 8: snake_case for variables/functions, UPPER_CASE for constants
+- Always handle type conversions explicitly — `int()`, `float()`, `str()`
+
+## What's Next
+
+You have the basics down. In **Data Structures**, you'll learn lists for server inventories, dictionaries for configurations, sets for deduplication, and tuples for immutable data — the data structures that power every automation script.

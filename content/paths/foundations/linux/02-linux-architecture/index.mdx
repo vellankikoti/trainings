@@ -1,0 +1,235 @@
+---
+title: "Linux Architecture"
+description: "Understand the layers that make up a Linux system — from hardware to kernel to user space — and how they work together to power every server on the internet."
+order: 2
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 01-the-linux-story
+objectives:
+  - Describe the four layers of Linux architecture
+  - Explain what the kernel does and why it matters
+  - Navigate the Filesystem Hierarchy Standard (FHS)
+  - Identify key directories and their purposes
+tags:
+  - linux
+  - architecture
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+When you type a command like `ls /home`, a remarkable chain of events unfolds. Your keystrokes travel from hardware through layers of software — the shell interprets your input, the kernel talks to the filesystem driver, the driver reads from the physical disk, and the results flow back up through those same layers to appear on your screen. All of this happens in milliseconds. Understanding these layers is the first step to truly mastering Linux.
+</Callout>
+
+## The Four Layers of Linux
+
+Every Linux system is built from four layers stacked on top of each other:
+
+```
+┌─────────────────────────────────────┐
+│        User Applications            │  ← Firefox, vim, docker, kubectl
+├─────────────────────────────────────┤
+│        Shell & Utilities            │  ← bash, ls, grep, awk, systemd
+├─────────────────────────────────────┤
+│           Linux Kernel              │  ← Memory, processes, drivers, I/O
+├─────────────────────────────────────┤
+│            Hardware                 │  ← CPU, RAM, disk, network card
+└─────────────────────────────────────┘
+```
+
+### Layer 1: Hardware
+
+The physical components — CPU, RAM, storage, network interfaces. The kernel is the only software that talks directly to hardware.
+
+### Layer 2: The Linux Kernel
+
+The kernel is the heart of Linux. It manages:
+
+- **Process management** — Creating, scheduling, and terminating processes
+- **Memory management** — Allocating RAM, virtual memory, swapping
+- **Device drivers** — Communicating with hardware (disk, network, USB)
+- **File systems** — Reading and writing data (ext4, xfs, btrfs)
+- **Networking** — TCP/IP stack, routing, firewalls
+- **Security** — User permissions, SELinux, cgroups
+
+<Callout type="info">
+The kernel runs in **kernel space** — a privileged area of memory with direct hardware access. Everything else runs in **user space** — isolated from hardware for safety.
+</Callout>
+
+### Layer 3: Shell and System Utilities
+
+The shell (bash, zsh) interprets your commands and sends them to the kernel. System utilities (`ls`, `cp`, `grep`, `systemd`) are programs that use kernel services through **system calls**.
+
+### Layer 4: User Applications
+
+Everything you run — web servers (nginx), databases (PostgreSQL), container runtimes (Docker), and your own scripts. These applications use libraries and system calls to interact with the kernel.
+
+## The Filesystem Hierarchy Standard (FHS)
+
+Linux organizes everything in a single directory tree starting from `/` (root). Every directory has a specific purpose:
+
+```bash
+/
+├── bin/       # Essential user commands (ls, cp, mv)
+├── boot/      # Boot loader files (kernel, initramfs)
+├── dev/       # Device files (disks, terminals, null)
+├── etc/       # System configuration files
+├── home/      # User home directories
+├── lib/       # Shared libraries
+├── media/     # Mount point for removable media
+├── mnt/       # Temporary mount points
+├── opt/       # Optional/third-party software
+├── proc/      # Virtual filesystem for process info
+├── root/      # Root user's home directory
+├── run/       # Runtime variable data
+├── sbin/      # System administration commands
+├── srv/       # Data for services (web, FTP)
+├── sys/       # Virtual filesystem for kernel/hardware
+├── tmp/       # Temporary files (cleared on reboot)
+├── usr/       # User programs and data
+└── var/       # Variable data (logs, databases, mail)
+```
+
+<Callout type="tip" title="Memory Trick">
+The most important directories for DevOps engineers: `/etc` (configuration), `/var/log` (logs), `/home` (user data), `/tmp` (scratch space), and `/proc` (live system info).
+</Callout>
+
+## Everything Is a File
+
+Linux treats almost everything as a file. This is one of its most powerful design decisions:
+
+| What it is | File path | Example |
+|---|---|---|
+| Hard disk | `/dev/sda` | `fdisk /dev/sda` |
+| CPU info | `/proc/cpuinfo` | `cat /proc/cpuinfo` |
+| Memory info | `/proc/meminfo` | `cat /proc/meminfo` |
+| Null device | `/dev/null` | `command > /dev/null` |
+| Random data | `/dev/urandom` | `head -c 32 /dev/urandom \| base64` |
+| Network stats | `/proc/net/dev` | `cat /proc/net/dev` |
+
+This means you can read system information the same way you read a text file — using `cat`, `grep`, or any text processing tool.
+
+<Exercise number={1} title="Explore the Architecture">
+
+Run these commands to explore each layer of your Linux system:
+
+```bash
+# Kernel version and info
+uname -a
+
+# CPU architecture
+lscpu | head -5
+
+# Memory details
+cat /proc/meminfo | head -5
+
+# Block devices (disks)
+lsblk
+
+# Filesystem hierarchy - list top-level directories
+ls -la /
+```
+
+What kernel version are you running? How many CPUs does your system have?
+
+</Exercise>
+
+<Exercise number={2} title="Investigate /proc">
+
+The `/proc` directory is a virtual filesystem that provides real-time system information:
+
+```bash
+# How long has the system been up? (in seconds)
+cat /proc/uptime
+
+# How many processes are running?
+ls /proc | grep -c '^[0-9]'
+
+# What command started process 1?
+cat /proc/1/cmdline 2>/dev/null; echo
+
+# Current system load
+cat /proc/loadavg
+```
+
+Explore `/proc` further. Can you find your own process?
+
+<CollapsibleSolution>
+
+```bash
+# Find your shell's process ID
+echo $$
+
+# Look at your process info
+cat /proc/$$/status | head -10
+
+# See the command that started your shell
+cat /proc/$$/cmdline; echo
+```
+
+</CollapsibleSolution>
+
+</Exercise>
+
+## System Calls: The Bridge
+
+When a program needs the kernel to do something (read a file, create a process, send network data), it makes a **system call**. Common system calls include:
+
+- `open()` — Open a file
+- `read()` / `write()` — Read/write data
+- `fork()` — Create a new process
+- `exec()` — Run a program
+- `socket()` — Create a network connection
+
+You don't call these directly (usually), but every command you run uses them behind the scenes.
+
+```bash
+# See the system calls made by a simple command
+strace ls / 2>&1 | head -20
+```
+
+<MiniProject title="System Architecture Report">
+
+Create a comprehensive system report that reveals your Linux architecture:
+
+```bash
+echo "========================================="
+echo "  LINUX ARCHITECTURE REPORT"
+echo "========================================="
+echo ""
+echo "--- KERNEL ---"
+echo "Version: $(uname -r)"
+echo "Architecture: $(uname -m)"
+echo "Hostname: $(hostname)"
+echo ""
+echo "--- CPU ---"
+echo "Model: $(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2)"
+echo "Cores: $(nproc)"
+echo ""
+echo "--- MEMORY ---"
+free -h | head -2
+echo ""
+echo "--- STORAGE ---"
+df -h / | tail -1
+echo ""
+echo "--- DIRECTORIES ---"
+echo "Config files: $(ls /etc | wc -l) items in /etc"
+echo "Log files: $(ls /var/log 2>/dev/null | wc -l) items in /var/log"
+echo "Running processes: $(ls /proc | grep -c '^[0-9]')"
+```
+
+Save this as `arch-report.sh` and run it with `bash arch-report.sh`.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Linux has four layers: hardware, kernel, shell/utilities, and user applications
+- The kernel manages processes, memory, devices, filesystems, and networking
+- The Filesystem Hierarchy Standard gives every directory a clear purpose
+- `/proc` is a virtual filesystem that exposes live system information
+- "Everything is a file" is the design principle that makes Linux powerful and scriptable
+
+## What's Next
+
+In the next lesson, **The Boot Process**, you'll trace what happens from the moment you press the power button to when you see a login prompt. Understanding the boot process is essential for debugging servers that won't start.

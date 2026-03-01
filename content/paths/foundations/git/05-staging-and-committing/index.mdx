@@ -1,0 +1,925 @@
+---
+title: "Staging and Committing"
+description: "Master the staging area workflow. Learn to craft clean commits with git add, understand partial staging, write great commit messages, and use git diff effectively."
+order: 5
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 04-first-repository
+objectives:
+  - Understand the staging area deeply
+  - Use git add with precision (partial staging)
+  - Write effective commit messages
+  - Use git diff to review changes
+  - Amend and fix commits
+tags:
+  - git
+  - staging
+  - commits
+  - workflow
+---
+
+<Callout type="story" title="The Story">
+Your code review keeps getting rejected. Not because of code quality — because of commit quality. One commit has 15 unrelated changes. The message says "stuff." Your senior developer says: "Each commit should tell a story. One logical change, one clear message." Learning to stage precisely and commit thoughtfully is what separates a Git user from a Git professional.
+</Callout>
+
+## The Staging Area
+
+The staging area (also called the "index") is Git's most underappreciated feature. It sits between your working directory and the repository, acting as a preview of your next commit:
+
+```
+Working Directory    →    Staging Area    →    Repository
+(all your changes)       (next commit)        (permanent history)
+```
+
+Why does this matter? Because you rarely want to commit everything at once. You might have fixed a bug AND reformatted a file AND added a feature. The staging area lets you separate those into three clean commits.
+
+```bash
+# Modified three files with different concerns
+git status
+#  M src/auth.js        (bug fix)
+#  M src/auth.js        (also has formatting changes)
+#  M src/dashboard.js   (new feature)
+#  M README.md          (typo fix)
+```
+
+Without staging, you'd commit all of this as one messy commit. With staging, you select exactly what goes into each commit.
+
+## git add — The Basics
+
+```bash
+# Stage a single file
+git add src/auth.js
+
+# Stage multiple files
+git add src/auth.js src/dashboard.js
+
+# Stage an entire directory
+git add src/
+
+# Stage all changes (tracked and untracked)
+git add -A
+# or equivalently:
+git add --all
+
+# Stage all changes in the current directory and below
+git add .
+```
+
+<Callout type="warning" title="git add -A vs git add .">
+`git add -A` stages everything in the entire repo (including deletions). `git add .` stages everything from the current directory down. In most cases they're the same, but if you're in a subdirectory, the behavior differs. Prefer `git add -A` when you want everything, or be explicit with file paths.
+</Callout>
+
+## git add -p — Partial Staging
+
+This is the power move. `git add -p` (patch mode) lets you stage individual chunks ("hunks") within a file. You can commit the bug fix from a file without committing the formatting changes in the same file:
+
+```bash
+git add -p src/auth.js
+```
+
+Git shows you each chunk of changes and asks what to do:
+
+```diff
+diff --git a/src/auth.js b/src/auth.js
+@@ -10,6 +10,7 @@ function login(user, password) {
+     const hash = bcrypt.hashSync(password, 10);
++    const timeout = 30000;  // Fix: increased timeout
+     return authenticate(user, hash);
+ }
+Stage this hunk [y,n,q,a,d,s,e,?]?
+```
+
+The options:
+
+| Key | Action |
+|---|---|
+| `y` | Stage this hunk |
+| `n` | Skip this hunk |
+| `q` | Quit (don't stage remaining hunks) |
+| `a` | Stage this and all remaining hunks in this file |
+| `d` | Don't stage this or any remaining hunks in this file |
+| `s` | Split this hunk into smaller pieces |
+| `e` | Manually edit this hunk |
+
+```bash
+# Workflow: stage only the bug fix, not the formatting
+git add -p src/auth.js
+# y for the bug fix hunk, n for the formatting hunk
+
+git commit -m "Fix authentication timeout"
+
+# Now stage and commit the formatting separately
+git add -p src/auth.js
+# y for the remaining formatting hunk
+
+git commit -m "Format auth module"
+```
+
+<Callout type="tip" title="The -p Habit">
+Using `git add -p` before every commit is a habit worth building. It forces you to review every change before committing, catching mistakes, debug statements, and accidental changes before they enter history.
+</Callout>
+
+## git status — Understanding the Output
+
+```bash
+git status
+```
+
+```
+On branch main
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+        modified:   src/auth.js
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+        modified:   src/dashboard.js
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        src/utils.js
+```
+
+Three sections:
+1. **Changes to be committed** (staged) — will be in the next commit
+2. **Changes not staged** — modified but not yet staged
+3. **Untracked files** — new files Git hasn't seen before
+
+### Short Status
+
+```bash
+git status -s
+# or
+git status -sb  # includes branch info
+```
+
+```
+ M src/dashboard.js
+M  src/auth.js
+?? src/utils.js
+```
+
+The two columns matter:
+
+| Left | Right | Meaning |
+|---|---|---|
+| `M` | ` ` | Staged modification |
+| ` ` | `M` | Unstaged modification |
+| `M` | `M` | Staged AND unstaged changes (partially staged) |
+| `A` | ` ` | Staged new file |
+| `?` | `?` | Untracked file |
+| `D` | ` ` | Staged deletion |
+| ` ` | `D` | Unstaged deletion |
+| `R` | ` ` | Staged rename |
+
+## git diff — Reviewing Changes
+
+Always review before committing. `git diff` is your pre-commit review tool:
+
+```bash
+# Show unstaged changes (working directory vs staging area)
+git diff
+
+# Show staged changes (staging area vs last commit)
+# This is what will be in your next commit
+git diff --staged
+# (--cached is a synonym)
+
+# Show all changes (working directory vs last commit)
+git diff HEAD
+
+# Diff a specific file
+git diff src/auth.js
+git diff --staged src/auth.js
+
+# Word-level diff (great for prose and long lines)
+git diff --word-diff
+
+# Stat only (which files changed, how many lines)
+git diff --stat
+```
+
+### Reading a Diff
+
+```diff
+diff --git a/src/auth.js b/src/auth.js
+index abc1234..def5678 100644
+--- a/src/auth.js
++++ b/src/auth.js
+@@ -8,7 +8,8 @@ function login(user, password) {
+     const hash = bcrypt.hashSync(password, 10);
+-    const timeout = 5000;
++    const timeout = 30000;
++    const retries = 3;
+     return authenticate(user, hash, timeout);
+ }
+```
+
+| Symbol | Meaning |
+|---|---|
+| `---` | Old file |
+| `+++` | New file |
+| `@@` | Location in file (line numbers) |
+| `-` | Removed line (red) |
+| `+` | Added line (green) |
+| ` ` | Unchanged context line |
+
+## git commit — Creating Commits
+
+### Basic Commit
+
+```bash
+# Commit staged changes, opens editor for message
+git commit
+
+# Commit with inline message
+git commit -m "Fix authentication timeout"
+
+# Skip staging — commit all tracked, modified files directly
+# (Skips untracked files. Use cautiously.)
+git commit -a -m "Quick fix"
+# or
+git commit -am "Quick fix"
+```
+
+<Callout type="warning" title="Avoid git commit -a">
+`git commit -a` stages and commits all modified tracked files. This bypasses the staging area — the very tool that lets you craft clean commits. It's tempting for speed, but it often leads to commits containing unrelated changes. Prefer explicit staging with `git add`.
+</Callout>
+
+### Writing Great Commit Messages
+
+A commit message has a subject line and an optional body:
+
+```
+Subject line (50 chars or less, imperative mood)
+
+Optional body wrapped at 72 characters. Explain the WHY,
+not the WHAT. The diff shows what changed — the message
+should explain why it changed.
+
+Refs: #123
+```
+
+Rules for the subject line:
+1. **50 characters or less** — concise summary
+2. **Capitalize** the first word
+3. **No period** at the end
+4. **Imperative mood** — "Fix bug" not "Fixed bug" or "Fixes bug"
+
+Think of it as completing: "If applied, this commit will ___"
+
+```bash
+# Good messages
+git commit -m "Fix payment timeout for slow connections"
+git commit -m "Add rate limiting to authentication endpoint"
+git commit -m "Remove deprecated API v1 routes"
+git commit -m "Refactor database connection pooling"
+
+# Bad messages
+git commit -m "stuff"
+git commit -m "fix"
+git commit -m "Updated some files"
+git commit -m "WIP"
+git commit -m "asdfgh"
+```
+
+### Conventional Commits Format
+
+Many teams use the Conventional Commits standard for structured, parseable messages:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+Common types:
+
+| Type | Purpose |
+|---|---|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation only |
+| `style` | Formatting (no logic change) |
+| `refactor` | Code change that neither fixes nor adds |
+| `test` | Adding or updating tests |
+| `chore` | Build process, dependencies, tooling |
+| `perf` | Performance improvement |
+| `ci` | CI/CD configuration |
+
+```bash
+git commit -m "feat(auth): add rate limiting to login endpoint
+
+Limit login attempts to 5 per minute per IP address.
+Uses sliding window counter stored in Redis.
+
+Closes #234"
+
+git commit -m "fix(payments): handle timeout for slow connections
+
+Increase timeout from 5s to 30s and add retry logic
+with exponential backoff.
+
+Fixes #189"
+
+git commit -m "chore(deps): update express to 4.18.2"
+```
+
+### Multi-line Commit Messages
+
+For longer messages, let Git open your editor:
+
+```bash
+# Opens your configured editor
+git commit
+
+# Or use multiple -m flags
+git commit -m "Subject line" -m "Body paragraph goes here."
+```
+
+<Callout type="tip" title="Commit Frequency">
+Commit early and often. Each commit should represent one logical change that could be reverted independently. Think of commits as save points — you can always squash them later before merging, but you can't split a monolithic commit easily.
+</Callout>
+
+## git commit --amend — Fixing the Last Commit
+
+Made a typo in the commit message? Forgot to add a file? `--amend` rewrites the last commit:
+
+```bash
+# Fix the commit message
+git commit --amend -m "Fix authentication timeout (was: Fix auth tmieout)"
+
+# Add a forgotten file to the last commit
+git add forgotten-file.js
+git commit --amend --no-edit
+# --no-edit keeps the existing message
+```
+
+<Callout type="warning" title="Amend with Care">
+`git commit --amend` rewrites history — it creates a new commit with a new hash. Never amend a commit that has already been pushed and shared with others. For pushed commits, create a new commit instead.
+</Callout>
+
+## Unstaging and Discarding Changes
+
+Made a mistake? Git has multiple undo operations:
+
+```bash
+# Unstage a file (keep changes in working directory)
+git restore --staged file.txt
+# or (older syntax):
+git reset HEAD file.txt
+
+# Discard changes in working directory (DANGEROUS — cannot undo)
+git restore file.txt
+# or (older syntax):
+git checkout -- file.txt
+
+# Unstage everything
+git restore --staged .
+# or:
+git reset HEAD
+
+# Discard ALL local changes (DANGEROUS)
+git restore .
+# or:
+git checkout -- .
+```
+
+## .gitignore Patterns
+
+The `.gitignore` file tells Git which files to ignore. Patterns use glob syntax:
+
+```bash
+# Ignore specific files
+secret.key
+credentials.json
+
+# Ignore by extension
+*.log
+*.tmp
+*.pyc
+
+# Ignore directories
+node_modules/
+__pycache__/
+dist/
+build/
+
+# Wildcard patterns
+*.env*          # .env, .env.local, .env.production
+logs/*.log      # logs/app.log, logs/error.log
+
+# Negate a pattern (don't ignore this)
+!important.log
+
+# Ignore in any subdirectory
+**/test/fixtures/
+
+# Ignore only in root directory
+/TODO.md
+```
+
+```bash
+# Already tracking a file that should be ignored?
+# Remove from tracking but keep on disk
+git rm --cached secret.key
+echo "secret.key" >> .gitignore
+git add .gitignore
+git commit -m "Stop tracking secret.key"
+```
+
+<Callout type="tip" title="gitignore.io">
+Use gitignore.io or GitHub's `.gitignore` templates to generate comprehensive ignore files for your stack. A Node.js project needs different ignore rules than a Python or Go project.
+</Callout>
+
+## The Complete Staging Workflow
+
+Here's the professional workflow for crafting clean commits:
+
+```bash
+# 1. Make changes to multiple files
+#    (work on feature, fix bug, update docs)
+
+# 2. Review ALL changes
+git diff                 # see what changed
+git status -sb           # overview of changed files
+
+# 3. Stage changes for the first logical commit
+git add -p               # interactively stage hunks
+# or
+git add specific-file.js # stage entire files
+
+# 4. Review what you're about to commit
+git diff --staged        # verify staged changes
+
+# 5. Commit with a clear message
+git commit -m "feat(auth): add rate limiting to login"
+
+# 6. Repeat for remaining changes
+git add -p
+git diff --staged
+git commit -m "fix(payments): increase timeout to 30s"
+
+# 7. Verify your work
+git log --oneline -5     # see recent commits
+```
+
+<Exercise number={1} title="Precise Staging">
+
+Use `git add -p` to stage only specific hunks of changes:
+
+```bash
+# Setup: create a repo with a file
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+cat > app.js << 'EOF'
+// Application Configuration
+const PORT = 3000;
+const HOST = "localhost";
+
+// Authentication
+function login(user, pass) {
+    const hash = hashPassword(pass);
+    return authenticate(user, hash);
+}
+
+// Data Processing
+function processData(input) {
+    return input.trim().toLowerCase();
+}
+
+// Export
+module.exports = { login, processData };
+EOF
+
+git add app.js && git commit -q -m "Initial application code"
+
+# Now make MULTIPLE unrelated changes in the same file
+cat > app.js << 'EOF'
+// Application Configuration
+const PORT = 8080;
+const HOST = "0.0.0.0";
+
+// Authentication
+function login(user, pass) {
+    const hash = hashPassword(pass);
+    const timeout = 30000;
+    return authenticate(user, hash, { timeout, retries: 3 });
+}
+
+// Data Processing
+function processData(input) {
+    if (!input) return null;
+    return input.trim().toLowerCase();
+}
+
+// Logging
+function log(message) {
+    console.log(`[${new Date().toISOString()}] ${message}`);
+}
+
+// Export
+module.exports = { login, processData, log };
+EOF
+
+echo ""
+echo "=== All Changes Made ==="
+git diff
+
+echo ""
+echo "We have three unrelated changes:"
+echo "  1. Config change (PORT/HOST)"
+echo "  2. Auth fix (timeout/retries)"
+echo "  3. New feature (logging function)"
+echo ""
+echo "Let's commit them separately using git add -p"
+echo ""
+
+# Stage only the config change
+# In practice, you'd interactively choose y/n for each hunk.
+# Here we demonstrate the concept with targeted adds:
+
+# Method: Use git diff to identify, then stage specific sections
+# For automated demo, we'll show the interactive add approach:
+
+echo "=== Running git add -p ==="
+echo "(In practice, you'd press y/n for each hunk)"
+echo ""
+
+# For this exercise, let's stage everything but show the concept
+git add -p app.js << 'INPUT'
+y
+y
+y
+y
+INPUT
+
+git diff --staged --stat
+echo ""
+echo "=== Staged Changes ==="
+git diff --staged
+
+git commit -q -m "feat: update config, fix auth timeout, add logging"
+
+echo ""
+echo "=== Commit History ==="
+git log --oneline
+
+# Clean up
+cd / && rm -rf "$REPO"
+echo ""
+echo "In practice, you'd answer y/n per hunk to create separate commits."
+echo "The key command: git add -p <file>"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Clean Commit History">
+
+Make multiple changes but create separate, logical commits:
+
+```bash
+# Setup
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Create initial project
+mkdir -p src tests
+cat > src/calculator.js << 'EOF'
+function add(a, b) {
+    return a + b;
+}
+
+function subtract(a, b) {
+    return a - b;
+}
+
+module.exports = { add, subtract };
+EOF
+
+cat > tests/calculator.test.js << 'EOF'
+const { add, subtract } = require('../src/calculator');
+
+console.log('add(2, 3):', add(2, 3));
+console.log('subtract(5, 3):', subtract(5, 3));
+EOF
+
+cat > README.md << 'EOF'
+# Calculator
+A simple calculator module.
+EOF
+
+git add -A && git commit -q -m "Initial commit: basic calculator"
+
+# Now make multiple unrelated changes
+# Change 1: Add multiply function (feature)
+cat > src/calculator.js << 'EOF'
+function add(a, b) {
+    return a + b;
+}
+
+function subtract(a, b) {
+    return a - b;
+}
+
+function multiply(a, b) {
+    return a * b;
+}
+
+module.exports = { add, subtract, multiply };
+EOF
+
+# Change 2: Update tests (related to feature)
+cat > tests/calculator.test.js << 'EOF'
+const { add, subtract, multiply } = require('../src/calculator');
+
+console.log('add(2, 3):', add(2, 3));
+console.log('subtract(5, 3):', subtract(5, 3));
+console.log('multiply(4, 5):', multiply(4, 5));
+EOF
+
+# Change 3: Fix typo in README (unrelated)
+cat > README.md << 'EOF'
+# Calculator
+
+A simple calculator module for arithmetic operations.
+
+## Usage
+
+```javascript
+const { add, subtract, multiply } = require('./src/calculator');
+```
+EOF
+
+# Change 4: Add a config file (unrelated)
+cat > .editorconfig << 'EOF'
+root = true
+
+[*]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+EOF
+
+echo "=== Overview of All Changes ==="
+git status -sb
+echo ""
+git diff --stat
+
+echo ""
+echo "=== Committing as Separate Logical Changes ==="
+echo ""
+
+# Commit 1: Feature — add multiply (source + tests together)
+git add src/calculator.js tests/calculator.test.js
+echo "--- Commit 1: Feature ---"
+git diff --staged --stat
+git commit -m "feat(calc): add multiply function
+
+Include updated tests for the new operation."
+echo ""
+
+# Commit 2: Docs — update README
+git add README.md
+echo "--- Commit 2: Docs ---"
+git diff --staged --stat
+git commit -m "docs: expand README with usage example"
+echo ""
+
+# Commit 3: Chore — add editor config
+git add .editorconfig
+echo "--- Commit 3: Chore ---"
+git diff --staged --stat
+git commit -m "chore: add .editorconfig for consistent formatting"
+echo ""
+
+# Verify clean history
+echo "=== Final Commit History ==="
+git log --oneline
+
+echo ""
+echo "=== Verify Working Tree is Clean ==="
+git status -sb
+
+echo ""
+echo "Three separate logical commits instead of one messy 'update stuff' commit."
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Commit Message Linter">
+
+Create a script that validates commit message format against conventional commits rules:
+
+```bash
+cat > ~/commit-lint.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# ============================================================
+# Commit Message Linter
+# Validates commit messages against Conventional Commits format
+#
+# Usage:
+#   ./commit-lint.sh "feat(auth): add login endpoint"
+#   ./commit-lint.sh                # validates last commit
+#   ./commit-lint.sh --check-repo   # validates all commits
+# ============================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+VALID_TYPES="feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert"
+ERRORS=0
+
+lint_message() {
+    local message="$1"
+    local commit_ref="${2:-input}"
+    local has_error=0
+
+    # Split into subject and body
+    local subject
+    subject=$(echo "$message" | head -n 1)
+    local body
+    body=$(echo "$message" | tail -n +3)
+
+    echo "Linting: $commit_ref"
+    echo "  Subject: $subject"
+
+    # Rule 1: Subject must not be empty
+    if [ -z "$subject" ]; then
+        echo -e "  ${RED}FAIL${NC}: Subject line is empty"
+        has_error=1
+        ((ERRORS++))
+        return $has_error
+    fi
+
+    # Rule 2: Subject must match conventional commits format
+    if ! echo "$subject" | grep -qE "^(${VALID_TYPES})(\(.+\))?: .+$"; then
+        echo -e "  ${RED}FAIL${NC}: Subject doesn't match format: <type>(<scope>): <description>"
+        echo "         Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert"
+        has_error=1
+        ((ERRORS++))
+    else
+        echo -e "  ${GREEN}PASS${NC}: Conventional commits format"
+    fi
+
+    # Rule 3: Subject must be 72 chars or less (warning at 50)
+    local subject_len=${#subject}
+    if [ "$subject_len" -gt 72 ]; then
+        echo -e "  ${RED}FAIL${NC}: Subject is $subject_len chars (max 72)"
+        has_error=1
+        ((ERRORS++))
+    elif [ "$subject_len" -gt 50 ]; then
+        echo -e "  ${YELLOW}WARN${NC}: Subject is $subject_len chars (recommended max 50)"
+    else
+        echo -e "  ${GREEN}PASS${NC}: Subject length ($subject_len chars)"
+    fi
+
+    # Rule 4: Subject must not end with a period
+    if echo "$subject" | grep -qE '\.$'; then
+        echo -e "  ${RED}FAIL${NC}: Subject ends with a period"
+        has_error=1
+        ((ERRORS++))
+    else
+        echo -e "  ${GREEN}PASS${NC}: No trailing period"
+    fi
+
+    # Rule 5: Subject first letter of description should be lowercase
+    local desc
+    desc=$(echo "$subject" | sed -E "s/^(${VALID_TYPES})(\(.+\))?: //")
+    if echo "$desc" | grep -qE '^[A-Z]'; then
+        echo -e "  ${YELLOW}WARN${NC}: Description starts with uppercase ('$desc')"
+    else
+        echo -e "  ${GREEN}PASS${NC}: Description starts lowercase"
+    fi
+
+    # Rule 6: If body exists, check for blank line between subject and body
+    local second_line
+    second_line=$(echo "$message" | sed -n '2p')
+    if [ -n "$second_line" ] && [ -n "$(echo "$second_line" | tr -d '[:space:]')" ]; then
+        echo -e "  ${RED}FAIL${NC}: No blank line between subject and body"
+        has_error=1
+        ((ERRORS++))
+    elif [ -n "$body" ]; then
+        echo -e "  ${GREEN}PASS${NC}: Blank line separates subject and body"
+    fi
+
+    # Rule 7: Body lines should be 72 chars or less
+    if [ -n "$body" ]; then
+        local long_lines
+        long_lines=$(echo "$body" | awk 'length > 72 { count++ } END { print count+0 }')
+        if [ "$long_lines" -gt 0 ]; then
+            echo -e "  ${YELLOW}WARN${NC}: $long_lines body line(s) exceed 72 chars"
+        else
+            echo -e "  ${GREEN}PASS${NC}: Body line lengths OK"
+        fi
+    fi
+
+    echo ""
+    return $has_error
+}
+
+# ---- Main ----
+
+if [ "${1:-}" = "--check-repo" ]; then
+    echo "============================================"
+    echo "  Linting All Commits on Current Branch"
+    echo "============================================"
+    echo ""
+
+    while IFS= read -r line; do
+        HASH=$(echo "$line" | awk '{print $1}')
+        MSG=$(git log --format="%B" -n 1 "$HASH")
+        lint_message "$MSG" "$HASH" || true
+    done < <(git log --oneline)
+
+    echo "============================================"
+    if [ "$ERRORS" -gt 0 ]; then
+        echo -e "  ${RED}$ERRORS error(s) found${NC}"
+        exit 1
+    else
+        echo -e "  ${GREEN}All commits pass!${NC}"
+    fi
+
+elif [ -n "${1:-}" ]; then
+    echo "============================================"
+    echo "  Commit Message Linter"
+    echo "============================================"
+    echo ""
+    lint_message "$1" "provided message"
+
+    if [ "$ERRORS" -gt 0 ]; then
+        echo -e "${RED}$ERRORS error(s) found${NC}"
+        exit 1
+    else
+        echo -e "${GREEN}Message is valid!${NC}"
+    fi
+
+else
+    # Lint the last commit
+    echo "============================================"
+    echo "  Linting Last Commit"
+    echo "============================================"
+    echo ""
+    MSG=$(git log --format="%B" -n 1 HEAD)
+    lint_message "$MSG" "$(git rev-parse --short HEAD)"
+
+    if [ "$ERRORS" -gt 0 ]; then
+        echo -e "${RED}$ERRORS error(s) found${NC}"
+        exit 1
+    else
+        echo -e "${GREEN}Commit message is valid!${NC}"
+    fi
+fi
+SCRIPT
+
+chmod +x ~/commit-lint.sh
+
+# Test the linter
+echo "=== Testing the Commit Message Linter ==="
+echo ""
+
+echo "--- Test 1: Valid message ---"
+~/commit-lint.sh "feat(auth): add login endpoint" || true
+
+echo "--- Test 2: Invalid type ---"
+~/commit-lint.sh "added login endpoint" || true
+
+echo "--- Test 3: Trailing period ---"
+~/commit-lint.sh "fix(api): resolve timeout issue." || true
+
+echo "--- Test 4: Too long ---"
+~/commit-lint.sh "feat(auth): this is a really long commit message that goes on and on and exceeds the maximum recommended length" || true
+
+echo ""
+echo "Linter created at ~/commit-lint.sh"
+echo "Usage:"
+echo "  ~/commit-lint.sh 'feat: add feature'   # lint a message"
+echo "  ~/commit-lint.sh                        # lint last commit"
+echo "  ~/commit-lint.sh --check-repo           # lint all commits"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- The staging area is Git's most powerful feature — it lets you craft precise commits from messy work
+- `git add -p` is the professional's tool — stage individual hunks, review every change before committing
+- `git diff` shows unstaged changes; `git diff --staged` shows what will be committed
+- Good commit messages use imperative mood, stay under 50 characters, and explain the WHY
+- Conventional Commits (`feat:`, `fix:`, `docs:`) provide structure that tools can parse
+- `git commit --amend` fixes the last commit — but never amend pushed commits
+- Each commit should represent one logical change that could be independently reverted
+- `.gitignore` patterns keep build artifacts, secrets, and OS junk out of your repository
+
+## What's Next
+
+You're creating clean commits. In **Viewing History**, you'll learn to navigate that history like a detective — using `git log`, `git blame`, and `git bisect` to find when code changed, who changed it, and why.

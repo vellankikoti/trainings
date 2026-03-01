@@ -1,0 +1,20 @@
+{
+  "id": "foundations",
+  "title": "Foundations",
+  "slug": "foundations",
+  "description": "Build the foundational skills every engineer needs. Master Linux, networking, Git, shell scripting, and Python automation from the ground up.",
+  "order": 1,
+  "difficulty": "Beginner",
+  "estimatedHours": 250,
+  "icon": "terminal",
+  "color": "green",
+  "modules": [
+    "linux",
+    "linux-admin",
+    "shell-scripting",
+    "networking",
+    "git",
+    "python-automation"
+  ],
+  "capstoneProject": "Build a complete server monitoring and alerting system using Bash scripts and Python that monitors system health, parses logs, sends alerts, and stores historical data."
+}

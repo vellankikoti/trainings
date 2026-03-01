@@ -1,0 +1,886 @@
+---
+title: "HTTP Requests and APIs"
+description: "Interact with APIs from Python. Master the requests library for REST APIs, handle authentication, pagination, and rate limiting like a DevOps pro."
+order: 10
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 09-os-and-subprocess
+objectives:
+  - Make HTTP requests with the requests library
+  - Handle authentication with API keys and tokens
+  - Process JSON responses and handle errors
+  - Implement pagination and rate limiting
+  - Build reusable API client patterns
+tags:
+  - python
+  - http
+  - requests
+  - api
+---
+
+<Callout type="story" title="The Story">
+It is 2 AM and PagerDuty fires. You need to check the status of 200 EC2 instances, cross-reference them with your GitHub deployment log, update a Jira ticket, and post a summary to Slack — all before the on-call escalation timer runs out. Every one of these services speaks REST. Every one expects proper authentication, handles pagination differently, and will rate-limit you if you hit them too fast. The `requests` library is how your Python scripts talk to the entire DevOps ecosystem.
+</Callout>
+
+## The requests Library
+
+Python's `requests` library is the de facto standard for HTTP. It wraps the complexity of HTTP into a clean, intuitive API.
+
+```python
+# pip install requests
+import requests
+
+# Simple GET request
+response = requests.get("https://api.github.com")
+print(response.status_code)   # 200
+print(response.headers["content-type"])  # application/json; charset=utf-8
+print(response.json())        # Parsed JSON as a dict
+```
+
+### HTTP Methods
+
+```python
+import requests
+
+# GET — retrieve data
+response = requests.get("https://api.example.com/servers")
+
+# POST — create a resource
+response = requests.post(
+    "https://api.example.com/servers",
+    json={"name": "web-03", "type": "t3.medium"}
+)
+
+# PUT — replace a resource
+response = requests.put(
+    "https://api.example.com/servers/web-03",
+    json={"name": "web-03", "type": "t3.large"}
+)
+
+# PATCH — partial update
+response = requests.patch(
+    "https://api.example.com/servers/web-03",
+    json={"type": "t3.large"}
+)
+
+# DELETE — remove a resource
+response = requests.delete("https://api.example.com/servers/web-03")
+```
+
+### The Response Object
+
+```python
+import requests
+
+response = requests.get("https://api.github.com/users/octocat")
+
+# Status
+print(response.status_code)    # 200
+print(response.ok)             # True (status < 400)
+print(response.reason)         # OK
+
+# Headers
+print(response.headers["content-type"])
+print(response.headers.get("x-ratelimit-remaining"))
+
+# Body
+print(response.text)           # Raw text
+print(response.json())         # Parsed JSON (if applicable)
+print(response.content)        # Raw bytes
+
+# Request info
+print(response.url)            # Final URL (after redirects)
+print(response.elapsed)        # Time taken
+```
+
+## Headers and Authentication
+
+### API Keys
+
+```python
+import requests
+
+# API key in header (most common pattern)
+headers = {
+    "Authorization": "Bearer your-api-token-here",
+    "Content-Type": "application/json"
+}
+response = requests.get(
+    "https://api.example.com/resources",
+    headers=headers
+)
+
+# API key as query parameter (some APIs use this)
+response = requests.get(
+    "https://api.example.com/resources",
+    params={"api_key": "your-key-here"}
+)
+```
+
+### Bearer Token Authentication
+
+```python
+import requests
+import os
+
+# Read token from environment variable (never hardcode)
+token = os.environ["GITHUB_TOKEN"]
+
+headers = {"Authorization": f"token {token}"}
+response = requests.get(
+    "https://api.github.com/user/repos",
+    headers=headers
+)
+
+repos = response.json()
+for repo in repos[:5]:
+    print(f"  {repo['full_name']} ({repo['stargazers_count']} stars)")
+```
+
+### Basic Authentication
+
+```python
+import requests
+
+# Basic auth with username and password
+response = requests.get(
+    "https://jenkins.example.com/api/json",
+    auth=("admin", "api-token-here")
+)
+```
+
+<Callout type="warning" title="Never Hardcode Credentials">
+Always read API keys and tokens from environment variables or a secrets manager. Never put them in source code. Even in examples and tests, use placeholder values and document which environment variables need to be set.
+</Callout>
+
+## Query Parameters and JSON
+
+### Query Parameters
+
+```python
+import requests
+
+# Pass query parameters cleanly
+params = {
+    "state": "open",
+    "labels": "bug",
+    "sort": "created",
+    "direction": "desc",
+    "per_page": 10
+}
+
+response = requests.get(
+    "https://api.github.com/repos/python/cpython/issues",
+    params=params
+)
+# Actual URL: https://api.github.com/repos/python/cpython/issues?state=open&labels=bug&...
+
+issues = response.json()
+for issue in issues:
+    print(f"  #{issue['number']}: {issue['title']}")
+```
+
+### Sending JSON Data
+
+```python
+import requests
+
+# POST with JSON body
+payload = {
+    "text": "Deployment complete: web-api v2.3.1",
+    "channel": "#deployments",
+    "username": "deploy-bot"
+}
+
+response = requests.post(
+    "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+    json=payload  # Automatically sets Content-Type and serializes
+)
+
+print(response.status_code)
+```
+
+## Error Handling
+
+### Status Code Checking
+
+```python
+import requests
+
+response = requests.get("https://api.example.com/resource")
+
+# Check specific status codes
+if response.status_code == 200:
+    data = response.json()
+elif response.status_code == 404:
+    print("Resource not found")
+elif response.status_code == 401:
+    print("Authentication failed — check your token")
+elif response.status_code == 429:
+    print("Rate limited — slow down")
+    retry_after = response.headers.get("Retry-After", "60")
+    print(f"Retry after {retry_after} seconds")
+else:
+    print(f"Unexpected status: {response.status_code}")
+```
+
+### raise_for_status
+
+```python
+import requests
+
+try:
+    response = requests.get("https://api.example.com/data")
+    response.raise_for_status()  # Raises HTTPError for 4xx/5xx
+    data = response.json()
+except requests.exceptions.HTTPError as e:
+    print(f"HTTP error: {e}")
+    print(f"Response body: {e.response.text[:200]}")
+except requests.exceptions.ConnectionError:
+    print("Failed to connect — check network or URL")
+except requests.exceptions.Timeout:
+    print("Request timed out")
+except requests.exceptions.RequestException as e:
+    print(f"Request failed: {e}")
+```
+
+### Timeouts
+
+Always set timeouts to prevent your script from hanging indefinitely:
+
+```python
+import requests
+
+# Connect timeout: 5s, Read timeout: 30s
+response = requests.get(
+    "https://api.example.com/data",
+    timeout=(5, 30)
+)
+
+# Single timeout for both
+response = requests.get(
+    "https://api.example.com/data",
+    timeout=10
+)
+```
+
+<Callout type="tip" title="Always Set Timeouts">
+A missing timeout means your script can hang forever if the server stops responding. In automation scripts, always pass `timeout` to every request. A reasonable default is `timeout=(5, 30)` — 5 seconds to connect, 30 seconds to read.
+</Callout>
+
+## Sessions
+
+Sessions persist settings across requests — connection pooling, headers, and cookies:
+
+```python
+import requests
+import os
+
+# Create a session with persistent headers
+session = requests.Session()
+session.headers.update({
+    "Authorization": f"token {os.getenv('GITHUB_TOKEN')}",
+    "Accept": "application/vnd.github.v3+json"
+})
+session.timeout = (5, 30)
+
+# All requests now include the headers automatically
+repos = session.get("https://api.github.com/user/repos").json()
+user = session.get("https://api.github.com/user").json()
+orgs = session.get("https://api.github.com/user/orgs").json()
+
+# Connection pooling means these are faster than individual requests
+print(f"User: {user.get('login')}")
+print(f"Repos: {len(repos)}")
+print(f"Orgs: {len(orgs)}")
+```
+
+## Pagination
+
+Most APIs return results in pages. You need to follow the pages to get all data.
+
+### Link Header Pagination (GitHub style)
+
+```python
+import requests
+import os
+
+def get_all_pages(url, session, params=None):
+    """Follow pagination links to get all results."""
+    all_results = []
+    params = params or {}
+
+    while url:
+        response = session.get(url, params=params)
+        response.raise_for_status()
+        all_results.extend(response.json())
+
+        # GitHub uses Link header for pagination
+        # Link: <https://api...?page=2>; rel="next", <...?page=5>; rel="last"
+        link_header = response.headers.get("Link", "")
+        url = None
+        for part in link_header.split(","):
+            if 'rel="next"' in part:
+                url = part.split(";")[0].strip(" <>")
+                params = {}  # URL already has params
+
+        print(f"  Fetched {len(response.json())} items "
+              f"(total: {len(all_results)})")
+
+    return all_results
+
+# Usage
+session = requests.Session()
+session.headers["Authorization"] = f"token {os.getenv('GITHUB_TOKEN', '')}"
+
+repos = get_all_pages(
+    "https://api.github.com/users/octocat/repos",
+    session,
+    params={"per_page": 30}
+)
+print(f"Total repos: {len(repos)}")
+```
+
+### Offset/Limit Pagination
+
+```python
+import requests
+
+def get_all_offset(base_url, session, page_size=100):
+    """Pagination with offset and limit parameters."""
+    all_results = []
+    offset = 0
+
+    while True:
+        response = session.get(
+            base_url,
+            params={"offset": offset, "limit": page_size}
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        results = data.get("results", data.get("items", []))
+        if not results:
+            break
+
+        all_results.extend(results)
+        offset += len(results)
+        print(f"  Fetched {len(results)} (total: {len(all_results)})")
+
+        # Some APIs provide a total count
+        total = data.get("total_count", None)
+        if total and len(all_results) >= total:
+            break
+
+    return all_results
+```
+
+## Rate Limiting
+
+APIs limit how many requests you can make. Respect the limits:
+
+```python
+import requests
+import time
+
+def rate_limited_request(session, url, max_retries=3, **kwargs):
+    """Make a request with rate limit handling and retry."""
+    for attempt in range(max_retries):
+        response = session.get(url, **kwargs)
+
+        # Check rate limit headers
+        remaining = response.headers.get("X-RateLimit-Remaining")
+        if remaining:
+            remaining = int(remaining)
+            if remaining < 10:
+                print(f"  Warning: Only {remaining} API calls remaining")
+
+        if response.status_code == 429:  # Too Many Requests
+            retry_after = int(response.headers.get("Retry-After", 60))
+            print(f"  Rate limited. Waiting {retry_after}s...")
+            time.sleep(retry_after)
+            continue
+
+        if response.status_code >= 500:
+            # Server error — retry with exponential backoff
+            wait = 2 ** attempt
+            print(f"  Server error {response.status_code}. "
+                  f"Retrying in {wait}s...")
+            time.sleep(wait)
+            continue
+
+        return response
+
+    raise Exception(f"Failed after {max_retries} retries: {url}")
+```
+
+## Webhook Receivers
+
+Sometimes your script needs to receive HTTP requests, not just send them:
+
+```python
+# pip install flask
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+@app.route("/webhook", methods=["POST"])
+def handle_webhook():
+    """Receive a webhook from GitHub, Docker Hub, etc."""
+    event = request.headers.get("X-GitHub-Event", "unknown")
+    payload = request.json
+
+    print(f"Received {event} event")
+
+    if event == "push":
+        repo = payload["repository"]["full_name"]
+        branch = payload["ref"].split("/")[-1]
+        pusher = payload["pusher"]["name"]
+        print(f"  Push to {repo}/{branch} by {pusher}")
+
+    elif event == "pull_request":
+        action = payload["action"]
+        pr = payload["pull_request"]
+        print(f"  PR #{pr['number']} {action}: {pr['title']}")
+
+    return jsonify({"status": "received"}), 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+```
+
+<Exercise number={1} title="API Health Checker">
+
+Build a script that checks the health of multiple API endpoints.
+
+```python
+import requests
+import time
+from datetime import datetime
+
+def check_endpoint(url, method="GET", expected_status=200,
+                   timeout=10, headers=None):
+    """Check a single endpoint and return status info."""
+    result = {
+        "url": url,
+        "timestamp": datetime.now().isoformat(),
+        "method": method,
+    }
+
+    try:
+        start = time.time()
+        response = requests.request(
+            method, url,
+            timeout=timeout,
+            headers=headers or {},
+            allow_redirects=True
+        )
+        elapsed = time.time() - start
+
+        result["status_code"] = response.status_code
+        result["response_time_ms"] = round(elapsed * 1000, 1)
+        result["healthy"] = response.status_code == expected_status
+        result["content_length"] = len(response.content)
+
+    except requests.exceptions.ConnectionError:
+        result["healthy"] = False
+        result["error"] = "Connection failed"
+        result["response_time_ms"] = None
+    except requests.exceptions.Timeout:
+        result["healthy"] = False
+        result["error"] = "Timeout"
+        result["response_time_ms"] = timeout * 1000
+
+    return result
+
+# Define endpoints to check
+endpoints = [
+    {"url": "https://api.github.com", "name": "GitHub API"},
+    {"url": "https://pypi.org/pypi/requests/json", "name": "PyPI"},
+    {"url": "https://httpbin.org/get", "name": "HTTPBin"},
+    {"url": "https://httpbin.org/status/500", "name": "Failing Endpoint",
+     "expected_status": 500},
+    {"url": "https://nonexistent.invalid", "name": "Bad Domain"},
+]
+
+# Run checks
+print("=" * 65)
+print(f"  API Health Check — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print("=" * 65)
+
+results = []
+for ep in endpoints:
+    result = check_endpoint(
+        ep["url"],
+        expected_status=ep.get("expected_status", 200)
+    )
+    result["name"] = ep["name"]
+    results.append(result)
+
+    status = "UP" if result["healthy"] else "DOWN"
+    time_str = (f"{result['response_time_ms']}ms"
+                if result.get("response_time_ms") else "N/A")
+    code = result.get("status_code", result.get("error", "?"))
+
+    print(f"  [{status:>4}] {ep['name']:<25} {str(code):<6} {time_str}")
+
+# Summary
+healthy = sum(1 for r in results if r["healthy"])
+total = len(results)
+print(f"\n  Result: {healthy}/{total} endpoints healthy")
+
+if healthy < total:
+    print("  Unhealthy endpoints:")
+    for r in results:
+        if not r["healthy"]:
+            print(f"    - {r['name']}: {r.get('error', f'status {r.get(\"status_code\")}')}")
+```
+
+</Exercise>
+
+<Exercise number={2} title="Paginated API Fetcher">
+
+Build a reusable function for fetching all pages from APIs.
+
+```python
+import requests
+import json
+import time
+
+class PaginatedFetcher:
+    """Fetch all pages from a paginated API."""
+
+    def __init__(self, base_url, headers=None, rate_limit=None):
+        self.session = requests.Session()
+        if headers:
+            self.session.headers.update(headers)
+        self.rate_limit = rate_limit  # seconds between requests
+        self.request_count = 0
+
+    def fetch_link_pagination(self, url, params=None, max_pages=50):
+        """Fetch using Link header pagination (GitHub, GitLab)."""
+        all_items = []
+        page = 0
+        params = params or {}
+
+        while url and page < max_pages:
+            self._rate_limit_wait()
+            response = self.session.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            self.request_count += 1
+
+            items = response.json()
+            if isinstance(items, list):
+                all_items.extend(items)
+            else:
+                # Some APIs wrap results in an object
+                items_key = next(
+                    (k for k in ("items", "results", "data") if k in items),
+                    None
+                )
+                if items_key:
+                    all_items.extend(items[items_key])
+
+            page += 1
+            print(f"  Page {page}: +{len(items) if isinstance(items, list) else '?'} "
+                  f"(total: {len(all_items)})")
+
+            # Follow Link header
+            url = None
+            params = {}
+            link = response.headers.get("Link", "")
+            for part in link.split(","):
+                if 'rel="next"' in part:
+                    url = part.split(";")[0].strip(" <>")
+
+        return all_items
+
+    def fetch_offset_pagination(self, url, page_size=100, max_items=1000):
+        """Fetch using offset/limit pagination."""
+        all_items = []
+        offset = 0
+
+        while offset < max_items:
+            self._rate_limit_wait()
+            response = self.session.get(
+                url,
+                params={"offset": offset, "limit": page_size},
+                timeout=30
+            )
+            response.raise_for_status()
+            self.request_count += 1
+
+            data = response.json()
+            items = data.get("results", data.get("items", []))
+            if not items:
+                break
+
+            all_items.extend(items)
+            offset += len(items)
+            print(f"  Offset {offset}: +{len(items)} (total: {len(all_items)})")
+
+            total = data.get("total_count", data.get("total", None))
+            if total and len(all_items) >= total:
+                break
+
+        return all_items
+
+    def _rate_limit_wait(self):
+        if self.rate_limit:
+            time.sleep(self.rate_limit)
+
+# --- Demo with GitHub public API ---
+fetcher = PaginatedFetcher(
+    base_url="https://api.github.com",
+    headers={"Accept": "application/vnd.github.v3+json"},
+    rate_limit=0.5  # Be polite to the API
+)
+
+print("Fetching octocat's public repos (paginated)...")
+repos = fetcher.fetch_link_pagination(
+    "https://api.github.com/users/octocat/repos",
+    params={"per_page": 10},
+    max_pages=3
+)
+
+print(f"\nFetched {len(repos)} repos in {fetcher.request_count} requests")
+for repo in repos[:5]:
+    print(f"  {repo['name']}: {repo.get('description', 'No description')[:50]}")
+```
+
+</Exercise>
+
+<MiniProject title="GitHub Repository Reporter">
+
+Build a tool that queries the GitHub API for an organization's repos and generates a status report.
+
+```python
+import requests
+import json
+import os
+from datetime import datetime, timezone
+
+class GitHubReporter:
+    """Queries GitHub API and generates repository reports."""
+
+    API_BASE = "https://api.github.com"
+
+    def __init__(self, token=None):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "github-reporter/1.0"
+        })
+        if token:
+            self.session.headers["Authorization"] = f"token {token}"
+
+    def _get(self, endpoint, params=None):
+        """Make a GET request with error handling."""
+        url = (endpoint if endpoint.startswith("http")
+               else f"{self.API_BASE}{endpoint}")
+        try:
+            response = self.session.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                remaining = e.response.headers.get("X-RateLimit-Remaining", "?")
+                print(f"  [WARN] Rate limited. Remaining: {remaining}")
+            raise
+
+    def _get_all_pages(self, endpoint, params=None):
+        """Fetch all pages of a paginated resource."""
+        all_items = []
+        params = params or {}
+        params["per_page"] = 100
+        url = f"{self.API_BASE}{endpoint}"
+
+        while url:
+            response = self._get(url, params=params)
+            items = response.json()
+            all_items.extend(items)
+            params = {}  # Clear params for subsequent pages
+
+            url = None
+            link = response.headers.get("Link", "")
+            for part in link.split(","):
+                if 'rel="next"' in part:
+                    url = part.split(";")[0].strip(" <>")
+
+        return all_items
+
+    def get_org_repos(self, org):
+        """Get all repositories for an organization."""
+        return self._get_all_pages(
+            f"/orgs/{org}/repos",
+            params={"type": "all", "sort": "updated"}
+        )
+
+    def get_user_repos(self, username):
+        """Get all repositories for a user."""
+        return self._get_all_pages(
+            f"/users/{username}/repos",
+            params={"type": "all", "sort": "updated"}
+        )
+
+    def get_repo_languages(self, owner, repo):
+        """Get language breakdown for a repo."""
+        response = self._get(f"/repos/{owner}/{repo}/languages")
+        return response.json()
+
+    def generate_report(self, owner, is_org=True):
+        """Generate a comprehensive report."""
+        print(f"Fetching repos for {'org' if is_org else 'user'}: {owner}...")
+
+        if is_org:
+            repos = self.get_org_repos(owner)
+        else:
+            repos = self.get_user_repos(owner)
+
+        if not repos:
+            print(f"No repos found for {owner}")
+            return
+
+        # Build report data
+        report = {
+            "owner": owner,
+            "type": "organization" if is_org else "user",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "total_repos": len(repos),
+            "repos": []
+        }
+
+        # Analyze repos
+        total_stars = 0
+        total_forks = 0
+        total_issues = 0
+        languages = {}
+        private_count = 0
+        archived_count = 0
+        forked_count = 0
+
+        for repo in repos:
+            total_stars += repo.get("stargazers_count", 0)
+            total_forks += repo.get("forks_count", 0)
+            total_issues += repo.get("open_issues_count", 0)
+
+            if repo.get("private"):
+                private_count += 1
+            if repo.get("archived"):
+                archived_count += 1
+            if repo.get("fork"):
+                forked_count += 1
+
+            lang = repo.get("language")
+            if lang:
+                languages[lang] = languages.get(lang, 0) + 1
+
+            report["repos"].append({
+                "name": repo["name"],
+                "description": repo.get("description", ""),
+                "stars": repo.get("stargazers_count", 0),
+                "forks": repo.get("forks_count", 0),
+                "open_issues": repo.get("open_issues_count", 0),
+                "language": lang,
+                "private": repo.get("private", False),
+                "archived": repo.get("archived", False),
+                "updated_at": repo.get("updated_at", ""),
+            })
+
+        report["summary"] = {
+            "total_stars": total_stars,
+            "total_forks": total_forks,
+            "total_open_issues": total_issues,
+            "private_repos": private_count,
+            "archived_repos": archived_count,
+            "forked_repos": forked_count,
+            "languages": dict(sorted(
+                languages.items(), key=lambda x: x[1], reverse=True
+            ))
+        }
+
+        # Print the report
+        self._print_report(report)
+        return report
+
+    def _print_report(self, report):
+        """Print a formatted report."""
+        s = report["summary"]
+        print()
+        print("=" * 65)
+        print(f"  GitHub Report: {report['owner']} ({report['type']})")
+        print(f"  Generated: {report['generated_at'][:19]}")
+        print("=" * 65)
+        print()
+        print(f"  Total Repositories: {report['total_repos']}")
+        print(f"  Total Stars:        {s['total_stars']}")
+        print(f"  Total Forks:        {s['total_forks']}")
+        print(f"  Open Issues:        {s['total_open_issues']}")
+        print(f"  Private:            {s['private_repos']}")
+        print(f"  Archived:           {s['archived_repos']}")
+        print(f"  Forked:             {s['forked_repos']}")
+
+        # Language breakdown
+        print(f"\n  Languages:")
+        for lang, count in list(s["languages"].items())[:10]:
+            bar = "#" * count
+            print(f"    {lang:<20} {count:>3} {bar}")
+
+        # Top repos by stars
+        top = sorted(
+            report["repos"], key=lambda r: r["stars"], reverse=True
+        )[:10]
+        print(f"\n  Top Repos by Stars:")
+        for repo in top:
+            archived = " [ARCHIVED]" if repo["archived"] else ""
+            desc = (repo["description"] or "No description")[:35]
+            print(
+                f"    {repo['name']:<30} "
+                f"{repo['stars']:>4} stars  "
+                f"{desc}{archived}"
+            )
+
+        # Recently updated
+        recent = sorted(
+            report["repos"],
+            key=lambda r: r["updated_at"],
+            reverse=True
+        )[:5]
+        print(f"\n  Recently Updated:")
+        for repo in recent:
+            updated = repo["updated_at"][:10]
+            print(f"    {repo['name']:<30} {updated}")
+
+        print()
+        print("=" * 65)
+
+
+# --- Run the report ---
+token = os.getenv("GITHUB_TOKEN", "")
+reporter = GitHubReporter(token=token if token else None)
+
+# Generate report for a public user (works without authentication)
+report = reporter.generate_report("octocat", is_org=False)
+
+# Save as JSON
+print("\nSaving report as JSON...")
+print(json.dumps(report["summary"], indent=2))
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Use `requests.get()`, `.post()`, `.put()`, `.delete()` for HTTP methods — the API is clean and intuitive
+- Always set `timeout=(connect, read)` on every request to prevent indefinite hangs
+- Use `response.raise_for_status()` to turn HTTP errors into Python exceptions
+- Sessions (`requests.Session()`) persist headers and reuse connections for better performance
+- Handle pagination by following `Link` headers or using offset/limit patterns
+- Respect rate limits: check `X-RateLimit-Remaining` headers and implement backoff on 429 responses
+- Never hardcode API tokens — read them from environment variables or secrets managers
+- Use `json=payload` (not `data=`) to automatically serialize and set Content-Type headers
+
+## What's Next
+
+Your scripts can talk to APIs now. But what happens when an API returns a 500 error, the network drops mid-request, or your config file has a typo? In **Error Handling and Logging**, you'll learn the patterns that make automation scripts reliable in production — try/except, custom exceptions, the logging module, and retry strategies.

@@ -1,0 +1,888 @@
+---
+title: "IP Addressing and Subnets"
+description: "Master IP addresses, subnetting, CIDR notation, and the math that determines which devices can talk to each other. Essential for cloud networking and container orchestration."
+order: 3
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - "02-osi-and-tcp-ip"
+objectives:
+  - "Convert between binary and decimal IP addresses"
+  - "Calculate subnet masks and CIDR notation"
+  - "Determine network and host ranges"
+  - "Understand private vs public IP ranges"
+  - "Plan IP addressing for networks"
+tags:
+  - networking
+  - ip
+  - subnetting
+  - cidr
+---
+
+<Callout type="story" title="The Story">
+Your company is setting up a new cloud environment. The architect asks: "What CIDR block should we use for the VPC?" You freeze. "How about 10.0.0.0/16?" someone suggests. "That gives us 65,534 addresses — is that enough?" Understanding IP addressing and subnetting isn't optional for DevOps. Every VPC, every Docker network, every Kubernetes pod has an IP. Subnetting determines who can talk to whom.
+</Callout>
+
+## IPv4 Address Format
+
+An IPv4 address is a **32-bit number** that uniquely identifies a device on a network. We write it in **dotted decimal notation** — four numbers separated by dots.
+
+```
+Dotted Decimal:   192.168.1.100
+
+Binary:           11000000.10101000.00000001.01100100
+                  ^^^^^^^^ ^^^^^^^^ ^^^^^^^^ ^^^^^^^^
+                  Octet 1  Octet 2  Octet 3  Octet 4
+
+Each octet = 8 bits
+Each octet ranges from 0 to 255 (2^8 = 256 values)
+Total bits: 4 × 8 = 32 bits
+Total possible addresses: 2^32 = 4,294,967,296 (~4.3 billion)
+```
+
+### Converting Binary to Decimal
+
+Each bit position has a value based on powers of 2:
+
+```
+Bit position:   7    6    5    4    3    2    1    0
+Bit value:     128   64   32   16    8    4    2    1
+
+Example: Convert 11000000 to decimal
+         1×128 + 1×64 + 0×32 + 0×16 + 0×8 + 0×4 + 0×2 + 0×1
+         = 128 + 64
+         = 192
+
+Example: Convert 10101000 to decimal
+         1×128 + 0×64 + 1×32 + 0×16 + 1×8 + 0×4 + 0×2 + 0×1
+         = 128 + 32 + 8
+         = 168
+
+So: 11000000.10101000.00000001.01100100 = 192.168.1.100
+```
+
+### Converting Decimal to Binary
+
+Work from left to right. For each bit position, ask: "Is the remaining value >= this bit's value?"
+
+```
+Convert 172 to binary:
+172 >= 128? Yes → 1, remainder = 172 - 128 = 44
+ 44 >= 64?  No  → 0
+ 44 >= 32?  Yes → 1, remainder = 44 - 32 = 12
+ 12 >= 16?  No  → 0
+ 12 >= 8?   Yes → 1, remainder = 12 - 8 = 4
+  4 >= 4?   Yes → 1, remainder = 4 - 4 = 0
+  0 >= 2?   No  → 0
+  0 >= 1?   No  → 0
+
+Result: 10101100 = 172
+```
+
+<Callout type="tip" title="Do You Really Need Binary Math?">
+Yes, but not as much as you think. You need to understand the concept for subnetting, but in daily work you will use calculators and tools. The key skill is understanding what the binary math *means* — which bits are the network portion and which are the host portion. That said, being able to do simple conversions in your head impresses in interviews and makes troubleshooting faster.
+</Callout>
+
+## IP Address Classes (Historical Context)
+
+Originally, IP addresses were divided into classes based on the first few bits. This is **classful addressing** and is mostly obsolete, but you will encounter references to it:
+
+| Class | First Bits | First Octet Range | Default Mask | Networks | Hosts/Network |
+|---|---|---|---|---|---|
+| A | 0... | 1-126 | /8 (255.0.0.0) | 126 | 16,777,214 |
+| B | 10... | 128-191 | /16 (255.255.0.0) | 16,384 | 65,534 |
+| C | 110... | 192-223 | /24 (255.255.255.0) | 2,097,152 | 254 |
+| D | 1110... | 224-239 | Multicast | — | — |
+| E | 1111... | 240-255 | Reserved | — | — |
+
+```bash
+# Class A: 10.0.0.0    — huge networks (16 million hosts)
+# Class B: 172.16.0.0  — medium networks (65,534 hosts)
+# Class C: 192.168.1.0 — small networks (254 hosts)
+
+# Note: 127.x.x.x is reserved for loopback (127.0.0.1 = localhost)
+```
+
+<Callout type="info" title="Classful Is Dead, Long Live CIDR">
+Classful addressing wasted enormous numbers of IP addresses. A company that needed 300 addresses would get a Class B (65,534 addresses), wasting over 65,000. **CIDR** (Classless Inter-Domain Routing) replaced this system in 1993, allowing any prefix length. But you will still hear terms like "Class A private range" (10.0.0.0/8) in everyday conversation.
+</Callout>
+
+## Private IP Ranges
+
+Three ranges are reserved for **private** use — they are not routable on the public Internet:
+
+| Range | CIDR | Addresses | Common Use |
+|---|---|---|---|
+| 10.0.0.0 – 10.255.255.255 | 10.0.0.0/8 | 16,777,216 | Cloud VPCs, large corporate networks |
+| 172.16.0.0 – 172.31.255.255 | 172.16.0.0/12 | 1,048,576 | Docker default bridge network |
+| 192.168.0.0 – 192.168.255.255 | 192.168.0.0/16 | 65,536 | Home networks, small offices |
+
+```bash
+# Check if your IP is private:
+ip addr show | grep "inet "
+
+# Common private IPs you'll encounter:
+# 10.0.0.0/16    — AWS default VPC CIDR
+# 172.17.0.0/16  — Docker default bridge network
+# 10.244.0.0/16  — Kubernetes pod network (Flannel default)
+# 10.96.0.0/12   — Kubernetes service network (default)
+# 192.168.49.0/24 — Minikube default network
+```
+
+## Special IP Addresses
+
+Several addresses have special meanings:
+
+| Address | Purpose |
+|---|---|
+| **127.0.0.1** | Loopback — refers to this machine itself |
+| **0.0.0.0** | "All interfaces" — used by servers to listen on every IP |
+| **255.255.255.255** | Broadcast — reaches all hosts on the local network |
+| **169.254.x.x** | Link-local — auto-assigned when DHCP fails (APIPA) |
+| **::1** | IPv6 loopback |
+| **::** | IPv6 "all interfaces" (like 0.0.0.0) |
+
+```bash
+# 0.0.0.0 vs 127.0.0.1 — a common source of confusion:
+
+# A server listening on 0.0.0.0:8080 accepts connections
+# from ANY interface (local and remote)
+python3 -m http.server 8080 --bind 0.0.0.0
+
+# A server listening on 127.0.0.1:8080 ONLY accepts
+# connections from the same machine
+python3 -m http.server 8080 --bind 127.0.0.1
+
+# This matters for security! If your database listens on
+# 0.0.0.0:5432, it's exposed to the network.
+# If it listens on 127.0.0.1:5432, only local apps can connect.
+```
+
+<Callout type="warning" title="Security: Binding to 0.0.0.0">
+When deploying services, always check what address they bind to. A database or cache server listening on 0.0.0.0 is accessible from the network — potentially a serious security risk. Redis, for example, defaults to binding on all interfaces in some configurations. Always bind internal services to 127.0.0.1 or a private interface and use firewalls as an additional layer of protection.
+</Callout>
+
+## Subnet Masks
+
+A **subnet mask** divides an IP address into two parts:
+- **Network portion** — identifies which network the device belongs to
+- **Host portion** — identifies the specific device on that network
+
+```
+IP Address:    192.168.1.100
+Subnet Mask:   255.255.255.0
+
+Binary:
+IP:    11000000.10101000.00000001.01100100
+Mask:  11111111.11111111.11111111.00000000
+       |<---- Network bits ---->|<-Hosts->|
+
+Network portion: 192.168.1     (first 24 bits = all 1s in mask)
+Host portion:    .100          (last 8 bits = all 0s in mask)
+
+Network address: 192.168.1.0   (host portion all zeros)
+Broadcast addr:  192.168.1.255 (host portion all ones)
+Usable range:    192.168.1.1 — 192.168.1.254
+```
+
+Two devices can communicate **directly** (without a router) only if they share the same network portion. The subnet mask determines what "same network" means.
+
+```bash
+# Device A: 192.168.1.50  / 255.255.255.0  → Network: 192.168.1.0
+# Device B: 192.168.1.100 / 255.255.255.0  → Network: 192.168.1.0
+# Same network? YES — they can communicate directly.
+
+# Device A: 192.168.1.50  / 255.255.255.0  → Network: 192.168.1.0
+# Device C: 192.168.2.50  / 255.255.255.0  → Network: 192.168.2.0
+# Same network? NO — they need a router to communicate.
+```
+
+## CIDR Notation
+
+**CIDR** (Classless Inter-Domain Routing) notation expresses the subnet mask as a **prefix length** — the number of 1-bits in the mask.
+
+```
+/24  = 255.255.255.0     = 11111111.11111111.11111111.00000000
+/16  = 255.255.0.0       = 11111111.11111111.00000000.00000000
+/8   = 255.0.0.0         = 11111111.00000000.00000000.00000000
+/32  = 255.255.255.255   = 11111111.11111111.11111111.11111111
+/0   = 0.0.0.0           = 00000000.00000000.00000000.00000000
+```
+
+### Common CIDR Blocks
+
+| CIDR | Subnet Mask | Usable Hosts | Common Use |
+|---|---|---|---|
+| /32 | 255.255.255.255 | 1 | Single host |
+| /30 | 255.255.255.252 | 2 | Point-to-point links |
+| /28 | 255.255.255.240 | 14 | Small subnet |
+| /24 | 255.255.255.0 | 254 | Standard LAN, most common |
+| /20 | 255.255.240.0 | 4,094 | Medium subnet |
+| /16 | 255.255.0.0 | 65,534 | Large network, VPC default |
+| /8 | 255.0.0.0 | 16,777,214 | Huge network (10.0.0.0/8) |
+
+### The Formula
+
+For a given CIDR prefix of `/n`:
+
+```
+Number of addresses = 2^(32 - n)
+Number of usable hosts = 2^(32 - n) - 2
+
+Why subtract 2?
+- Network address (all host bits = 0) — cannot be assigned to a device
+- Broadcast address (all host bits = 1) — cannot be assigned to a device
+```
+
+```bash
+# /24 example:
+# Host bits = 32 - 24 = 8
+# Total addresses = 2^8 = 256
+# Usable hosts = 256 - 2 = 254
+
+# /16 example:
+# Host bits = 32 - 16 = 16
+# Total addresses = 2^16 = 65,536
+# Usable hosts = 65,536 - 2 = 65,534
+
+# /20 example:
+# Host bits = 32 - 20 = 12
+# Total addresses = 2^12 = 4,096
+# Usable hosts = 4,096 - 2 = 4,094
+```
+
+## Calculating Network Addresses
+
+Given a CIDR block, you can calculate every important address:
+
+### Example: 192.168.1.100/24
+
+```
+IP (binary):     11000000.10101000.00000001.01100100
+Mask (binary):   11111111.11111111.11111111.00000000  (/24)
+
+Bitwise AND of IP and Mask:
+Network address: 11000000.10101000.00000001.00000000 = 192.168.1.0
+
+Set all host bits to 1:
+Broadcast addr:  11000000.10101000.00000001.11111111 = 192.168.1.255
+
+First usable:    192.168.1.1   (network + 1)
+Last usable:     192.168.1.254 (broadcast - 1)
+Usable hosts:    254           (2^8 - 2)
+```
+
+### Example: 10.0.50.200/20
+
+```
+IP (binary):     00001010.00000000.00110010.11001000
+Mask (binary):   11111111.11111111.11110000.00000000  (/20)
+
+Bitwise AND:
+Network address: 00001010.00000000.00110000.00000000 = 10.0.48.0
+                                   ^^^^
+                              The key bits!
+
+Set host bits to 1:
+Broadcast addr:  00001010.00000000.00111111.11111111 = 10.0.63.255
+
+First usable:    10.0.48.1
+Last usable:     10.0.63.254
+Usable hosts:    4,094 (2^12 - 2)
+```
+
+<Callout type="tip" title="The Shortcut for Non-Octet Boundaries">
+When the CIDR prefix doesn't fall on an octet boundary (/8, /16, /24), the interesting math happens in one octet. For /20, the boundary falls in the third octet (bits 17-20). Calculate the "block size" as 2^(bits remaining in that octet). For /20: third octet has 4 network bits, so block size = 2^4 = 16. Networks start at multiples of 16: .0, .16, .32, .48, .64, etc. The IP 10.0.50.200 falls in the .48 block (48 is the largest multiple of 16 that is <= 50).
+</Callout>
+
+## Subnetting: Dividing Networks
+
+**Subnetting** takes a larger network and divides it into smaller networks. You borrow bits from the host portion to create additional network bits.
+
+### Example: Split 192.168.1.0/24 into 4 Subnets
+
+```
+Original: 192.168.1.0/24 (256 addresses, 254 usable hosts)
+
+To create 4 subnets, borrow 2 bits (2^2 = 4):
+New prefix: /24 + 2 = /26
+
+Subnet 1: 192.168.1.0/26
+  Range:     192.168.1.0   – 192.168.1.63
+  Usable:    192.168.1.1   – 192.168.1.62   (62 hosts)
+  Broadcast: 192.168.1.63
+
+Subnet 2: 192.168.1.64/26
+  Range:     192.168.1.64  – 192.168.1.127
+  Usable:    192.168.1.65  – 192.168.1.126  (62 hosts)
+  Broadcast: 192.168.1.127
+
+Subnet 3: 192.168.1.128/26
+  Range:     192.168.1.128 – 192.168.1.191
+  Usable:    192.168.1.129 – 192.168.1.190  (62 hosts)
+  Broadcast: 192.168.1.191
+
+Subnet 4: 192.168.1.192/26
+  Range:     192.168.1.192 – 192.168.1.255
+  Usable:    192.168.1.193 – 192.168.1.254  (62 hosts)
+  Broadcast: 192.168.1.255
+
+Total hosts: 4 × 62 = 248 (vs 254 in original)
+Lost 6 addresses to additional network/broadcast pairs.
+```
+
+```bash
+# You can verify with ipcalc (install it first):
+# Ubuntu: sudo apt install ipcalc
+# CentOS: sudo dnf install ipcalc
+
+ipcalc 192.168.1.0/26
+
+# Output:
+# Address:   192.168.1.0          11000000.10101000.00000001.00 000000
+# Netmask:   255.255.255.192 = 26 11111111.11111111.11111111.11 000000
+# Wildcard:  0.0.0.63             00000000.00000000.00000000.00 111111
+# Network:   192.168.1.0/26       11000000.10101000.00000001.00 000000
+# HostMin:   192.168.1.1          11000000.10101000.00000001.00 000001
+# HostMax:   192.168.1.62         11000000.10101000.00000001.00 111110
+# Broadcast: 192.168.1.63         11000000.10101000.00000001.00 111111
+# Hosts/Net: 62
+```
+
+### Subnetting in the Cloud
+
+Subnetting is not just an academic exercise. It is how you design cloud networks:
+
+```bash
+# AWS VPC example:
+# VPC CIDR:        10.0.0.0/16 (65,534 hosts)
+#
+# Public subnets (one per AZ):
+#   us-east-1a:    10.0.1.0/24  (254 hosts)
+#   us-east-1b:    10.0.2.0/24  (254 hosts)
+#   us-east-1c:    10.0.3.0/24  (254 hosts)
+#
+# Private subnets (one per AZ):
+#   us-east-1a:    10.0.10.0/24 (254 hosts)
+#   us-east-1b:    10.0.11.0/24 (254 hosts)
+#   us-east-1c:    10.0.12.0/24 (254 hosts)
+#
+# Database subnets:
+#   us-east-1a:    10.0.20.0/24 (254 hosts)
+#   us-east-1b:    10.0.21.0/24 (254 hosts)
+
+# Kubernetes example:
+# Pod network:     10.244.0.0/16
+#   Node 1 pods:   10.244.0.0/24  (254 pods)
+#   Node 2 pods:   10.244.1.0/24  (254 pods)
+#   Node 3 pods:   10.244.2.0/24  (254 pods)
+# Service network: 10.96.0.0/12
+```
+
+## IPv6 Basics
+
+IPv4's 4.3 billion addresses are exhausted. **IPv6** uses 128-bit addresses, providing an essentially unlimited number:
+
+```
+IPv4: 32 bits  = ~4.3 billion addresses
+IPv6: 128 bits = ~340 undecillion addresses (3.4 × 10^38)
+
+IPv6 format: Eight groups of four hex digits, separated by colons
+Full:        2001:0db8:0000:0000:0000:0000:0000:0001
+Shortened:   2001:db8::1    (leading zeros removed, :: replaces consecutive zero groups)
+```
+
+### Common IPv6 Addresses
+
+| Address | Purpose |
+|---|---|
+| ::1 | Loopback (like 127.0.0.1) |
+| :: | All zeros (like 0.0.0.0) |
+| fe80::/10 | Link-local (like 169.254.x.x) |
+| 2001:db8::/32 | Documentation examples |
+| fc00::/7 | Unique local (like private IPv4) |
+
+```bash
+# Check your IPv6 addresses:
+ip -6 addr show
+
+# Ping an IPv6 address:
+ping6 ::1
+# or
+ping -6 ::1
+
+# Check if you have IPv6 connectivity:
+curl -6 https://ifconfig.co
+```
+
+<Callout type="info" title="IPv6 in DevOps">
+IPv6 adoption is growing but IPv4 is still dominant in most infrastructure. Kubernetes supports dual-stack (both IPv4 and IPv6). AWS, GCP, and Azure all support IPv6 for VPCs. You do not need to master IPv6 right now, but you should understand the basics and be aware that it exists. Many container and cloud networking systems are starting to require IPv6 knowledge.
+</Callout>
+
+## NAT: Network Address Translation
+
+**NAT** allows multiple devices with private IP addresses to share a single public IP address. Your home router does this.
+
+```
+Inside your network:                     Internet:
+
+┌─────────────────────┐
+│ Laptop: 192.168.1.50│──┐
+├─────────────────────┤  │    ┌──────────┐         ┌────────────┐
+│ Phone:  192.168.1.51│──┼──► │  Router  │ ──────► │   Server   │
+├─────────────────────┤  │    │ NAT:     │         │ 93.184.216 │
+│ Server: 192.168.1.52│──┘    │ 203.0.113│         └────────────┘
+└─────────────────────┘       └──────────┘
+Private IPs                   Public IP            Public IP
+
+The router translates:
+  192.168.1.50:54321 ←→ 203.0.113.5:54321
+  192.168.1.51:54322 ←→ 203.0.113.5:54322
+  192.168.1.52:54323 ←→ 203.0.113.5:54323
+```
+
+```bash
+# See your NAT/routing information:
+ip route show
+
+# See NAT translations (on a Linux router):
+sudo iptables -t nat -L -n -v
+
+# The server only sees the public IP (203.0.113.5)
+# It does not know about 192.168.1.50
+```
+
+## DHCP: Dynamic Host Configuration Protocol
+
+**DHCP** automatically assigns IP addresses to devices joining a network. Without DHCP, you would have to manually configure every device.
+
+```
+DHCP Process (DORA):
+
+1. Discover — Client broadcasts: "Any DHCP servers out there?"
+2. Offer    — Server responds: "Here's an IP you can use: 192.168.1.50"
+3. Request  — Client replies: "I'll take 192.168.1.50, please"
+4. Acknowledge — Server confirms: "It's yours for 24 hours (lease time)"
+```
+
+```bash
+# See your DHCP lease information:
+cat /var/lib/dhcp/dhclient.leases 2>/dev/null || \
+cat /var/lib/dhclient/dhclient.leases 2>/dev/null || \
+echo "DHCP lease file not found (location varies by distro)"
+
+# Release and renew your DHCP lease:
+sudo dhclient -r eth0     # Release
+sudo dhclient eth0        # Renew
+
+# On systems with NetworkManager:
+sudo nmcli connection down eth0 && sudo nmcli connection up eth0
+```
+
+<Exercise number={1} title="Subnet Calculator">
+
+Calculate the following for each CIDR block. Do the math by hand first, then verify with `ipcalc` or the solution.
+
+**Block 1:** 10.0.0.0/24
+- Network address:
+- Broadcast address:
+- First usable host:
+- Last usable host:
+- Number of usable hosts:
+
+**Block 2:** 172.16.0.0/20
+- Network address:
+- Broadcast address:
+- First usable host:
+- Last usable host:
+- Number of usable hosts:
+
+**Block 3:** 192.168.10.130/27
+- Network address:
+- Broadcast address:
+- First usable host:
+- Last usable host:
+- Number of usable hosts:
+
+<CollapsibleSolution>
+
+```bash
+# Block 1: 10.0.0.0/24
+# Host bits: 32 - 24 = 8
+# Addresses: 2^8 = 256
+# Usable: 256 - 2 = 254
+
+Network address:    10.0.0.0
+Broadcast address:  10.0.0.255
+First usable host:  10.0.0.1
+Last usable host:   10.0.0.254
+Usable hosts:       254
+
+# Block 2: 172.16.0.0/20
+# Host bits: 32 - 20 = 12
+# Addresses: 2^12 = 4,096
+# Usable: 4,096 - 2 = 4,094
+
+Network address:    172.16.0.0
+Broadcast address:  172.16.15.255
+First usable host:  172.16.0.1
+Last usable host:   172.16.15.254
+Usable hosts:       4,094
+
+# Why 172.16.15.255?
+# /20 means the third octet has 4 network bits and 4 host bits.
+# 4 host bits in third octet: 2^4 - 1 = 15
+# So the third octet ranges from 0 to 15.
+
+# Block 3: 192.168.10.130/27
+# Host bits: 32 - 27 = 5
+# Addresses: 2^5 = 32
+# Usable: 32 - 2 = 30
+# Block size: 32. Networks start at multiples of 32: 0, 32, 64, 96, 128, 160...
+# 130 falls in the 128 block (128 <= 130 < 160)
+
+Network address:    192.168.10.128
+Broadcast address:  192.168.10.159
+First usable host:  192.168.10.129
+Last usable host:   192.168.10.158
+Usable hosts:       30
+```
+
+Verify with ipcalc:
+
+```bash
+ipcalc 10.0.0.0/24
+ipcalc 172.16.0.0/20
+ipcalc 192.168.10.130/27
+```
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise number={2} title="Network Planning">
+
+You are designing the network for a small office with 4 departments. You have been assigned the network 10.10.0.0/16. Design an IP addressing scheme that meets these requirements:
+
+| Department | Required Hosts | Subnet |
+|---|---|---|
+| Engineering | 200 | ? |
+| Marketing | 50 | ? |
+| Finance | 25 | ? |
+| Management | 10 | ? |
+
+Additionally, plan for:
+- A server subnet for 30 servers
+- A guest Wi-Fi network for up to 100 devices
+
+Requirements:
+1. Choose an appropriate CIDR block for each department
+2. Ensure subnets do not overlap
+3. Leave room for growth
+4. Document the network address, usable range, and broadcast for each
+
+<CollapsibleSolution>
+
+```bash
+# Available: 10.10.0.0/16 (65,534 usable addresses)
+# Strategy: Use /24 blocks for simplicity, smaller for small departments
+
+# ============================
+# Engineering (needs 200 hosts)
+# ============================
+# /24 gives 254 hosts — fits with room to grow
+Subnet:      10.10.1.0/24
+Network:     10.10.1.0
+Usable:      10.10.1.1 – 10.10.1.254
+Broadcast:   10.10.1.255
+Hosts:       254
+
+# ============================
+# Marketing (needs 50 hosts)
+# ============================
+# /26 gives 62 hosts — fits, but tight
+# /24 gives 254 hosts — better for growth
+Subnet:      10.10.2.0/24
+Network:     10.10.2.0
+Usable:      10.10.2.1 – 10.10.2.254
+Broadcast:   10.10.2.255
+Hosts:       254
+
+# ============================
+# Finance (needs 25 hosts)
+# ============================
+# /27 gives 30 hosts — fits but very tight
+# /24 gives 254 hosts — generous but consistent
+Subnet:      10.10.3.0/24
+Network:     10.10.3.0
+Usable:      10.10.3.1 – 10.10.3.254
+Broadcast:   10.10.3.255
+Hosts:       254
+
+# ============================
+# Management (needs 10 hosts)
+# ============================
+Subnet:      10.10.4.0/24
+Network:     10.10.4.0
+Usable:      10.10.4.1 – 10.10.4.254
+Broadcast:   10.10.4.255
+Hosts:       254
+
+# ============================
+# Servers (needs 30)
+# ============================
+Subnet:      10.10.10.0/24
+Network:     10.10.10.0
+Usable:      10.10.10.1 – 10.10.10.254
+Broadcast:   10.10.10.255
+Hosts:       254
+
+# ============================
+# Guest Wi-Fi (needs 100)
+# ============================
+Subnet:      10.10.20.0/24
+Network:     10.10.20.0
+Usable:      10.10.20.1 – 10.10.20.254
+Broadcast:   10.10.20.255
+Hosts:       254
+
+# ============================
+# Summary
+# ============================
+# 10.10.1.0/24  — Engineering (200 needed, 254 available)
+# 10.10.2.0/24  — Marketing (50 needed, 254 available)
+# 10.10.3.0/24  — Finance (25 needed, 254 available)
+# 10.10.4.0/24  — Management (10 needed, 254 available)
+# 10.10.10.0/24 — Servers (30 needed, 254 available)
+# 10.10.20.0/24 — Guest Wi-Fi (100 needed, 254 available)
+#
+# Used: 6 × /24 = 1,524 addresses out of 65,536 available
+# Remaining: ~64,000 addresses for future growth
+#
+# The gaps (10.10.5-9, 10.10.11-19, 10.10.21+) allow
+# for easy expansion without renumbering.
+```
+
+Key design decisions:
+- Using /24 for all subnets for consistency (even though some departments need fewer addresses)
+- Leaving gaps between ranges for future departments or subnets
+- Separating servers (10.10.10.x) and guest Wi-Fi (10.10.20.x) from user subnets
+- This structure makes firewall rules and routing policies cleaner
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Subnet Calculator Tool">
+
+Build a script that takes a CIDR block and outputs all relevant subnet information, just like `ipcalc` but simpler and custom-built.
+
+```bash
+#!/bin/bash
+# subnet-calc.sh — Calculate subnet details from a CIDR block
+# Usage: ./subnet-calc.sh 192.168.1.0/24
+
+CIDR="${1}"
+
+if [ -z "$CIDR" ]; then
+    echo "Usage: $0 <ip>/<prefix>"
+    echo "Example: $0 192.168.1.0/24"
+    exit 1
+fi
+
+# Parse IP and prefix
+IP="${CIDR%/*}"
+PREFIX="${CIDR#*/}"
+
+# Validate prefix
+if [ "$PREFIX" -lt 0 ] || [ "$PREFIX" -gt 32 ] 2>/dev/null; then
+    echo "ERROR: Prefix must be between 0 and 32"
+    exit 1
+fi
+
+# Convert IP to 32-bit integer
+ip_to_int() {
+    local IFS='.'
+    read -r a b c d <<< "$1"
+    echo $(( (a << 24) + (b << 16) + (c << 8) + d ))
+}
+
+# Convert 32-bit integer to IP
+int_to_ip() {
+    local n=$1
+    echo "$(( (n >> 24) & 255 )).$(( (n >> 16) & 255 )).$(( (n >> 8) & 255 )).$(( n & 255 ))"
+}
+
+# Convert IP to binary string for display
+ip_to_binary() {
+    local IFS='.'
+    read -r a b c d <<< "$1"
+    for octet in $a $b $c $d; do
+        printf "%08d" "$(echo "obase=2;$octet" | bc)"
+        printf "."
+    done | sed 's/\.$/\n/'
+}
+
+# Calculate values
+IP_INT=$(ip_to_int "$IP")
+
+# Subnet mask
+if [ "$PREFIX" -eq 0 ]; then
+    MASK_INT=0
+else
+    MASK_INT=$(( 0xFFFFFFFF << (32 - PREFIX) & 0xFFFFFFFF ))
+fi
+MASK=$(int_to_ip $MASK_INT)
+
+# Wildcard mask (inverse of subnet mask)
+WILDCARD_INT=$(( MASK_INT ^ 0xFFFFFFFF ))
+WILDCARD=$(int_to_ip $WILDCARD_INT)
+
+# Network address (IP AND mask)
+NETWORK_INT=$(( IP_INT & MASK_INT ))
+NETWORK=$(int_to_ip $NETWORK_INT)
+
+# Broadcast address (network OR wildcard)
+BROADCAST_INT=$(( NETWORK_INT | WILDCARD_INT ))
+BROADCAST=$(int_to_ip $BROADCAST_INT)
+
+# Host range
+FIRST_HOST_INT=$(( NETWORK_INT + 1 ))
+LAST_HOST_INT=$(( BROADCAST_INT - 1 ))
+FIRST_HOST=$(int_to_ip $FIRST_HOST_INT)
+LAST_HOST=$(int_to_ip $LAST_HOST_INT)
+
+# Number of addresses and usable hosts
+TOTAL_ADDRESSES=$(( 1 << (32 - PREFIX) ))
+if [ "$PREFIX" -le 30 ]; then
+    USABLE_HOSTS=$(( TOTAL_ADDRESSES - 2 ))
+elif [ "$PREFIX" -eq 31 ]; then
+    USABLE_HOSTS=2
+    FIRST_HOST=$NETWORK
+    LAST_HOST=$BROADCAST
+elif [ "$PREFIX" -eq 32 ]; then
+    USABLE_HOSTS=1
+    FIRST_HOST=$IP
+    LAST_HOST=$IP
+fi
+
+# Determine if the IP is private
+is_private() {
+    local ip_int=$1
+    local ten=$(ip_to_int "10.0.0.0")
+    local ten_end=$(ip_to_int "10.255.255.255")
+    local oneseventwo=$(ip_to_int "172.16.0.0")
+    local oneseventwo_end=$(ip_to_int "172.31.255.255")
+    local onenine=$(ip_to_int "192.168.0.0")
+    local onenine_end=$(ip_to_int "192.168.255.255")
+
+    if [ "$ip_int" -ge "$ten" ] && [ "$ip_int" -le "$ten_end" ]; then
+        echo "Private (10.0.0.0/8)"
+    elif [ "$ip_int" -ge "$oneseventwo" ] && [ "$ip_int" -le "$oneseventwo_end" ]; then
+        echo "Private (172.16.0.0/12)"
+    elif [ "$ip_int" -ge "$onenine" ] && [ "$ip_int" -le "$onenine_end" ]; then
+        echo "Private (192.168.0.0/16)"
+    else
+        echo "Public"
+    fi
+}
+
+IP_CLASS=$(is_private $IP_INT)
+
+# Output
+echo "=============================================="
+echo "  Subnet Calculator"
+echo "  Input: $CIDR"
+echo "=============================================="
+echo ""
+echo "  IP Address:       $IP"
+echo "  Prefix Length:    /$PREFIX"
+echo "  Subnet Mask:      $MASK"
+echo "  Wildcard Mask:    $WILDCARD"
+echo ""
+echo "  Network Address:  $NETWORK/$PREFIX"
+echo "  Broadcast:        $BROADCAST"
+echo "  First Usable:     $FIRST_HOST"
+echo "  Last Usable:      $LAST_HOST"
+echo ""
+echo "  Total Addresses:  $TOTAL_ADDRESSES"
+echo "  Usable Hosts:     $USABLE_HOSTS"
+echo "  IP Type:          $IP_CLASS"
+echo ""
+echo "  Binary:"
+echo "  IP:     $(ip_to_binary "$IP")"
+echo "  Mask:   $(ip_to_binary "$MASK")"
+echo "  Network:$(ip_to_binary "$NETWORK")"
+echo "=============================================="
+```
+
+Save and test:
+
+```bash
+chmod +x subnet-calc.sh
+
+# Test with different CIDR blocks
+./subnet-calc.sh 192.168.1.0/24
+./subnet-calc.sh 10.0.0.0/16
+./subnet-calc.sh 172.16.50.200/20
+./subnet-calc.sh 192.168.10.130/27
+
+# Compare your output with ipcalc:
+ipcalc 192.168.10.130/27
+```
+
+This script performs the same calculations you did by hand in Exercise 1, but automated. Building tools like this reinforces your understanding of the math and gives you a utility you can use in real work.
+
+</MiniProject>
+
+## Key Takeaways
+
+- An IPv4 address is a 32-bit number with a network portion and a host portion, separated by the subnet mask
+- CIDR notation (/24, /16, /20) specifies the number of network bits — the remaining bits determine how many hosts fit in the subnet
+- The formula for usable hosts is 2^(32-prefix) - 2 (subtracting the network and broadcast addresses)
+- Private IP ranges (10.x, 172.16-31.x, 192.168.x) are used inside networks; NAT translates them to public IPs for Internet access
+- Subnetting is a daily skill in DevOps — every VPC, Docker network, and Kubernetes cluster requires IP address planning
+
+<Quiz>
+<QuizQuestion
+  question="How many usable host addresses are in a /28 subnet?"
+  options={["14", "16", "30", "32"]}
+  answer={0}
+  explanation="A /28 has 32 - 28 = 4 host bits. 2^4 = 16 total addresses. Subtract 2 for network and broadcast: 16 - 2 = 14 usable hosts."
+/>
+<QuizQuestion
+  question="What is the network address of 10.0.50.200/20?"
+  options={[
+    "10.0.50.0",
+    "10.0.48.0",
+    "10.0.32.0",
+    "10.0.0.0"
+  ]}
+  answer={1}
+  explanation="With /20, the third octet has 4 network bits. The block size is 2^4 = 16. The largest multiple of 16 that is <= 50 is 48. So the network address is 10.0.48.0."
+/>
+<QuizQuestion
+  question="A service binds to 0.0.0.0:5432. What does this mean?"
+  options={[
+    "It only accepts connections from localhost",
+    "It accepts connections from any network interface",
+    "It is not listening on any port",
+    "It only accepts connections from the default gateway"
+  ]}
+  answer={1}
+  explanation="0.0.0.0 means 'all interfaces.' A service binding to 0.0.0.0:5432 accepts connections from any IP address that can reach the host — both local and remote. For internal services like databases, this can be a security risk; bind to 127.0.0.1 instead."
+/>
+<QuizQuestion
+  question="Which private IP range is commonly used for AWS VPC default CIDR blocks?"
+  options={[
+    "192.168.0.0/16",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "169.254.0.0/16"
+  ]}
+  answer={1}
+  explanation="The 10.0.0.0/8 range is the most commonly used for cloud VPCs because it provides over 16 million addresses, allowing for extensive subnetting. 169.254.0.0/16 is link-local (APIPA), not a private range for general use."
+/>
+</Quiz>
+
+## What's Next?
+
+In the next lesson, **DNS Deep Dive**, you will learn how domain names become IP addresses. Now that you understand IP addressing and subnetting, you will see how DNS maps human-readable names like `www.example.com` to the IP addresses you just learned to calculate. DNS issues are one of the most common causes of outages — and you will learn to diagnose and fix them.

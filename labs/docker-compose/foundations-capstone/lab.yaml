@@ -1,0 +1,131 @@
+name: foundations-capstone
+title: "Foundations Capstone Lab — Server Monitoring System"
+description: "Build a complete server monitoring and alerting system using Bash scripts, Python automation, Git workflows, and networking health checks. This capstone project integrates all five Foundations modules."
+module: "foundations-capstone"
+difficulty: intermediate
+duration: 180
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: cap-ex-1
+    title: "Set up the project with Git"
+    description: "Inside the /workspace directory, initialize a new Git repository. Create a proper directory structure with directories: scripts/, python/, config/, logs/, and reports/. Create a README.md describing your monitoring project. Stage everything and make your initial commit with a conventional commit message."
+    hints:
+      - "Use: git init && mkdir -p scripts python config logs reports"
+      - "Write a meaningful README: echo '# Server Monitoring System' > README.md"
+      - "Commit: git add -A && git commit -m 'feat: initial project structure'"
+    validation:
+      type: command
+      command: "cd /workspace && git log --oneline | grep -qi 'initial\\|feat' && test -d scripts && test -d python && test -d config && test -d logs && test -d reports && test -f README.md && echo 'pass'"
+      expected_output: "pass"
+
+  - id: cap-ex-2
+    title: "Create a CPU monitoring Bash script"
+    description: "Create scripts/check_cpu.sh that outputs the current CPU usage percentage as JSON. The script should use /proc/stat or top to calculate CPU usage and output: {\"metric\": \"cpu\", \"value\": <percentage>, \"status\": \"ok|warning|critical\", \"timestamp\": \"<ISO-8601>\"}. Thresholds: ok < 80%, warning 80-95%, critical > 95%. Make the script executable."
+    hints:
+      - "Read /proc/stat twice with a 1-second sleep to calculate CPU delta"
+      - "Use bc for floating point math or awk for calculation"
+      - "Output JSON with: echo '{\"metric\": \"cpu\", \"value\": '\"$usage\"', ...}'"
+    validation:
+      type: command
+      command: "cd /workspace && test -x scripts/check_cpu.sh && output=$(bash scripts/check_cpu.sh 2>/dev/null) && echo \"$output\" | jq -e '.metric == \"cpu\" and .value != null and .status != null' >/dev/null 2>&1 && echo 'pass'"
+      expected_output: "pass"
+
+  - id: cap-ex-3
+    title: "Create memory and disk monitoring scripts"
+    description: "Create scripts/check_memory.sh and scripts/check_disk.sh. Each should output JSON in the same format as check_cpu.sh. Memory: use /proc/meminfo or free. Disk: use df for the root partition. Apply thresholds (ok/warning/critical) based on usage percentage. Commit your monitoring scripts on a 'feature/monitoring-scripts' branch."
+    hints:
+      - "Memory: free -m | awk '/Mem:/ {printf \"%.1f\", $3/$2 * 100}'"
+      - "Disk: df / | awk 'NR==2 {print $5}' | tr -d '%'"
+      - "Create branch: git checkout -b feature/monitoring-scripts"
+    validation:
+      type: command
+      command: "cd /workspace && test -x scripts/check_memory.sh && test -x scripts/check_disk.sh && bash scripts/check_memory.sh 2>/dev/null | jq -e '.metric == \"memory\"' >/dev/null 2>&1 && bash scripts/check_disk.sh 2>/dev/null | jq -e '.metric == \"disk\"' >/dev/null 2>&1 && echo 'pass'"
+      expected_output: "pass"
+
+  - id: cap-ex-4
+    title: "Create a combined Bash monitoring collector"
+    description: "Create scripts/collect_all.sh that runs all three check scripts and combines their output into a single JSON array. The script should also log the combined output to logs/metrics_<date>.log (using YYYY-MM-DD format). Merge your monitoring branch into main."
+    hints:
+      - "Collect outputs into an array: echo '[' && for script in check_cpu check_memory check_disk; do ..."
+      - "Log with: tee -a logs/metrics_$(date +%F).log"
+      - "Merge: git checkout main && git merge feature/monitoring-scripts"
+    validation:
+      type: command
+      command: "cd /workspace && test -x scripts/collect_all.sh && output=$(bash scripts/collect_all.sh 2>/dev/null) && echo \"$output\" | jq -e 'type == \"array\" and length >= 3' >/dev/null 2>&1 && echo 'pass'"
+      expected_output: "pass"
+
+  - id: cap-ex-5
+    title: "Build a Python MetricCollector class"
+    description: "Create python/collector.py with a MetricCollector class that collects CPU, memory, and disk metrics using the psutil library. The class should have methods: collect_cpu(), collect_memory(), collect_disk(), and collect_all() that returns a list of metric dictionaries. Include proper error handling and logging."
+    hints:
+      - "import psutil; psutil.cpu_percent(interval=1)"
+      - "psutil.virtual_memory().percent for memory"
+      - "psutil.disk_usage('/').percent for disk"
+    validation:
+      type: command
+      command: "cd /workspace && python3 -c \"from python.collector import MetricCollector; m = MetricCollector(); results = m.collect_all(); assert len(results) >= 3; assert all('metric' in r and 'value' in r for r in results); print('pass')\" 2>/dev/null || echo 'fail'"
+      expected_output: "pass"
+
+  - id: cap-ex-6
+    title: "Build a Python AlertManager class"
+    description: "Create python/alerter.py with an AlertManager class. It should accept thresholds from a config dictionary and evaluate metrics against them. Methods: check_thresholds(metrics) returns a list of alerts, send_alert(alert) prints alerts to console with severity coloring. Include a cooldown mechanism to prevent alert storms (no duplicate alerts within 60 seconds)."
+    hints:
+      - "Store thresholds as: {'cpu': {'warning': 80, 'critical': 95}, ...}"
+      - "Track last alert time per metric to implement cooldown"
+      - "Use ANSI colors: \\033[31m for red (critical), \\033[33m for yellow (warning)"
+    validation:
+      type: command
+      command: "cd /workspace && python3 -c \"from python.alerter import AlertManager; a = AlertManager({'cpu': {'warning': 80, 'critical': 95}}); alerts = a.check_thresholds([{'metric': 'cpu', 'value': 90, 'status': 'warning'}]); assert len(alerts) >= 1; print('pass')\" 2>/dev/null || echo 'fail'"
+      expected_output: "pass"
+
+  - id: cap-ex-7
+    title: "Add HTTP endpoint monitoring"
+    description: "Create python/network_checker.py with a NetworkChecker class. It should check HTTP endpoints (the webapp service at http://devops-capstone-webapp/) and TCP ports (Redis at devops-capstone-database:6379). Methods: check_http(url) and check_port(host, port) should return metric dictionaries with response time. Commit on a 'feature/network-checks' branch."
+    hints:
+      - "Use requests.get() with timeout for HTTP checks"
+      - "Use socket.create_connection() for TCP port checks"
+      - "Measure time with time.time() before and after the request"
+    validation:
+      type: command
+      command: "cd /workspace && python3 -c \"from python.network_checker import NetworkChecker; nc = NetworkChecker(); result = nc.check_http('http://devops-capstone-webapp/'); assert result['metric'] == 'http' and 'response_time' in result; print('pass')\" 2>/dev/null || echo 'fail'"
+      expected_output: "pass"
+
+  - id: cap-ex-8
+    title: "Load configuration from YAML"
+    description: "Create config/monitoring.yaml with monitoring settings (check interval, thresholds, endpoints, alert channels). Create python/config_loader.py that loads and validates this config file. The config should define: monitoring interval (seconds), threshold values for each metric, HTTP endpoints to check, and TCP ports to check."
+    hints:
+      - "import yaml; config = yaml.safe_load(open('config/monitoring.yaml'))"
+      - "Include validation: assert 'thresholds' in config"
+      - "Default values for missing keys with dict.get()"
+    validation:
+      type: command
+      command: "cd /workspace && test -f config/monitoring.yaml && python3 -c \"from python.config_loader import load_config; c = load_config('config/monitoring.yaml'); assert 'thresholds' in c; print('pass')\" 2>/dev/null || echo 'fail'"
+      expected_output: "pass"
+
+  - id: cap-ex-9
+    title: "Generate a monitoring report"
+    description: "Create python/reporter.py with a ReportGenerator class that produces a summary report. It should read metrics from the logs directory, calculate min/max/avg for each metric over the available data, and write an HTML report to reports/daily_report.html. The report should include a summary table with traffic-light coloring."
+    hints:
+      - "Read log files: glob.glob('logs/metrics_*.log')"
+      - "Use statistics module for mean, or calculate manually"
+      - "Generate HTML with f-strings or string templates"
+    validation:
+      type: command
+      command: "cd /workspace && python3 -c \"from python.reporter import ReportGenerator; r = ReportGenerator(); r.generate('reports/daily_report.html')\" 2>/dev/null && test -f reports/daily_report.html && grep -qi '<html\\|<table' reports/daily_report.html && echo 'pass'"
+      expected_output: "pass"
+
+  - id: cap-ex-10
+    title: "Create the main monitoring script and finalize the project"
+    description: "Create python/main.py that ties everything together: loads config, collects metrics (system + network), evaluates alerts, logs results, and can generate reports. Add a proper .gitignore, ensure all changes are committed with conventional commits, and tag the final version as v1.0.0. The main script should support --once (single run) and --report (generate report) flags."
+    hints:
+      - "Use argparse for CLI flags: --once, --report, --config"
+      - "Main loop: collect → evaluate → alert → log → sleep"
+      - "Tag: git tag -a v1.0.0 -m 'Release version 1.0.0'"
+    validation:
+      type: command
+      command: "cd /workspace && test -f python/main.py && python3 python/main.py --once 2>/dev/null && git tag | grep -q 'v1.0.0' && git log --oneline | wc -l | awk '$1 >= 5 {print \"pass\"}'"
+      expected_output: "pass"

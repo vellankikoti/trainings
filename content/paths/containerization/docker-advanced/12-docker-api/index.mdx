@@ -1,0 +1,1361 @@
+---
+title: "The Docker Engine API"
+description: "Master the Docker Engine REST API to build custom tools, automation scripts, and monitoring dashboards. Learn to interact via curl, Python docker-py, Go SDK, and event streaming."
+order: 12
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - 11-image-management
+objectives:
+  - Understand the Docker Engine API architecture and how the CLI communicates with the daemon
+  - Interact with the Docker API using curl over the Unix socket
+  - Perform container and image operations programmatically via the REST API
+  - Build automation tools using the Python Docker SDK (docker-py)
+  - Stream real-time container events for monitoring and alerting
+  - Handle API versioning and compatibility across Docker versions
+tags:
+  - docker
+  - docker-api
+  - automation
+  - docker-py
+  - rest-api
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your operations team manages 200+ containers across 15 Docker hosts. Every morning, the team lead spends 45 minutes SSH-ing into each host, running `docker ps`, checking container health, and compiling a status report in a spreadsheet. When a container crashes at 2 AM, the on-call engineer has to manually check each host to find it. You have been tasked with building an internal dashboard that shows every container's status in real time — no more SSH, no more spreadsheets. The Docker CLI will not cut it here. You need to talk directly to the Docker Engine API.
+</Callout>
+
+## Docker API Architecture
+
+Every `docker` command you have ever run is just a REST API call in disguise. The Docker CLI is a client that sends HTTP requests to the Docker daemon.
+
+```
+Docker Architecture — The API Layer:
+┌────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  ┌─────────────┐    HTTP/REST    ┌──────────────────────┐      │
+│  │  Docker CLI  │───────────────▶│   Docker Daemon      │      │
+│  │  (client)    │                │   (dockerd)          │      │
+│  └─────────────┘                 │                      │      │
+│                                  │  ┌────────────────┐  │      │
+│  ┌─────────────┐    HTTP/REST    │  │  Container     │  │      │
+│  │  curl        │───────────────▶│  │  Runtime       │  │      │
+│  │  (raw API)   │                │  │  (containerd)  │  │      │
+│  └─────────────┘                 │  └────────────────┘  │      │
+│                                  │                      │      │
+│  ┌─────────────┐    HTTP/REST    │  ┌────────────────┐  │      │
+│  │  Python SDK  │───────────────▶│  │  Image Store   │  │      │
+│  │  (docker-py) │                │  │                │  │      │
+│  └─────────────┘                 │  └────────────────┘  │      │
+│                                  │                      │      │
+│  ┌─────────────┐    HTTP/REST    │  ┌────────────────┐  │      │
+│  │  Custom App  │───────────────▶│  │  Network       │  │      │
+│  │  (any lang)  │                │  │  Driver        │  │      │
+│  └─────────────┘                 │  └────────────────┘  │      │
+│         │                        └──────────────────────┘      │
+│         │                                                       │
+│         ▼                                                       │
+│  Transport Options:                                             │
+│  ├── Unix Socket: /var/run/docker.sock (default, local only)   │
+│  ├── TCP: tcp://0.0.0.0:2376 (remote, must use TLS)           │
+│  └── SSH: ssh://user@host (remote, via SSH tunnel)             │
+│                                                                 │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### The Unix Socket
+
+By default, Docker listens on a Unix socket at `/var/run/docker.sock`. This is a file on the filesystem that allows local processes to communicate with the Docker daemon.
+
+```bash
+# Check the socket exists
+ls -la /var/run/docker.sock
+# srw-rw---- 1 root docker 0 Mar 01 10:00 /var/run/docker.sock
+
+# The socket is owned by root:docker
+# Your user must be in the 'docker' group to access it
+groups
+# user docker
+
+# The Docker CLI uses this socket by default
+# You can see this with strace:
+strace -e trace=connect docker ps 2>&1 | grep docker.sock
+# connect(3, {sa_family=AF_UNIX, sun_path="/var/run/docker.sock"}, 33) = 0
+```
+
+<Callout type="warning" title="The Docker Socket Is Root-Equivalent">
+Any process that can access `/var/run/docker.sock` has full control over the Docker daemon, which means it can mount the host filesystem, access host networking, and effectively gain root access to the host. Never mount the Docker socket into containers unless absolutely necessary, and never expose it over TCP without TLS and authentication.
+</Callout>
+
+## Interacting with the API via curl
+
+You can talk to the Docker API using `curl` and the `--unix-socket` flag. This is the most direct way to understand what the API offers.
+
+### Ping and Version
+
+```bash
+# Ping the daemon — simplest possible API call
+curl --unix-socket /var/run/docker.sock http://localhost/_ping
+# OK
+
+# Get Docker version info
+curl -s --unix-socket /var/run/docker.sock http://localhost/version | jq .
+# {
+#   "Platform": { "Name": "Docker Engine - Community" },
+#   "Components": [
+#     {
+#       "Name": "Engine",
+#       "Version": "26.1.0",
+#       "Details": { "ApiVersion": "1.45", ... }
+#     },
+#     {
+#       "Name": "containerd",
+#       "Version": "1.7.15"
+#     },
+#     {
+#       "Name": "runc",
+#       "Version": "1.1.12"
+#     }
+#   ],
+#   "Version": "26.1.0",
+#   "ApiVersion": "1.45",
+#   "MinAPIVersion": "1.24",
+#   "Os": "linux",
+#   "Arch": "amd64",
+#   "KernelVersion": "6.5.0-21-generic"
+# }
+
+# Get system information (equivalent to `docker info`)
+curl -s --unix-socket /var/run/docker.sock http://localhost/info | jq '{
+  Containers: .Containers,
+  ContainersRunning: .ContainersRunning,
+  ContainersStopped: .ContainersStopped,
+  Images: .Images,
+  ServerVersion: .ServerVersion,
+  MemTotal: .MemTotal,
+  NCPU: .NCPU
+}'
+# {
+#   "Containers": 12,
+#   "ContainersRunning": 8,
+#   "ContainersStopped": 4,
+#   "Images": 47,
+#   "ServerVersion": "26.1.0",
+#   "MemTotal": 16777216000,
+#   "NCPU": 8
+# }
+```
+
+### Container Operations
+
+```bash
+# List all running containers (equivalent to `docker ps`)
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/json" | jq '.[] | {
+    Id: .Id[:12],
+    Name: .Names[0],
+    Image: .Image,
+    State: .State,
+    Status: .Status
+  }'
+# {
+#   "Id": "abc123def456",
+#   "Name": "/auth-service",
+#   "Image": "registry.acme.io/platform/auth-service:v2.3.1",
+#   "State": "running",
+#   "Status": "Up 3 hours (healthy)"
+# }
+
+# List ALL containers including stopped (equivalent to `docker ps -a`)
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/json?all=true" | jq length
+# 12
+
+# Create a new container (equivalent to `docker create`)
+curl -s --unix-socket /var/run/docker.sock \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Image": "nginx:alpine",
+    "Cmd": ["nginx", "-g", "daemon off;"],
+    "ExposedPorts": { "80/tcp": {} },
+    "HostConfig": {
+      "PortBindings": {
+        "80/tcp": [{ "HostPort": "8080" }]
+      },
+      "Memory": 268435456,
+      "CpuQuota": 50000
+    },
+    "Env": ["NGINX_HOST=example.com"],
+    "Labels": {
+      "app": "web",
+      "environment": "dev"
+    }
+  }' \
+  "http://localhost/containers/create?name=my-nginx" | jq .
+# {
+#   "Id": "a1b2c3d4e5f6...",
+#   "Warnings": []
+# }
+
+# Start the container
+CONTAINER_ID="a1b2c3d4e5f6"
+curl -s --unix-socket /var/run/docker.sock \
+  -X POST \
+  "http://localhost/containers/${CONTAINER_ID}/start"
+# (empty response, 204 No Content = success)
+
+# Inspect a container (equivalent to `docker inspect`)
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/${CONTAINER_ID}/json" | jq '{
+    State: .State,
+    Config: { Image: .Config.Image, Env: .Config.Env },
+    NetworkSettings: { IPAddress: .NetworkSettings.IPAddress }
+  }'
+
+# Get container logs (equivalent to `docker logs`)
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/${CONTAINER_ID}/logs?stdout=true&stderr=true&tail=20"
+
+# Get container stats (equivalent to `docker stats --no-stream`)
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/${CONTAINER_ID}/stats?stream=false" | jq '{
+    cpu_percent: ((.cpu_stats.cpu_usage.total_usage - .precpu_stats.cpu_usage.total_usage) / (.cpu_stats.system_cpu_usage - .precpu_stats.system_cpu_usage) * .cpu_stats.online_cpus * 100),
+    memory_usage_mb: (.memory_stats.usage / 1048576),
+    memory_limit_mb: (.memory_stats.limit / 1048576),
+    network_rx_mb: ((.networks.eth0.rx_bytes // 0) / 1048576),
+    network_tx_mb: ((.networks.eth0.tx_bytes // 0) / 1048576)
+  }'
+
+# Stop a container (equivalent to `docker stop`)
+curl -s --unix-socket /var/run/docker.sock \
+  -X POST \
+  "http://localhost/containers/${CONTAINER_ID}/stop?t=10"
+# (waits up to 10 seconds for graceful shutdown, then sends SIGKILL)
+
+# Remove a container (equivalent to `docker rm`)
+curl -s --unix-socket /var/run/docker.sock \
+  -X DELETE \
+  "http://localhost/containers/${CONTAINER_ID}?force=true"
+```
+
+### Image Operations
+
+```bash
+# List images (equivalent to `docker images`)
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/images/json" | jq '.[] | {
+    Id: .Id[:19],
+    RepoTags: .RepoTags,
+    Size_MB: (.Size / 1048576 | floor)
+  }'
+
+# Pull an image (equivalent to `docker pull`)
+curl -s --unix-socket /var/run/docker.sock \
+  -X POST \
+  "http://localhost/images/create?fromImage=alpine&tag=3.19" | jq .
+# {"status":"Pulling from library/alpine","id":"3.19"}
+# {"status":"Pulling fs layer","progressDetail":{},"id":"sha256:abc123..."}
+# {"status":"Pull complete","progressDetail":{},"id":"sha256:abc123..."}
+# {"status":"Digest: sha256:def456..."}
+# {"status":"Downloaded newer image for alpine:3.19"}
+
+# Pull from a private registry (with authentication)
+# First, encode credentials
+AUTH=$(echo -n '{"username":"myuser","password":"mypass","serveraddress":"registry.acme.io"}' | base64)
+
+curl -s --unix-socket /var/run/docker.sock \
+  -X POST \
+  -H "X-Registry-Auth: ${AUTH}" \
+  "http://localhost/images/create?fromImage=registry.acme.io/platform/auth-service&tag=v2.3.1"
+
+# Tag an image (equivalent to `docker tag`)
+curl -s --unix-socket /var/run/docker.sock \
+  -X POST \
+  "http://localhost/images/alpine:3.19/tag?repo=registry.acme.io/platform/base-alpine&tag=3.19"
+
+# Delete an image (equivalent to `docker rmi`)
+curl -s --unix-socket /var/run/docker.sock \
+  -X DELETE \
+  "http://localhost/images/alpine:3.18" | jq .
+# [
+#   { "Untagged": "alpine:3.18" },
+#   { "Deleted": "sha256:abc123..." }
+# ]
+
+# Build an image from a Dockerfile (equivalent to `docker build`)
+# The build context must be sent as a tar archive
+tar -czf context.tar.gz Dockerfile src/ requirements.txt
+
+curl -s --unix-socket /var/run/docker.sock \
+  -X POST \
+  -H "Content-Type: application/x-tar" \
+  --data-binary @context.tar.gz \
+  "http://localhost/build?t=myapp:latest&dockerfile=Dockerfile"
+```
+
+<Callout type="info" title="API Reference Documentation">
+The complete Docker Engine API reference is available at https://docs.docker.com/engine/api/. Each endpoint is documented with request parameters, request body schema, and response format. The API version in the URL (e.g., `/v1.45/containers/json`) determines which features are available. Always specify the API version explicitly in production code to avoid breaking changes.
+</Callout>
+
+## Docker SDKs
+
+While `curl` is great for exploration, real tools are built with proper SDKs. Docker provides official SDKs for Python, Go, and community SDKs for other languages.
+
+### Python SDK (docker-py)
+
+```bash
+# Install the Python Docker SDK
+pip install docker
+```
+
+```python
+# docker_basics.py — Basic container operations with docker-py
+import docker
+
+# Connect to the Docker daemon
+client = docker.from_env()  # Uses /var/run/docker.sock by default
+
+# Alternatively, connect to a remote Docker host
+# client = docker.DockerClient(base_url='tcp://192.168.1.100:2376',
+#                               tls=True)
+
+# --- System Information ---
+info = client.info()
+print(f"Docker Version: {info['ServerVersion']}")
+print(f"Containers: {info['Containers']} (Running: {info['ContainersRunning']})")
+print(f"Images: {info['Images']}")
+print(f"CPUs: {info['NCPU']}, Memory: {info['MemTotal'] // (1024**3)} GB")
+
+# --- Container Operations ---
+
+# List running containers
+for container in client.containers.list():
+    print(f"  {container.short_id} | {container.name:20s} | {container.status} | {container.image.tags}")
+
+# Run a new container (docker run equivalent)
+container = client.containers.run(
+    image="nginx:alpine",
+    name="api-test",
+    ports={'80/tcp': 8080},
+    environment={'NGINX_HOST': 'localhost'},
+    labels={'app': 'test', 'managed-by': 'python-sdk'},
+    mem_limit='256m',
+    cpu_quota=50000,
+    detach=True,  # Run in background
+    remove=False
+)
+print(f"Started container: {container.name} ({container.short_id})")
+
+# Get container details
+container.reload()  # Refresh state from daemon
+print(f"Status: {container.status}")
+print(f"IP Address: {container.attrs['NetworkSettings']['IPAddress']}")
+
+# Get container logs
+logs = container.logs(tail=10, timestamps=True).decode('utf-8')
+print(f"Last 10 log lines:\n{logs}")
+
+# Execute a command inside the container
+exit_code, output = container.exec_run("nginx -v")
+print(f"Nginx version: {output.decode('utf-8')}")
+
+# Get container stats
+stats = container.stats(stream=False)
+cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - \
+            stats['precpu_stats']['cpu_usage']['total_usage']
+system_delta = stats['cpu_stats']['system_cpu_usage'] - \
+               stats['precpu_stats']['system_cpu_usage']
+cpu_percent = (cpu_delta / system_delta) * stats['cpu_stats']['online_cpus'] * 100
+memory_mb = stats['memory_stats']['usage'] / (1024 * 1024)
+print(f"CPU: {cpu_percent:.2f}%, Memory: {memory_mb:.1f} MB")
+
+# Stop and remove
+container.stop(timeout=10)
+container.remove()
+print("Container stopped and removed")
+```
+
+```python
+# docker_image_ops.py — Image operations with docker-py
+import docker
+
+client = docker.from_env()
+
+# --- Image Operations ---
+
+# Pull an image
+image = client.images.pull('python', tag='3.12-slim')
+print(f"Pulled: {image.tags}, Size: {image.attrs['Size'] // (1024*1024)} MB")
+
+# List images
+for img in client.images.list():
+    tags = img.tags if img.tags else ['<none>']
+    size_mb = img.attrs['Size'] // (1024 * 1024)
+    print(f"  {tags[0]:40s} | {size_mb:>6d} MB")
+
+# Build an image from a Dockerfile
+image, build_logs = client.images.build(
+    path="./my-app",
+    tag="myapp:latest",
+    dockerfile="Dockerfile",
+    buildargs={"VERSION": "1.0.0"},
+    rm=True,  # Remove intermediate containers
+    pull=True  # Always pull base image
+)
+
+for log in build_logs:
+    if 'stream' in log:
+        print(log['stream'], end='')
+
+print(f"\nBuilt: {image.tags}")
+
+# Tag and push
+image.tag('registry.acme.io/platform/myapp', tag='v1.0.0')
+push_logs = client.images.push(
+    'registry.acme.io/platform/myapp',
+    tag='v1.0.0',
+    stream=True,
+    decode=True
+)
+for log in push_logs:
+    print(log)
+
+# Inspect image layers
+history = image.history()
+for layer in history:
+    size_mb = layer['Size'] / (1024 * 1024)
+    cmd = layer['CreatedBy'][:80] if layer['CreatedBy'] else '<missing>'
+    print(f"  {size_mb:>8.1f} MB | {cmd}")
+
+# Prune unused images
+pruned = client.images.prune(filters={'dangling': True})
+print(f"Reclaimed: {pruned['SpaceReclaimed'] // (1024*1024)} MB")
+```
+
+### Go SDK
+
+```go
+// main.go — Docker operations with the Go SDK
+package main
+
+import (
+    "context"
+    "fmt"
+    "io"
+    "os"
+
+    "github.com/docker/docker/api/types"
+    "github.com/docker/docker/api/types/container"
+    "github.com/docker/docker/client"
+    "github.com/docker/go-connections/nat"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // Create a Docker client
+    cli, err := client.NewClientWithOpts(client.FromEnv,
+        client.WithAPIVersionNegotiation())
+    if err != nil {
+        panic(err)
+    }
+    defer cli.Close()
+
+    // List containers
+    containers, err := cli.ContainerList(ctx, container.ListOptions{All: true})
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("%-12s %-20s %-10s %s\n", "ID", "NAME", "STATE", "IMAGE")
+    for _, c := range containers {
+        name := ""
+        if len(c.Names) > 0 {
+            name = c.Names[0][1:] // Remove leading "/"
+        }
+        fmt.Printf("%-12s %-20s %-10s %s\n",
+            c.ID[:12], name, c.State, c.Image)
+    }
+
+    // Create and start a container
+    resp, err := cli.ContainerCreate(ctx,
+        &container.Config{
+            Image: "nginx:alpine",
+            Env:   []string{"NGINX_HOST=localhost"},
+            ExposedPorts: nat.PortSet{
+                "80/tcp": struct{}{},
+            },
+        },
+        &container.HostConfig{
+            PortBindings: nat.PortMap{
+                "80/tcp": []nat.PortBinding{
+                    {HostIP: "0.0.0.0", HostPort: "9090"},
+                },
+            },
+            Resources: container.Resources{
+                Memory:   256 * 1024 * 1024, // 256 MB
+                CPUQuota: 50000,
+            },
+        },
+        nil, nil, "my-nginx-go")
+
+    if err != nil {
+        panic(err)
+    }
+
+    if err := cli.ContainerStart(ctx, resp.ID,
+        container.StartOptions{}); err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("Started container: %s\n", resp.ID[:12])
+
+    // Get container logs
+    logReader, err := cli.ContainerLogs(ctx, resp.ID,
+        container.LogsOptions{ShowStdout: true, Tail: "10"})
+    if err != nil {
+        panic(err)
+    }
+    defer logReader.Close()
+    io.Copy(os.Stdout, logReader)
+}
+```
+
+### Node.js SDK (Dockerode)
+
+```javascript
+// docker-ops.js — Docker operations with Dockerode
+const Docker = require('dockerode');
+
+const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+
+async function main() {
+  // List containers
+  const containers = await docker.listContainers({ all: true });
+  console.log('Containers:');
+  containers.forEach(c => {
+    console.log(`  ${c.Id.substring(0, 12)} | ${c.Names[0]} | ${c.State} | ${c.Image}`);
+  });
+
+  // Run a container
+  const container = await docker.createContainer({
+    Image: 'nginx:alpine',
+    name: 'my-nginx-node',
+    ExposedPorts: { '80/tcp': {} },
+    HostConfig: {
+      PortBindings: { '80/tcp': [{ HostPort: '9091' }] },
+      Memory: 256 * 1024 * 1024
+    },
+    Env: ['NGINX_HOST=localhost'],
+    Labels: { app: 'test', 'managed-by': 'nodejs-sdk' }
+  });
+
+  await container.start();
+  console.log(`Started: ${container.id.substring(0, 12)}`);
+
+  // Get stats
+  const stats = await container.stats({ stream: false });
+  const memUsageMB = stats.memory_stats.usage / (1024 * 1024);
+  console.log(`Memory: ${memUsageMB.toFixed(1)} MB`);
+
+  // Stream logs
+  const logStream = await container.logs({
+    follow: true,
+    stdout: true,
+    stderr: true,
+    tail: 10
+  });
+  logStream.pipe(process.stdout);
+
+  // Cleanup after 5 seconds
+  setTimeout(async () => {
+    await container.stop();
+    await container.remove();
+    console.log('Container stopped and removed');
+    process.exit(0);
+  }, 5000);
+}
+
+main().catch(console.error);
+```
+
+<Callout type="tip" title="Choose the Right SDK">
+| Language | SDK | Install | Best For |
+|----------|-----|---------|----------|
+| Python | docker-py | `pip install docker` | Scripts, automation, quick tools |
+| Go | docker/client | `go get github.com/docker/docker` | Production services, high performance |
+| Node.js | dockerode | `npm install dockerode` | Web dashboards, event-driven tools |
+| Rust | bollard | `cargo add bollard` | System-level tools, safety-critical |
+| Java | docker-java | Maven/Gradle | Enterprise applications |
+</Callout>
+
+## Building Tools with the Docker API
+
+### Custom Container Dashboard
+
+```python
+# dashboard.py — Simple container status dashboard
+import docker
+import time
+import os
+from datetime import datetime
+
+client = docker.from_env()
+
+def clear_screen():
+    os.system('clear' if os.name == 'posix' else 'cls')
+
+def format_bytes(bytes_val):
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes_val < 1024:
+            return f"{bytes_val:.1f} {unit}"
+        bytes_val /= 1024
+    return f"{bytes_val:.1f} TB"
+
+def get_container_stats(container):
+    """Get CPU and memory stats for a container."""
+    try:
+        stats = container.stats(stream=False)
+
+        # CPU calculation
+        cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - \
+                    stats['precpu_stats']['cpu_usage']['total_usage']
+        system_delta = stats['cpu_stats']['system_cpu_usage'] - \
+                       stats['precpu_stats']['system_cpu_usage']
+        num_cpus = stats['cpu_stats'].get('online_cpus',
+                     len(stats['cpu_stats']['cpu_usage'].get('percpu_usage', [1])))
+
+        cpu_percent = 0.0
+        if system_delta > 0 and cpu_delta > 0:
+            cpu_percent = (cpu_delta / system_delta) * num_cpus * 100
+
+        # Memory calculation
+        mem_usage = stats['memory_stats'].get('usage', 0)
+        mem_limit = stats['memory_stats'].get('limit', 0)
+        mem_percent = (mem_usage / mem_limit * 100) if mem_limit > 0 else 0
+
+        return {
+            'cpu_percent': cpu_percent,
+            'mem_usage': mem_usage,
+            'mem_limit': mem_limit,
+            'mem_percent': mem_percent,
+        }
+    except Exception:
+        return None
+
+def display_dashboard():
+    """Display the container dashboard."""
+    clear_screen()
+
+    info = client.info()
+    print("=" * 78)
+    print(f"  Docker Dashboard — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Host: {info.get('Name', 'unknown')} | "
+          f"Docker {info['ServerVersion']} | "
+          f"Containers: {info['ContainersRunning']}/{info['Containers']} | "
+          f"Images: {info['Images']}")
+    print("=" * 78)
+    print()
+
+    containers = client.containers.list(all=True)
+
+    if not containers:
+        print("  No containers found.")
+        return
+
+    # Header
+    print(f"  {'NAME':<25} {'IMAGE':<25} {'STATUS':<15} {'CPU':>6} {'MEM':>10} {'PORTS'}")
+    print(f"  {'-'*25} {'-'*25} {'-'*15} {'-'*6} {'-'*10} {'-'*20}")
+
+    for container in sorted(containers, key=lambda c: c.name):
+        image = container.image.tags[0] if container.image.tags else 'unknown'
+        image = image[:24]  # Truncate long image names
+
+        # Status with color indicator
+        status = container.status
+        if status == 'running':
+            health = container.attrs.get('State', {}).get('Health', {})
+            if health:
+                health_status = health.get('Status', 'none')
+                status = f"UP ({health_status})"
+            else:
+                status = "UP"
+        elif status == 'exited':
+            exit_code = container.attrs['State']['ExitCode']
+            status = f"EXIT ({exit_code})"
+
+        # Get resource stats for running containers
+        cpu_str = "-"
+        mem_str = "-"
+        if container.status == 'running':
+            stats = get_container_stats(container)
+            if stats:
+                cpu_str = f"{stats['cpu_percent']:.1f}%"
+                mem_str = format_bytes(stats['mem_usage'])
+
+        # Get port mappings
+        ports = container.attrs['NetworkSettings']['Ports'] or {}
+        port_str = ""
+        for container_port, host_bindings in ports.items():
+            if host_bindings:
+                for binding in host_bindings:
+                    port_str += f"{binding['HostPort']}->{container_port} "
+
+        print(f"  {container.name:<25} {image:<25} {status:<15} {cpu_str:>6} {mem_str:>10} {port_str}")
+
+    print()
+    print("  Press Ctrl+C to exit")
+
+# Main loop
+if __name__ == '__main__':
+    try:
+        while True:
+            display_dashboard()
+            time.sleep(5)
+    except KeyboardInterrupt:
+        print("\nDashboard stopped.")
+```
+
+### Automated Cleanup Tool
+
+```python
+# cleanup.py — Automated Docker resource cleanup
+import docker
+from datetime import datetime, timezone, timedelta
+
+client = docker.from_env()
+
+def cleanup_stopped_containers(max_age_hours=24):
+    """Remove containers that have been stopped for more than max_age_hours."""
+    print(f"\n--- Stopped Containers (older than {max_age_hours}h) ---")
+    removed = 0
+
+    for container in client.containers.list(all=True,
+                                             filters={'status': 'exited'}):
+        finished = container.attrs['State']['FinishedAt']
+        finished_dt = datetime.fromisoformat(finished.replace('Z', '+00:00'))
+        age = datetime.now(timezone.utc) - finished_dt
+
+        if age > timedelta(hours=max_age_hours):
+            name = container.name
+            exit_code = container.attrs['State']['ExitCode']
+            print(f"  Removing: {name} (exited {exit_code}, "
+                  f"stopped {age.days}d {age.seconds//3600}h ago)")
+            container.remove(force=True)
+            removed += 1
+
+    print(f"  Removed {removed} containers")
+    return removed
+
+def cleanup_dangling_images():
+    """Remove dangling (untagged) images."""
+    print("\n--- Dangling Images ---")
+    result = client.images.prune(filters={'dangling': True})
+    deleted = result.get('ImagesDeleted') or []
+    space = result.get('SpaceReclaimed', 0)
+    print(f"  Removed {len(deleted)} images, reclaimed "
+          f"{space // (1024*1024)} MB")
+    return len(deleted)
+
+def cleanup_unused_volumes():
+    """Remove volumes not attached to any container."""
+    print("\n--- Unused Volumes ---")
+    result = client.volumes.prune()
+    deleted = result.get('VolumesDeleted') or []
+    space = result.get('SpaceReclaimed', 0)
+    print(f"  Removed {len(deleted)} volumes, reclaimed "
+          f"{space // (1024*1024)} MB")
+    return len(deleted)
+
+def cleanup_unused_networks():
+    """Remove networks not used by any container."""
+    print("\n--- Unused Networks ---")
+    result = client.networks.prune()
+    deleted = result.get('NetworksDeleted') or []
+    print(f"  Removed {len(deleted)} networks")
+    return len(deleted)
+
+if __name__ == '__main__':
+    print(f"Docker Cleanup — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 50)
+
+    cleanup_stopped_containers(max_age_hours=48)
+    cleanup_dangling_images()
+    cleanup_unused_volumes()
+    cleanup_unused_networks()
+
+    print("\n" + "=" * 50)
+    print("Cleanup complete.")
+```
+
+## Event Streaming
+
+The Docker API provides a real-time event stream that notifies you of every action taken on the daemon — containers starting, stopping, images being pulled, networks being created, and more.
+
+### Streaming Events with curl
+
+```bash
+# Stream all events (runs forever, prints as they happen)
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/events" | jq --unbuffered .
+
+# Example events when you run `docker run --rm alpine echo hello`:
+# {
+#   "status": "create",
+#   "id": "abc123...",
+#   "from": "alpine",
+#   "Type": "container",
+#   "Action": "create",
+#   "Actor": {
+#     "ID": "abc123...",
+#     "Attributes": { "image": "alpine", "name": "cool_tesla" }
+#   },
+#   "time": 1709312400,
+#   "timeNano": 1709312400123456789
+# }
+# { "status": "start", "id": "abc123...", ... }
+# { "status": "die", "id": "abc123...", ... }
+# { "status": "destroy", "id": "abc123...", ... }
+
+# Filter events by type and action
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/events?filters=%7B%22type%22%3A%5B%22container%22%5D%2C%22event%22%3A%5B%22die%22%2C%22oom%22%5D%7D"
+# Only shows container die and OOM events
+
+# Get historical events (since a specific time)
+curl -s --unix-socket /var/run/docker.sock \
+  "http://localhost/events?since=1709312400&until=1709312500" | jq .
+```
+
+### Event-Driven Monitoring with Python
+
+```python
+# event_monitor.py — Real-time Docker event monitor with alerting
+import docker
+import json
+from datetime import datetime
+
+client = docker.from_env()
+
+# Events that indicate problems
+ALERT_EVENTS = {
+    'die': 'Container died unexpectedly',
+    'oom': 'Container killed by OOM (Out of Memory)',
+    'kill': 'Container was killed',
+    'health_status: unhealthy': 'Container health check failing',
+}
+
+def format_event(event):
+    """Format a Docker event for display."""
+    timestamp = datetime.fromtimestamp(event['time']).strftime('%H:%M:%S')
+    action = event['Action']
+    actor = event['Actor']
+    name = actor['Attributes'].get('name', 'unknown')
+    image = actor['Attributes'].get('image', 'unknown')
+    event_type = event['Type']
+
+    return f"[{timestamp}] {event_type}/{action}: {name} ({image})"
+
+def send_alert(event, reason):
+    """Send alert for critical events."""
+    actor = event['Actor']
+    name = actor['Attributes'].get('name', 'unknown')
+
+    alert = {
+        'severity': 'critical',
+        'container': name,
+        'reason': reason,
+        'image': actor['Attributes'].get('image', 'unknown'),
+        'exit_code': actor['Attributes'].get('exitCode', 'N/A'),
+        'timestamp': datetime.fromtimestamp(event['time']).isoformat(),
+    }
+
+    print(f"\n  *** ALERT: {reason} ***")
+    print(f"  Container: {name}")
+    print(f"  Exit Code: {alert['exit_code']}")
+    print(f"  Image: {alert['image']}")
+
+    # In production, send to Slack, PagerDuty, etc.
+    # requests.post(SLACK_WEBHOOK, json={'text': json.dumps(alert)})
+
+def monitor_events():
+    """Stream and process Docker events in real time."""
+    print("Docker Event Monitor")
+    print("=" * 60)
+    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("Monitoring for: container, image, network, volume events")
+    print("=" * 60)
+
+    # Filter for specific event types
+    filters = {
+        'type': ['container', 'image', 'network', 'volume'],
+    }
+
+    for event in client.events(decode=True, filters=filters):
+        line = format_event(event)
+        print(line)
+
+        # Check for alert-worthy events
+        action = event.get('Action', '')
+        for trigger, reason in ALERT_EVENTS.items():
+            if trigger in action:
+                send_alert(event, reason)
+
+if __name__ == '__main__':
+    try:
+        monitor_events()
+    except KeyboardInterrupt:
+        print("\nMonitor stopped.")
+```
+
+<Callout type="info" title="Event Types and Actions">
+
+| Type | Actions | Description |
+|------|---------|-------------|
+| container | create, start, stop, die, kill, oom, pause, unpause, health_status | Container lifecycle events |
+| image | pull, push, tag, untag, delete, build | Image management events |
+| network | create, connect, disconnect, destroy | Network lifecycle events |
+| volume | create, mount, unmount, destroy | Volume lifecycle events |
+| daemon | reload | Daemon configuration changes |
+
+Events include attributes like container name, image, exit code, and custom labels, making it easy to filter and route alerts.
+</Callout>
+
+## API Versioning and Compatibility
+
+The Docker API version changes with each Docker release. Your tools need to handle version differences gracefully.
+
+```bash
+# Check the current API version
+curl -s --unix-socket /var/run/docker.sock http://localhost/version | jq '.ApiVersion'
+# "1.45"
+
+# Check the minimum supported API version
+curl -s --unix-socket /var/run/docker.sock http://localhost/version | jq '.MinAPIVersion'
+# "1.24"
+
+# Pin to a specific API version in your requests
+curl -s --unix-socket /var/run/docker.sock http://localhost/v1.43/containers/json | jq length
+
+# Version negotiation in Python
+import docker
+client = docker.from_env()
+print(client.api.api_version)  # e.g., "1.45"
+
+# Pin to a specific version for stability
+client = docker.DockerClient(base_url='unix://var/run/docker.sock',
+                              version='1.43')
+```
+
+```
+API Version Compatibility Matrix:
+┌─────────────────┬──────────────┬──────────────────────────────┐
+│ Docker Version  │ API Version  │ Notable API Changes           │
+├─────────────────┼──────────────┼──────────────────────────────┤
+│ Docker 20.10    │ 1.41         │ Container prune filters      │
+│ Docker 23.0     │ 1.42         │ Swarm job support            │
+│ Docker 24.0     │ 1.43         │ CDI device support           │
+│ Docker 25.0     │ 1.44         │ Container annotations        │
+│ Docker 26.0     │ 1.45         │ Health check start interval  │
+│ Docker 27.0     │ 1.46         │ OCI image support extended   │
+└─────────────────┴──────────────┴──────────────────────────────┘
+
+Best practice: Use API version negotiation in SDKs or pin to
+the minimum version that supports all features you need.
+```
+
+<Callout type="warning" title="Remote API Security">
+If you expose the Docker API over TCP for remote access, you **must** configure TLS. An unprotected Docker API on the network is equivalent to giving anyone root access to your server.
+
+```bash
+# NEVER do this in production:
+# dockerd -H tcp://0.0.0.0:2375  # Unencrypted, unauthenticated
+
+# ALWAYS use TLS:
+dockerd --tlsverify \
+  --tlscacert=ca.pem \
+  --tlscert=server-cert.pem \
+  --tlskey=server-key.pem \
+  -H tcp://0.0.0.0:2376
+
+# Or use SSH tunneling (simpler and secure):
+docker -H ssh://user@remote-host ps
+```
+</Callout>
+
+<Exercise
+  title="Build a Container Management Script with docker-py"
+  difficulty="intermediate"
+  xpReward={35}
+  estimatedMinutes={25}
+  objectives={[
+    "Connect to Docker daemon using the Python SDK",
+    "List, inspect, and manage containers programmatically",
+    "Calculate CPU and memory usage from container stats",
+    "Implement automated container restart on failure"
+  ]}
+  hints={[
+    "Use docker.from_env() to connect using the default Unix socket",
+    "Container stats come as raw counters — you need to calculate deltas for CPU percentage",
+    "Use container.attrs['State']['Health'] to check health status",
+    "Wrap operations in try/except to handle containers that stop between listing and inspection"
+  ]}
+  validationCriteria={`
+Create \`container_manager.py\`:
+
+\`\`\`python
+#!/usr/bin/env python3
+"""Container Manager — monitor and manage Docker containers."""
+import docker
+import sys
+from datetime import datetime
+
+client = docker.from_env()
+
+def list_containers(show_all=False):
+    """List containers with status and resource usage."""
+    containers = client.containers.list(all=show_all)
+    print(f"{'NAME':<25} {'IMAGE':<30} {'STATUS':<20} {'CPU':>7} {'MEM':>10}")
+    print("-" * 95)
+
+    for c in sorted(containers, key=lambda x: x.name):
+        image = c.image.tags[0] if c.image.tags else c.image.short_id
+        cpu_str = mem_str = "-"
+
+        if c.status == 'running':
+            try:
+                stats = c.stats(stream=False)
+                cpu_d = stats['cpu_stats']['cpu_usage']['total_usage'] - \\
+                        stats['precpu_stats']['cpu_usage']['total_usage']
+                sys_d = stats['cpu_stats']['system_cpu_usage'] - \\
+                        stats['precpu_stats']['system_cpu_usage']
+                cpus = stats['cpu_stats'].get('online_cpus', 1)
+                cpu_pct = (cpu_d / sys_d) * cpus * 100 if sys_d > 0 else 0
+                mem_mb = stats['memory_stats'].get('usage', 0) / (1024**2)
+                cpu_str = f"{cpu_pct:.1f}%"
+                mem_str = f"{mem_mb:.1f} MB"
+            except Exception:
+                pass
+
+        print(f"{c.name:<25} {image:<30} {c.status:<20} {cpu_str:>7} {mem_str:>10}")
+
+def restart_unhealthy():
+    """Find and restart containers with failed health checks."""
+    for c in client.containers.list():
+        health = c.attrs.get('State', {}).get('Health', {})
+        if health and health.get('Status') == 'unhealthy':
+            print(f"Restarting unhealthy container: {c.name}")
+            c.restart(timeout=10)
+            print(f"  Restarted successfully")
+
+def cleanup(max_age_hours=24):
+    """Remove stopped containers older than max_age_hours."""
+    from datetime import timezone, timedelta
+    removed = 0
+    for c in client.containers.list(all=True, filters={'status': 'exited'}):
+        finished = c.attrs['State']['FinishedAt']
+        finished_dt = datetime.fromisoformat(finished.replace('Z', '+00:00'))
+        age = datetime.now(timezone.utc) - finished_dt
+        if age > timedelta(hours=max_age_hours):
+            print(f"Removing: {c.name} (stopped {age.days}d ago)")
+            c.remove(force=True)
+            removed += 1
+    print(f"Removed {removed} containers")
+
+if __name__ == '__main__':
+    cmd = sys.argv[1] if len(sys.argv) > 1 else 'list'
+    if cmd == 'list':
+        list_containers(show_all='--all' in sys.argv)
+    elif cmd == 'heal':
+        restart_unhealthy()
+    elif cmd == 'cleanup':
+        cleanup()
+    else:
+        print(f"Usage: {sys.argv[0]} [list|heal|cleanup] [--all]")
+\`\`\`
+
+Test:
+1. \`python container_manager.py list\` — shows running containers with stats
+2. \`python container_manager.py list --all\` — includes stopped containers
+3. \`python container_manager.py heal\` — restarts unhealthy containers
+4. \`python container_manager.py cleanup\` — removes old stopped containers
+  `}
+/>
+
+<Exercise
+  title="Create a Custom Monitoring Tool"
+  difficulty="advanced"
+  xpReward={40}
+  estimatedMinutes={30}
+  objectives={[
+    "Stream Docker events in real time using the events API",
+    "Filter events by type and classify them by severity",
+    "Log events to a file with structured JSON formatting",
+    "Trigger alerts for critical events like OOM kills and container crashes"
+  ]}
+  hints={[
+    "Use client.events(decode=True) for the Python event stream — it yields dictionaries",
+    "Container 'die' events include exitCode in the attributes",
+    "Use Python's logging module with a JSON formatter for structured log output",
+    "Filter events in the API call itself (more efficient than filtering in Python)"
+  ]}
+  validationCriteria={`
+Create \`event_logger.py\`:
+
+\`\`\`python
+#!/usr/bin/env python3
+"""Docker Event Logger — stream events and alert on critical issues."""
+import docker
+import json
+import logging
+from datetime import datetime
+
+# Set up structured logging
+logging.basicConfig(
+    filename='docker-events.log',
+    level=logging.INFO,
+    format='%(message)s'
+)
+logger = logging.getLogger('docker-events')
+
+client = docker.from_env()
+
+SEVERITY_MAP = {
+    'die': 'critical',
+    'oom': 'critical',
+    'kill': 'warning',
+    'stop': 'info',
+    'start': 'info',
+    'create': 'info',
+    'destroy': 'info',
+    'health_status: unhealthy': 'critical',
+    'health_status: healthy': 'info',
+}
+
+def classify_event(event):
+    action = event.get('Action', '')
+    severity = 'info'
+    for pattern, sev in SEVERITY_MAP.items():
+        if pattern in action:
+            severity = sev
+            break
+    return severity
+
+def process_event(event):
+    severity = classify_event(event)
+    attrs = event.get('Actor', {}).get('Attributes', {})
+
+    log_entry = {
+        'timestamp': datetime.fromtimestamp(event['time']).isoformat(),
+        'type': event.get('Type'),
+        'action': event.get('Action'),
+        'severity': severity,
+        'container': attrs.get('name', 'unknown'),
+        'image': attrs.get('image', 'unknown'),
+        'exit_code': attrs.get('exitCode'),
+    }
+
+    logger.info(json.dumps(log_entry))
+
+    # Console output
+    icon = {'critical': 'CRIT', 'warning': 'WARN', 'info': 'INFO'}
+    ts = log_entry['timestamp'][11:19]
+    print(f"[{ts}] [{icon.get(severity, 'INFO')}] "
+          f"{log_entry['type']}/{log_entry['action']}: "
+          f"{log_entry['container']} ({log_entry['image']})")
+
+    if severity == 'critical':
+        print(f"  >>> ALERT: {log_entry['container']} — "
+              f"exit code: {log_entry['exit_code']}")
+
+print("Docker Event Logger started. Press Ctrl+C to stop.")
+print("Events are logged to docker-events.log")
+print("=" * 60)
+
+try:
+    for event in client.events(decode=True,
+                                filters={'type': ['container']}):
+        process_event(event)
+except KeyboardInterrupt:
+    print("\\nLogger stopped.")
+\`\`\`
+
+Test:
+1. Start the logger: \`python event_logger.py\`
+2. In another terminal, run: \`docker run --rm alpine echo hello\`
+3. Verify you see create, start, die, destroy events
+4. Run: \`docker run --rm -m 10m alpine dd if=/dev/zero of=/dev/null bs=1G\`
+5. Verify OOM event is caught with CRITICAL severity
+6. Check \`docker-events.log\` for structured JSON entries
+  `}
+/>
+
+<MiniProject
+  title="Docker Fleet Management Dashboard"
+  difficulty="advanced"
+  xpReward={75}
+  estimatedMinutes={45}
+  objectives={[
+    "Build a comprehensive container monitoring and management tool",
+    "Combine container listing, stats collection, and event monitoring",
+    "Implement automated health checking and container restart",
+    "Generate HTML reports of container fleet status"
+  ]}
+  hints={[
+    "Use docker-py for all Docker API interactions",
+    "Collect stats in a separate thread to avoid blocking the event loop",
+    "Generate the HTML report with Python string formatting or a templating library",
+    "Use argparse for clean command-line interface with subcommands"
+  ]}
+  validationCriteria={`
+Create a \`fleet_manager/\` directory with the following files:
+
+1. \`fleet_manager/manager.py\` — Main fleet management tool:
+\`\`\`python
+#!/usr/bin/env python3
+"""Docker Fleet Manager — monitor and manage all containers."""
+import docker
+import argparse
+import json
+from datetime import datetime
+
+client = docker.from_env()
+
+def status_report():
+    """Generate a complete fleet status report."""
+    info = client.info()
+    containers = client.containers.list(all=True)
+
+    report = {
+        'timestamp': datetime.now().isoformat(),
+        'host': info['Name'],
+        'docker_version': info['ServerVersion'],
+        'containers': {
+            'total': info['Containers'],
+            'running': info['ContainersRunning'],
+            'stopped': info['ContainersStopped'],
+        },
+        'resources': {
+            'cpus': info['NCPU'],
+            'memory_gb': round(info['MemTotal'] / (1024**3), 1),
+            'images': info['Images'],
+        },
+        'services': []
+    }
+
+    for c in containers:
+        service = {
+            'name': c.name,
+            'image': c.image.tags[0] if c.image.tags else c.image.short_id,
+            'status': c.status,
+            'created': c.attrs['Created'],
+        }
+        if c.status == 'running':
+            try:
+                stats = c.stats(stream=False)
+                mem = stats['memory_stats'].get('usage', 0)
+                service['memory_mb'] = round(mem / (1024**2), 1)
+            except Exception:
+                pass
+        report['services'].append(service)
+
+    return report
+
+def generate_html(report):
+    """Generate an HTML status page from the report."""
+    services_html = ""
+    for svc in report['services']:
+        color = '#2ecc71' if svc['status'] == 'running' else '#e74c3c'
+        mem = svc.get('memory_mb', '-')
+        services_html += f"""
+        <tr>
+          <td>{svc['name']}</td>
+          <td>{svc['image']}</td>
+          <td style="color:{color};font-weight:bold">{svc['status']}</td>
+          <td>{mem}</td>
+        </tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><title>Docker Fleet Status</title>
+<style>
+  body {{ font-family: monospace; margin: 20px; background: #1a1a2e; color: #eee; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  th, td {{ border: 1px solid #444; padding: 8px; text-align: left; }}
+  th {{ background: #16213e; }}
+  .summary {{ display: flex; gap: 20px; margin-bottom: 20px; }}
+  .card {{ background: #16213e; padding: 15px; border-radius: 8px; flex: 1; }}
+</style></head>
+<body>
+<h1>Docker Fleet Status</h1>
+<p>Generated: {report['timestamp']}</p>
+<div class="summary">
+  <div class="card">
+    <h3>Containers</h3>
+    <p>{report['containers']['running']} running / {report['containers']['total']} total</p>
+  </div>
+  <div class="card">
+    <h3>Resources</h3>
+    <p>{report['resources']['cpus']} CPUs, {report['resources']['memory_gb']} GB RAM</p>
+  </div>
+</div>
+<table>
+  <tr><th>Name</th><th>Image</th><th>Status</th><th>Memory (MB)</th></tr>
+  {services_html}
+</table>
+</body></html>"""
+
+    with open('fleet-status.html', 'w') as f:
+        f.write(html)
+    print("Report saved to fleet-status.html")
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Docker Fleet Manager')
+    parser.add_argument('command', choices=['status', 'report', 'heal', 'events'],
+                       help='Command to run')
+    args = parser.parse_args()
+
+    if args.command == 'status':
+        report = status_report()
+        print(json.dumps(report, indent=2))
+    elif args.command == 'report':
+        report = status_report()
+        generate_html(report)
+    elif args.command == 'heal':
+        for c in client.containers.list():
+            health = c.attrs.get('State', {}).get('Health', {})
+            if health and health.get('Status') == 'unhealthy':
+                print(f"Restarting: {c.name}")
+                c.restart(timeout=10)
+    elif args.command == 'events':
+        print("Streaming events... (Ctrl+C to stop)")
+        for event in client.events(decode=True, filters={'type': ['container']}):
+            ts = datetime.fromtimestamp(event['time']).strftime('%H:%M:%S')
+            name = event['Actor']['Attributes'].get('name', '?')
+            print(f"[{ts}] {event['Action']}: {name}")
+\`\`\`
+
+Test the complete tool:
+1. \`python fleet_manager/manager.py status\` — JSON status report
+2. \`python fleet_manager/manager.py report\` — generates fleet-status.html
+3. \`python fleet_manager/manager.py heal\` — restarts unhealthy containers
+4. \`python fleet_manager/manager.py events\` — streams live events
+  `}
+/>
+
+## Key Takeaways
+
+- **The Docker CLI is just an API client** — every `docker` command maps to a REST API call over the Unix socket at `/var/run/docker.sock`
+- **curl with --unix-socket** is the simplest way to explore the Docker API — great for debugging and understanding request/response formats
+- **Container operations via API** follow a lifecycle: create, start, (inspect, logs, stats, exec), stop, remove
+- **Docker SDKs** (Python docker-py, Go docker/client, Node.js dockerode) provide language-native interfaces that are much easier to use than raw HTTP
+- **Event streaming** enables real-time monitoring — subscribe to container lifecycle events to build dashboards and alerting systems
+- **API versioning** matters — always specify the API version in production code to avoid breaking changes when Docker is updated
+- **The Docker socket is root-equivalent** — treat access to `/var/run/docker.sock` as a security-critical permission
+- **Custom tooling** built on the Docker API can automate cleanup, monitoring, health management, and reporting tasks that are tedious with the CLI
+
+## What's Next
+
+Now that you can interact with Docker programmatically, the next lesson covers **Production Architecture Patterns**. You will learn the sidecar, ambassador, adapter, and init container patterns — proven designs for building resilient, observable, and maintainable container-based systems. You will also implement blue-green and canary deployments for zero-downtime releases.

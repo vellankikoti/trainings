@@ -1,0 +1,1232 @@
+---
+title: "Installing Docker"
+description: "Walk through installing Docker Engine on Ubuntu, Debian, CentOS, and RHEL, set up Docker Desktop on macOS and Windows, configure the Docker daemon, and verify your installation is production-ready."
+order: 4
+xpReward: 35
+estimatedMinutes: 45
+prerequisites:
+  - 03-docker-architecture
+objectives:
+  - Install Docker Engine on Ubuntu/Debian using the official apt repository
+  - Install Docker Engine on CentOS/RHEL using the official yum repository
+  - Set up Docker Desktop on macOS and Windows
+  - Complete essential post-installation steps including user group configuration
+  - Configure the Docker daemon using daemon.json for production settings
+  - Verify a working Docker installation and troubleshoot common issues
+tags:
+  - docker
+  - installation
+  - linux
+  - configuration
+  - daemon
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+Your team just got approval to containerize the company's main application. The project kicks off Monday, and your manager asks you to prepare the development machines. There are three developers on Ubuntu, two on macOS, and one on a CentOS staging server. You need Docker running correctly on all of them by Monday morning. One developer tries to install Docker using `apt install docker` and gets a completely wrong package — a system tray docking application, not Docker Engine. Another tries `snap install docker` and runs into permission issues. You realize that installing Docker correctly is not as simple as it sounds — there are wrong packages, missing repositories, permission traps, and daemon configurations that matter. This lesson makes sure you install Docker right the first time, every time.
+</Callout>
+
+## Prerequisites and System Requirements
+
+Before installing Docker, make sure your system meets these requirements:
+
+### Linux Requirements
+
+| Requirement | Details |
+|---|---|
+| **Architecture** | x86_64 (amd64), ARM64 (aarch64), ARM (armhf), s390x |
+| **Kernel version** | 3.10 or higher (4.x+ recommended) |
+| **Storage driver** | overlay2 (requires kernel 4.0+, d_type support in filesystem) |
+| **iptables** | Version 1.4 or higher |
+| **Filesystem** | ext4 or xfs recommended for overlay2 |
+| **RAM** | Minimum 512 MB (2 GB+ recommended) |
+
+```bash
+# Check your kernel version:
+$ uname -r
+5.15.0-91-generic
+
+# Check your architecture:
+$ uname -m
+x86_64
+
+# Check if your filesystem supports d_type (needed for overlay2):
+$ xfs_info / 2>/dev/null | grep ftype || stat -f -c %T /
+ext2/ext3
+```
+
+### macOS Requirements
+
+| Requirement | Details |
+|---|---|
+| **macOS version** | 12 (Monterey) or newer |
+| **Hardware** | Apple Silicon (M1/M2/M3) or Intel |
+| **RAM** | 4 GB minimum |
+| **Disk** | ~2 GB for Docker Desktop |
+
+### Windows Requirements
+
+| Requirement | Details |
+|---|---|
+| **Windows version** | Windows 10 (Build 19041+) or Windows 11 |
+| **Backend** | WSL 2 (recommended) or Hyper-V |
+| **RAM** | 4 GB minimum |
+| **BIOS** | Hardware virtualization enabled |
+
+<Callout type="warning" title="Do NOT Install the Wrong Package">
+On Linux, there are several packages named "docker" that are NOT Docker Engine:
+
+```bash
+# WRONG — this is a system tray docking application:
+sudo apt install docker
+
+# WRONG — this is an outdated version:
+sudo apt install docker.io
+
+# CORRECT — Docker Engine from Docker's official repository:
+# (installation steps below)
+```
+
+Always install from Docker's official repositories to get the latest, supported version.
+</Callout>
+
+## Installing Docker Engine on Ubuntu/Debian
+
+This is the most common installation path. Follow these steps exactly.
+
+### Step 1: Remove Old Versions
+
+Old versions of Docker may be installed under different package names. Remove them first:
+
+```bash
+# Remove any old Docker packages:
+sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null
+
+# This is safe to run even if none of these packages are installed.
+# Existing images, containers, volumes, and networks in /var/lib/docker/
+# are preserved.
+```
+
+### Step 2: Install Prerequisites
+
+Install packages needed to use Docker's repository over HTTPS:
+
+```bash
+# Update the package index:
+sudo apt-get update
+
+# Install prerequisite packages:
+sudo apt-get install -y \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release
+```
+
+### Step 3: Add Docker's Official GPG Key
+
+```bash
+# Create the keyrings directory:
+sudo install -m 0755 -d /etc/apt/keyrings
+
+# Download Docker's official GPG key:
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    -o /etc/apt/keyrings/docker.asc
+
+# Set proper permissions:
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+```
+
+<Callout type="info" title="For Debian Instead of Ubuntu">
+If you are on Debian, replace `ubuntu` with `debian` in the URLs:
+
+```bash
+# Debian GPG key:
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg \
+    -o /etc/apt/keyrings/docker.asc
+
+# Debian repository (Step 4):
+echo "deb [arch=$(dpkg --print-architecture) \
+  signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+```
+</Callout>
+
+### Step 4: Set Up the Docker Repository
+
+```bash
+# Add Docker's official apt repository:
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Verify the repository was added:
+cat /etc/apt/sources.list.d/docker.list
+# Should show something like:
+# deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc]
+#   https://download.docker.com/linux/ubuntu jammy stable
+```
+
+### Step 5: Install Docker Engine
+
+```bash
+# Update package index with the new repository:
+sudo apt-get update
+
+# Install Docker Engine, CLI, containerd, and plugins:
+sudo apt-get install -y \
+    docker-ce \
+    docker-ce-cli \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-compose-plugin
+```
+
+Here is what each package provides:
+
+| Package | What It Provides |
+|---|---|
+| **docker-ce** | Docker Engine (daemon) |
+| **docker-ce-cli** | Docker CLI (`docker` command) |
+| **containerd.io** | containerd runtime |
+| **docker-buildx-plugin** | BuildKit-based build system |
+| **docker-compose-plugin** | Docker Compose V2 (`docker compose`) |
+
+### Step 6: Verify the Installation
+
+```bash
+# Check Docker version:
+$ sudo docker version
+Client: Docker Engine - Community
+ Version:           24.0.7
+ API version:       1.43
+ Go version:        go1.20.10
+ Git commit:        afdd53b
+ Built:             Thu Oct 26 09:08:17 2023
+ OS/Arch:           linux/amd64
+ Context:           default
+
+Server: Docker Engine - Community
+ Engine:
+  Version:          24.0.7
+  API version:      1.43 (minimum version 1.12)
+  Go version:       go1.20.10
+  Git commit:       311b9ff
+  Built:            Thu Oct 26 09:08:17 2023
+  OS/Arch:          linux/amd64
+  Experimental:     false
+ containerd:
+  Version:          1.6.24
+  GitCommit:        61f9fd88f79f081d64d6fa3bb1a0dc71ec870523
+ runc:
+  Version:          1.1.10
+  GitCommit:        v1.1.10-0-g18a0cb0
+ docker-init:
+  Version:          0.19.0
+  GitCommit:        de40ad0
+
+# Run the hello-world test:
+$ sudo docker run hello-world
+Unable to find image 'hello-world:latest' locally
+latest: Pulling from library/hello-world
+c1ec31eb5944: Pull complete
+Digest: sha256:4bd78111b6914a99dbc560e6a20eab57ff6655aea4a80c50b0c5036dd5dc7e5b
+Status: Downloaded newer image for hello-world:latest
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+
+To generate this message, Docker took the following steps:
+ 1. The Docker client contacted the Docker daemon.
+ 2. The Docker daemon pulled the "hello-world" image from the Docker Hub.
+    (amd64)
+ 3. The Docker daemon created a new container from that image which runs the
+    executable that produces the output you are currently reading.
+ 4. The Docker daemon streamed that output to the Docker client, which sent it
+    to your terminal.
+...
+```
+
+<Callout type="tip" title="Install a Specific Version">
+To install a specific Docker version (useful for matching production environments):
+
+```bash
+# List available versions:
+apt-cache madison docker-ce
+# docker-ce | 5:24.0.7-1~ubuntu.22.04~jammy | https://download.docker.com/...
+# docker-ce | 5:24.0.6-1~ubuntu.22.04~jammy | https://download.docker.com/...
+# docker-ce | 5:24.0.5-1~ubuntu.22.04~jammy | https://download.docker.com/...
+
+# Install a specific version:
+VERSION_STRING=5:24.0.7-1~ubuntu.22.04~jammy
+sudo apt-get install -y \
+    docker-ce=$VERSION_STRING \
+    docker-ce-cli=$VERSION_STRING \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-compose-plugin
+```
+</Callout>
+
+## Installing Docker Engine on CentOS/RHEL
+
+### Step 1: Remove Old Versions
+
+```bash
+# Remove any old Docker packages:
+sudo yum remove -y docker \
+    docker-client \
+    docker-client-latest \
+    docker-common \
+    docker-latest \
+    docker-latest-logrotate \
+    docker-logrotate \
+    docker-engine 2>/dev/null
+```
+
+### Step 2: Install Prerequisites and Add Repository
+
+```bash
+# Install yum-utils for yum-config-manager:
+sudo yum install -y yum-utils
+
+# Add Docker's official repository:
+sudo yum-config-manager --add-repo \
+    https://download.docker.com/linux/centos/docker-ce.repo
+```
+
+<Callout type="info" title="For RHEL Instead of CentOS">
+For Red Hat Enterprise Linux, the repository URL is the same (CentOS repo works on RHEL). However, you may need to enable the `extras` repo for some dependencies:
+
+```bash
+# RHEL 8/9:
+sudo yum-config-manager --add-repo \
+    https://download.docker.com/linux/rhel/docker-ce.repo
+```
+</Callout>
+
+### Step 3: Install Docker Engine
+
+```bash
+# Install Docker Engine, CLI, containerd, and plugins:
+sudo yum install -y \
+    docker-ce \
+    docker-ce-cli \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-compose-plugin
+
+# If prompted to accept the GPG key, verify the fingerprint:
+# 060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35
+```
+
+### Step 4: Start and Enable Docker
+
+On CentOS/RHEL, Docker does not start automatically after installation:
+
+```bash
+# Start the Docker daemon:
+sudo systemctl start docker
+
+# Enable Docker to start on boot:
+sudo systemctl enable docker
+
+# Verify it is running:
+$ sudo systemctl status docker
+● docker.service - Docker Application Container Engine
+     Loaded: loaded (/usr/lib/systemd/system/docker.service; enabled)
+     Active: active (running) since Mon 2025-01-15 08:30:00 UTC
+       Docs: https://docs.docker.com
+   Main PID: 1234 (dockerd)
+      Tasks: 12
+     Memory: 98.4M
+     CGroup: /system.slice/docker.service
+             ├─1234 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+             └─1235 /usr/bin/containerd
+
+# Run the hello-world test:
+$ sudo docker run hello-world
+Hello from Docker!
+...
+```
+
+<Callout type="warning" title="Firewalld Compatibility">
+On CentOS/RHEL with firewalld, Docker may have issues with iptables rules. If containers cannot reach the internet, try:
+
+```bash
+# Option 1: Restart Docker after firewalld:
+sudo systemctl restart docker
+
+# Option 2: Add Docker's interface to the trusted zone:
+sudo firewall-cmd --permanent --zone=trusted --add-interface=docker0
+sudo firewall-cmd --reload
+```
+</Callout>
+
+## Docker Desktop for macOS and Windows
+
+Docker Desktop provides Docker Engine, Docker CLI, Docker Compose, Kubernetes, and a GUI dashboard — all in one package. It runs a lightweight Linux VM behind the scenes.
+
+### macOS Installation
+
+```
+Docker Desktop on macOS:
+═══════════════════════════════════════
+
+┌──────────────────────────────────────┐
+│           macOS                       │
+│                                       │
+│  ┌─────────────────────────────────┐ │
+│  │       Docker Desktop             │ │
+│  │  ┌─────┐  ┌──────┐  ┌───────┐  │ │
+│  │  │ GUI │  │Docker│  │Docker │  │ │
+│  │  │     │  │CLI   │  │Compose│  │ │
+│  │  └─────┘  └──────┘  └───────┘  │ │
+│  │                                  │ │
+│  │  ┌─────────────────────────────┐│ │
+│  │  │   Lightweight Linux VM       ││ │
+│  │  │  ┌────────────────────────┐ ││ │
+│  │  │  │     Docker Engine      │ ││ │
+│  │  │  │     containerd         │ ││ │
+│  │  │  │     runc               │ ││ │
+│  │  │  └────────────────────────┘ ││ │
+│  │  │     Linux Kernel (5.15)     ││ │
+│  │  └─────────────────────────────┘│ │
+│  └─────────────────────────────────┘ │
+│                                       │
+│  Apple Hypervisor Framework           │
+│  (Virtualization.framework)           │
+└──────────────────────────────────────┘
+```
+
+**Installation Steps:**
+
+1. Download Docker Desktop from https://www.docker.com/products/docker-desktop/
+2. Choose the correct installer:
+   - **Apple Silicon (M1/M2/M3)**: `Docker Desktop Installer - Apple Silicon.dmg`
+   - **Intel**: `Docker Desktop Installer - Intel.dmg`
+3. Open the `.dmg` file and drag Docker to Applications
+4. Launch Docker Desktop from Applications
+5. Follow the setup wizard (accept the terms, complete configuration)
+6. Wait for Docker to start (whale icon in menu bar stops animating)
+
+```bash
+# Verify installation from Terminal:
+$ docker version
+Client:
+ Cloud integration: v1.0.35+desktop.5
+ Version:           24.0.7
+ ...
+
+$ docker compose version
+Docker Compose version v2.23.3
+
+$ docker run hello-world
+Hello from Docker!
+...
+```
+
+### Windows Installation
+
+**Installation Steps:**
+
+1. **Enable WSL 2** (recommended backend):
+
+```powershell
+# Open PowerShell as Administrator:
+wsl --install
+
+# Restart your computer if prompted.
+# After restart, set WSL 2 as default:
+wsl --set-default-version 2
+```
+
+2. Download Docker Desktop from https://www.docker.com/products/docker-desktop/
+3. Run `Docker Desktop Installer.exe`
+4. Select "Use WSL 2 instead of Hyper-V" during installation
+5. Follow the setup wizard
+6. Log out and back in (or restart) when prompted
+7. Launch Docker Desktop
+
+```powershell
+# Verify installation from PowerShell or WSL terminal:
+PS> docker version
+Client:
+ Cloud integration: v1.0.35+desktop.5
+ Version:           24.0.7
+ ...
+
+PS> docker run hello-world
+Hello from Docker!
+...
+```
+
+<Callout type="tip" title="WSL 2 vs Hyper-V Backend">
+Docker Desktop on Windows offers two backends:
+
+| Feature | WSL 2 Backend | Hyper-V Backend |
+|---|---|---|
+| **Performance** | Better (native Linux kernel) | Good |
+| **Memory usage** | Dynamic (grows/shrinks) | Fixed allocation |
+| **File sharing** | Fast (native Linux FS) | Slower (SMB mount) |
+| **Linux integration** | Full WSL distro access | Limited |
+| **Windows version** | Home, Pro, Enterprise | Pro, Enterprise only |
+
+**Recommendation**: Use WSL 2 — it is faster, uses less memory, and works on all Windows editions.
+</Callout>
+
+## Post-Installation Steps (Linux)
+
+After installing Docker on Linux, there are important configuration steps to complete.
+
+### Run Docker Without sudo
+
+By default, the Docker daemon runs as root and requires `sudo` for every command. Add your user to the `docker` group to avoid this:
+
+```bash
+# Create the docker group (may already exist):
+sudo groupadd docker 2>/dev/null
+
+# Add your user to the docker group:
+sudo usermod -aG docker $USER
+
+# IMPORTANT: Log out and back in for the group change to take effect.
+# Or run this to activate the group in the current session:
+newgrp docker
+
+# Verify it works without sudo:
+$ docker run hello-world
+Hello from Docker!
+...
+
+# Verify your groups:
+$ groups
+username sudo docker
+```
+
+<Callout type="warning" title="Security Implication of the Docker Group">
+Adding a user to the `docker` group grants them the equivalent of root access to the host. Anyone in the docker group can:
+
+```bash
+# Mount the host filesystem into a container:
+docker run -v /:/host -it ubuntu bash
+# Now they can read/write ANY file on the host as root!
+```
+
+Only add trusted users to the docker group. For shared servers, consider using rootless Docker or Podman instead.
+</Callout>
+
+### Configure Docker to Start on Boot
+
+```bash
+# Enable Docker daemon to start on boot:
+sudo systemctl enable docker.service
+sudo systemctl enable containerd.service
+
+# Verify:
+$ systemctl is-enabled docker
+enabled
+$ systemctl is-enabled containerd
+enabled
+```
+
+### Configure Default Logging
+
+Docker's default logging driver (`json-file`) can fill up disk space because it stores logs indefinitely. Configure log rotation:
+
+```bash
+# Create or edit the daemon configuration file:
+sudo mkdir -p /etc/docker
+
+sudo tee /etc/docker/daemon.json <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+EOF
+
+# Restart Docker to apply:
+sudo systemctl restart docker
+```
+
+This limits each container's log file to 10 MB and keeps at most 3 rotated files (30 MB max per container).
+
+## Docker Daemon Configuration
+
+The Docker daemon is configured through `/etc/docker/daemon.json`. This file controls everything from storage drivers to networking defaults.
+
+### Common daemon.json Configuration
+
+```json
+{
+  "data-root": "/var/lib/docker",
+  "storage-driver": "overlay2",
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "default-address-pools": [
+    {
+      "base": "172.17.0.0/16",
+      "size": 24
+    }
+  ],
+  "dns": ["8.8.8.8", "8.8.4.4"],
+  "live-restore": true,
+  "userland-proxy": false,
+  "experimental": false,
+  "metrics-addr": "0.0.0.0:9323",
+  "max-concurrent-downloads": 10,
+  "max-concurrent-uploads": 5
+}
+```
+
+### Configuration Options Explained
+
+| Option | Description | Default |
+|---|---|---|
+| `data-root` | Directory where Docker stores all data | `/var/lib/docker` |
+| `storage-driver` | Filesystem driver for layers | `overlay2` |
+| `log-driver` | Default logging driver for containers | `json-file` |
+| `log-opts` | Options for the logging driver | No limits |
+| `dns` | DNS servers for containers | Host DNS |
+| `live-restore` | Keep containers running during daemon downtime | `false` |
+| `userland-proxy` | Use userland proxy for port mapping | `true` |
+| `metrics-addr` | Expose Prometheus metrics | Disabled |
+| `max-concurrent-downloads` | Parallel layer downloads per pull | `3` |
+| `max-concurrent-uploads` | Parallel layer uploads per push | `5` |
+| `insecure-registries` | Registries to allow HTTP connections | `[]` |
+| `registry-mirrors` | Mirror registries for Docker Hub | `[]` |
+
+<Callout type="info" title="live-restore Is Critical for Production">
+The `live-restore` option allows containers to keep running when the Docker daemon is stopped or restarted. Without this, restarting Docker kills all containers.
+
+```json
+{
+  "live-restore": true
+}
+```
+
+This is essential for production servers where you need to upgrade Docker without downtime. Enable it on every production host.
+</Callout>
+
+### Moving Docker's Data Directory
+
+If `/var/lib/docker` is on a small root partition, move Docker's data to a larger disk:
+
+```bash
+# Stop Docker:
+sudo systemctl stop docker
+sudo systemctl stop containerd
+
+# Create the new directory:
+sudo mkdir -p /data/docker
+
+# Move existing data:
+sudo rsync -aP /var/lib/docker/ /data/docker/
+
+# Configure Docker to use the new location:
+sudo tee /etc/docker/daemon.json <<'EOF'
+{
+  "data-root": "/data/docker",
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "live-restore": true
+}
+EOF
+
+# Start Docker:
+sudo systemctl start docker
+
+# Verify:
+$ docker info --format '{{.DockerRootDir}}'
+/data/docker
+
+# Once verified, remove old data:
+sudo rm -rf /var/lib/docker
+```
+
+### Configuring an Insecure Registry
+
+For development environments with a private registry that does not have TLS:
+
+```json
+{
+  "insecure-registries": ["registry.dev.internal:5000"]
+}
+```
+
+<Callout type="warning" title="Never Use Insecure Registries in Production">
+The `insecure-registries` option disables TLS verification, making connections vulnerable to man-in-the-middle attacks. Use it only for local development. In production, always configure proper TLS certificates for your registries.
+</Callout>
+
+### Configuring Registry Mirrors
+
+If Docker Hub pulls are slow, configure a mirror:
+
+```json
+{
+  "registry-mirrors": [
+    "https://mirror.gcr.io",
+    "https://registry-mirror.company.com"
+  ]
+}
+```
+
+### Applying Configuration Changes
+
+After editing `daemon.json`, you must restart Docker:
+
+```bash
+# Validate the JSON syntax first (avoid breaking Docker):
+python3 -c "import json; json.load(open('/etc/docker/daemon.json'))" && echo "Valid JSON" || echo "Invalid JSON!"
+
+# Restart Docker daemon:
+sudo systemctl restart docker
+
+# Check that Docker started successfully:
+sudo systemctl status docker
+
+# If Docker fails to start, check the logs:
+sudo journalctl -u docker.service --no-pager -n 50
+```
+
+## Verifying Your Installation
+
+Run these verification checks to confirm Docker is installed and configured correctly.
+
+### Basic Verification
+
+```bash
+# 1. Docker version (both client and server):
+$ docker version
+Client: Docker Engine - Community
+ Version:           24.0.7
+ ...
+Server: Docker Engine - Community
+ Engine:
+  Version:          24.0.7
+ containerd:
+  Version:          1.6.24
+ runc:
+  Version:          1.1.10
+
+# 2. Docker system info:
+$ docker info
+...
+Server:
+ Containers: 0
+ Images: 0
+ Storage Driver: overlay2
+ ...
+
+# 3. Hello World test:
+$ docker run hello-world
+Hello from Docker!
+...
+
+# 4. Run an interactive container:
+$ docker run -it ubuntu:22.04 cat /etc/os-release
+PRETTY_NAME="Ubuntu 22.04.3 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+...
+
+# 5. Run a background container with port mapping:
+$ docker run -d --name verify-nginx -p 8080:80 nginx
+abc123def456...
+
+$ curl http://localhost:8080
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+...
+
+# 6. Clean up:
+$ docker stop verify-nginx && docker rm verify-nginx
+```
+
+### Docker Compose Verification
+
+```bash
+# Check Docker Compose version:
+$ docker compose version
+Docker Compose version v2.23.3
+
+# Test with a simple compose file:
+$ cat <<'EOF' > /tmp/docker-compose-test.yml
+services:
+  web:
+    image: nginx:latest
+    ports:
+      - "8081:80"
+EOF
+
+$ docker compose -f /tmp/docker-compose-test.yml up -d
+[+] Running 1/1
+ ✔ Container tmp-web-1  Started
+
+$ curl http://localhost:8081
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+...
+
+$ docker compose -f /tmp/docker-compose-test.yml down
+[+] Running 1/1
+ ✔ Container tmp-web-1  Removed
+
+$ rm /tmp/docker-compose-test.yml
+```
+
+### BuildKit Verification
+
+```bash
+# Check BuildKit (buildx) version:
+$ docker buildx version
+github.com/docker/buildx v0.12.0 abc123
+
+# List buildx builders:
+$ docker buildx ls
+NAME/NODE    DRIVER/ENDPOINT  STATUS  BUILDKIT  PLATFORMS
+default      docker
+  default    default          running v0.12.4   linux/amd64, linux/arm64, ...
+```
+
+## Troubleshooting Common Installation Issues
+
+### Issue 1: "Cannot connect to the Docker daemon"
+
+```bash
+$ docker ps
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock.
+Is the docker daemon running?
+
+# Fix: Start the Docker daemon
+sudo systemctl start docker
+
+# Check if it started:
+sudo systemctl status docker
+
+# If it failed, check the logs:
+sudo journalctl -u docker.service --no-pager -n 30
+```
+
+### Issue 2: "Permission denied" when running Docker commands
+
+```bash
+$ docker ps
+Got permission denied while trying to connect to the Docker daemon socket
+at unix:///var/run/docker.sock: ...dial unix /var/run/docker.sock:
+connect: permission denied
+
+# Fix: Add your user to the docker group
+sudo usermod -aG docker $USER
+
+# IMPORTANT: Log out and log back in, or run:
+newgrp docker
+
+# Verify:
+docker ps
+```
+
+### Issue 3: Docker daemon fails to start with storage driver errors
+
+```bash
+# Check the daemon logs:
+$ sudo journalctl -u docker.service --no-pager | grep -i error
+level=error msg="failed to mount overlay: invalid argument"
+
+# Fix: Ensure filesystem supports overlay2
+# Check the filesystem type:
+$ df -T /var/lib/docker
+Filesystem     Type  1K-blocks     Used Available Use% Mounted on
+/dev/sda1      ext4  102400000  5000000  92179024   6% /
+
+# If using XFS, ensure ftype=1:
+$ xfs_info /var/lib/docker | grep ftype
+# ftype must be 1 for overlay2
+```
+
+### Issue 4: Containers cannot reach the internet
+
+```bash
+# Test DNS from inside a container:
+$ docker run --rm alpine ping -c 3 google.com
+ping: bad address 'google.com'
+
+# Fix 1: Configure DNS in daemon.json
+sudo tee /etc/docker/daemon.json <<'EOF'
+{
+  "dns": ["8.8.8.8", "8.8.4.4"]
+}
+EOF
+sudo systemctl restart docker
+
+# Fix 2: Check iptables/firewall:
+sudo iptables -L -n | grep DOCKER
+# Docker should have its own chain
+
+# Fix 3: On CentOS/RHEL with firewalld:
+sudo firewall-cmd --permanent --zone=trusted --add-interface=docker0
+sudo firewall-cmd --reload
+sudo systemctl restart docker
+```
+
+### Issue 5: "No space left on device"
+
+```bash
+$ docker pull ubuntu
+Error: write /var/lib/docker/...: no space left on device
+
+# Check Docker disk usage:
+$ docker system df
+TYPE            TOTAL   ACTIVE  SIZE       RECLAIMABLE
+Images          45      5       12.4GB     9.2GB (74%)
+Containers      12      3       2.1GB      1.8GB (85%)
+Local Volumes   20      5       5.3GB      4.1GB (77%)
+Build Cache     67      0       3.8GB      3.8GB (100%)
+
+# Clean up unused resources:
+docker container prune -f     # Remove stopped containers
+docker image prune -f         # Remove dangling images
+docker volume prune -f        # Remove unused volumes (careful!)
+docker builder prune -f       # Remove build cache
+
+# Or clean everything at once:
+docker system prune -a -f --volumes
+```
+
+### Issue 6: Slow image pulls
+
+```bash
+# Increase concurrent downloads in daemon.json:
+{
+  "max-concurrent-downloads": 10
+}
+
+# Or configure a registry mirror:
+{
+  "registry-mirrors": ["https://mirror.gcr.io"]
+}
+
+# Always restart after changes:
+sudo systemctl restart docker
+```
+
+<Callout type="tip" title="Docker Installation Checklist">
+Use this checklist to verify a complete installation:
+
+```
+Docker Installation Checklist:
+═══════════════════════════════
+
+[ ] Docker Engine installed from official repository
+[ ] docker version shows both Client and Server
+[ ] docker info shows correct storage driver (overlay2)
+[ ] docker run hello-world succeeds
+[ ] User added to docker group (sudo not needed)
+[ ] Docker starts on boot (systemctl enable docker)
+[ ] Log rotation configured in daemon.json
+[ ] live-restore enabled for production hosts
+[ ] Docker Compose installed and working
+[ ] BuildKit (buildx) installed and working
+[ ] /var/lib/docker has sufficient disk space
+```
+</Callout>
+
+## Uninstalling Docker
+
+If you need to completely remove Docker:
+
+### Ubuntu/Debian
+
+```bash
+# Remove Docker packages:
+sudo apt-get purge -y docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+
+# Remove Docker data (images, containers, volumes):
+sudo rm -rf /var/lib/docker
+sudo rm -rf /var/lib/containerd
+
+# Remove Docker configuration:
+sudo rm -rf /etc/docker
+sudo rm /etc/apt/sources.list.d/docker.list
+sudo rm /etc/apt/keyrings/docker.asc
+```
+
+### CentOS/RHEL
+
+```bash
+# Remove Docker packages:
+sudo yum remove -y docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+
+# Remove Docker data:
+sudo rm -rf /var/lib/docker
+sudo rm -rf /var/lib/containerd
+
+# Remove Docker configuration:
+sudo rm -rf /etc/docker
+```
+
+<Exercise title="Install and Verify Docker" difficulty="beginner" xpReward={30} estimatedMinutes={25}
+  objectives={["Install Docker Engine on your Linux distribution", "Complete all post-installation configuration steps", "Verify a fully working Docker installation"]}
+  hints={["Follow the installation steps for your specific distribution exactly", "Remember to add your user to the docker group and re-login", "Check docker version, docker info, and docker run hello-world as verification"]}
+  validationCriteria={["Docker Engine installed successfully with docker version showing both client and server", "docker run hello-world produces the expected output without using sudo", "docker info shows overlay2 storage driver and correct system information", "Docker is configured to start on boot (systemctl is-enabled docker returns 'enabled')", "Docker Compose is installed (docker compose version shows a version number)"]}
+>
+
+Install Docker Engine on your system and complete all post-installation steps.
+
+**If you are on Ubuntu/Debian:**
+
+Follow the Ubuntu installation steps in order:
+
+```bash
+# Step 1: Remove old versions
+sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null
+
+# Step 2: Install prerequisites
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg lsb-release
+
+# Step 3: Add Docker's GPG key
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Step 4: Add the repository
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Step 5: Install Docker
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin
+
+# Step 6: Post-installation
+sudo usermod -aG docker $USER
+newgrp docker
+sudo systemctl enable docker
+```
+
+**If you are on CentOS/RHEL:**
+
+Follow the CentOS installation steps provided in this lesson.
+
+**Verification Tasks:**
+
+After installation, run all of these and capture the output:
+
+1. `docker version` — Should show Client and Server sections
+2. `docker info` — Note the storage driver, cgroup driver, and runtime
+3. `docker run hello-world` — Should work without sudo
+4. `docker compose version` — Should show Compose version
+5. `docker buildx version` — Should show BuildKit version
+6. `systemctl is-enabled docker` — Should show "enabled"
+
+</Exercise>
+
+<Exercise title="Configure the Docker Daemon" difficulty="intermediate" xpReward={30} estimatedMinutes={20}
+  objectives={["Create a production-ready daemon.json configuration", "Understand and apply each configuration option", "Verify configuration changes take effect"]}
+  hints={["Always validate JSON syntax before restarting Docker", "Use docker info to verify configuration changes after restart", "Remember to restart Docker after editing daemon.json"]}
+  validationCriteria={["Create a daemon.json with at least 6 configuration options including log rotation, live-restore, and DNS", "Validate the JSON syntax before applying the configuration", "Restart Docker and verify the new configuration with docker info", "Demonstrate that log rotation is working by checking a container's log file size settings", "Explain what each configuration option does and why it matters for production"]}
+>
+
+Configure the Docker daemon for a production-like environment.
+
+**Task 1: Create a Production daemon.json**
+
+Create `/etc/docker/daemon.json` with these settings:
+
+```json
+{
+  "storage-driver": "overlay2",
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "live-restore": true,
+  "userland-proxy": false,
+  "max-concurrent-downloads": 10,
+  "max-concurrent-uploads": 5,
+  "dns": ["8.8.8.8", "8.8.4.4"],
+  "default-ulimits": {
+    "nofile": {
+      "Name": "nofile",
+      "Hard": 65536,
+      "Soft": 65536
+    }
+  }
+}
+```
+
+**Task 2: Validate and Apply**
+
+```bash
+# Validate JSON syntax:
+python3 -c "import json; json.load(open('/etc/docker/daemon.json'))" && echo "Valid"
+
+# Restart Docker:
+sudo systemctl restart docker
+
+# Verify Docker started:
+sudo systemctl status docker
+```
+
+**Task 3: Verify Configuration**
+
+Run these commands and confirm the settings took effect:
+
+```bash
+# Check storage driver:
+docker info --format '{{.Driver}}'
+
+# Check live-restore:
+docker info --format '{{.LiveRestoreEnabled}}'
+
+# Check logging driver:
+docker info --format '{{.LoggingDriver}}'
+
+# Test log rotation by running a container:
+docker run -d --name log-test busybox sh -c 'while true; do echo "log line $(date)"; sleep 1; done'
+
+# Find the container's log file:
+docker inspect log-test --format '{{.LogPath}}'
+
+# Check that the log file exists:
+ls -la $(docker inspect log-test --format '{{.LogPath}}')
+
+# Clean up:
+docker stop log-test && docker rm log-test
+```
+
+**Task 4: Document Your Configuration**
+
+For each option in your daemon.json, write a one-sentence explanation of what it does and why you included it.
+
+</Exercise>
+
+<MiniProject title="Multi-Environment Docker Setup" difficulty="intermediate" xpReward={40} estimatedMinutes={30}
+  objectives={["Design Docker daemon configurations for different environments", "Create an installation automation script", "Demonstrate understanding of Docker installation across platforms"]}
+  hints={["Different environments (dev, staging, production) need different configurations", "An installation script should be idempotent — safe to run multiple times", "Consider security, performance, and debugging needs for each environment"]}
+  validationCriteria={["Create three different daemon.json files optimized for development, staging, and production environments", "Write a shell script that automates Docker installation on Ubuntu including all post-installation steps", "The script should be idempotent (safe to run multiple times)", "Each daemon.json must include at least 5 configuration options with comments explaining each choice", "Production config must include log rotation, live-restore, and security-hardened settings", "Development config should prioritize debugging features like verbose logging"]}
+>
+
+Create a comprehensive Docker installation and configuration package for your team.
+
+**Part 1: Installation Script**
+
+Write a shell script `install-docker.sh` that automates Docker installation on Ubuntu:
+
+```bash
+#!/bin/bash
+# Docker Installation Script for Ubuntu
+# Usage: sudo bash install-docker.sh [dev|staging|prod]
+
+set -euo pipefail
+
+ENVIRONMENT=${1:-dev}
+
+echo "Installing Docker for environment: $ENVIRONMENT"
+
+# Your script should:
+# 1. Check if Docker is already installed
+# 2. Remove old Docker packages
+# 3. Install prerequisites
+# 4. Add Docker's GPG key and repository
+# 5. Install Docker Engine, CLI, containerd, Compose, and BuildKit
+# 6. Add the current user to the docker group
+# 7. Enable Docker on boot
+# 8. Apply the appropriate daemon.json for the environment
+# 9. Start Docker
+# 10. Run verification tests
+```
+
+**Part 2: Environment-Specific Configurations**
+
+Create three daemon.json files:
+
+**Development (`daemon-dev.json`):**
+- Prioritize developer experience and debugging
+- Enable experimental features
+- Verbose logging
+- No resource restrictions
+
+**Staging (`daemon-staging.json`):**
+- Match production settings closely
+- Enable metrics for monitoring
+- Log rotation with moderate limits
+- Live restore enabled
+
+**Production (`daemon-prod.json`):**
+- Maximum security and stability
+- Strict log rotation
+- Live restore enabled
+- Optimized concurrent operations
+- No experimental features
+- Default ulimits configured
+
+**Part 3: Verification Script**
+
+Write a script `verify-docker.sh` that runs all verification checks:
+
+```bash
+#!/bin/bash
+# Docker Installation Verification Script
+
+echo "=== Docker Verification ==="
+
+# Check docker version
+# Check docker info
+# Run hello-world
+# Check compose version
+# Check buildx version
+# Check daemon configuration
+# Test networking (DNS resolution)
+# Test port mapping
+# Report overall status (PASS/FAIL)
+```
+
+Save all files in your home directory:
+- `~/install-docker.sh`
+- `~/daemon-dev.json`
+- `~/daemon-staging.json`
+- `~/daemon-prod.json`
+- `~/verify-docker.sh`
+
+</MiniProject>
+
+## Key Takeaways
+
+- Always install Docker from Docker's official repository — the `docker` or `docker.io` packages from default OS repositories are outdated or incorrect
+- Docker Engine on Linux requires five packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, and docker-compose-plugin
+- On Ubuntu/Debian, installation uses `apt` with Docker's GPG key and repository; on CentOS/RHEL, it uses `yum` with Docker's repo
+- Docker Desktop provides Docker Engine, CLI, Compose, and Kubernetes in one package for macOS and Windows, running a lightweight Linux VM behind the scenes
+- Post-installation steps are critical: add users to the docker group, enable Docker on boot, and configure log rotation in daemon.json
+- The `/etc/docker/daemon.json` file controls daemon behavior including storage driver, logging, DNS, live-restore, and performance tuning
+- Enable `live-restore` on all production hosts so containers survive daemon restarts
+- Always verify installation with `docker version`, `docker info`, `docker run hello-world`, and `docker compose version`
+- Common issues include wrong packages, permission errors, firewall conflicts, and disk space — all have straightforward fixes documented in this lesson
+
+## What's Next
+
+Now that Docker is installed, configured, and verified on your machine, it is time to use it. In the next lesson, **Your First Container**, you will run your first real containers — from the simple `hello-world` to interactive Ubuntu sessions to full web servers. You will learn port mapping, container naming, lifecycle commands, log viewing, and container inspection. Get ready to get your hands dirty with real Docker commands.

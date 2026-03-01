@@ -1,0 +1,1308 @@
+---
+title: "Cherry Pick and Advanced Operations"
+description: "Selectively apply commits across branches. Master cherry-pick for hotfixes, feature backporting, and surgical history manipulation."
+order: 16
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 15-interactive-rebase
+objectives:
+  - Use git cherry-pick to apply specific commits
+  - Handle cherry-pick conflicts
+  - Know when to cherry-pick vs merge/rebase
+  - Use cherry-pick for hotfix workflows
+tags:
+  - git
+  - cherry-pick
+  - advanced
+  - workflow
+---
+
+<Callout type="story" title="The Story">
+It's 2AM. Production is down because of a bug introduced 3 days ago. The fix is in a feature branch that's not ready to merge — it has 50 commits of unfinished work. You can't merge the whole branch. But you can cherry-pick just the one commit that fixes the bug, apply it directly to main, deploy, and go back to sleep. Cherry-pick is the surgical tool for when you need one specific commit from another branch.
+</Callout>
+
+## What Is Cherry-Pick?
+
+`git cherry-pick` takes a commit from one branch and applies it to another. It doesn't move branches or change history — it creates a **new commit** on your current branch with the same changes as the original.
+
+```
+Before cherry-pick:
+  main:    A → B → C
+  feature: A → B → D → E → F
+                        ↑
+                   (you want this one)
+
+After git cherry-pick E (while on main):
+  main:    A → B → C → E'
+  feature: A → B → D → E → F
+
+  E' has the same changes as E, but a different hash.
+  It's a copy, not a move.
+```
+
+The key insight: cherry-pick **copies** a commit. The original commit stays exactly where it is. The new commit has the same diff (same code changes) but a different SHA because it has a different parent.
+
+## Basic Cherry-Pick Usage
+
+### Cherry-Picking a Single Commit
+
+```bash
+# First, find the commit you want
+git log --oneline feature/payments
+# a1b2c3d Add payment validation
+# e4f5g6h Fix currency rounding bug  ← this one
+# i7j8k9l Refactor payment gateway
+# m0n1o2p WIP: new checkout flow
+
+# Switch to the branch you want to apply it to
+git switch main
+
+# Cherry-pick the commit
+git cherry-pick e4f5g6h
+# [main 7x8y9z0] Fix currency rounding bug
+#  Date: Mon Mar 15 14:30:00 2026
+#  1 file changed, 5 insertions(+), 3 deletions(-)
+```
+
+The commit message is preserved by default. The author information is preserved too — if Bob wrote the original commit, the cherry-picked commit still shows Bob as the author, but you as the committer.
+
+### Cherry-Picking Multiple Commits
+
+```bash
+# Cherry-pick several commits (applied in order)
+git cherry-pick a1b2c3d e4f5g6h i7j8k9l
+
+# Each becomes a separate commit on the current branch
+git log --oneline -3
+# 111aaaa Add payment validation
+# 222bbbb Fix currency rounding bug
+# 333cccc Refactor payment gateway
+```
+
+### Cherry-Picking a Range of Commits
+
+```bash
+# Cherry-pick a range: from A (exclusive) to B (inclusive)
+git cherry-pick A..B
+# This does NOT include commit A — only A+1 through B
+
+# To include commit A, use the caret syntax
+git cherry-pick A^..B
+# This includes A, and everything up to and including B
+
+# Example: cherry-pick commits D, E, and F from feature
+git log --oneline feature/payments
+# f1f1f1f (HEAD -> feature/payments) F: Add tests
+# e1e1e1e E: Fix edge case
+# d1d1d1d D: Core implementation
+# c1c1c1c C: Setup files
+# b1b1b1b B: Initial work
+
+# Cherry-pick D through F (inclusive)
+git switch main
+git cherry-pick d1d1d1d^..f1f1f1f
+# Applies D, then E, then F in order
+```
+
+<Callout type="warning" title="Range Syntax Gotcha">
+`A..B` excludes commit A. This trips up almost everyone. If you want commits D, E, and F, and D's hash is `d1d1d1d`, you need `d1d1d1d^..f1f1f1f` (note the caret `^`). Without the caret, commit D is excluded and you only get E and F. Think of `A..B` as "everything after A, up to and including B."
+</Callout>
+
+## Cherry-Pick Without Committing
+
+Sometimes you want to apply changes but not commit immediately — maybe you want to combine changes from multiple commits or edit before committing.
+
+```bash
+# Apply changes but don't commit (stage only)
+git cherry-pick --no-commit e4f5g6h
+# or the shorthand
+git cherry-pick -n e4f5g6h
+
+# Changes are staged but not committed
+git status
+# Changes to be committed:
+#   modified: src/payments/validator.js
+
+# You can now modify, add more changes, or combine with other cherry-picks
+git cherry-pick -n a1b2c3d
+git cherry-pick -n i7j8k9l
+
+# Commit everything as a single commit
+git commit -m "Backport payment fixes from feature branch"
+```
+
+<Callout type="tip" title="When to Use --no-commit">
+Use `--no-commit` when you want to:
+- Combine multiple cherry-picked commits into one
+- Edit the changes before committing
+- Add additional modifications on top
+- Create a cleaner history on the target branch
+
+This is especially useful when backporting to release branches where you want a single, clean commit rather than replaying the full development history.
+</Callout>
+
+## Handling Cherry-Pick Conflicts
+
+Cherry-pick conflicts happen when the commit you're copying changes code that's different on your current branch. The resolution process is similar to merge conflicts.
+
+```bash
+# Attempt a cherry-pick
+git cherry-pick e4f5g6h
+# Auto-merging src/payments/processor.js
+# CONFLICT (content): Merge conflict in src/payments/processor.js
+# error: could not apply e4f5g6h... Fix currency rounding bug
+# hint: After resolving the conflicts, mark the corrected paths
+# hint: with 'git add <paths>' and run 'git cherry-pick --continue'.
+```
+
+### Resolving the Conflict
+
+```bash
+# 1. Open the conflicted file and resolve
+cat src/payments/processor.js
+# <<<<<<< HEAD (your current branch)
+# const roundAmount = (amount) => Math.round(amount * 100) / 100;
+# =======
+# const roundAmount = (amount) => {
+#   return Number(amount.toFixed(2));
+# };
+# >>>>>>> e4f5g6h (Fix currency rounding bug)
+
+# 2. Edit the file to keep the version you want
+# (In this case, keep the fix from the cherry-picked commit)
+
+# 3. Stage the resolution
+git add src/payments/processor.js
+
+# 4. Continue the cherry-pick
+git cherry-pick --continue
+# Opens editor for commit message (pre-filled with original message)
+```
+
+### Aborting a Cherry-Pick
+
+```bash
+# If the conflict is too complex or you change your mind
+git cherry-pick --abort
+# Returns everything to the state before the cherry-pick started
+
+# If you're in the middle of a multi-commit cherry-pick
+git cherry-pick --quit
+# Stops the cherry-pick sequence but keeps any already-applied commits
+# (--abort would undo everything, --quit keeps what succeeded)
+```
+
+### Conflict Resolution Strategies
+
+```bash
+# Accept all changes from the cherry-picked commit
+git cherry-pick --strategy-option theirs e4f5g6h
+
+# Keep all current branch changes (effectively a no-op, but records the cherry-pick)
+git cherry-pick --strategy-option ours e4f5g6h
+```
+
+## Cherry-Pick vs Merge vs Rebase
+
+Understanding when to use each is critical:
+
+| Aspect | Cherry-Pick | Merge | Rebase |
+|---|---|---|---|
+| What it does | Copies specific commits | Combines full branch histories | Replays commits on new base |
+| Creates duplicate commits | Yes | No | Yes (new hashes) |
+| Preserves original | Yes (original untouched) | Yes | No (rewrites history) |
+| Best for | 1-3 specific commits | Integrating complete features | Cleaning up before merge |
+| Risk | Duplicate commits on later merge | Merge conflicts, merge commits | History rewrite, force push |
+| Shared branches | Safe (additive) | Safe (additive) | Dangerous (rewrites) |
+
+### Decision Guide
+
+```
+Do you need ALL commits from a branch?
+├── Yes → Use merge or rebase
+│   ├── Want linear history? → Rebase then merge
+│   └── Want merge commit? → Merge
+└── No, just specific commits
+    ├── 1-3 commits? → Cherry-pick
+    ├── Many commits? → Consider creating a branch and merging
+    └── Need to modify commits? → Cherry-pick with --no-commit
+```
+
+<Callout type="tip" title="The Duplicate Commit Problem">
+When you cherry-pick a commit from branch A to branch B, the same changes now exist in both branches. Later, when you merge A into B (or vice versa), Git is usually smart enough to handle this — it recognizes the same diff and skips it. But not always. If surrounding code changed differently on each branch, you may get conflicts during the eventual merge. This is why cherry-pick is best for surgical operations, not routine branch integration.
+</Callout>
+
+## Common Cherry-Pick Use Cases
+
+### 1. Hotfix from Feature Branch
+
+The most common use case — extracting a bugfix from an in-progress feature branch:
+
+```bash
+# Production bug! The fix is in feature/checkout
+git log --oneline feature/checkout
+# 9a8b7c6 WIP: new checkout UI
+# 5d4e3f2 Fix: handle null cart items  ← need this
+# 1g2h3i4 WIP: payment redesign
+# 0j1k2l3 Fix: tax calculation error   ← and this
+# m4n5o6p WIP: cart refactor
+
+# Create a hotfix branch from main
+git switch main
+git switch -c hotfix/cart-fixes
+
+# Cherry-pick just the fixes
+git cherry-pick 0j1k2l3
+git cherry-pick 5d4e3f2
+
+# Review and deploy
+git log --oneline
+# aaa1111 Fix: handle null cart items
+# bbb2222 Fix: tax calculation error
+# ccc3333 (main) Latest production commit
+
+# Merge hotfix to main
+git switch main
+git merge hotfix/cart-fixes
+git push origin main
+# Deploy!
+```
+
+### 2. Backporting to Release Branch
+
+When your main branch has moved ahead but you need fixes in an older release:
+
+```bash
+# main has the fix, need it in release/2.5
+git log --oneline main
+# abc1234 Fix: SQL injection in login
+# def5678 Feature: new dashboard (not needed in 2.5)
+# ghi9012 Fix: memory leak in worker
+
+# Backport security fix and memory leak fix to release/2.5
+git switch release/2.5
+git cherry-pick abc1234 ghi9012
+
+# Tag the new patch release
+git tag v2.5.3
+git push origin release/2.5 --tags
+```
+
+### 3. Recovering Commits from Abandoned Branches
+
+```bash
+# A feature was abandoned but had some useful utility functions
+git log --oneline feature/abandoned-experiment
+# aaa1111 Experiment: failed approach (don't want)
+# bbb2222 Utility: date formatting helpers (want this!)
+# ccc3333 Utility: string sanitizer (want this!)
+# ddd4444 Experiment: initial setup (don't want)
+
+git switch main
+git cherry-pick ccc3333 bbb2222
+```
+
+### 4. Feature Flag Commits
+
+```bash
+# Cherry-pick feature flag toggles independently of the feature itself
+git log --oneline feature/new-search
+# 111aaaa Implement new search algorithm
+# 222bbbb Add feature flag for new search  ← just the flag
+# 333cccc Search index optimization
+
+# Deploy the flag first (turned off), then the feature later
+git switch main
+git cherry-pick 222bbbb
+# Now you can deploy the flag, then cherry-pick the implementation later
+```
+
+## Tracking Cherry-Picked Commits
+
+### Using -x Flag
+
+```bash
+# Add a reference to the original commit in the message
+git cherry-pick -x e4f5g6h
+
+# The commit message will include:
+# Fix currency rounding bug
+#
+# (cherry picked from commit e4f5g6habcdef1234567890)
+
+# This helps track where cherry-picks came from
+git log --oneline -1
+# 7x8y9z0 Fix currency rounding bug
+git log -1
+# commit 7x8y9z0...
+# Author: Bob <bob@company.com>
+# Date: Mon Mar 15 14:30:00 2026
+#
+#     Fix currency rounding bug
+#
+#     (cherry picked from commit e4f5g6habcdef1234567890)
+```
+
+<Callout type="tip" title="Always Use -x for Traceability">
+In team environments, always use `git cherry-pick -x` so that the commit message records where the cherry-pick came from. This is invaluable when debugging later — you can trace back to the original commit, see its full context, and understand why it was cherry-picked. Some teams enforce this via commit-msg hooks.
+</Callout>
+
+### Finding Cherry-Picked Commits
+
+```bash
+# Find commits that have been cherry-picked between branches
+# (commits in main that are NOT in feature, by patch content)
+git log --oneline --cherry-pick --right-only main...feature/payments
+
+# Find duplicate commits (same patch, different hash)
+git log --oneline --cherry-mark main...feature/payments
+# = abc1234 appears in both (cherry-picked)
+# + def5678 only in right side
+# + ghi9012 only in right side
+
+# Search for cherry-pick references in commit messages
+git log --grep="cherry picked from" --oneline
+```
+
+## Cherry-Pick Workflow for Hotfixes
+
+Here's the complete workflow most teams use for production hotfixes:
+
+```bash
+# Step 1: Identify the fix commit in the feature branch
+git log --oneline --all --grep="fix timeout"
+# e4f5g6h (feature/api-v2) Fix: API timeout handling
+
+# Step 2: Create hotfix branch from production tag/branch
+git switch main
+git pull origin main
+git switch -c hotfix/api-timeout
+
+# Step 3: Cherry-pick with reference tracking
+git cherry-pick -x e4f5g6h
+
+# Step 4: Test the hotfix
+npm test
+npm run build
+
+# Step 5: Merge to main and deploy
+git switch main
+git merge --no-ff hotfix/api-timeout -m "Hotfix: API timeout (cherry-picked from feature/api-v2)"
+git tag v3.2.1
+git push origin main --tags
+
+# Step 6: Clean up
+git branch -d hotfix/api-timeout
+
+# Step 7: Note for the feature branch developer
+# When feature/api-v2 eventually merges to main,
+# Git will handle the duplicate commit automatically in most cases
+```
+
+## Potential Issues and Solutions
+
+### Duplicate Commits
+
+When you cherry-pick and later merge the source branch, you may see the same changes appear twice in the log:
+
+```bash
+# After cherry-pick to main, then merging feature to main:
+git log --oneline --graph
+# *   abc1234 Merge feature/payments into main
+# |\
+# | * e4f5g6h Fix currency rounding (original)
+# | * ...
+# * | 7x8y9z0 Fix currency rounding (cherry-picked)
+# * | ...
+# |/
+
+# Git usually handles the merge cleanly despite the duplication.
+# But the history looks messy. Solutions:
+# 1. Before merging, rebase feature and drop the cherry-picked commit
+# 2. Accept the duplication (it's cosmetic, not functional)
+# 3. Use --no-commit cherry-pick so there's no duplicated commit title
+```
+
+### Conflicts When Branches Eventually Merge
+
+```bash
+# If code around the cherry-picked area changed differently:
+git merge feature/payments
+# CONFLICT: both branches modified processor.js near the cherry-picked area
+
+# Resolution: understand that both versions contain the fix,
+# choose the version from the feature branch (it's more up-to-date)
+```
+
+### Cherry-Pick and Merge Commits
+
+```bash
+# You can't directly cherry-pick a merge commit without specifying a parent
+git cherry-pick abc1234
+# error: commit abc1234 is a merge but no -m option was given
+
+# Specify which parent's diff to use
+git cherry-pick -m 1 abc1234  # changes relative to first parent (usually main)
+git cherry-pick -m 2 abc1234  # changes relative to second parent (feature branch)
+
+# Usually -m 1 is what you want for a merge commit on main
+```
+
+<Callout type="warning" title="Avoid Cherry-Picking Merge Commits">
+Cherry-picking merge commits is tricky and often produces unexpected results. The `-m` flag tells Git which parent to diff against, but the resulting commit may not include all the changes you expect. When possible, cherry-pick the individual commits from the branch instead of the merge commit itself.
+</Callout>
+
+## Advanced Cherry-Pick Techniques
+
+### Cherry-Pick with Edit
+
+```bash
+# Cherry-pick but edit the commit message
+git cherry-pick --edit e4f5g6h
+# Opens editor so you can modify the message
+
+# Cherry-pick and modify the changes before committing
+git cherry-pick --no-commit e4f5g6h
+# Edit files as needed
+git add -A
+git commit -m "Adapted fix for our branch context"
+```
+
+### Cherry-Pick to Check for Conflicts (Dry Run)
+
+```bash
+# There's no official --dry-run, but you can simulate one:
+git stash  # save any work in progress
+git cherry-pick --no-commit e4f5g6h
+# If it works: changes are staged (inspect them)
+git diff --cached --stat  # see what changed
+git cherry-pick --abort   # clean up without committing
+git stash pop  # restore your work
+
+# Or use a throwaway branch
+git switch -c test/cherry-pick-check
+git cherry-pick e4f5g6h
+# Inspect results
+git switch -  # go back
+git branch -D test/cherry-pick-check  # clean up
+```
+
+### Bulk Cherry-Pick with Filtering
+
+```bash
+# Cherry-pick all commits by a specific author from a branch
+git log --author="bob@company.com" --format="%H" feature/api-v2 \
+  | tac \
+  | xargs git cherry-pick
+
+# Cherry-pick commits matching a pattern in the message
+git log --grep="^Fix:" --format="%H" feature/api-v2 \
+  | tac \
+  | xargs git cherry-pick
+```
+
+<Exercise number={1} title="Hotfix Cherry-Pick">
+
+```bash
+# Set up a realistic scenario: production bug, fix is in a feature branch
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Build up the main branch (production)
+echo '{"name": "webapp", "version": "3.2.0"}' > package.json
+echo "const app = require('./app');" > index.js
+cat > app.js << 'EOF'
+function processOrder(order) {
+  const total = order.items.reduce((sum, item) => sum + item.price, 0);
+  const tax = total * 0.08;
+  return { total, tax, grandTotal: total + tax };
+}
+
+function validateOrder(order) {
+  if (!order.items || order.items.length === 0) {
+    throw new Error("Order must have items");
+  }
+  return true;
+}
+
+module.exports = { processOrder, validateOrder };
+EOF
+git add . && git commit -q -m "v3.2.0: Production release"
+git tag v3.2.0
+
+# Create a feature branch with many commits (not ready to merge)
+git switch -c feature/checkout-redesign
+
+echo "// Checkout redesign WIP" > checkout.js
+git add . && git commit -q -m "WIP: Start checkout redesign"
+
+cat > cart.js << 'EOF'
+function calculateCart(items) {
+  return items.reduce((total, item) => {
+    return total + (item.price * item.quantity);
+  }, 0);
+}
+module.exports = { calculateCart };
+EOF
+git add . && git commit -q -m "WIP: Cart calculation module"
+
+# THIS is the bugfix commit we'll need
+cat > app.js << 'EOF'
+function processOrder(order) {
+  if (!order || !order.items) {
+    throw new Error("Invalid order object");
+  }
+  const total = order.items.reduce((sum, item) => sum + item.price * (item.quantity || 1), 0);
+  const tax = total * 0.08;
+  return { total, tax, grandTotal: total + tax };
+}
+
+function validateOrder(order) {
+  if (!order.items || order.items.length === 0) {
+    throw new Error("Order must have items");
+  }
+  if (order.items.some(item => item.price < 0)) {
+    throw new Error("Item prices must be non-negative");
+  }
+  return true;
+}
+
+module.exports = { processOrder, validateOrder };
+EOF
+git add . && git commit -q -m "Fix: Handle null orders and negative prices"
+FIX_COMMIT=$(git rev-parse HEAD)
+
+echo "// More WIP checkout stuff" >> checkout.js
+git add . && git commit -q -m "WIP: Checkout progress indicators"
+
+echo "// Even more WIP" >> checkout.js
+git add . && git commit -q -m "WIP: Checkout animations (broken)"
+
+echo ""
+echo "=== Feature branch has 5 commits (mostly WIP) ==="
+git log --oneline
+echo ""
+echo "=== The fix commit we need: $FIX_COMMIT ==="
+git log --oneline -1 "$FIX_COMMIT"
+
+# Switch to main — this is where we need the fix
+git switch main
+echo ""
+echo "=== Main branch (production) before cherry-pick ==="
+git log --oneline
+echo ""
+echo "=== Current app.js on main (has the bug) ==="
+cat app.js
+
+echo ""
+echo "================================================================"
+echo "  TASK: Cherry-pick the bugfix to main for emergency deployment"
+echo "================================================================"
+echo ""
+
+# Step 1: Create a hotfix branch
+git switch -c hotfix/null-order-fix
+echo "Step 1: Created hotfix branch from main"
+
+# Step 2: Cherry-pick with -x for traceability
+git cherry-pick -x "$FIX_COMMIT"
+echo ""
+echo "Step 2: Cherry-picked the fix"
+echo ""
+echo "=== Hotfix branch now has the fix ==="
+git log --oneline -3
+echo ""
+echo "=== Fixed app.js ==="
+cat app.js
+
+# Step 3: Verify the fix
+echo ""
+echo "Step 3: Verify the commit message has cherry-pick reference"
+git log -1
+echo ""
+
+# Step 4: Merge to main
+git switch main
+git merge --no-ff hotfix/null-order-fix -m "Hotfix: null order handling (cherry-picked from feature/checkout-redesign)"
+echo ""
+echo "Step 4: Merged hotfix to main"
+
+# Step 5: Tag the release
+git tag v3.2.1
+echo ""
+echo "Step 5: Tagged v3.2.1"
+
+# Step 6: Clean up
+git branch -d hotfix/null-order-fix
+echo ""
+echo "Step 6: Cleaned up hotfix branch"
+
+echo ""
+echo "=== Final state of main ==="
+git log --oneline --graph
+echo ""
+echo "=== Feature branch still has its original commits ==="
+git log --oneline feature/checkout-redesign
+echo ""
+echo "=== Tags ==="
+git tag -l
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Backport to Release Branch">
+
+```bash
+# Scenario: Main branch has moved ahead. We need to backport specific
+# fixes to the release/2.x branch that's still in production for some clients.
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Set up initial release
+echo "v2.0" > version.txt
+cat > server.js << 'EOF'
+const http = require('http');
+
+function startServer(port) {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Hello World');
+  });
+  server.listen(port);
+  return server;
+}
+
+module.exports = { startServer };
+EOF
+cat > auth.js << 'EOF'
+function authenticate(username, password) {
+  // Simple auth check
+  if (!username || !password) return false;
+  return checkDatabase(username, password);
+}
+
+function checkDatabase(username, password) {
+  // Simulated database check
+  return true;
+}
+
+module.exports = { authenticate };
+EOF
+git add . && git commit -q -m "v2.0.0: Initial release"
+git tag v2.0.0
+
+# Create release branch
+git branch release/2.x
+
+# Continue development on main (heading toward v3.0)
+echo "v3.0-dev" > version.txt
+cat > server.js << 'EOF'
+const http = require('http');
+const cluster = require('cluster');
+
+function startServer(port, workers = 4) {
+  if (cluster.isMaster) {
+    for (let i = 0; i < workers; i++) cluster.fork();
+  } else {
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', worker: process.pid }));
+    });
+    server.listen(port);
+  }
+}
+
+module.exports = { startServer };
+EOF
+git add . && git commit -q -m "Feature: Cluster mode for v3.0"
+
+# Security fix (need to backport this!)
+cat > auth.js << 'EOF'
+const crypto = require('crypto');
+
+function authenticate(username, password) {
+  if (!username || !password) return false;
+  // Sanitize inputs to prevent injection
+  const safeUser = sanitizeInput(username);
+  const safePass = sanitizeInput(password);
+  return checkDatabase(safeUser, safePass);
+}
+
+function sanitizeInput(input) {
+  return input.replace(/[^\w@.-]/g, '');
+}
+
+function checkDatabase(username, password) {
+  // Use timing-safe comparison
+  const stored = getStoredHash(username);
+  const provided = crypto.createHash('sha256').update(password).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(provided));
+}
+
+function getStoredHash(username) {
+  // Simulated - would come from database
+  return crypto.createHash('sha256').update('password').digest('hex');
+}
+
+module.exports = { authenticate, sanitizeInput };
+EOF
+git add . && git commit -q -m "Security: Input sanitization and timing-safe auth"
+SECURITY_FIX=$(git rev-parse HEAD)
+
+# Performance fix (also need to backport)
+cat > logger.js << 'EOF'
+function createLogger(level = 'info') {
+  const levels = { error: 0, warn: 1, info: 2, debug: 3 };
+  return {
+    log(msgLevel, message) {
+      if (levels[msgLevel] <= levels[level]) {
+        const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] [${msgLevel.toUpperCase()}] ${message}`);
+      }
+    }
+  };
+}
+
+module.exports = { createLogger };
+EOF
+git add . && git commit -q -m "Feature: Structured logging (v3.0 only)"
+
+cat > cache.js << 'EOF'
+class LRUCache {
+  constructor(maxSize = 100) {
+    this.maxSize = maxSize;
+    this.cache = new Map();
+  }
+
+  get(key) {
+    if (!this.cache.has(key)) return undefined;
+    const value = this.cache.get(key);
+    this.cache.delete(key);
+    this.cache.set(key, value);
+    return value;
+  }
+
+  set(key, value) {
+    if (this.cache.has(key)) this.cache.delete(key);
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, value);
+  }
+}
+
+module.exports = { LRUCache };
+EOF
+git add . && git commit -q -m "Performance: Add LRU cache for database queries"
+PERF_FIX=$(git rev-parse HEAD)
+
+# More v3.0 features
+echo "// GraphQL support" > graphql.js
+git add . && git commit -q -m "Feature: GraphQL endpoint (v3.0)"
+
+echo ""
+echo "=== Main branch (heading to v3.0) ==="
+git log --oneline
+echo ""
+
+echo "=== Release/2.x branch (stuck at v2.0) ==="
+git log --oneline release/2.x
+echo ""
+
+echo "=== Commits to backport ==="
+echo "Security fix: $SECURITY_FIX"
+echo "  $(git log --oneline -1 $SECURITY_FIX)"
+echo "Performance fix: $PERF_FIX"
+echo "  $(git log --oneline -1 $PERF_FIX)"
+echo ""
+echo "================================================================"
+echo "  TASK: Backport security and performance fixes to release/2.x"
+echo "================================================================"
+echo ""
+
+# Switch to release branch
+git switch release/2.x
+
+# Backport the security fix first (most critical)
+echo "--- Backporting security fix ---"
+git cherry-pick -x "$SECURITY_FIX"
+echo ""
+
+# Backport the performance fix
+echo "--- Backporting performance fix ---"
+# This might need --no-commit since the file is new in both branches
+git cherry-pick -x "$PERF_FIX"
+echo ""
+
+# Update the version
+echo "v2.0.1" > version.txt
+git add . && git commit -q -m "Bump version to v2.0.1"
+git tag v2.0.1
+
+echo "=== Release/2.x after backports ==="
+git log --oneline
+echo ""
+echo "=== Files on release/2.x ==="
+ls *.js *.txt
+echo ""
+echo "=== auth.js has the security fix ==="
+head -10 auth.js
+echo ""
+echo "=== Commit messages show cherry-pick origin ==="
+git log --format="%h %s" -4
+echo ""
+echo "=== Main branch is unaffected ==="
+git log --oneline main
+echo ""
+echo "=== Both branches have the fixes now ==="
+echo "release/2.x tags:"
+git tag -l 'v2.*'
+echo ""
+echo "Backport complete! Release/2.x has the security and performance fixes"
+echo "without any of the v3.0 features (cluster mode, logging, GraphQL)."
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Cherry-Pick Helper">
+
+```bash
+cat > ~/cherry-pick-helper.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Cherry-Pick Helper — Find commits by message or author and cherry-pick them safely
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Verify we're in a git repo
+if ! git rev-parse --git-dir &>/dev/null; then
+    echo -e "${RED}Error: Not in a git repository${NC}"
+    exit 1
+fi
+
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "DETACHED")
+
+usage() {
+    echo -e "${BLUE}Cherry-Pick Helper${NC}"
+    echo ""
+    echo "Usage: $0 <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  find    <branch> --author <email>     Find commits by author on a branch"
+    echo "  find    <branch> --grep <pattern>      Find commits by message pattern"
+    echo "  find    <branch> --since <date>        Find commits since date"
+    echo "  pick    <commit> [commit...]            Safely cherry-pick commits"
+    echo "  pick-range <start> <end>               Cherry-pick a range of commits"
+    echo "  preview <commit>                        Show what a cherry-pick would change"
+    echo "  batch   <branch> --grep <pattern>      Find and interactively cherry-pick"
+    echo "  log                                     Show recent cherry-picks on this branch"
+    echo ""
+    echo "Options:"
+    echo "  --no-commit    Stage changes without committing"
+    echo "  --dry-run      Show what would happen without doing it"
+    echo ""
+    echo "Examples:"
+    echo "  $0 find feature/api --grep 'Fix:'"
+    echo "  $0 find feature/api --author bob@company.com"
+    echo "  $0 pick abc1234 def5678"
+    echo "  $0 batch feature/api --grep 'Security:'"
+}
+
+find_commits() {
+    local branch="$1"
+    shift
+    local search_type=""
+    local search_value=""
+    local since_date=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --author) search_type="author"; search_value="$2"; shift 2 ;;
+            --grep)   search_type="grep";   search_value="$2"; shift 2 ;;
+            --since)  since_date="$2"; shift 2 ;;
+            *) echo -e "${RED}Unknown option: $1${NC}"; return 1 ;;
+        esac
+    done
+
+    if [ -z "$search_type" ]; then
+        echo -e "${RED}Must specify --author, --grep, or --since${NC}"
+        return 1
+    fi
+
+    echo -e "${BLUE}Searching branch '${branch}' for commits...${NC}"
+    echo ""
+
+    local git_args=("log" "--oneline" "--no-merges" "$branch")
+
+    case "$search_type" in
+        author) git_args+=("--author=$search_value") ;;
+        grep)   git_args+=("--grep=$search_value") ;;
+    esac
+
+    if [ -n "$since_date" ]; then
+        git_args+=("--since=$since_date")
+    fi
+
+    # Exclude commits already on current branch
+    git_args+=("--not" "$CURRENT_BRANCH")
+
+    local results
+    results=$(git "${git_args[@]}" 2>/dev/null || true)
+
+    if [ -z "$results" ]; then
+        echo -e "${YELLOW}No matching commits found on '${branch}' that aren't already on '${CURRENT_BRANCH}'.${NC}"
+        return 0
+    fi
+
+    echo -e "${GREEN}Found commits:${NC}"
+    echo "$results" | nl -ba
+    echo ""
+    echo -e "${CYAN}Total: $(echo "$results" | wc -l) commit(s)${NC}"
+    echo ""
+    echo "Use '$0 pick <hash>' or '$0 preview <hash>' to proceed."
+}
+
+preview_commit() {
+    local commit="$1"
+
+    echo -e "${BLUE}Preview of cherry-pick: ${commit}${NC}"
+    echo ""
+
+    echo -e "${YELLOW}--- Commit Info ---${NC}"
+    git log -1 --format="Hash:    %H%nAuthor:  %an <%ae>%nDate:    %ci%nMessage: %s" "$commit"
+    echo ""
+
+    echo -e "${YELLOW}--- Changes ---${NC}"
+    git show --stat "$commit"
+    echo ""
+
+    echo -e "${YELLOW}--- Diff ---${NC}"
+    git show --format="" "$commit"
+    echo ""
+
+    # Check for potential conflicts
+    echo -e "${YELLOW}--- Conflict Check ---${NC}"
+    local changed_files
+    changed_files=$(git show --format="" --name-only "$commit")
+
+    local has_risk=false
+    while IFS= read -r file; do
+        if [ -f "$file" ]; then
+            # Check if the file has diverged
+            local base_version current_version
+            base_version=$(git show "${commit}^:${file}" 2>/dev/null | md5sum | cut -d' ' -f1)
+            current_version=$(git show "HEAD:${file}" 2>/dev/null | md5sum | cut -d' ' -f1)
+            if [ "$base_version" != "$current_version" ]; then
+                echo -e "  ${YELLOW}WARNING:${NC} ${file} has diverged — possible conflict"
+                has_risk=true
+            else
+                echo -e "  ${GREEN}OK:${NC} ${file} should apply cleanly"
+            fi
+        else
+            echo -e "  ${CYAN}NEW:${NC} ${file} doesn't exist on current branch"
+        fi
+    done <<< "$changed_files"
+
+    if [ "$has_risk" = true ]; then
+        echo ""
+        echo -e "${YELLOW}Some files have diverged. Cherry-pick may require conflict resolution.${NC}"
+    else
+        echo ""
+        echo -e "${GREEN}Cherry-pick should apply cleanly.${NC}"
+    fi
+}
+
+safe_cherry_pick() {
+    local commits=()
+    local no_commit=false
+    local dry_run=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-commit) no_commit=true; shift ;;
+            --dry-run)   dry_run=true; shift ;;
+            *)           commits+=("$1"); shift ;;
+        esac
+    done
+
+    if [ ${#commits[@]} -eq 0 ]; then
+        echo -e "${RED}No commits specified${NC}"
+        return 1
+    fi
+
+    # Safety checks
+    echo -e "${BLUE}Cherry-Pick Safety Check${NC}"
+    echo -e "Current branch: ${CYAN}${CURRENT_BRANCH}${NC}"
+    echo -e "Commits to pick: ${#commits[@]}"
+    echo ""
+
+    # Check for uncommitted changes
+    if [ -n "$(git status --porcelain)" ]; then
+        echo -e "${YELLOW}Warning: You have uncommitted changes.${NC}"
+        echo -e "${YELLOW}Consider stashing them first: git stash${NC}"
+        git status --short
+        echo ""
+        read -r -p "Continue anyway? (yes/no): " response
+        if [ "$response" != "yes" ]; then
+            echo "Aborted."
+            return 0
+        fi
+    fi
+
+    # Show what we're about to do
+    for commit in "${commits[@]}"; do
+        echo -e "  ${CYAN}$(git log --oneline -1 "$commit")${NC}"
+    done
+    echo ""
+
+    if [ "$dry_run" = true ]; then
+        echo -e "${YELLOW}DRY RUN — no changes will be made${NC}"
+        echo ""
+        for commit in "${commits[@]}"; do
+            echo -e "${BLUE}Would cherry-pick: $(git log --oneline -1 "$commit")${NC}"
+            git show --stat --format="" "$commit"
+            echo ""
+        done
+        return 0
+    fi
+
+    # Record starting point for rollback
+    local start_point
+    start_point=$(git rev-parse HEAD)
+
+    local picked=0
+    local failed=0
+
+    for commit in "${commits[@]}"; do
+        echo -e "${BLUE}Cherry-picking: $(git log --oneline -1 "$commit")${NC}"
+
+        local cp_args=("-x")
+        if [ "$no_commit" = true ]; then
+            cp_args+=("--no-commit")
+        fi
+        cp_args+=("$commit")
+
+        if git cherry-pick "${cp_args[@]}" 2>/dev/null; then
+            echo -e "  ${GREEN}Success${NC}"
+            ((picked++))
+        else
+            echo -e "  ${RED}CONFLICT — cherry-pick paused${NC}"
+            echo ""
+            echo "Conflicted files:"
+            git diff --name-only --diff-filter=U
+            echo ""
+            echo "Options:"
+            echo "  1) Resolve conflicts manually, then: git cherry-pick --continue"
+            echo "  2) Skip this commit: git cherry-pick --skip"
+            echo "  3) Abort everything: git cherry-pick --abort"
+            echo "  4) Reset to before we started: git reset --hard $start_point"
+            ((failed++))
+            break
+        fi
+    done
+
+    echo ""
+    echo -e "${BLUE}Results:${NC}"
+    echo -e "  Picked: ${GREEN}${picked}${NC}"
+    echo -e "  Failed: ${RED}${failed}${NC}"
+
+    if [ "$picked" -gt 0 ] && [ "$failed" -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}All commits cherry-picked successfully!${NC}"
+        echo ""
+        echo "New commits on ${CURRENT_BRANCH}:"
+        git log --oneline -"$picked"
+    fi
+}
+
+show_cherry_pick_log() {
+    echo -e "${BLUE}Recent cherry-picks on '${CURRENT_BRANCH}':${NC}"
+    echo ""
+    local results
+    results=$(git log --grep="cherry picked from" --oneline -20 2>/dev/null || true)
+    if [ -z "$results" ]; then
+        echo "No cherry-picked commits found on this branch."
+    else
+        echo "$results"
+        echo ""
+        echo -e "${CYAN}Total: $(echo "$results" | wc -l) cherry-picked commit(s)${NC}"
+    fi
+}
+
+batch_cherry_pick() {
+    local branch="$1"
+    shift
+    local grep_pattern=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --grep) grep_pattern="$2"; shift 2 ;;
+            *) echo -e "${RED}Unknown option: $1${NC}"; return 1 ;;
+        esac
+    done
+
+    if [ -z "$grep_pattern" ]; then
+        echo -e "${RED}Must specify --grep pattern${NC}"
+        return 1
+    fi
+
+    echo -e "${BLUE}Finding commits matching '${grep_pattern}' on '${branch}'...${NC}"
+    echo ""
+
+    local commits
+    commits=$(git log --format="%H" --grep="$grep_pattern" --no-merges "$branch" --not "$CURRENT_BRANCH" | tac)
+
+    if [ -z "$commits" ]; then
+        echo "No matching commits found."
+        return 0
+    fi
+
+    echo "Matching commits (in chronological order):"
+    echo ""
+    local i=1
+    while IFS= read -r hash; do
+        echo -e "  ${CYAN}${i})${NC} $(git log --oneline -1 "$hash")"
+        ((i++))
+    done <<< "$commits"
+    echo ""
+
+    read -r -p "Cherry-pick all of these? (yes/no/select): " response
+    case "$response" in
+        yes)
+            # shellcheck disable=SC2086
+            safe_cherry_pick $commits
+            ;;
+        select)
+            echo "Enter commit numbers to pick (space-separated), e.g., '1 3 5':"
+            read -r -a selections
+            local selected=()
+            while IFS= read -r hash; do
+                local idx
+                ((idx++)) || true
+                for sel in "${selections[@]}"; do
+                    if [ "$sel" = "$idx" ]; then
+                        selected+=("$hash")
+                    fi
+                done
+            done <<< "$commits"
+            if [ ${#selected[@]} -gt 0 ]; then
+                safe_cherry_pick "${selected[@]}"
+            else
+                echo "No commits selected."
+            fi
+            ;;
+        *)
+            echo "Aborted."
+            ;;
+    esac
+}
+
+# Main command dispatch
+case "${1:-help}" in
+    find)
+        shift
+        find_commits "$@"
+        ;;
+    pick)
+        shift
+        safe_cherry_pick "$@"
+        ;;
+    pick-range)
+        shift
+        start="$1"
+        end="$2"
+        shift 2
+        echo -e "${BLUE}Cherry-picking range ${start}^..${end}${NC}"
+        safe_cherry_pick $(git log --format="%H" --reverse "${start}^..${end}")
+        ;;
+    preview)
+        shift
+        preview_commit "$@"
+        ;;
+    batch)
+        shift
+        batch_cherry_pick "$@"
+        ;;
+    log)
+        show_cherry_pick_log
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo -e "${RED}Unknown command: $1${NC}"
+        usage
+        exit 1
+        ;;
+esac
+SCRIPT
+
+chmod +x ~/cherry-pick-helper.sh
+
+# Demo the script
+echo "=== Cherry-Pick Helper Script Created ==="
+echo ""
+~/cherry-pick-helper.sh help
+echo ""
+
+# Test it in a real repo
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+echo "base" > file.txt && git add . && git commit -q -m "Initial commit"
+
+git switch -c feature/api
+echo "fix 1" > api.js && git add . && git commit -q -m "Fix: API timeout handling"
+echo "feature" > new.js && git add . && git commit -q -m "Feature: New endpoint"
+echo "fix 2" >> api.js && git add . && git commit -q -m "Fix: API error codes"
+echo "wip" > wip.js && git add . && git commit -q -m "WIP: refactoring"
+echo "fix 3" >> api.js && git add . && git commit -q -m "Security: Sanitize API inputs"
+
+git switch main
+
+echo ""
+echo "=== Demo: Find fix commits on feature/api ==="
+~/cherry-pick-helper.sh find feature/api --grep "Fix:"
+echo ""
+
+echo "=== Demo: Preview a commit ==="
+FIX_HASH=$(git log --format="%H" --grep="Fix: API timeout" feature/api | head -1)
+~/cherry-pick-helper.sh preview "$FIX_HASH"
+echo ""
+
+echo "=== Demo: Cherry-pick with safety checks ==="
+~/cherry-pick-helper.sh pick --dry-run "$FIX_HASH"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `git cherry-pick <sha>` copies a specific commit to your current branch, creating a new commit with the same changes but a different hash
+- Use `A^..B` syntax (with caret) to cherry-pick a range that includes commit A; `A..B` excludes A
+- `--no-commit` (`-n`) stages changes without committing — useful for combining multiple cherry-picks
+- Always use `-x` in team environments to record the original commit hash in the message
+- Cherry-pick conflicts are resolved the same way as merge conflicts: edit, stage, then `--continue`
+- Cherry-pick is best for 1-3 specific commits; for larger sets, consider merge or rebase instead
+- The hotfix workflow (cherry-pick fix to main, deploy, continue feature work) is the most common use case
+- Duplicate commits from cherry-picking are usually handled cleanly during later merges, but can occasionally cause conflicts
+- Avoid cherry-picking merge commits — cherry-pick the individual commits from the branch instead
+- Cherry-pick is safe for shared branches because it only adds new commits (no history rewriting)
+
+## What's Next
+
+You can now surgically move individual commits between branches. But what happens when you need to quickly switch contexts without committing? In **Stashing and Worktrees**, you'll learn to save work-in-progress instantly with `git stash` and work on multiple branches simultaneously with `git worktree` — the ultimate productivity tools for context switching.

@@ -1,0 +1,1641 @@
+---
+title: "Swarm Services and Stacks"
+description: "Deploy and manage applications on Docker Swarm. Create replicated and global services, configure rolling updates with automatic rollback, use placement constraints and resource limits, deploy multi-service stacks from Compose files, and manage secrets and configs for secure application configuration."
+order: 10
+xpReward: 50
+estimatedMinutes: 55
+prerequisites:
+  - 09-docker-swarm-basics
+objectives:
+  - Create and manage replicated and global services with docker service commands
+  - Configure rolling updates with parallelism, delay, failure actions, and automatic rollback
+  - Apply placement constraints and preferences for intelligent task scheduling
+  - Deploy complete application stacks from Compose files with docker stack deploy
+  - Manage secrets and configs securely with docker secret and docker config
+  - Monitor and troubleshoot services with docker service ps, logs, and inspect
+tags:
+  - docker
+  - swarm
+  - services
+  - stacks
+  - rolling-updates
+  - secrets
+  - configs
+  - orchestration
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your team is deploying a new version of the payment processing service. The last time they deployed, they stopped the old containers, started the new ones, and prayed. For 45 seconds, no payment could be processed. Two customers abandoned their carts. The CEO got an email. This time, you configure a rolling update: the swarm replaces one container at a time, waits 10 seconds between each, checks the health endpoint, and automatically rolls back if two containers fail in a row. The deployment takes 60 seconds, zero requests are dropped, and no one outside the team even notices it happened. Today you learn to deploy like that every time.
+</Callout>
+
+## Creating Services
+
+A swarm service is the definition of a desired state: which image to run, how many replicas, which networks to attach to, and how to update. The swarm manager continuously reconciles the actual state with the desired state.
+
+### Basic Service Creation
+
+```bash
+# Create a simple service with 3 replicas
+docker service create \
+  --name webapp \
+  --replicas 3 \
+  --publish 80:80 \
+  nginx:alpine
+
+# Verify the service
+docker service ls
+# ID             NAME     MODE         REPLICAS   IMAGE          PORTS
+# abc123def456   webapp   replicated   3/3        nginx:alpine   *:80->80/tcp
+
+# See where tasks are running
+docker service ps webapp
+# ID        NAME       IMAGE          NODE       DESIRED STATE   CURRENT STATE
+# abc123    webapp.1   nginx:alpine   manager1   Running         Running 10 seconds ago
+# def456    webapp.2   nginx:alpine   worker1    Running         Running 10 seconds ago
+# ghi789    webapp.3   nginx:alpine   worker2    Running         Running 10 seconds ago
+
+# Inspect the full service definition
+docker service inspect webapp --pretty
+# ID:             abc123def456
+# Name:           webapp
+# Service Mode:   Replicated
+#  Replicas:      3
+# Placement:
+# UpdateConfig:
+#  Parallelism:   1
+#  On failure:    pause
+#  ...
+```
+
+### Service Creation with Full Configuration
+
+```bash
+# Production-grade service creation
+docker service create \
+  --name api \
+  --replicas 5 \
+  --publish published=8080,target=3000,protocol=tcp,mode=ingress \
+  --network app-network \
+  --env NODE_ENV=production \
+  --env PORT=3000 \
+  --limit-cpu 1.0 \
+  --limit-memory 512M \
+  --reserve-cpu 0.25 \
+  --reserve-memory 128M \
+  --restart-condition on-failure \
+  --restart-delay 5s \
+  --restart-max-attempts 3 \
+  --restart-window 120s \
+  --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1" \
+  --health-interval 15s \
+  --health-timeout 5s \
+  --health-retries 3 \
+  --health-start-period 30s \
+  --update-delay 10s \
+  --update-parallelism 2 \
+  --update-failure-action rollback \
+  --update-monitor 15s \
+  --update-order start-first \
+  --rollback-delay 5s \
+  --rollback-parallelism 1 \
+  --rollback-failure-action pause \
+  --rollback-monitor 10s \
+  --rollback-order stop-first \
+  --log-driver json-file \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
+  myregistry.com/api:v1.2.3
+```
+
+## Replicated vs Global Services
+
+```
+┌────────────────────────────────────────────────────────────┐
+│              Replicated vs Global Services                  │
+│                                                            │
+│  Replicated (--mode replicated)                            │
+│  ─────────────────────────────                             │
+│  You specify the number of replicas.                       │
+│  Swarm distributes tasks across available nodes.           │
+│                                                            │
+│  Node 1        Node 2        Node 3        Node 4          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │ webapp.1 │  │ webapp.2 │  │ webapp.3 │  │          │  │
+│  │          │  │          │  │          │  │ (empty)  │  │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
+│  3 replicas spread across 4 nodes (1 node idle)            │
+│                                                            │
+│  Global (--mode global)                                    │
+│  ─────────────────────                                     │
+│  Exactly one task per node. You cannot set replica count.  │
+│  New nodes automatically get a task.                       │
+│                                                            │
+│  Node 1        Node 2        Node 3        Node 4          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │ monitor  │  │ monitor  │  │ monitor  │  │ monitor  │  │
+│  │ .abc123  │  │ .def456  │  │ .ghi789  │  │ .jkl012  │  │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
+│  One per node — ideal for monitoring, log agents, etc.     │
+└────────────────────────────────────────────────────────────┘
+```
+
+```bash
+# Create a replicated service (default)
+docker service create \
+  --name webapp \
+  --mode replicated \
+  --replicas 5 \
+  nginx:alpine
+
+# Create a global service (one per node)
+docker service create \
+  --name node-exporter \
+  --mode global \
+  --publish 9100:9100 \
+  prom/node-exporter:latest
+
+# Global services are ideal for:
+# - Monitoring agents (node-exporter, cAdvisor)
+# - Log collectors (Fluentd, Filebeat)
+# - Security agents
+# - Network proxies
+
+# Scale a replicated service
+docker service scale webapp=10
+# webapp scaled to 10
+# (Does not apply to global services — they auto-scale with node count)
+
+# Scale multiple services at once
+docker service scale webapp=5 api=3 worker=8
+```
+
+## Rolling Updates and Rollback
+
+Rolling updates replace service tasks incrementally, maintaining availability throughout the deployment.
+
+### Update Configuration
+
+```bash
+# Update a service to a new image version
+docker service update \
+  --image myregistry.com/api:v1.3.0 \
+  api
+
+# Watch the update in real-time
+docker service ps api
+# ID       NAME       IMAGE              NODE      DESIRED STATE   CURRENT STATE
+# new123   api.1      api:v1.3.0         worker1   Running         Running 5s
+# old123   \_api.1    api:v1.2.3         worker1   Shutdown        Shutdown 10s
+# new456   api.2      api:v1.3.0         worker2   Running         Running 15s
+# old456   \_api.2    api:v1.2.3         worker2   Shutdown        Shutdown 20s
+# old789   api.3      api:v1.2.3         manager1  Running         Running 2m
+# ^^ api.3 has not been updated yet (rolling update in progress)
+```
+
+### Update Parameters Explained
+
+```bash
+# Configure how updates are performed
+docker service update \
+  --update-parallelism 2 \
+  --update-delay 10s \
+  --update-failure-action rollback \
+  --update-monitor 15s \
+  --update-order start-first \
+  --update-max-failure-ratio 0.25 \
+  --image api:v2.0.0 \
+  api
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--update-parallelism` | 1 | Number of tasks updated simultaneously |
+| `--update-delay` | 0s | Wait time between updating each batch |
+| `--update-failure-action` | pause | What to do on failure: `pause`, `continue`, or `rollback` |
+| `--update-monitor` | 5s | Time to monitor a new task before considering it healthy |
+| `--update-order` | stop-first | `stop-first` (stop old, start new) or `start-first` (start new, then stop old) |
+| `--update-max-failure-ratio` | 0 | Maximum fraction of tasks that can fail before triggering failure action |
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│              Rolling Update: stop-first vs start-first       │
+│                                                              │
+│  stop-first (default):                                       │
+│  ┌──────┐                    ┌──────┐                        │
+│  │ v1.0 │ ──→ stop ──→      │ v2.0 │ ──→ start ──→ healthy  │
+│  └──────┘                    └──────┘                        │
+│  Temporarily reduces capacity. Saves resources.              │
+│                                                              │
+│  start-first:                                                │
+│  ┌──────┐     ┌──────┐                                       │
+│  │ v1.0 │     │ v2.0 │ ──→ start ──→ healthy ──→            │
+│  └──────┘     └──────┘                           │           │
+│      │                                           │           │
+│      └───────── stop after new is healthy ◄──────┘           │
+│  Maintains full capacity. Uses more resources temporarily.   │
+│  Preferred for zero-downtime deployments.                    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+<Callout type="tip" title="Use start-first for Zero-Downtime Deployments">
+The `--update-order start-first` option starts the new task before stopping the old one. This means the service always has the desired number of healthy replicas during the update. Combined with health checks and `--update-monitor`, this ensures that bad deployments are caught before the old task is removed. Use `stop-first` only when resources are constrained and you cannot afford to run extra tasks temporarily.
+</Callout>
+
+### Rollback
+
+```bash
+# Automatic rollback on failure
+# (configured with --update-failure-action rollback)
+
+# Manual rollback to the previous version
+docker service rollback api
+# api
+# rollback: manually requested rollback
+
+# Watch the rollback
+docker service ps api
+# Shows tasks being rolled back to the previous image
+
+# Check rollback configuration
+docker service inspect api --format '{{json .Spec.RollbackConfig}}' | jq .
+# {
+#   "Parallelism": 1,
+#   "Delay": 5000000000,
+#   "FailureAction": "pause",
+#   "Monitor": 10000000000,
+#   "MaxFailureRatio": 0
+# }
+
+# View the update and rollback history
+docker service inspect api --format '{{json .PreviousSpec.TaskTemplate.ContainerSpec.Image}}'
+# myregistry.com/api:v1.2.3@sha256:abc123...   (previous version)
+
+docker service inspect api --format '{{json .Spec.TaskTemplate.ContainerSpec.Image}}'
+# myregistry.com/api:v1.3.0@sha256:def456...   (current version)
+
+# Update multiple service parameters at once
+docker service update \
+  --image api:v1.4.0 \
+  --env-add NEW_FEATURE=enabled \
+  --env-rm OLD_FEATURE \
+  --limit-memory 768M \
+  --replicas 8 \
+  api
+```
+
+<Callout type="warning" title="Rollback Only Goes Back One Version">
+`docker service rollback` reverts to the immediately previous service specification. It does not maintain a full version history. If you need to roll back multiple versions, you must explicitly specify the target image tag with `docker service update --image api:v1.0.0 api`. For production deployments, always tag your images with specific version numbers so you can target any previous version.
+</Callout>
+
+## Placement Constraints and Preferences
+
+### Constraints (Hard Rules)
+
+```bash
+# Run only on worker nodes
+docker service create \
+  --name api \
+  --constraint 'node.role == worker' \
+  api:latest
+
+# Run only on nodes with specific labels
+docker service create \
+  --name db \
+  --constraint 'node.labels.disk == ssd' \
+  --constraint 'node.labels.env == production' \
+  postgres:16-alpine
+
+# Run only on a specific hostname
+docker service create \
+  --name singleton \
+  --constraint 'node.hostname == db-server-01' \
+  postgres:16-alpine
+
+# Exclude specific nodes
+docker service create \
+  --name api \
+  --constraint 'node.labels.env != staging' \
+  api:latest
+
+# Multiple constraints are AND-ed together:
+# Both must be true for a node to be eligible
+docker service create \
+  --name api \
+  --constraint 'node.role == worker' \
+  --constraint 'node.labels.region == us-east' \
+  --constraint 'node.labels.tier == frontend' \
+  api:latest
+```
+
+### Preferences (Soft Rules)
+
+```bash
+# Spread tasks across datacenters (soft preference)
+docker service create \
+  --name api \
+  --replicas 6 \
+  --placement-pref 'spread=node.labels.datacenter' \
+  api:latest
+
+# With 3 datacenters, each gets 2 replicas:
+# us-east: api.1, api.4
+# us-west: api.2, api.5
+# eu-west: api.3, api.6
+
+# Spread across availability zones
+docker service create \
+  --name webapp \
+  --replicas 9 \
+  --placement-pref 'spread=node.labels.zone' \
+  webapp:latest
+
+# Combine constraints and preferences
+docker service create \
+  --name api \
+  --replicas 6 \
+  --constraint 'node.labels.env == production' \
+  --placement-pref 'spread=node.labels.zone' \
+  api:latest
+# Only runs on production nodes, spread across zones
+```
+
+### Resource Reservations and Limits
+
+```bash
+# Reserve resources (scheduling guarantee) and set limits (hard cap)
+docker service create \
+  --name api \
+  --replicas 3 \
+  --reserve-cpu 0.5 \
+  --reserve-memory 256M \
+  --limit-cpu 2.0 \
+  --limit-memory 512M \
+  api:latest
+
+# The scheduler will only place a task on a node that has
+# at least 0.5 CPU and 256MB of memory available.
+# The task cannot use more than 2.0 CPU or 512MB memory.
+```
+
+```
+┌──────────────────────────────────────────────────────────┐
+│           Resource Reservations vs Limits                 │
+│                                                          │
+│  Reservation (--reserve-*)                               │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  "Promise me at least this much"                   │  │
+│  │  - Used by the scheduler for placement decisions   │  │
+│  │  - Node must have this much free to accept task    │  │
+│  │  - Prevents overcommitting (if set correctly)      │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  Limit (--limit-*)                                       │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  "Never let me use more than this"                 │  │
+│  │  - Hard enforcement by the kernel (cgroups)        │  │
+│  │  - Exceeding memory limit → OOM kill               │  │
+│  │  - Exceeding CPU limit → throttling                │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  Example: --reserve-cpu 0.5 --limit-cpu 2.0              │
+│  The task is guaranteed 0.5 CPU but can burst to 2.0     │
+│  when other containers are not using their allocation.   │
+└──────────────────────────────────────────────────────────┘
+```
+
+## Docker Stack: Deploying Compose Files to Swarm
+
+Docker Stack lets you deploy a complete application from a Compose file to a swarm. It is the bridge between development (Docker Compose) and production (Swarm).
+
+### Stack Deploy
+
+```yaml
+# docker-compose.yml (stack-compatible)
+version: "3.9"
+
+services:
+  api:
+    image: myregistry.com/api:v1.2.3
+    ports:
+      - "8080:3000"
+    networks:
+      - frontend
+      - backend
+    environment:
+      NODE_ENV: production
+      DB_HOST: db
+      REDIS_HOST: redis
+    deploy:
+      replicas: 5
+      update_config:
+        parallelism: 2
+        delay: 10s
+        failure_action: rollback
+        monitor: 15s
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+      placement:
+        constraints:
+          - node.role == worker
+          - node.labels.env == production
+        preferences:
+          - spread: node.labels.zone
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: postgres:16-alpine
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    environment:
+      POSTGRES_USER_FILE: /run/secrets/db_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: appdb
+    secrets:
+      - db_user
+      - db_password
+    configs:
+      - source: postgres_conf
+        target: /etc/postgresql/postgresql.conf
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.disk == ssd
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  worker:
+    image: myregistry.com/worker:v1.2.3
+    networks:
+      - backend
+    environment:
+      REDIS_HOST: redis
+      DB_HOST: db
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  frontend:
+    driver: overlay
+  backend:
+    driver: overlay
+    internal: true
+
+volumes:
+  db-data:
+    driver: local
+
+secrets:
+  db_user:
+    external: true
+  db_password:
+    external: true
+
+configs:
+  postgres_conf:
+    file: ./postgres/postgresql.conf
+```
+
+```bash
+# Deploy the stack
+docker stack deploy --compose-file docker-compose.yml myapp
+# Creating network myapp_frontend
+# Creating network myapp_backend
+# Creating secret myapp_db_user
+# Creating secret myapp_db_password
+# Creating config myapp_postgres_conf
+# Creating service myapp_api
+# Creating service myapp_db
+# Creating service myapp_redis
+# Creating service myapp_worker
+
+# List stacks
+docker stack ls
+# NAME     SERVICES   ORCHESTRATOR
+# myapp    4          Swarm
+
+# List services in a stack
+docker stack services myapp
+# ID        NAME           MODE         REPLICAS   IMAGE                        PORTS
+# abc123    myapp_api      replicated   5/5        myregistry.com/api:v1.2.3    *:8080->3000/tcp
+# def456    myapp_db       replicated   1/1        postgres:16-alpine
+# ghi789    myapp_redis    replicated   1/1        redis:7-alpine
+# jkl012    myapp_worker   replicated   3/3        myregistry.com/worker:v1.2.3
+
+# List all tasks in a stack
+docker stack ps myapp
+# Shows every task across all services
+
+# Update a stack (modify the compose file, then redeploy)
+# Edit docker-compose.yml (change image version, replicas, etc.)
+docker stack deploy --compose-file docker-compose.yml myapp
+# Swarm performs a rolling update for changed services
+
+# Remove a stack
+docker stack rm myapp
+# Removing service myapp_api
+# Removing service myapp_db
+# Removing service myapp_redis
+# Removing service myapp_worker
+# Removing network myapp_frontend
+# Removing network myapp_backend
+```
+
+<Callout type="info" title="Stack Deploy vs Compose Up">
+`docker stack deploy` and `docker compose up` both use Compose files but behave differently:
+- `docker compose up` runs containers on a single host with the Compose engine
+- `docker stack deploy` distributes services across a swarm with the orchestrator
+- Stack deploy ignores `build`, `depends_on`, `container_name`, and `links` directives
+- Stack deploy requires pre-built images (it cannot build during deploy)
+- The `deploy` section in the Compose file is only used by `docker stack deploy`, not by `docker compose up`
+</Callout>
+
+## Secrets Management
+
+Docker secrets provide a secure way to pass sensitive data (passwords, API keys, TLS certificates) to services. Secrets are encrypted at rest in the Raft store and only mounted into containers that need them.
+
+```bash
+# Create a secret from a value
+echo "mydbpassword123" | docker secret create db_password -
+# abc123def456
+
+# Create a secret from a file
+echo "dbadmin" > /tmp/db_user.txt
+docker secret create db_user /tmp/db_user.txt
+rm /tmp/db_user.txt  # Remove the plaintext file
+
+# Create a secret from a certificate file
+docker secret create tls_cert ./server.crt
+docker secret create tls_key ./server.key
+
+# List secrets
+docker secret ls
+# ID             NAME           CREATED          UPDATED
+# abc123         db_password    5 seconds ago    5 seconds ago
+# def456         db_user        3 seconds ago    3 seconds ago
+# ghi789         tls_cert       1 second ago     1 second ago
+# jkl012         tls_key        1 second ago     1 second ago
+
+# Inspect a secret (does NOT reveal the value)
+docker secret inspect db_password
+# [
+#   {
+#     "ID": "abc123",
+#     "Version": { "Index": 15 },
+#     "CreatedAt": "2025-01-15T10:30:00Z",
+#     "UpdatedAt": "2025-01-15T10:30:00Z",
+#     "Spec": {
+#       "Name": "db_password",
+#       "Labels": {}
+#     }
+#   }
+# ]
+# Note: The secret value is NEVER shown by docker secret inspect
+```
+
+### Using Secrets in Services
+
+```bash
+# Grant a service access to secrets
+docker service create \
+  --name api \
+  --secret db_password \
+  --secret db_user \
+  --secret source=tls_cert,target=server.crt,uid=1001,gid=1001,mode=0400 \
+  api:latest
+
+# Inside the container, secrets are mounted at /run/secrets/
+# /run/secrets/db_password    → contains "mydbpassword123"
+# /run/secrets/db_user        → contains "dbadmin"
+# /run/secrets/server.crt     → contains the TLS certificate
+
+# Read secrets in your application:
+# Node.js: fs.readFileSync('/run/secrets/db_password', 'utf8').trim()
+# Python:  open('/run/secrets/db_password').read().strip()
+# Shell:   cat /run/secrets/db_password
+```
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Secrets Architecture                       │
+│                                                              │
+│  docker secret create         Raft Store (Encrypted)         │
+│  ─────────────────────        ──────────────────────         │
+│  echo "pass" | docker    ──→  ┌──────────────────────┐      │
+│  secret create db_pass -      │  AES-256 encrypted   │      │
+│                               │  Replicated to all   │      │
+│                               │  manager nodes       │      │
+│                               └─────────┬────────────┘      │
+│                                         │                    │
+│  Service requests secret                │                    │
+│  ─────────────────────────              │                    │
+│  --secret db_pass              Manager decrypts and          │
+│                                sends to task node            │
+│                                         │                    │
+│                                         ▼                    │
+│                               ┌──────────────────────┐      │
+│                               │  Container tmpfs     │      │
+│                               │  /run/secrets/       │      │
+│                               │  └── db_pass         │      │
+│                               │                      │      │
+│                               │  In-memory only      │      │
+│                               │  Never written to    │      │
+│                               │  disk on worker      │      │
+│                               └──────────────────────┘      │
+│                                                              │
+│  When the task stops, the secret is removed from memory.     │
+│  Workers never have access to secrets they do not need.      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Rotating Secrets
+
+```bash
+# Secrets are immutable — you cannot update a secret's value.
+# To rotate, create a new secret and update the service.
+
+# Step 1: Create the new secret
+echo "newpassword456" | docker secret create db_password_v2 -
+
+# Step 2: Update the service to use the new secret
+docker service update \
+  --secret-rm db_password \
+  --secret-add source=db_password_v2,target=db_password \
+  api
+# The service sees the new value at /run/secrets/db_password
+# Rolling update replaces containers one by one
+
+# Step 3: Remove the old secret
+docker secret rm db_password
+```
+
+<Callout type="warning" title="Secrets Are for Swarm Services Only">
+Docker secrets only work with swarm services (`docker service create`), not with standalone containers (`docker run`). If you need to pass secrets to standalone containers, use environment variables (less secure) or mount a file from the host (manage permissions carefully). In Docker Compose with `docker compose up` (not stack deploy), secrets are simulated by mounting files from the host.
+</Callout>
+
+## Configs Management
+
+Docker configs store non-sensitive configuration files in the swarm. Unlike secrets, configs are not encrypted, but they provide the same versioned, immutable, service-attached workflow.
+
+```bash
+# Create a config from a file
+cat > /tmp/nginx.conf << 'EOF'
+worker_processes auto;
+events { worker_connections 1024; }
+http {
+    server {
+        listen 80;
+        location / {
+            proxy_pass http://api:3000;
+        }
+        location /health {
+            return 200 'ok';
+        }
+    }
+}
+EOF
+
+docker config create nginx_conf_v1 /tmp/nginx.conf
+
+# List configs
+docker config ls
+# ID             NAME              CREATED
+# abc123         nginx_conf_v1     5 seconds ago
+
+# Use a config in a service
+docker service create \
+  --name proxy \
+  --config source=nginx_conf_v1,target=/etc/nginx/nginx.conf \
+  --publish 80:80 \
+  nginx:alpine
+
+# The file /etc/nginx/nginx.conf inside the container
+# contains the content of the config
+
+# Update to a new config version
+cat > /tmp/nginx-v2.conf << 'EOF'
+worker_processes auto;
+events { worker_connections 2048; }
+http {
+    upstream api {
+        server api:3000;
+    }
+    server {
+        listen 80;
+        location / {
+            proxy_pass http://api;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+        location /health {
+            return 200 'ok';
+        }
+    }
+}
+EOF
+
+docker config create nginx_conf_v2 /tmp/nginx-v2.conf
+
+docker service update \
+  --config-rm nginx_conf_v1 \
+  --config-add source=nginx_conf_v2,target=/etc/nginx/nginx.conf \
+  proxy
+
+# Clean up old config
+docker config rm nginx_conf_v1
+```
+
+## Monitoring and Managing Services
+
+### Service Logs
+
+```bash
+# View logs for all tasks in a service
+docker service logs api
+# api.1.abc123@worker1    | Server started on port 3000
+# api.2.def456@worker2    | Server started on port 3000
+# api.3.ghi789@manager1   | Server started on port 3000
+
+# Follow logs in real-time
+docker service logs -f api
+
+# Show timestamps
+docker service logs -t api
+
+# Show only the last 50 lines
+docker service logs --tail 50 api
+
+# Filter by a specific task
+docker service logs api.1
+
+# Show logs since a specific time
+docker service logs --since "10m" api
+
+# Logs from stack services
+docker service logs myapp_api
+```
+
+### Service Inspection and Troubleshooting
+
+```bash
+# Check service health
+docker service ps api --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}"
+
+# Show only failed tasks
+docker service ps api --filter "desired-state=shutdown"
+# This shows tasks that were replaced during updates or crashed
+
+# Inspect the service configuration
+docker service inspect api --pretty
+
+# Check why a task failed
+docker service ps api --format "table {{.Name}}\t{{.Error}}" --no-trunc
+
+# Force rebalance tasks across nodes
+docker service update --force api
+# All tasks are restarted and redistributed
+
+# Update individual service parameters
+docker service update --replicas 10 api
+docker service update --limit-memory 1G api
+docker service update --env-add NEW_VAR=value api
+docker service update --env-rm OLD_VAR api
+docker service update --publish-add 9090:9090 api
+docker service update --publish-rm 8080 api
+docker service update --constraint-add 'node.labels.tier == web' api
+docker service update --constraint-rm 'node.role == worker' api
+```
+
+<Exercise title="Deploy a Multi-Service Stack to Swarm" difficulty="intermediate" xpReward={35} estimatedMinutes={25}>
+
+Deploy a complete application stack to Docker Swarm with multiple services, overlay networking, and proper update configuration.
+
+**Objectives:**
+- Create a Compose file with deploy configurations for swarm
+- Deploy the stack with `docker stack deploy`
+- Verify all services are running with the correct number of replicas
+- Perform a rolling update by changing the compose file and redeploying
+- Monitor the update process with `docker service ps`
+
+**Hints:**
+- Use the `deploy` section in the Compose file for swarm-specific settings
+- Set `update_config` with `parallelism`, `delay`, and `failure_action`
+- Use overlay networks for inter-service communication
+- Ensure images are available (use public images like nginx, redis, postgres)
+- Use `docker stack ps <stack-name>` to see all tasks across all services
+
+**Validation Criteria:**
+- Stack deploys with at least 3 services
+- Services use overlay networks for communication
+- Update configuration includes parallelism, delay, and failure action
+- Rolling update can be triggered by redeploying with a modified compose file
+- All services reach the desired replica count
+
+<CollapsibleSolution>
+
+```bash
+# Ensure swarm is active
+docker swarm init 2>/dev/null || true
+
+mkdir -p ~/stack-exercise
+
+# ─── Create the Stack Compose File ───
+cat > ~/stack-exercise/docker-compose.yml << 'EOF'
+version: "3.9"
+
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    networks:
+      - frontend
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 10s
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 32M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  api:
+    image: node:20-alpine
+    command: >
+      sh -c 'cat > /app/server.js << "APPEOF"
+      const http = require("http");
+      const os = require("os");
+      const VERSION = process.env.APP_VERSION || "1.0.0";
+      http.createServer((req, res) => {
+        res.writeHead(200, {"Content-Type": "application/json"});
+        res.end(JSON.stringify({
+          version: VERSION,
+          hostname: os.hostname(),
+          uptime: Math.floor(process.uptime())
+        }));
+      }).listen(3000, () => console.log("API v" + VERSION + " on 3000"));
+      APPEOF
+      node /app/server.js'
+    networks:
+      - frontend
+      - backend
+    environment:
+      APP_VERSION: "1.0.0"
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 15s
+        failure_action: rollback
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  cache:
+    image: redis:7-alpine
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+
+networks:
+  frontend:
+    driver: overlay
+  backend:
+    driver: overlay
+    internal: true
+EOF
+
+# ─── Deploy the Stack ───
+echo "=== Deploying Stack ==="
+cd ~/stack-exercise
+docker stack deploy --compose-file docker-compose.yml mystack
+
+echo ""
+echo "Waiting for services to start..."
+sleep 15
+
+# ─── Verify Deployment ───
+echo ""
+echo "=== Stack Services ==="
+docker stack services mystack
+
+echo ""
+echo "=== All Tasks ==="
+docker stack ps mystack --format "table {{.Name}}\t{{.Image}}\t{{.Node}}\t{{.CurrentState}}"
+
+echo ""
+echo "=== Test Web Server ==="
+curl -s http://localhost:8080/ | head -5
+
+# ─── Perform Rolling Update ───
+echo ""
+echo "=== Performing Rolling Update ==="
+echo "Updating API version to 2.0.0..."
+
+# Modify the compose file
+sed -i 's/APP_VERSION: "1.0.0"/APP_VERSION: "2.0.0"/' ~/stack-exercise/docker-compose.yml
+
+# Redeploy (triggers rolling update for changed services)
+docker stack deploy --compose-file docker-compose.yml mystack
+
+echo "Update started. Monitoring..."
+sleep 5
+
+docker service ps mystack_api --format "table {{.Name}}\t{{.Image}}\t{{.CurrentState}}" | head -10
+
+echo ""
+echo "Waiting for update to complete..."
+sleep 20
+
+echo ""
+echo "=== Final Service State ==="
+docker stack services mystack
+echo ""
+docker stack ps mystack --filter "desired-state=running" \
+  --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}"
+
+# ─── Cleanup ───
+echo ""
+echo "=== Cleanup ==="
+docker stack rm mystack
+sleep 5
+echo "Stack removed."
+```
+
+This exercise demonstrates the complete lifecycle of a swarm stack: deploying from a Compose file, verifying all services reach their desired state, performing a rolling update by modifying the Compose file and redeploying, and monitoring the update process. The key insight is that `docker stack deploy` is idempotent — running it again with a modified Compose file triggers rolling updates only for services that changed.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise title="Configure Secrets and Rolling Updates" difficulty="advanced" xpReward={40} estimatedMinutes={25}>
+
+Create and manage Docker secrets for a database-backed service, then perform a secret rotation using a rolling update.
+
+**Objectives:**
+- Create Docker secrets for database credentials
+- Deploy a service that consumes secrets from /run/secrets/
+- Rotate a secret by creating a new version and updating the service
+- Verify the service receives the updated secret value
+
+**Hints:**
+- Create secrets with `echo "value" | docker secret create name -`
+- Mount secrets to services with `--secret name` or `--secret source=name,target=path`
+- Secrets are immutable — create a new one with a different name and update the service
+- Use `--secret-rm` and `--secret-add` together in `docker service update`
+- The target parameter controls the filename in `/run/secrets/`
+
+**Validation Criteria:**
+- Secrets are created and listed without exposing their values
+- A service mounts secrets and can read them from /run/secrets/
+- Secret rotation creates a new secret version
+- Service update replaces the old secret with the new one via rolling update
+- The service reads the new secret value after the update
+
+<CollapsibleSolution>
+
+```bash
+# Ensure swarm is active
+docker swarm init 2>/dev/null || true
+
+# ─── Step 1: Create Secrets ───
+echo "=== Step 1: Create Secrets ==="
+
+echo "dbuser" | docker secret create db_user -
+echo "original_password_123" | docker secret create db_password_v1 -
+echo "my-secret-api-key-abc123" | docker secret create api_key_v1 -
+
+echo "Secrets created:"
+docker secret ls
+
+echo ""
+echo "=== Step 2: Deploy Service with Secrets ==="
+
+docker service create \
+  --name secret-demo \
+  --replicas 2 \
+  --secret db_user \
+  --secret source=db_password_v1,target=db_password \
+  --secret source=api_key_v1,target=api_key \
+  --publish 9090:3000 \
+  node:20-alpine \
+  sh -c '
+    cat > /app/server.js << "APPEOF"
+    const http = require("http");
+    const fs = require("fs");
+
+    function readSecret(name) {
+      try {
+        return fs.readFileSync("/run/secrets/" + name, "utf8").trim();
+      } catch(e) {
+        return "NOT_FOUND";
+      }
+    }
+
+    http.createServer((req, res) => {
+      res.writeHead(200, {"Content-Type": "application/json"});
+      res.end(JSON.stringify({
+        hostname: require("os").hostname(),
+        secrets: {
+          db_user: readSecret("db_user"),
+          db_password: readSecret("db_password").substring(0, 5) + "***",
+          api_key: readSecret("api_key").substring(0, 10) + "***"
+        }
+      }, null, 2));
+    }).listen(3000, () => console.log("Running on 3000"));
+    APPEOF
+    node /app/server.js
+  '
+
+sleep 10
+
+echo ""
+echo "Service status:"
+docker service ps secret-demo --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}"
+
+echo ""
+echo "=== Step 3: Verify Secrets Are Accessible ==="
+curl -s http://localhost:9090/ | jq .
+# Should show masked secret values
+
+echo ""
+echo "=== Step 4: Rotate Password Secret ==="
+echo "rotated_password_456" | docker secret create db_password_v2 -
+
+echo "Updating service with new password..."
+docker service update \
+  --secret-rm db_password_v1 \
+  --secret-add source=db_password_v2,target=db_password \
+  secret-demo
+
+echo ""
+echo "Waiting for rolling update..."
+sleep 15
+
+echo "Update status:"
+docker service ps secret-demo --format "table {{.Name}}\t{{.CurrentState}}" | head -6
+
+echo ""
+echo "=== Step 5: Verify New Secret ==="
+curl -s http://localhost:9090/ | jq .
+# Should show the new password (first 5 chars of "rotated_password_456")
+
+echo ""
+echo "=== Step 6: Rotate API Key ==="
+echo "new-api-key-xyz789" | docker secret create api_key_v2 -
+
+docker service update \
+  --secret-rm api_key_v1 \
+  --secret-add source=api_key_v2,target=api_key \
+  secret-demo
+
+sleep 15
+
+echo "After API key rotation:"
+curl -s http://localhost:9090/ | jq .
+
+echo ""
+echo "=== Step 7: Clean Old Secrets ==="
+docker secret rm db_password_v1 api_key_v1
+
+echo ""
+echo "Remaining secrets:"
+docker secret ls
+
+echo ""
+echo "=== Cleanup ==="
+docker service rm secret-demo
+sleep 3
+docker secret rm db_user db_password_v2 api_key_v2 2>/dev/null
+echo "Done."
+```
+
+This exercise demonstrates the full lifecycle of Docker secrets: creation, attachment to services, verification, rotation, and cleanup. The key pattern for secret rotation is creating a new secret with a version suffix, updating the service to swap old for new (using `--secret-rm` and `--secret-add` in the same command), and then deleting the old secret. The rolling update ensures the service transitions smoothly with no downtime.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Production Application Stack on Swarm">
+
+Deploy a complete production-grade application stack to Docker Swarm with all best practices: secrets management, rolling updates, resource limits, health checks, overlay networking, and monitoring.
+
+Your stack must include:
+
+1. An API service with health checks and rolling update configuration
+2. A PostgreSQL database with secrets for credentials
+3. A Redis cache service
+4. An nginx reverse proxy with a config
+5. A worker service for background processing
+6. Proper overlay networking (frontend and backend)
+7. Resource limits and reservations on every service
+8. A deployment script that creates secrets, configs, and deploys the stack
+
+```bash
+mkdir -p ~/swarm-production-app/{nginx,scripts}
+
+# ─── Nginx Configuration ───
+cat > ~/swarm-production-app/nginx/default.conf << 'NGINXEOF'
+upstream api {
+    server api:3000;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+    }
+
+    location /health {
+        access_log off;
+        return 200 'ok';
+    }
+}
+NGINXEOF
+
+# ─── Stack Compose File ───
+cat > ~/swarm-production-app/docker-compose.yml << 'COMPOSEEOF'
+version: "3.9"
+
+services:
+  proxy:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    networks:
+      - frontend
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 32M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      - api
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    image: node:20-alpine
+    command: >
+      sh -c 'mkdir -p /app && cat > /app/server.js << "APPEOF"
+      const http = require("http");
+      const fs = require("fs");
+      const os = require("os");
+      const VERSION = process.env.APP_VERSION || "1.0.0";
+      let requests = 0;
+      function readSecret(name) {
+        try { return fs.readFileSync("/run/secrets/" + name, "utf8").trim(); }
+        catch(e) { return "N/A"; }
+      }
+      http.createServer((req, res) => {
+        requests++;
+        const respond = (code, body) => {
+          res.writeHead(code, {"Content-Type": "application/json"});
+          res.end(JSON.stringify(body));
+        };
+        if (req.url === "/health") {
+          respond(200, {status: "healthy", version: VERSION, hostname: os.hostname()});
+        } else if (req.url === "/status") {
+          respond(200, {
+            version: VERSION,
+            hostname: os.hostname(),
+            uptime: Math.floor(process.uptime()),
+            requests: requests,
+            db_configured: readSecret("db_password") !== "N/A",
+            memory_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
+          });
+        } else {
+          respond(200, {message: "Production Stack API", version: VERSION});
+        }
+      }).listen(3000, () => console.log("API " + VERSION + " on " + os.hostname()));
+      APPEOF
+      node /app/server.js'
+    networks:
+      - frontend
+      - backend
+    environment:
+      APP_VERSION: "1.0.0"
+      NODE_ENV: production
+      DB_HOST: db
+      REDIS_HOST: redis
+    secrets:
+      - db_user
+      - db_password
+    deploy:
+      replicas: 4
+      update_config:
+        parallelism: 2
+        delay: 15s
+        monitor: 10s
+        order: start-first
+        failure_action: rollback
+        max_failure_ratio: 0.25
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  db:
+    image: postgres:16-alpine
+    networks:
+      - backend
+    environment:
+      POSTGRES_USER_FILE: /run/secrets/db_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: production_db
+    secrets:
+      - db_user
+      - db_password
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$(cat /run/secrets/db_user)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 192M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  worker:
+    image: node:20-alpine
+    command: >
+      sh -c 'mkdir -p /app && cat > /app/worker.js << "WEOF"
+      const os = require("os");
+      console.log("Worker started on " + os.hostname());
+      setInterval(() => {
+        console.log(JSON.stringify({
+          event: "heartbeat",
+          worker: os.hostname(),
+          uptime: Math.floor(process.uptime()),
+          memory_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+          timestamp: new Date().toISOString()
+        }));
+      }, 30000);
+      WEOF
+      node /app/worker.js'
+    networks:
+      - backend
+    environment:
+      REDIS_HOST: redis
+      DB_HOST: db
+    secrets:
+      - db_user
+      - db_password
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  frontend:
+    driver: overlay
+  backend:
+    driver: overlay
+    internal: true
+
+volumes:
+  db-data:
+
+secrets:
+  db_user:
+    external: true
+  db_password:
+    external: true
+
+configs:
+  nginx_conf:
+    file: ./nginx/default.conf
+COMPOSEEOF
+
+# ─── Deployment Script ───
+cat > ~/swarm-production-app/scripts/deploy.sh << 'DEPLOYEOF'
+#!/bin/bash
+set -euo pipefail
+
+STACK_NAME="production"
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Production Stack Deployment                     ║"
+echo "║          $(date '+%Y-%m-%d %H:%M:%S')                    ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+# Ensure swarm is active
+if ! docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
+  echo "Initializing swarm..."
+  docker swarm init 2>/dev/null || true
+fi
+
+# Create secrets (idempotent — skip if they exist)
+echo "=== Creating Secrets ==="
+echo "appdbuser" | docker secret create db_user - 2>/dev/null && echo "  Created: db_user" || echo "  Exists: db_user"
+echo "secure-db-password-$(date +%s)" | docker secret create db_password - 2>/dev/null && echo "  Created: db_password" || echo "  Exists: db_password"
+
+echo ""
+echo "=== Deploying Stack: $STACK_NAME ==="
+docker stack deploy \
+  --compose-file docker-compose.yml \
+  --with-registry-auth \
+  $STACK_NAME
+
+echo ""
+echo "Waiting for services to start..."
+sleep 20
+
+echo ""
+echo "=== Service Status ==="
+docker stack services $STACK_NAME
+
+echo ""
+echo "=== Task Status ==="
+docker stack ps $STACK_NAME --filter "desired-state=running" \
+  --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}"
+
+echo ""
+echo "=== Health Check ==="
+MAX_WAIT=30
+for i in $(seq 1 $MAX_WAIT); do
+  if curl -sf http://localhost:80/health > /dev/null 2>&1; then
+    echo "  Stack is healthy (after ${i}s)"
+    break
+  fi
+  if [ "$i" -eq "$MAX_WAIT" ]; then
+    echo "  WARNING: Stack did not become healthy in ${MAX_WAIT}s"
+  fi
+  sleep 1
+done
+
+echo ""
+echo "=== API Status ==="
+curl -s http://localhost:80/status 2>/dev/null | jq . || echo "  API not yet ready"
+
+echo ""
+echo "=== Network Information ==="
+docker network ls --filter "label=com.docker.stack.namespace=$STACK_NAME" \
+  --format "table {{.Name}}\t{{.Driver}}\t{{.Scope}}"
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║  Deployment Complete                                     ║"
+echo "║  Access: http://localhost:80/                            ║"
+echo "║  Status: http://localhost:80/status                      ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+DEPLOYEOF
+
+chmod +x ~/swarm-production-app/scripts/deploy.sh
+
+# ─── Stack Status Script ───
+cat > ~/swarm-production-app/scripts/status.sh << 'STATUSEOF'
+#!/bin/bash
+STACK_NAME="${1:-production}"
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Stack Status: $STACK_NAME"
+echo "║          $(date '+%Y-%m-%d %H:%M:%S')                    ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "=== Services ==="
+docker stack services $STACK_NAME 2>/dev/null || echo "Stack not deployed"
+
+echo ""
+echo "=== Running Tasks ==="
+docker stack ps $STACK_NAME --filter "desired-state=running" \
+  --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}" 2>/dev/null
+
+echo ""
+echo "=== Failed Tasks (last 10) ==="
+docker stack ps $STACK_NAME --filter "desired-state=shutdown" \
+  --format "table {{.Name}}\t{{.CurrentState}}\t{{.Error}}" 2>/dev/null | head -10
+
+echo ""
+echo "=== Resource Usage ==="
+for SERVICE in $(docker stack services $STACK_NAME -q 2>/dev/null); do
+  SERVICE_NAME=$(docker service inspect $SERVICE --format '{{.Spec.Name}}')
+  echo "  $SERVICE_NAME:"
+  for TASK_ID in $(docker service ps $SERVICE -q --filter "desired-state=running" 2>/dev/null); do
+    CONTAINER_ID=$(docker inspect $TASK_ID --format '{{.Status.ContainerStatus.ContainerID}}' 2>/dev/null | head -c 12)
+    if [ -n "$CONTAINER_ID" ] && docker inspect $CONTAINER_ID > /dev/null 2>&1; then
+      docker stats --no-stream --format "    {{.Name}}: CPU={{.CPUPerc}} MEM={{.MemUsage}}" $CONTAINER_ID 2>/dev/null
+    fi
+  done
+done
+
+echo ""
+echo "=== API Health ==="
+curl -s http://localhost:80/status 2>/dev/null | jq . || echo "  Not reachable"
+STATUSEOF
+
+chmod +x ~/swarm-production-app/scripts/status.sh
+
+# ─── Deploy ───
+cd ~/swarm-production-app
+bash scripts/deploy.sh
+
+echo ""
+echo "=== Running Status Check ==="
+bash scripts/status.sh production
+
+# ─── Cleanup instructions ───
+echo ""
+echo "=== To remove the stack ==="
+echo "docker stack rm production"
+echo "docker secret rm db_user db_password"
+```
+
+This mini project brings together every Swarm concept from lessons 9 and 10 into a production deployment. The stack includes five services with proper overlay networking (frontend is public, backend is internal), secrets for database credentials, a config for nginx, health checks on every service, resource limits and reservations, rolling update and rollback configurations, and structured logging. The deployment script is idempotent — it can be run multiple times without error. The status script provides a comprehensive view of the stack's health, resource usage, and any failed tasks.
+
+</MiniProject>
+
+## Key Takeaways
+
+- **Swarm services** define a desired state (image, replicas, resources, networks) and the swarm manager continuously reconciles actual state to match, automatically replacing failed tasks
+- **Replicated services** run a specified number of tasks spread across nodes; **global services** run exactly one task per node — use global for monitoring agents and log collectors
+- **Rolling updates** replace tasks incrementally; configure `--update-parallelism` (how many at once), `--update-delay` (wait between batches), `--update-order start-first` (maintain capacity), and `--update-failure-action rollback` (auto-revert on failure)
+- **Rollback** reverts to the previous service specification; it only goes back one version — always use versioned image tags so you can target any previous version explicitly
+- **Placement constraints** are hard rules (`node.labels.env == production`) that determine which nodes can run a service; **preferences** (`spread=node.labels.zone`) are soft rules for distributing tasks evenly
+- **Resource reservations** guarantee minimum resources for scheduling; **resource limits** set hard caps enforced by cgroups — always set both for predictable behavior
+- **Docker Stack** deploys Compose files to Swarm with `docker stack deploy`; the `deploy` section in the Compose file controls swarm-specific behavior (replicas, update config, placement)
+- **Secrets** are encrypted at rest, transmitted only to nodes running tasks that need them, mounted as in-memory files at `/run/secrets/`, and never exposed via `docker inspect` — rotate by creating a new version and updating the service
+- **Configs** store non-sensitive configuration files with the same versioned, immutable workflow as secrets — useful for nginx configs, application settings, and other configuration files
+- **Service logs** aggregate output from all tasks with `docker service logs`; use `-f` to follow, `--tail` to limit, and `--since` to filter by time
+
+## What's Next
+
+Congratulations on completing the Docker Advanced course. You have mastered CI/CD integration, debugging techniques, performance tuning, and Docker Swarm orchestration. From here, you can explore Kubernetes for large-scale orchestration, dive deeper into container security with tools like Falco and Open Policy Agent, or learn about service mesh technologies like Istio and Linkerd. The container skills you have built in this course form the foundation for all modern cloud-native infrastructure.

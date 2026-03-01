@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  lab:
+    image: ubuntu:22.04
+    container_name: devops-shell-scripting-lab
+    command: >
+      bash -c "apt-get update -qq &&
+      apt-get install -y -qq bash vim nano curl wget jq bc file tree procps psmisc net-tools iproute2 cron gawk sed grep findutils coreutils shellcheck >/dev/null 2>&1 &&
+      echo 'Shell Scripting Lab Ready.' &&
+      /bin/bash"
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    volumes:
+      - ./workspace:/workspace
+    environment:
+      - TERM=xterm-256color

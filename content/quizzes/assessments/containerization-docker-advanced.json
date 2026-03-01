@@ -1,0 +1,868 @@
+{
+  "id": "containerization-docker-advanced",
+  "moduleSlug": "docker-advanced",
+  "pathSlug": "containerization",
+  "title": "Docker Advanced Assessment",
+  "description": "Test your advanced Docker knowledge covering build optimization, security hardening, orchestration, monitoring, and production-grade container strategies. 60 questions across 15 lessons.",
+  "settings": {
+    "questionsPerAttempt": 35,
+    "passingScore": 80,
+    "timeLimit": 45,
+    "shuffleQuestions": true,
+    "shuffleOptions": true,
+    "showResults": true,
+    "attemptsAllowed": 3
+  },
+  "questions": [
+    {
+      "id": "da-q01",
+      "type": "multiple_choice",
+      "question": "Which BuildKit feature allows you to cache package manager directories across builds to speed up dependency installation?",
+      "options": [
+        "COPY --cache",
+        "RUN --mount=type=cache",
+        "ARG --cache-from",
+        "FROM --cache"
+      ],
+      "correctAnswer": 1,
+      "explanation": "RUN --mount=type=cache mounts a persistent cache directory during a RUN step. For example, mounting /root/.cache/pip or /var/cache/apt lets package downloads persist across builds without bloating the image layer.",
+      "difficulty": "intermediate",
+      "lessonRef": "01-build-optimization"
+    },
+    {
+      "id": "da-q02",
+      "type": "code_completion",
+      "question": "Complete the Dockerfile instruction to enable BuildKit inline cache metadata for CI/CD cache reuse:\n\nFROM node:20-alpine\n# syntax=docker/dockerfile:1\nRUN --mount=type=cache,target=/root/.npm \\\n  npm ci\n\n# Build command:\n# docker build _____ type=inline .",
+      "options": [
+        "A) --build-arg BUILDKIT_INLINE_CACHE=1",
+        "B) --cache-from",
+        "C) --squash",
+        "D) --compress"
+      ],
+      "correctAnswer": "A) --build-arg BUILDKIT_INLINE_CACHE=1",
+      "explanation": "BUILDKIT_INLINE_CACHE=1 embeds cache metadata into the image, allowing it to be used as a cache source in subsequent builds with --cache-from. This is essential for CI/CD where each build runs on a clean machine.",
+      "difficulty": "advanced",
+      "lessonRef": "01-build-optimization"
+    },
+    {
+      "id": "da-q03",
+      "type": "multiple_choice",
+      "question": "How does BuildKit improve upon the legacy Docker builder for multi-stage Dockerfiles?",
+      "options": [
+        "It uses a different image format",
+        "It analyzes the stage dependency graph and builds independent stages in parallel",
+        "It caches only the final stage for speed",
+        "It requires fewer FROM instructions"
+      ],
+      "correctAnswer": 1,
+      "explanation": "BuildKit analyzes the dependency graph of stages and steps. Stages that do not depend on each other are built concurrently. This is a major improvement over the legacy builder which processed stages sequentially.",
+      "difficulty": "intermediate",
+      "lessonRef": "01-build-optimization"
+    },
+    {
+      "id": "da-q04",
+      "type": "multiple_choice",
+      "question": "What is the recommended way to reduce Docker image size for a Go application?",
+      "options": [
+        "Use the golang base image for the final stage",
+        "Use a multi-stage build with a scratch or distroless final stage",
+        "Compress the binary with gzip inside the container",
+        "Use the --squash flag during build"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Multi-stage builds let you compile with golang image, then copy the statically-linked binary into scratch (empty image) or distroless. This produces images as small as 5-15MB instead of 300MB+ with the full Go SDK.",
+      "difficulty": "intermediate",
+      "lessonRef": "01-build-optimization"
+    },
+    {
+      "id": "da-q05",
+      "type": "multiple_choice",
+      "question": "What is the primary purpose of Docker image scanning tools like Trivy or Snyk?",
+      "options": [
+        "Optimizing image layer sizes",
+        "Detecting known vulnerabilities (CVEs) in OS packages and application dependencies",
+        "Verifying Dockerfile syntax",
+        "Measuring container runtime performance"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Image scanning tools analyze the packages and libraries in a Docker image against vulnerability databases (CVE/NVD) to identify known security issues. They should be integrated into CI/CD pipelines to prevent deploying vulnerable images.",
+      "difficulty": "beginner",
+      "lessonRef": "02-image-security"
+    },
+    {
+      "id": "da-q06",
+      "type": "multiple_choice",
+      "question": "What is a 'distroless' container image?",
+      "options": [
+        "An image without any Linux distribution branding",
+        "An image containing only the application and its runtime dependencies, without package managers, shells, or OS utilities",
+        "An image that works across multiple Linux distributions",
+        "An image built without using a Dockerfile"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Distroless images (like gcr.io/distroless) contain only the application runtime. By excluding shells, package managers, and other utilities, they dramatically reduce the attack surface since attackers have fewer tools to exploit.",
+      "difficulty": "intermediate",
+      "lessonRef": "02-image-security"
+    },
+    {
+      "id": "da-q07",
+      "type": "code_completion",
+      "question": "Complete the Dockerfile to use a non-root user with a read-only filesystem for maximum security:\n\nFROM node:20-alpine\nWORKDIR /app\nCOPY --chown=node:node . .\nRUN npm ci --production\nUSER node\n\n# Run with:\n# docker run --read-only _____ /tmp myapp",
+      "options": [
+        "A) --tmpfs",
+        "B) --volume",
+        "C) --mount",
+        "D) --writedir"
+      ],
+      "correctAnswer": "A) --tmpfs",
+      "explanation": "--read-only makes the container's root filesystem read-only, but many apps need writable temp directories. --tmpfs mounts an in-memory writable filesystem at /tmp. This hardens the container while still allowing necessary temp file operations.",
+      "difficulty": "advanced",
+      "lessonRef": "02-image-security"
+    },
+    {
+      "id": "da-q08",
+      "type": "true_false",
+      "question": "Using 'FROM alpine:latest' in a Dockerfile is considered a security best practice because Alpine is a small distribution.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "While Alpine is small and has fewer packages (reducing attack surface), using the 'latest' tag is not a best practice. You should pin to a specific version (e.g., alpine:3.19) for reproducibility and to avoid unexpected changes from upstream updates.",
+      "difficulty": "intermediate",
+      "lessonRef": "02-image-security"
+    },
+    {
+      "id": "da-q09",
+      "type": "multiple_choice",
+      "question": "In a Docker Compose override pattern, what happens when you run 'docker compose -f docker-compose.yml -f docker-compose.prod.yml up'?",
+      "options": [
+        "Only docker-compose.prod.yml is used",
+        "Values in docker-compose.prod.yml override or extend values in docker-compose.yml",
+        "Both files are run as independent stacks",
+        "Docker throws an error for multiple -f flags"
+      ],
+      "correctAnswer": 1,
+      "explanation": "When multiple compose files are specified with -f, they are merged in order. The second file overrides or extends settings from the first. This pattern allows a base config with environment-specific overrides for dev, staging, and production.",
+      "difficulty": "intermediate",
+      "lessonRef": "03-advanced-compose"
+    },
+    {
+      "id": "da-q10",
+      "type": "code_completion",
+      "question": "Complete the Compose file to define a service that only starts when the database is healthy:\n\nservices:\n  db:\n    image: postgres:16\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U postgres\"]\n      interval: 5s\n      timeout: 5s\n      retries: 5\n  app:\n    image: myapp\n    depends_on:\n      db:\n        _____: service_healthy",
+      "options": [
+        "A) condition",
+        "B) state",
+        "C) wait",
+        "D) require"
+      ],
+      "correctAnswer": "A) condition",
+      "explanation": "The condition field in depends_on lets you specify when a dependency is considered satisfied. service_healthy waits for the healthcheck to pass, service_started only waits for the container to start, and service_completed_successfully waits for it to exit with code 0.",
+      "difficulty": "advanced",
+      "lessonRef": "03-advanced-compose"
+    },
+    {
+      "id": "da-q11",
+      "type": "multiple_choice",
+      "question": "What is the purpose of the 'profiles' feature in Docker Compose?",
+      "options": [
+        "To define different CPU and memory limits for services",
+        "To selectively enable groups of services for different workflows (e.g., debug, monitoring)",
+        "To set environment-specific variables",
+        "To configure different network profiles"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Compose profiles allow you to assign services to named groups. Only services without a profile or matching an active profile are started. For example, 'docker compose --profile debug up' starts only base services and those tagged with 'debug'.",
+      "difficulty": "advanced",
+      "lessonRef": "03-advanced-compose"
+    },
+    {
+      "id": "da-q12",
+      "type": "multiple_choice",
+      "question": "How do you scale a specific service to 3 replicas using Docker Compose?",
+      "options": [
+        "docker compose scale web=3",
+        "docker compose up -d --scale web=3",
+        "docker compose replicas web 3",
+        "docker compose run --count 3 web"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The --scale flag with 'docker compose up' creates the specified number of containers for a service. You can also define replicas in the compose file under deploy.replicas. Note: scaled services cannot map to fixed host ports.",
+      "difficulty": "intermediate",
+      "lessonRef": "03-advanced-compose"
+    },
+    {
+      "id": "da-q13",
+      "type": "multiple_choice",
+      "question": "What Linux kernel feature provides filesystem isolation for Docker containers?",
+      "options": [
+        "SELinux",
+        "Mount namespaces",
+        "iptables",
+        "Swap partitions"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Mount namespaces isolate the filesystem view for each container, giving it its own root filesystem. Docker uses multiple namespace types: PID, network, mount, UTS, IPC, and user namespaces to provide comprehensive isolation.",
+      "difficulty": "intermediate",
+      "lessonRef": "04-container-internals"
+    },
+    {
+      "id": "da-q14",
+      "type": "multiple_choice",
+      "question": "What is the role of cgroups (control groups) in Docker container isolation?",
+      "options": [
+        "They provide network isolation between containers",
+        "They limit and account for CPU, memory, I/O, and other resource usage",
+        "They encrypt data at rest inside containers",
+        "They manage container image layers"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Cgroups enforce resource limits on containers. They control how much CPU, memory, disk I/O, and network bandwidth a container can use. Without cgroup limits, a container could consume all host resources and starve other containers.",
+      "difficulty": "intermediate",
+      "lessonRef": "04-container-internals"
+    },
+    {
+      "id": "da-q15",
+      "type": "true_false",
+      "question": "Docker containers each run their own separate Linux kernel instance.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "All containers on a host share the same Linux kernel. This is a fundamental difference from VMs. Containers use kernel features (namespaces, cgroups) for isolation, but the kernel itself is shared. This is why containers are so lightweight.",
+      "difficulty": "beginner",
+      "lessonRef": "04-container-internals"
+    },
+    {
+      "id": "da-q16",
+      "type": "code_completion",
+      "question": "Complete the command to inspect the namespaces used by a running Docker container:\n\ndocker inspect --format '{{.State.Pid}}' my-container\n# Then:\nls -la /proc/<PID>/_____",
+      "options": [
+        "A) ns",
+        "B) namespaces",
+        "C) cgroups",
+        "D) isolation"
+      ],
+      "correctAnswer": "A) ns",
+      "explanation": "The /proc/<PID>/ns directory contains symbolic links to the namespaces used by a process. Each file (mnt, pid, net, uts, ipc, user) represents a different namespace. This lets you verify container isolation at the kernel level.",
+      "difficulty": "advanced",
+      "lessonRef": "04-container-internals"
+    },
+    {
+      "id": "da-q17",
+      "type": "multiple_choice",
+      "question": "Which Docker storage driver is most commonly used on modern Linux systems and provides efficient layer management?",
+      "options": [
+        "aufs",
+        "devicemapper",
+        "overlay2",
+        "btrfs"
+      ],
+      "correctAnswer": 2,
+      "explanation": "overlay2 is the default and recommended storage driver for Docker on modern Linux. It uses the OverlayFS filesystem to efficiently layer images using lower (read-only) and upper (writable) directories with a merged view.",
+      "difficulty": "intermediate",
+      "lessonRef": "05-storage-deep-dive"
+    },
+    {
+      "id": "da-q18",
+      "type": "multiple_choice",
+      "question": "What is copy-on-write (CoW) in the context of Docker storage?",
+      "options": [
+        "Files are copied to all containers when an image is pulled",
+        "When a container modifies a file from a read-only layer, only the modified file is copied to the writable layer",
+        "All file writes are duplicated for backup purposes",
+        "Image layers are copied when a new tag is created"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Copy-on-write means the container reads files directly from image layers. Only when a file is modified does Docker copy it to the container's writable layer. This is efficient because most files are never modified, saving disk space and enabling instant container creation.",
+      "difficulty": "advanced",
+      "lessonRef": "05-storage-deep-dive"
+    },
+    {
+      "id": "da-q19",
+      "type": "multiple_choice",
+      "question": "What type of data is best suited for Docker tmpfs mounts?",
+      "options": [
+        "Database files that need persistence across restarts",
+        "Sensitive or temporary data that should not be persisted to disk",
+        "Static assets like images and CSS files",
+        "Docker image layers"
+      ],
+      "correctAnswer": 1,
+      "explanation": "tmpfs mounts are stored in the host's memory (RAM) and are never written to the host filesystem. They are ideal for sensitive data that should not persist, like secrets or temporary processing data. All data is lost when the container stops.",
+      "difficulty": "intermediate",
+      "lessonRef": "05-storage-deep-dive"
+    },
+    {
+      "id": "da-q20",
+      "type": "code_completion",
+      "question": "Complete the command to check how much disk space Docker objects are consuming:\n\ndocker system _____",
+      "options": [
+        "A) df",
+        "B) du",
+        "C) usage",
+        "D) space"
+      ],
+      "correctAnswer": "A) df",
+      "explanation": "docker system df shows disk usage for images, containers, volumes, and build cache. Use -v for a verbose breakdown. This helps identify what is consuming disk space before running cleanup commands like docker system prune.",
+      "difficulty": "intermediate",
+      "lessonRef": "05-storage-deep-dive"
+    },
+    {
+      "id": "da-q21",
+      "type": "multiple_choice",
+      "question": "What is the purpose of a Docker network alias?",
+      "options": [
+        "To rename a network after creation",
+        "To provide additional DNS names for a container within a network",
+        "To create a backup network connection",
+        "To mask the container's IP address"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Network aliases provide alternative DNS names for a container on a network. Multiple containers can share the same alias, enabling round-robin DNS load balancing. This is useful for service discovery without external tools.",
+      "difficulty": "advanced",
+      "lessonRef": "06-advanced-networking"
+    },
+    {
+      "id": "da-q22",
+      "type": "multiple_choice",
+      "question": "Which Docker network driver enables communication between containers running on different Docker hosts?",
+      "options": [
+        "bridge",
+        "host",
+        "overlay",
+        "macvlan"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The overlay network driver creates a distributed network across multiple Docker hosts. It uses VXLAN encapsulation to tunnel traffic between hosts. Overlay networks are used in Docker Swarm and can be created with 'docker network create -d overlay'.",
+      "difficulty": "advanced",
+      "lessonRef": "06-advanced-networking"
+    },
+    {
+      "id": "da-q23",
+      "type": "code_completion",
+      "question": "Complete the command to create a macvlan network that assigns containers real IP addresses on the physical network:\n\ndocker network create -d _____ \\\n  --subnet=192.168.1.0/24 \\\n  --gateway=192.168.1.1 \\\n  -o parent=eth0 my-macvlan",
+      "options": [
+        "A) macvlan",
+        "B) bridge",
+        "C) overlay",
+        "D) ipvlan"
+      ],
+      "correctAnswer": "A) macvlan",
+      "explanation": "macvlan assigns containers MAC addresses on the physical network, making them appear as physical devices. The parent option specifies the host interface. This is useful for legacy applications that expect to be directly on the LAN.",
+      "difficulty": "advanced",
+      "lessonRef": "06-advanced-networking"
+    },
+    {
+      "id": "da-q24",
+      "type": "true_false",
+      "question": "Containers on the default bridge network can resolve each other by container name using Docker's built-in DNS.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "The default bridge network does NOT provide DNS resolution between containers. Only user-defined (custom) bridge networks provide automatic DNS resolution by container name. This is a key reason to always use custom networks.",
+      "difficulty": "beginner",
+      "lessonRef": "06-advanced-networking"
+    },
+    {
+      "id": "da-q25",
+      "type": "multiple_choice",
+      "question": "What is the primary security concern with mounting the Docker socket (/var/run/docker.sock) into a container?",
+      "options": [
+        "It slows down container performance",
+        "It grants the container full control over the Docker daemon, effectively giving root access to the host",
+        "It causes network conflicts between containers",
+        "It increases image size"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Mounting the Docker socket gives a container the ability to create, stop, and manage all containers on the host. An attacker with socket access can mount the host filesystem, escalate to root, and fully compromise the host. Use with extreme caution.",
+      "difficulty": "advanced",
+      "lessonRef": "07-security-hardening"
+    },
+    {
+      "id": "da-q26",
+      "type": "multiple_choice",
+      "question": "What is the purpose of seccomp profiles in Docker?",
+      "options": [
+        "Encrypting network traffic between containers",
+        "Restricting which Linux system calls a container can make",
+        "Managing user authentication for registries",
+        "Compressing container layers"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Seccomp (Secure Computing Mode) profiles define an allowlist of Linux system calls a container can execute. Docker's default profile blocks about 44 of 300+ syscalls, preventing dangerous operations like loading kernel modules or rebooting.",
+      "difficulty": "advanced",
+      "lessonRef": "07-security-hardening"
+    },
+    {
+      "id": "da-q27",
+      "type": "code_completion",
+      "question": "Complete the docker run command to drop all Linux capabilities and only add the NET_BIND_SERVICE capability:\n\ndocker run --cap-drop=ALL _____ NET_BIND_SERVICE myapp",
+      "options": [
+        "A) --cap-add=",
+        "B) --capability=",
+        "C) --add-cap=",
+        "D) --allow="
+      ],
+      "correctAnswer": "A) --cap-add=",
+      "explanation": "Linux capabilities split root privileges into distinct units. --cap-drop=ALL removes all capabilities, and --cap-add adds back only what is needed. NET_BIND_SERVICE allows binding to ports below 1024. This follows the principle of least privilege.",
+      "difficulty": "advanced",
+      "lessonRef": "07-security-hardening"
+    },
+    {
+      "id": "da-q28",
+      "type": "true_false",
+      "question": "Docker user namespace remapping maps container root (UID 0) to a non-root user on the host, adding an extra layer of security.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "User namespace remapping (--userns-remap) maps UIDs inside the container to unprivileged UIDs on the host. Even if a process runs as root (UID 0) inside the container, it maps to a non-root user on the host, limiting damage from container breakouts.",
+      "difficulty": "advanced",
+      "lessonRef": "07-security-hardening"
+    },
+    {
+      "id": "da-q29",
+      "type": "multiple_choice",
+      "question": "What is the primary purpose of Docker BuildKit's secret mounts?",
+      "options": [
+        "Encrypting the final Docker image",
+        "Passing sensitive data during build without storing it in image layers",
+        "Creating encrypted volumes",
+        "Signing Docker images with private keys"
+      ],
+      "correctAnswer": 1,
+      "explanation": "RUN --mount=type=secret makes a secret file available during a build step without embedding it in any layer. The secret is mounted temporarily and never persists in the image history or layers, unlike ENV or COPY which leave traces.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-secrets-management"
+    },
+    {
+      "id": "da-q30",
+      "type": "code_completion",
+      "question": "Complete the Dockerfile instruction to access a build secret securely:\n\nRUN --mount=type=secret,id=npmrc,target=/root/.npmrc \\\n  npm ci\n\n# Build command:\n# docker build --secret _____=npmrc,src=.npmrc .",
+      "options": [
+        "A) id",
+        "B) name",
+        "C) key",
+        "D) ref"
+      ],
+      "correctAnswer": "A) id",
+      "explanation": "The --secret flag uses id to name the secret and src to specify the source file on the host. The id must match between the build command and the RUN --mount instruction. The secret is never stored in the image layers.",
+      "difficulty": "advanced",
+      "lessonRef": "08-secrets-management"
+    },
+    {
+      "id": "da-q31",
+      "type": "multiple_choice",
+      "question": "In Docker Swarm, how are secrets delivered to containers?",
+      "options": [
+        "As environment variables",
+        "As files mounted in /run/secrets/ inside the container via an in-memory tmpfs",
+        "Through the Docker API at runtime",
+        "Embedded in the container image"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Docker Swarm secrets are mounted as files in /run/secrets/ using a tmpfs (in-memory filesystem). They are encrypted at rest in the Raft log and in transit between nodes. Only containers in services granted access can see them.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-secrets-management"
+    },
+    {
+      "id": "da-q32",
+      "type": "true_false",
+      "question": "Using ARG instructions in a Dockerfile to pass secrets is safe because ARG values are not persisted in the final image layers.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "ARG values are recorded in the image history and can be revealed with 'docker history'. Anyone with access to the image can see build arguments. Use BuildKit secret mounts (--mount=type=secret) instead for sensitive build-time data.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-secrets-management"
+    },
+    {
+      "id": "da-q33",
+      "type": "multiple_choice",
+      "question": "What is the primary function of a private Docker registry?",
+      "options": [
+        "Running containers in a private network",
+        "Hosting Docker images internally with access control, reducing reliance on public registries",
+        "Encrypting Docker containers at rest",
+        "Providing private DNS for container networks"
+      ],
+      "correctAnswer": 1,
+      "explanation": "A private registry (like Harbor, AWS ECR, or the Docker registry image) lets organizations host images internally with fine-grained access control, vulnerability scanning, and compliance features, without exposing images publicly.",
+      "difficulty": "beginner",
+      "lessonRef": "09-registry-management"
+    },
+    {
+      "id": "da-q34",
+      "type": "multiple_choice",
+      "question": "What is an image manifest in the context of Docker registries?",
+      "options": [
+        "A log of all pull and push operations",
+        "A JSON document describing the image's layers, configuration, and platform compatibility",
+        "A list of allowed users for the registry",
+        "A Dockerfile stored alongside the image"
+      ],
+      "correctAnswer": 1,
+      "explanation": "An image manifest is a JSON document that describes the image: its layers (as content-addressable digests), configuration, and target platform. Multi-arch manifest lists reference platform-specific manifests to support different CPU architectures.",
+      "difficulty": "advanced",
+      "lessonRef": "09-registry-management"
+    },
+    {
+      "id": "da-q35",
+      "type": "code_completion",
+      "question": "Complete the command to inspect a remote image manifest without pulling the full image:\n\ndocker _____ inspect nginx:latest",
+      "options": [
+        "A) manifest",
+        "B) image",
+        "C) registry",
+        "D) remote"
+      ],
+      "correctAnswer": "A) manifest",
+      "explanation": "docker manifest inspect retrieves the manifest from a registry without downloading image layers. This shows layer digests, platform support, and image metadata. It is useful for verifying multi-arch support and image composition.",
+      "difficulty": "advanced",
+      "lessonRef": "09-registry-management"
+    },
+    {
+      "id": "da-q36",
+      "type": "true_false",
+      "question": "An image digest (SHA256 hash) is immutable and always refers to the exact same image content, unlike mutable tags.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "Image digests are content-addressable SHA256 hashes of the image manifest. They are immutable -- the same digest always refers to the same content. Tags can be moved to point to different images, but digests guarantee reproducibility.",
+      "difficulty": "beginner",
+      "lessonRef": "09-registry-management"
+    },
+    {
+      "id": "da-q37",
+      "type": "multiple_choice",
+      "question": "What is the purpose of Docker Swarm's Raft consensus algorithm?",
+      "options": [
+        "Load balancing incoming requests across services",
+        "Maintaining a consistent cluster state across manager nodes and electing leaders",
+        "Encrypting network traffic between nodes",
+        "Scheduling containers on worker nodes"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Raft ensures all manager nodes agree on the cluster state (services, tasks, secrets). It handles leader election and log replication. A majority quorum of managers must be available for the cluster to function, which is why 3 or 5 managers are recommended.",
+      "difficulty": "advanced",
+      "lessonRef": "10-orchestration-basics"
+    },
+    {
+      "id": "da-q38",
+      "type": "code_completion",
+      "question": "Complete the command to initialize a Docker Swarm cluster on the current node:\n\ndocker swarm _____ --advertise-addr 192.168.1.10",
+      "options": [
+        "A) init",
+        "B) create",
+        "C) start",
+        "D) setup"
+      ],
+      "correctAnswer": "A) init",
+      "explanation": "docker swarm init creates a new Swarm cluster with the current node as the first manager. --advertise-addr specifies the IP address other nodes will use to connect. The command outputs a join token for adding worker and manager nodes.",
+      "difficulty": "beginner",
+      "lessonRef": "10-orchestration-basics"
+    },
+    {
+      "id": "da-q39",
+      "type": "multiple_choice",
+      "question": "In Docker Swarm, what is the difference between a 'service' and a 'task'?",
+      "options": [
+        "They are the same thing",
+        "A service is the desired state definition; a task is a single running instance (container) of that service",
+        "A task defines the image; a service defines the network",
+        "A service runs on managers; a task runs on workers"
+      ],
+      "correctAnswer": 1,
+      "explanation": "A service defines the desired state: which image, how many replicas, network, ports, etc. Each replica is a task, which is the unit scheduled onto a node. If a task fails, the scheduler creates a new task to maintain the desired replica count.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-orchestration-basics"
+    },
+    {
+      "id": "da-q40",
+      "type": "multiple_choice",
+      "question": "How does Docker Swarm's routing mesh work?",
+      "options": [
+        "It routes traffic only to the node where the container runs",
+        "Any node in the swarm can accept incoming requests on published ports and route them to a container running on any node",
+        "It requires an external load balancer to function",
+        "It only works with overlay networks disabled"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The routing mesh uses an ingress overlay network so that published ports are available on every swarm node. Traffic hitting any node is routed via IPVS load balancing to a container running the service, regardless of which node it is on.",
+      "difficulty": "advanced",
+      "lessonRef": "10-orchestration-basics"
+    },
+    {
+      "id": "da-q41",
+      "type": "multiple_choice",
+      "question": "What is the advantage of a rolling update deployment strategy for Docker services?",
+      "options": [
+        "All containers are replaced simultaneously for faster deployment",
+        "Containers are updated incrementally, maintaining availability with configurable parallelism and rollback on failure",
+        "It requires no additional configuration",
+        "It uses less network bandwidth than other strategies"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Rolling updates replace containers in batches (update-parallelism) with configurable delays. If health checks fail, the update can automatically rollback. This ensures the service remains available throughout the deployment with zero downtime.",
+      "difficulty": "intermediate",
+      "lessonRef": "11-service-deployment"
+    },
+    {
+      "id": "da-q42",
+      "type": "code_completion",
+      "question": "Complete the Swarm service create command to deploy 5 replicas of a web application:\n\ndocker service create --name web _____ 5 -p 80:80 nginx:1.25",
+      "options": [
+        "A) --replicas",
+        "B) --scale",
+        "C) --count",
+        "D) --instances"
+      ],
+      "correctAnswer": "A) --replicas",
+      "explanation": "The --replicas flag sets the desired number of identical container instances for a service. Swarm distributes these across available nodes and maintains the count by restarting failed tasks.",
+      "difficulty": "beginner",
+      "lessonRef": "11-service-deployment"
+    },
+    {
+      "id": "da-q43",
+      "type": "multiple_choice",
+      "question": "What does the 'docker service update --rollback' command do?",
+      "options": [
+        "Deletes the service and recreates it",
+        "Reverts the service to its previous specification before the last update",
+        "Scales the service down to zero",
+        "Restores the service from a backup"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The --rollback flag reverts a service to its previous specification. Swarm remembers the prior task template and performs a rolling rollback. This is critical for quick recovery from failed deployments.",
+      "difficulty": "intermediate",
+      "lessonRef": "11-service-deployment"
+    },
+    {
+      "id": "da-q44",
+      "type": "multiple_choice",
+      "question": "How do Docker Swarm placement constraints determine where service tasks are scheduled?",
+      "options": [
+        "They randomly distribute tasks across all available nodes",
+        "They use node labels and attributes to restrict which nodes can run specific tasks",
+        "They assign tasks based on the order nodes joined the swarm",
+        "They only schedule tasks on manager nodes"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Placement constraints use node labels to restrict where tasks are scheduled. For example, --constraint 'node.labels.disk==ssd' ensures tasks only run on SSD nodes. This is useful for GPU workloads, data locality, or compliance requirements.",
+      "difficulty": "advanced",
+      "lessonRef": "11-service-deployment"
+    },
+    {
+      "id": "da-q45",
+      "type": "multiple_choice",
+      "question": "Which tool provides a web-based UI for monitoring Docker container metrics including CPU, memory, and network in real-time?",
+      "options": [
+        "docker stats (CLI only)",
+        "cAdvisor (Container Advisor)",
+        "docker info",
+        "docker events"
+      ],
+      "correctAnswer": 1,
+      "explanation": "cAdvisor (Container Advisor) by Google provides a web UI and API for real-time container resource monitoring. It auto-discovers containers and exposes metrics that can be scraped by Prometheus for long-term storage and alerting.",
+      "difficulty": "beginner",
+      "lessonRef": "12-monitoring-logging"
+    },
+    {
+      "id": "da-q46",
+      "type": "multiple_choice",
+      "question": "What is the recommended logging architecture for production Docker deployments?",
+      "options": [
+        "Write logs to files inside each container",
+        "Use a centralized logging stack: containers output to stdout/stderr, collected by a log driver or agent and shipped to a log aggregation platform",
+        "Disable logging for performance",
+        "Use docker logs with manual log rotation"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Best practice is to have applications log to stdout/stderr (12-factor app). A logging driver or sidecar (Fluentd, Filebeat) collects and ships logs to a centralized platform (ELK, Loki, Splunk) for searching, alerting, and retention.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-monitoring-logging"
+    },
+    {
+      "id": "da-q47",
+      "type": "code_completion",
+      "question": "Complete the docker run command to use the Fluentd logging driver:\n\ndocker run -d --log-driver=_____ \\\n  --log-opt fluentd-address=localhost:24224 \\\n  --log-opt tag=myapp nginx",
+      "options": [
+        "A) fluentd",
+        "B) syslog",
+        "C) json-file",
+        "D) gelf"
+      ],
+      "correctAnswer": "A) fluentd",
+      "explanation": "The fluentd logging driver sends container logs to a Fluentd collector. Fluentd can then route, parse, and forward logs to various backends (Elasticsearch, S3, etc.). The tag option helps identify the log source in the aggregation platform.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-monitoring-logging"
+    },
+    {
+      "id": "da-q48",
+      "type": "true_false",
+      "question": "The 'docker events' command provides a real-time stream of events from the Docker daemon including container starts, stops, and image pulls.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "docker events streams real-time events from the daemon including container lifecycle (create, start, stop, die), image events (pull, push), volume events, and network events. It can be filtered by event type, container, and time range.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-monitoring-logging"
+    },
+    {
+      "id": "da-q49",
+      "type": "multiple_choice",
+      "question": "When a Docker container is stuck and unresponsive, what is the difference between 'docker stop' and 'docker kill'?",
+      "options": [
+        "They are identical commands",
+        "docker stop sends SIGTERM first (with a grace period) then SIGKILL; docker kill sends SIGKILL immediately",
+        "docker kill removes the container; docker stop pauses it",
+        "docker stop works on running containers; docker kill works on stopped ones"
+      ],
+      "correctAnswer": 1,
+      "explanation": "docker stop sends SIGTERM to allow graceful shutdown, then SIGKILL after a timeout (default 10s). docker kill sends SIGKILL immediately, forcing instant termination. Use stop for graceful shutdown and kill for unresponsive containers.",
+      "difficulty": "beginner",
+      "lessonRef": "13-troubleshooting"
+    },
+    {
+      "id": "da-q50",
+      "type": "code_completion",
+      "question": "Complete the command to export a container's filesystem as a tar archive for offline analysis:\n\ndocker _____ my-container > container-fs.tar",
+      "options": [
+        "A) export",
+        "B) save",
+        "C) backup",
+        "D) archive"
+      ],
+      "correctAnswer": "A) export",
+      "explanation": "docker export creates a tar archive of a container's entire filesystem. Unlike 'docker save' (which exports an image with layers and metadata), 'export' flattens the filesystem into a single layer. Useful for forensic analysis of compromised containers.",
+      "difficulty": "advanced",
+      "lessonRef": "13-troubleshooting"
+    },
+    {
+      "id": "da-q51",
+      "type": "multiple_choice",
+      "question": "How can you identify why a container exited unexpectedly?",
+      "options": [
+        "Only by checking application logs on the host",
+        "By inspecting the exit code with 'docker inspect', checking 'docker logs', and reviewing OOMKilled status",
+        "By restarting the container and watching",
+        "Docker does not provide exit diagnostics"
+      ],
+      "correctAnswer": 1,
+      "explanation": "docker inspect shows the exit code (State.ExitCode) and OOMKilled status (killed by out-of-memory). docker logs shows stdout/stderr output before exit. Exit code 137 usually indicates SIGKILL (OOM or manual kill), 1 indicates application error.",
+      "difficulty": "intermediate",
+      "lessonRef": "13-troubleshooting"
+    },
+    {
+      "id": "da-q52",
+      "type": "true_false",
+      "question": "An exit code of 137 from a Docker container typically indicates the container was killed by an out-of-memory (OOM) event or received SIGKILL.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "Exit code 137 = 128 + 9 (SIGKILL). This commonly occurs when the container exceeds its memory limit and the OOM killer terminates it, or when 'docker kill' is used. Check State.OOMKilled in docker inspect to confirm OOM.",
+      "difficulty": "advanced",
+      "lessonRef": "13-troubleshooting"
+    },
+    {
+      "id": "da-q53",
+      "type": "multiple_choice",
+      "question": "What is the purpose of Docker's 'buildx' plugin?",
+      "options": [
+        "Managing Docker volumes across hosts",
+        "Extended build capabilities including multi-platform image builds and advanced build features",
+        "Real-time container monitoring",
+        "Docker Swarm cluster management"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Docker buildx extends the build command with BuildKit features: multi-platform builds (build for ARM on x86), build caching backends, distributed building, and outputting to different formats (OCI, Docker, or directly to a registry).",
+      "difficulty": "intermediate",
+      "lessonRef": "14-advanced-build-patterns"
+    },
+    {
+      "id": "da-q54",
+      "type": "code_completion",
+      "question": "Complete the command to build a multi-platform image for both AMD64 and ARM64 architectures:\n\ndocker buildx build --platform _____ -t myapp:latest --push .",
+      "options": [
+        "A) linux/amd64,linux/arm64",
+        "B) amd64,arm64",
+        "C) x86_64,aarch64",
+        "D) all"
+      ],
+      "correctAnswer": "A) linux/amd64,linux/arm64",
+      "explanation": "The --platform flag accepts OS/architecture pairs. docker buildx builds the image for each platform and creates a manifest list that registries use to serve the correct image to each architecture. The --push flag is required for multi-platform builds.",
+      "difficulty": "intermediate",
+      "lessonRef": "14-advanced-build-patterns"
+    },
+    {
+      "id": "da-q55",
+      "type": "multiple_choice",
+      "question": "What is a Docker build context and why should it be minimized?",
+      "options": [
+        "The Docker daemon's configuration; it doesn't affect builds",
+        "The set of files sent to the daemon for building; a large context slows build start and may include sensitive files",
+        "The environment variables available during build",
+        "The number of layers in the resulting image"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The build context is everything in the directory sent to the Docker daemon. Large contexts (node_modules, .git, data files) slow down builds because they must be transferred. Use .dockerignore to exclude unnecessary files and keep the context small.",
+      "difficulty": "intermediate",
+      "lessonRef": "14-advanced-build-patterns"
+    },
+    {
+      "id": "da-q56",
+      "type": "true_false",
+      "question": "Docker buildx can use QEMU emulation to build images for CPU architectures different from the host without requiring actual hardware of that architecture.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "Docker buildx uses QEMU user-space emulation to cross-compile for different architectures. For example, you can build ARM64 images on an x86_64 machine. While slower than native builds, this enables multi-arch image creation from a single build machine.",
+      "difficulty": "advanced",
+      "lessonRef": "14-advanced-build-patterns"
+    },
+    {
+      "id": "da-q57",
+      "type": "multiple_choice",
+      "question": "What is Podman and how does it differ from Docker?",
+      "options": [
+        "A Docker plugin for pod management",
+        "A daemonless, rootless container engine that is CLI-compatible with Docker",
+        "A container orchestration tool that replaces Kubernetes",
+        "A Docker image format converter"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Podman is a daemonless container engine that runs containers without a central daemon process. It supports rootless containers by default and uses the same CLI syntax as Docker. It also natively supports pods (groups of containers sharing namespaces).",
+      "difficulty": "beginner",
+      "lessonRef": "15-beyond-docker"
+    },
+    {
+      "id": "da-q58",
+      "type": "multiple_choice",
+      "question": "What does the Open Container Initiative (OCI) standardize?",
+      "options": [
+        "Docker Compose file format only",
+        "Container image format, runtime specification, and distribution specification",
+        "Container orchestration APIs",
+        "Container monitoring metrics"
+      ],
+      "correctAnswer": 1,
+      "explanation": "OCI defines three specifications: the Image Specification (image format), the Runtime Specification (how to run containers), and the Distribution Specification (how to distribute images). This ensures interoperability between Docker, Podman, containerd, and other tools.",
+      "difficulty": "intermediate",
+      "lessonRef": "15-beyond-docker"
+    },
+    {
+      "id": "da-q59",
+      "type": "true_false",
+      "question": "Kubernetes uses Docker as its only supported container runtime.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "Kubernetes removed direct Docker support (dockershim) in v1.24. It now uses the Container Runtime Interface (CRI) with runtimes like containerd or CRI-O. Docker images still work because they follow OCI standards, but the Docker daemon is no longer needed.",
+      "difficulty": "intermediate",
+      "lessonRef": "15-beyond-docker"
+    },
+    {
+      "id": "da-q60",
+      "type": "multiple_choice",
+      "question": "What advantage does WebAssembly (Wasm) offer as a container alternative for certain workloads?",
+      "options": [
+        "It replaces containers entirely with no tradeoffs",
+        "Near-instant startup, smaller binary sizes, and strong sandboxing -- ideal for edge computing and serverless functions",
+        "It provides better GPU support than containers",
+        "It only works with JavaScript applications"
+      ],
+      "correctAnswer": 1,
+      "explanation": "WebAssembly containers start in milliseconds (vs seconds for Docker), produce tiny binaries, and provide capability-based security sandboxing. They are ideal for edge, serverless, and plugin workloads but lack the full OS environment that traditional containers provide.",
+      "difficulty": "advanced",
+      "lessonRef": "15-beyond-docker"
+    }
+  ]
+}

@@ -1,0 +1,358 @@
+---
+title: "System Monitoring"
+description: "Monitor Linux system health with top, vmstat, iostat, df, du, free, and uptime. Learn to identify performance bottlenecks and resource constraints."
+order: 14
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 13-service-management
+objectives:
+  - Monitor CPU, memory, disk, and I/O in real-time
+  - Use df and du to find disk usage and space issues
+  - Read vmstat and iostat output for performance analysis
+  - Build monitoring dashboards with simple commands
+tags:
+  - linux
+  - monitoring
+  - performance
+  - administration
+  - troubleshooting
+---
+
+<Callout type="story" title="The Story">
+"The website is slow." Three words that start every production incident. But "slow" could mean a hundred things. Is it CPU-bound? Out of memory? Disk I/O thrashing? Network saturated? Before you can fix the problem, you need to measure the system. This lesson gives you the tools to diagnose any performance issue in under 60 seconds.
+</Callout>
+
+## The 60-Second Performance Check
+
+When a server is in trouble, run these commands in this order. In 60 seconds, you'll know where the bottleneck is:
+
+```bash
+# 1. Load average — are we overloaded?
+uptime
+
+# 2. Disk space — is anything full?
+df -h
+
+# 3. Memory — are we swapping?
+free -h
+
+# 4. Top processes — who's eating resources?
+top -bn1 | head -20
+
+# 5. Disk I/O — is storage the bottleneck?
+iostat -x 1 3 2>/dev/null || echo "Install: sudo apt install sysstat"
+
+# 6. Network connections — too many connections?
+ss -s
+```
+
+## CPU Monitoring
+
+### `uptime` — Load Average
+
+```bash
+uptime
+# 14:23:01 up 45 days,  3:12,  2 users,  load average: 2.45, 1.82, 0.93
+#                                                        1min  5min  15min
+```
+
+**Reading load average:**
+- Load = number of processes wanting CPU time
+- A load of 1.0 on a single-core = 100% utilized
+- A load of 4.0 on a 4-core system = 100% utilized
+- Load higher than core count = processes waiting in queue
+
+```bash
+# Check number of CPU cores
+nproc
+# or
+grep -c ^processor /proc/cpuinfo
+```
+
+**Rule of thumb:** Load average should stay below your CPU core count. If it's consistently above that, you're overloaded.
+
+### `/proc/stat` — CPU Breakdown
+
+```bash
+# One-liner: CPU usage percentage
+grep 'cpu ' /proc/stat | awk '{total=$2+$3+$4+$5+$6+$7+$8; idle=$5; printf "CPU Usage: %.1f%%\n", (total-idle)/total*100}'
+```
+
+### `mpstat` — Per-CPU Statistics
+
+```bash
+# Install sysstat package
+sudo apt install -y sysstat
+
+# CPU usage per core
+mpstat -P ALL 1 3
+```
+
+## Memory Monitoring
+
+### `free` — Memory Overview
+
+```bash
+free -h
+#               total        used        free      shared  buff/cache   available
+# Mem:           7.8G        2.1G        1.2G        256M        4.5G        5.2G
+# Swap:          2.0G        128M        1.9G
+```
+
+| Column | Meaning |
+|---|---|
+| total | Total physical RAM |
+| used | RAM actively used by processes |
+| free | Truly unused RAM |
+| buff/cache | RAM used for disk cache (available if needed) |
+| available | RAM available for new processes (free + reclaimable cache) |
+
+<Callout type="tip" title="The Key Number">
+Look at **available**, not **free**. Linux aggressively caches disk data in RAM. The `buff/cache` column is RAM being used productively but can be reclaimed immediately. A system with 100MB free but 5GB available is healthy.
+</Callout>
+
+### `/proc/meminfo` — Detailed Memory
+
+```bash
+# Detailed memory breakdown
+cat /proc/meminfo | head -10
+
+# Quick check: how much is truly available
+awk '/MemAvailable/ {printf "Available: %.1f GB\n", $2/1024/1024}' /proc/meminfo
+```
+
+## Disk Space Monitoring
+
+### `df` — Disk Free Space
+
+```bash
+# Human-readable disk usage
+df -h
+
+# Show only local filesystems
+df -h --type=ext4 --type=xfs
+
+# Show inode usage (running out of inodes is different from running out of space)
+df -i
+```
+
+**Critical rule:** Disks above 90% need attention. At 100%, services start failing.
+
+### `du` — Directory Size
+
+```bash
+# Size of a directory
+du -sh /var/log
+
+# Size of each subdirectory
+du -h --max-depth=1 /var/log | sort -rh | head -10
+
+# Find the largest directories on the system
+sudo du -h --max-depth=2 / 2>/dev/null | sort -rh | head -20
+
+# Find the largest files
+find / -type f -size +100M -exec ls -lh {} \; 2>/dev/null | sort -k5 -rh | head -10
+```
+
+<Exercise number={1} title="System Health Check">
+
+Perform a complete health check:
+
+```bash
+# 1. System overview
+echo "=== System Overview ==="
+echo "Hostname: $(hostname)"
+echo "Uptime: $(uptime -p)"
+echo "Load: $(cat /proc/loadavg | awk '{print $1, $2, $3}')"
+echo "CPUs: $(nproc)"
+echo ""
+
+# 2. Memory check
+echo "=== Memory ==="
+free -h
+echo ""
+
+# 3. Disk check
+echo "=== Disk Usage ==="
+df -h | grep -v tmpfs | grep -v udev
+echo ""
+
+# 4. Top 5 memory consumers
+echo "=== Top 5 Memory Consumers ==="
+ps aux --sort=-%mem | head -6
+echo ""
+
+# 5. Top 5 CPU consumers
+echo "=== Top 5 CPU Consumers ==="
+ps aux --sort=-%cpu | head -6
+echo ""
+
+# 6. Disk space hogs
+echo "=== Largest Directories in /var ==="
+sudo du -h --max-depth=1 /var 2>/dev/null | sort -rh | head -5
+```
+
+</Exercise>
+
+## I/O Monitoring
+
+### `iostat` — Disk I/O Statistics
+
+```bash
+# Install sysstat
+sudo apt install -y sysstat
+
+# Basic I/O statistics
+iostat
+
+# Extended statistics, 1-second intervals, 5 samples
+iostat -x 1 5
+```
+
+Key columns in `iostat -x`:
+| Column | Meaning | Warning If |
+|---|---|---|
+| `%util` | Disk utilization | Above 80% |
+| `await` | Average I/O wait time (ms) | Above 10ms for SSD |
+| `r/s`, `w/s` | Reads/writes per second | Context-dependent |
+| `rkB/s`, `wkB/s` | Read/write throughput | Below expected |
+
+### `iotop` — I/O by Process
+
+```bash
+sudo apt install -y iotop
+sudo iotop -oP    # show only processes with active I/O
+```
+
+## Network Monitoring Quick Look
+
+```bash
+# Connection summary
+ss -s
+
+# Active connections
+ss -tuln
+
+# Bandwidth per interface
+cat /proc/net/dev | awk 'NR>2 {printf "%-12s RX: %-12s TX: %-12s\n", $1, $2, $10}'
+```
+
+<Exercise number={2} title="Find the Bottleneck">
+
+Simulate and identify resource issues:
+
+```bash
+# 1. Check current system state
+echo "Before:" && uptime && free -h | grep Mem
+
+# 2. Simulate memory pressure
+# (allocate 50MB in bash — harmless)
+BLOB=$(head -c 50M /dev/zero | base64)
+echo "After alloc:" && free -h | grep Mem
+
+# 3. Release it
+unset BLOB
+echo "After release:" && free -h | grep Mem
+
+# 4. Check disk I/O
+echo ""
+echo "=== Disk I/O ==="
+cat /proc/diskstats | awk '$3 !~ /loop|ram/ {print $3, "reads:", $4, "writes:", $8}' | head -5
+
+# 5. Check for swap usage (swapping = bad)
+echo ""
+echo "=== Swap ==="
+free -h | grep Swap
+swapon --show 2>/dev/null || echo "No swap devices"
+
+# 6. Check inode usage (can run out before disk space)
+echo ""
+echo "=== Inode Usage ==="
+df -i | grep -v tmpfs | head -5
+```
+
+</Exercise>
+
+<MiniProject title="System Dashboard Script">
+
+Create a terminal dashboard that shows system health at a glance:
+
+```bash
+cat > ~/dashboard.sh << 'SCRIPT'
+#!/bin/bash
+# System Dashboard — one-screen system overview
+
+clear
+COLS=$(tput cols 2>/dev/null || echo 80)
+LINE=$(printf '%.0s─' $(seq 1 $COLS))
+
+echo "$LINE"
+printf "%-20s %s\n" "SYSTEM DASHBOARD" "$(date)"
+printf "%-20s %s\n" "Hostname:" "$(hostname)"
+printf "%-20s %s\n" "Uptime:" "$(uptime -p 2>/dev/null || uptime)"
+printf "%-20s %s\n" "Kernel:" "$(uname -r)"
+echo "$LINE"
+
+echo ""
+echo "CPU"
+echo "$LINE"
+CORES=$(nproc)
+LOAD=$(cat /proc/loadavg | awk '{print $1}')
+printf "  Cores: %-4s  Load (1/5/15): %s\n" "$CORES" "$(cat /proc/loadavg | awk '{print $1, $2, $3}')"
+
+# CPU bar
+CPU_PCT=$(grep 'cpu ' /proc/stat | awk '{total=$2+$3+$4+$5; idle=$5; printf "%.0f", (total-idle)/total*100}')
+BAR_LEN=40
+FILLED=$((CPU_PCT * BAR_LEN / 100))
+BAR=$(printf '%.0s█' $(seq 1 $FILLED 2>/dev/null) 2>/dev/null)$(printf '%.0s░' $(seq 1 $((BAR_LEN - FILLED)) 2>/dev/null) 2>/dev/null)
+printf "  Usage: [%-40s] %s%%\n" "$BAR" "$CPU_PCT"
+
+echo ""
+echo "MEMORY"
+echo "$LINE"
+MEM_TOTAL=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+MEM_AVAIL=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+MEM_USED=$((MEM_TOTAL - MEM_AVAIL))
+MEM_PCT=$((MEM_USED * 100 / MEM_TOTAL))
+printf "  Total: %s MB  Used: %s MB  Available: %s MB\n" \
+    "$((MEM_TOTAL/1024))" "$((MEM_USED/1024))" "$((MEM_AVAIL/1024))"
+
+echo ""
+echo "DISK"
+echo "$LINE"
+df -h | grep -E '^/dev/' | awk '{printf "  %-20s %6s / %-6s (%s used)\n", $1, $3, $2, $5}'
+
+echo ""
+echo "TOP PROCESSES (by CPU)"
+echo "$LINE"
+ps aux --sort=-%cpu | awk 'NR>1 && NR<=6 {printf "  PID=%-8s CPU=%-6s MEM=%-6s %s\n", $2, $3, $4, $11}'
+
+echo ""
+echo "TOP PROCESSES (by Memory)"
+echo "$LINE"
+ps aux --sort=-%mem | awk 'NR>1 && NR<=6 {printf "  PID=%-8s CPU=%-6s MEM=%-6s %s\n", $2, $3, $4, $11}'
+
+echo ""
+echo "$LINE"
+SCRIPT
+
+chmod +x ~/dashboard.sh
+~/dashboard.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- The 60-second check: `uptime`, `df -h`, `free -h`, `top`, `iostat`, `ss -s`
+- Load average should be below your CPU core count
+- Look at "available" memory, not "free" — Linux caches aggressively and that's good
+- Disks above 90% utilization need immediate attention
+- `iostat -x` reveals disk bottlenecks; `%util` above 80% is concerning
+- Always check inodes (`df -i`) — you can run out of inodes before disk space
+- Automate monitoring with scripts — don't rely on remembering to check
+
+## What's Next
+
+You can see what's happening on the system right now. But what happened yesterday? Last week? When the crash occurred at 3 AM? In **Logs and journald**, you'll learn to read and search system logs — the permanent record of everything your system does.

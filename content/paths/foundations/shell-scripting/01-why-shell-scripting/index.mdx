@@ -1,0 +1,220 @@
+---
+title: "Why Shell Scripting?"
+description: "Discover why shell scripting is the first automation tool every DevOps engineer learns. Understand when to script, when not to, and the automation mindset."
+order: 1
+xpReward: 75
+estimatedMinutes: 25
+prerequisites: []
+objectives:
+  - Understand why shell scripting matters for DevOps
+  - Recognize tasks that should be automated
+  - Know when shell scripting is the right tool vs alternatives
+  - Write your first one-liner automation
+tags:
+  - shell-scripting
+  - automation
+  - devops
+  - bash
+---
+
+<Callout type="story" title="The Story">
+You join a new team and watch the senior engineer deploy to production. They SSH into 12 servers, one by one, run the same 6 commands on each, then manually check logs on all 12. It takes 45 minutes. You ask: "Why not script it?" They shrug: "Never got around to it." You write a 20-line bash script that does it in 90 seconds. This is the moment you become a DevOps engineer.
+</Callout>
+
+## The Automation Mindset
+
+The core principle of DevOps is: **if you do something more than twice, automate it.**
+
+Shell scripting is the fastest path from manual task to automated solution. Unlike Python or Go, you don't need to install anything — bash is already on every Linux server.
+
+### What Gets Automated
+
+| Manual Task | Automated Solution |
+|---|---|
+| SSH into servers and check logs | Script that checks all servers at once |
+| Deploy code: pull, build, restart | One-command deployment script |
+| Create user accounts one by one | User provisioning script |
+| Check disk space manually | Monitoring script with alerts |
+| Backup databases by hand | Scheduled backup script |
+
+## When to Use Shell Scripting
+
+**Use shell scripts when:**
+- Combining existing Linux commands
+- Automating repetitive system tasks
+- Writing deployment or setup scripts
+- Processing text files and logs
+- Wrapping CLI tools (aws, kubectl, docker)
+- Quick prototyping of automation
+
+**Consider other tools when:**
+- Complex data structures needed → Python
+- API-heavy work (REST calls, JSON parsing) → Python
+- Cross-platform requirements → Python or Go
+- Large, team-maintained automation → Ansible or Terraform
+- Performance-critical processing → Go or Rust
+
+<Callout type="tip" title="The Rule of Thumb">
+If your script is under 100 lines and mostly calls Linux commands, bash is perfect. If it's growing beyond that or doing complex logic, consider Python.
+</Callout>
+
+## Your First Automation
+
+Turn a manual task into a script in three steps:
+
+### Step 1: Do It Manually
+
+```bash
+# Manual: check disk, memory, and load on this server
+df -h /
+free -h
+uptime
+```
+
+### Step 2: Put It in a Script
+
+```bash
+cat > ~/health.sh << 'EOF'
+#!/bin/bash
+echo "=== Server Health: $(hostname) ==="
+echo "Date: $(date)"
+echo ""
+echo "--- Disk ---"
+df -h / | tail -1
+echo ""
+echo "--- Memory ---"
+free -h | grep Mem
+echo ""
+echo "--- Load ---"
+uptime
+EOF
+
+chmod +x ~/health.sh
+```
+
+### Step 3: Run It
+
+```bash
+./health.sh
+```
+
+That's it. Three commands become one. And this script can now run on any server, on a schedule, or as part of a larger pipeline.
+
+<Exercise number={1} title="Identify Automation Opportunities">
+
+Think about tasks you do (or would do) repeatedly. For each, write a one-liner that automates it:
+
+```bash
+# 1. Count how many lines are in all .log files in /var/log
+wc -l /var/log/*.log 2>/dev/null | tail -1
+
+# 2. Find the 5 largest files on the system
+find / -type f -exec du -h {} + 2>/dev/null | sort -rh | head -5
+
+# 3. Show all failed SSH login attempts
+grep "Failed password" /var/log/auth.log 2>/dev/null | wc -l
+
+# 4. List all installed packages and their sizes
+dpkg-query -W -f='${Installed-Size}\t${Package}\n' 2>/dev/null | sort -rn | head -10
+
+# 5. Check if a website is responding
+curl -s -o /dev/null -w "%{http_code}" http://localhost 2>/dev/null || echo "unreachable"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Create Your First Script">
+
+Create a script that gathers system information:
+
+```bash
+cat > ~/sysinfo.sh << 'SCRIPT'
+#!/bin/bash
+# System Information Report
+
+echo "==============================="
+echo "  System Information Report"
+echo "  Generated: $(date)"
+echo "==============================="
+echo ""
+echo "Hostname:   $(hostname)"
+echo "OS:         $(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '"')"
+echo "Kernel:     $(uname -r)"
+echo "Uptime:     $(uptime -p 2>/dev/null || uptime)"
+echo "CPU Cores:  $(nproc)"
+echo "Memory:     $(free -h | awk '/Mem:/ {print $2}')"
+echo "Disk:       $(df -h / | awk 'NR==2 {print $3 "/" $2 " (" $5 " used)"}')"
+echo "IP:         $(hostname -I 2>/dev/null | awk '{print $1}')"
+echo "Users:      $(who | wc -l) logged in"
+echo "Processes:  $(ps aux | wc -l)"
+SCRIPT
+
+chmod +x ~/sysinfo.sh
+~/sysinfo.sh
+```
+
+</Exercise>
+
+<MiniProject title="Lazy Admin Helper">
+
+Create a script that takes a command like "disk", "mem", "net" and shows the relevant info:
+
+```bash
+cat > ~/lazy.sh << 'SCRIPT'
+#!/bin/bash
+# Lazy Admin Helper — quick system checks
+
+case "${1:-help}" in
+    disk)
+        echo "=== Disk Usage ==="
+        df -h | grep -v tmpfs
+        ;;
+    mem)
+        echo "=== Memory ==="
+        free -h
+        ;;
+    net)
+        echo "=== Network ==="
+        ip -br addr show
+        ss -tlnp | head -10
+        ;;
+    proc)
+        echo "=== Top Processes ==="
+        ps aux --sort=-%cpu | head -10
+        ;;
+    who)
+        echo "=== Logged In Users ==="
+        who
+        last -5
+        ;;
+    all)
+        $0 disk
+        echo ""
+        $0 mem
+        echo ""
+        $0 proc
+        ;;
+    *)
+        echo "Usage: $0 {disk|mem|net|proc|who|all}"
+        ;;
+esac
+SCRIPT
+
+chmod +x ~/lazy.sh
+~/lazy.sh all
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Shell scripting automates repetitive system tasks — the foundation of DevOps
+- If you do it more than twice, script it
+- Bash is already on every Linux server — zero installation needed
+- Shell scripts are best for combining Linux commands and quick automation
+- For complex logic or large projects, consider Python or dedicated tools
+- The three-step process: do it manually → put it in a script → run it
+
+## What's Next
+
+You've seen why scripting matters. In **Your First Shell Script**, you'll learn the structure of a proper bash script — shebang, comments, variables, exit codes, and the habits that make scripts reliable and maintainable.

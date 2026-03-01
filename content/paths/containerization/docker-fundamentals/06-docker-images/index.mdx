@@ -1,0 +1,897 @@
+---
+title: "Understanding Docker Images"
+description: "Master Docker images — the immutable, layered building blocks of containers. Learn to pull, inspect, tag, and manage images efficiently."
+order: 6
+xpReward: 40
+estimatedMinutes: 45
+prerequisites:
+  - 05-your-first-container
+objectives:
+  - Understand what Docker images are and how layers work
+  - Pull and manage images from Docker Hub and other registries
+  - Use image tags and versioning effectively
+  - Inspect image metadata, history, and layer composition
+  - Optimize image sizes and clean up unused images
+tags:
+  - docker
+  - images
+  - containers
+  - devops
+  - layers
+---
+
+<Callout type="story" title="The Story">
+Your team is preparing to containerize a suite of microservices. As you browse Docker Hub, you notice the same application available as `node:20`, `node:20-slim`, `node:20-alpine`, and `node:20-bullseye`. One is 1.1 GB, another is 180 MB, and the Alpine variant is just 50 MB. Your lead asks you to explain the difference, recommend which one to use in production, and set up a strategy for managing images across environments. To answer confidently, you need to understand what Docker images really are under the hood — how they are layered, tagged, stored, and optimized.
+</Callout>
+
+## What Is a Docker Image?
+
+A Docker image is an **immutable, read-only template** that contains everything needed to run an application:
+
+- A base operating system (or a minimal root filesystem)
+- Application runtime (Node.js, Python, Java, etc.)
+- Application code and dependencies
+- Configuration files and environment variables
+- Startup commands
+
+Think of an image as a **snapshot** — a frozen point-in-time of a filesystem. When you run an image, Docker creates a **container** — a live, writable instance of that snapshot.
+
+```
+┌─────────────────────────────────────────────┐
+│              Docker Image                    │
+│  (Read-only template)                        │
+│                                              │
+│  ┌─────────────────────────────────────┐     │
+│  │  Application Code                   │     │
+│  ├─────────────────────────────────────┤     │
+│  │  Dependencies (npm, pip, etc.)      │     │
+│  ├─────────────────────────────────────┤     │
+│  │  Runtime (Node.js, Python, etc.)    │     │
+│  ├─────────────────────────────────────┤     │
+│  │  OS Libraries and Tools             │     │
+│  ├─────────────────────────────────────┤     │
+│  │  Base OS (Ubuntu, Alpine, etc.)     │     │
+│  └─────────────────────────────────────┘     │
+│                                              │
+└─────────────────────────────────────────────┘
+         │
+         │  docker run
+         ▼
+┌─────────────────────────────────────────────┐
+│              Container                       │
+│  (Running instance with writable layer)      │
+└─────────────────────────────────────────────┘
+```
+
+<Callout type="info" title="Images vs Containers">
+An image is like a **class** in object-oriented programming — it defines the blueprint. A container is like an **instance** — it is the running object created from that blueprint. You can create many containers from a single image, and each one is independent.
+</Callout>
+
+## How Image Layers Work
+
+Docker images are not monolithic files. They are built from a **stack of layers**, where each layer represents a change to the filesystem. This layered architecture is one of Docker's most powerful features.
+
+### The Layer Stack
+
+Every instruction in a Dockerfile (like `RUN`, `COPY`, `ADD`) creates a new layer. Layers are stacked on top of each other, and together they form the complete image filesystem:
+
+```
+┌─────────────────────────────────────────┐
+│  Layer 5: CMD ["node", "server.js"]     │  ← Metadata only (0 bytes)
+├─────────────────────────────────────────┤
+│  Layer 4: COPY . /app                   │  ← Your application code (5 MB)
+├─────────────────────────────────────────┤
+│  Layer 3: RUN npm install               │  ← Node modules (150 MB)
+├─────────────────────────────────────────┤
+│  Layer 2: RUN apt-get install -y curl   │  ← Additional packages (15 MB)
+├─────────────────────────────────────────┤
+│  Layer 1: FROM node:20-slim             │  ← Base image (180 MB)
+└─────────────────────────────────────────┘
+```
+
+### Why Layers Matter
+
+**1. Sharing and Reuse**: If two images both use `node:20-slim` as their base, they share that base layer on disk. Docker only stores it once.
+
+```
+Image A: myapp-frontend           Image B: myapp-backend
+┌───────────────────────┐        ┌───────────────────────┐
+│ Layer: Frontend code  │        │ Layer: Backend code   │
+├───────────────────────┤        ├───────────────────────┤
+│ Layer: npm install    │        │ Layer: npm install    │
+├───────────────────────┤        ├───────────────────────┤
+│                                                        │
+│           SHARED: node:20-slim base layers             │
+│           (stored only once on disk)                   │
+│                                                        │
+└────────────────────────────────────────────────────────┘
+```
+
+**2. Caching**: When rebuilding an image, Docker checks each layer. If a layer hasn't changed, Docker reuses the cached version instead of rebuilding it. This makes subsequent builds dramatically faster.
+
+**3. Efficient Distribution**: When pushing or pulling images, Docker only transfers layers that the destination doesn't already have.
+
+<Callout type="tip" title="Layer Caching Rule">
+Docker caches layers from top to bottom. If layer 3 changes, layers 4 and 5 must also be rebuilt — even if their content hasn't changed. This is why you should put the least frequently changing layers first (OS, dependencies) and the most frequently changing layers last (application code).
+</Callout>
+
+### Union Filesystem
+
+Docker uses a **union filesystem** (like OverlayFS) to merge all layers into a single, coherent view. When a container starts, Docker adds a thin **writable layer** on top of the image layers:
+
+```
+┌─────────────────────────────────────────┐
+│  Writable Container Layer               │  ← Changes go here
+│  (exists only while container runs)     │
+├═════════════════════════════════════════┤
+│  Image Layer N (read-only)              │
+├─────────────────────────────────────────┤
+│  Image Layer 2 (read-only)              │
+├─────────────────────────────────────────┤
+│  Image Layer 1 (read-only)              │
+└─────────────────────────────────────────┘
+```
+
+When a container writes to a file that exists in a lower layer, the file is **copied up** to the writable layer (copy-on-write). The original image layer remains unchanged.
+
+## Pulling Images from Registries
+
+### `docker pull` — Downloading Images
+
+Images are stored in **registries** — Docker Hub is the default public registry. Use `docker pull` to download images:
+
+```bash
+# Pull the latest nginx image
+docker pull nginx
+
+# Pull a specific version
+docker pull nginx:1.25
+
+# Pull an Alpine-based variant (smaller)
+docker pull nginx:1.25-alpine
+
+# Pull from a different registry
+docker pull gcr.io/google-containers/nginx:latest
+
+# Pull from Amazon ECR
+docker pull 123456789.dkr.ecr.us-east-1.amazonaws.com/myapp:v1.2
+```
+
+### What Happens During a Pull
+
+```bash
+$ docker pull nginx:1.25
+1.25: Pulling from library/nginx
+a2abf6c4d29d: Pull complete       # Layer 1: Base OS
+a9edb18cadd6: Pull complete       # Layer 2: nginx packages
+589b7251471a: Pull complete       # Layer 3: Configuration
+186b1aaa4aa6: Pull complete       # Layer 4: Default content
+b4df32aa5a72: Pull complete       # Layer 5: Entrypoint script
+a0bcbecc962e: Pull complete       # Layer 6: Startup command
+Digest: sha256:0d17b565c37bcbd895e9...
+Status: Downloaded newer image for nginx:1.25
+docker.io/library/nginx:1.25
+```
+
+Each line represents a **layer** being downloaded. If you already have some layers from a previous pull, Docker skips them:
+
+```bash
+$ docker pull nginx:1.25-alpine
+1.25-alpine: Pulling from library/nginx
+4abcf2066143: Already exists     # Shared Alpine base layer!
+f40c3402b8dc: Pull complete
+3c36f1bf3a72: Pull complete
+Digest: sha256:a5127daff3d6...
+Status: Downloaded newer image for nginx:1.25-alpine
+```
+
+<Callout type="info" title="Implicit Pull">
+When you run `docker run nginx:1.25` and the image doesn't exist locally, Docker automatically pulls it. You don't always need to run `docker pull` separately — but it's useful when you want to pre-download images or update to the latest version.
+</Callout>
+
+## Listing Local Images
+
+### `docker images` / `docker image ls`
+
+View all images stored on your local machine:
+
+```bash
+# List all images
+docker images
+
+# Same command, newer syntax
+docker image ls
+
+# Example output:
+REPOSITORY    TAG         IMAGE ID       CREATED        SIZE
+nginx         1.25        a6bd71f48f68   2 days ago     187MB
+nginx         1.25-alpine e4720093a3c1   2 days ago     42.6MB
+node          20-slim     8f3e4c9a2d7b   5 days ago     243MB
+ubuntu        22.04       3b418d7b466a   2 weeks ago    77.8MB
+hello-world   latest      9c7a54a9a43c   3 months ago   13.3kB
+```
+
+### Filtering and Formatting
+
+```bash
+# Filter by repository name
+docker images nginx
+REPOSITORY   TAG           IMAGE ID       CREATED      SIZE
+nginx        1.25          a6bd71f48f68   2 days ago   187MB
+nginx        1.25-alpine   e4720093a3c1   2 days ago   42.6MB
+nginx        latest        a6bd71f48f68   2 days ago   187MB
+
+# Show only image IDs
+docker images -q
+a6bd71f48f68
+e4720093a3c1
+8f3e4c9a2d7b
+
+# Show image digests
+docker images --digests
+
+# Custom format
+docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+REPOSITORY   TAG           SIZE
+nginx        1.25          187MB
+nginx        1.25-alpine   42.6MB
+node         20-slim       243MB
+
+# Show dangling images (untagged)
+docker images -f "dangling=true"
+
+# Show images created before a specific image
+docker images -f "before=nginx:1.25"
+```
+
+## Image Tags and Versioning
+
+Tags are **labels** that identify specific versions of an image. Understanding tags is critical for reproducible deployments.
+
+### Tag Anatomy
+
+```
+registry/repository:tag
+
+docker.io/library/nginx:1.25-alpine
+│         │       │     │
+│         │       │     └── Tag (version identifier)
+│         │       └── Repository (image name)
+│         └── Namespace (library = official)
+└── Registry (docker.io is default)
+```
+
+### Common Tagging Conventions
+
+| Tag Pattern | Example | Meaning |
+|---|---|---|
+| `latest` | `nginx:latest` | Most recent build (mutable!) |
+| `major` | `node:20` | Latest Node 20.x.x |
+| `major.minor` | `python:3.12` | Latest Python 3.12.x |
+| `major.minor.patch` | `python:3.12.1` | Exact version (most specific) |
+| `variant` | `node:20-alpine` | Alpine-based variant |
+| `slim` | `python:3.12-slim` | Minimal Debian variant |
+| `bullseye/bookworm` | `node:20-bookworm` | Specific Debian release |
+
+<Callout type="warning" title="Never Use 'latest' in Production">
+The `latest` tag is **mutable** — it points to whatever was most recently pushed. Today `nginx:latest` might be version 1.25.3, but tomorrow it could be 1.27.0 with breaking changes. Always use **specific version tags** in production Dockerfiles and deployment configurations.
+
+```dockerfile
+# BAD — unpredictable
+FROM nginx:latest
+
+# GOOD — predictable and reproducible
+FROM nginx:1.25.3-alpine
+```
+</Callout>
+
+### Tagging Your Own Images
+
+```bash
+# Tag an image during build
+docker build -t myapp:1.0 .
+
+# Add additional tags to an existing image
+docker tag myapp:1.0 myapp:latest
+docker tag myapp:1.0 myregistry.com/myapp:1.0
+
+# An image can have multiple tags (they all share the same Image ID)
+docker images myapp
+REPOSITORY   TAG      IMAGE ID       SIZE
+myapp        1.0      abc123def456   150MB
+myapp        latest   abc123def456   150MB
+```
+
+## Docker Hub: Finding Images
+
+Docker Hub (hub.docker.com) is the world's largest container image registry. Understanding image categories helps you make safe choices.
+
+### Image Categories
+
+| Category | Badge | Example | Trust Level |
+|---|---|---|---|
+| **Official Images** | "Docker Official Image" | `nginx`, `postgres`, `node` | Highest — maintained by Docker + upstream |
+| **Verified Publisher** | Checkmark badge | `bitnami/nginx` | High — verified organization |
+| **Sponsored OSS** | "Sponsored OSS" | Community maintained projects | Medium — popular open source |
+| **Community** | None | `someuser/myimage` | Varies — use with caution |
+
+### Searching Docker Hub
+
+```bash
+# Search from the command line
+docker search nginx
+
+NAME                    DESCRIPTION                     STARS   OFFICIAL
+nginx                   Official build of Nginx.        19000   [OK]
+bitnami/nginx           Bitnami nginx Docker Image      150
+linuxserver/nginx       Nginx reverse proxy...          120
+
+# Search with filters
+docker search --filter is-official=true nginx
+docker search --filter stars=100 postgres
+
+# Limit results
+docker search --limit 5 python
+```
+
+<Callout type="tip" title="Choosing Base Images">
+For production workloads, prefer images in this order:
+1. **Official images** — maintained by Docker and the upstream project
+2. **Verified publisher images** — from known organizations like Bitnami, Chainguard
+3. **Well-starred community images** — with recent updates and active maintenance
+
+Always check the "Last pushed" date. An image not updated in years may have unpatched vulnerabilities.
+</Callout>
+
+## Image Inspection
+
+### `docker image inspect` — Deep Metadata
+
+`docker image inspect` reveals everything about an image — its configuration, layers, environment variables, exposed ports, and more:
+
+```bash
+# Full inspection (JSON output)
+docker image inspect nginx:1.25
+
+# Extract specific fields with Go template formatting
+# Get the image architecture
+docker image inspect --format '{{.Architecture}}' nginx:1.25
+# amd64
+
+# Get exposed ports
+docker image inspect --format '{{json .Config.ExposedPorts}}' nginx:1.25
+# {"80/tcp":{}}
+
+# Get environment variables
+docker image inspect --format '{{json .Config.Env}}' nginx:1.25
+# ["PATH=/usr/local/sbin:...","NGINX_VERSION=1.25.3","NJS_VERSION=0.8.2"]
+
+# Get the default command
+docker image inspect --format '{{json .Config.Cmd}}' nginx:1.25
+# ["nginx","-g","daemon off;"]
+
+# Get the entrypoint
+docker image inspect --format '{{json .Config.Entrypoint}}' nginx:1.25
+# ["/docker-entrypoint.sh"]
+
+# Get all layer digests
+docker image inspect --format '{{json .RootFS.Layers}}' nginx:1.25
+```
+
+### `docker history` — Build History
+
+See exactly how an image was built, layer by layer:
+
+```bash
+docker history nginx:1.25
+
+IMAGE          CREATED       CREATED BY                                      SIZE
+a6bd71f48f68   2 days ago    CMD ["nginx" "-g" "daemon off;"]                0B
+<missing>      2 days ago    STOPSIGNAL SIGQUIT                              0B
+<missing>      2 days ago    EXPOSE map[80/tcp:{}]                           0B
+<missing>      2 days ago    ENTRYPOINT ["/docker-entrypoint.sh"]            0B
+<missing>      2 days ago    COPY file:cainit... in /docker-entrypoint.d     4.62kB
+<missing>      2 days ago    COPY file:0a9db... in /docker-entrypoint.d      1.04kB
+<missing>      2 days ago    COPY file:0fd5f... in /docker-entrypoint.d      2.12kB
+<missing>      2 days ago    COPY file:09a21... in /docker-entrypoint.sh     1.62kB
+<missing>      2 days ago    RUN /bin/sh -c set -x && addgroup...            112MB
+<missing>      2 days ago    ENV DYNPKG_RELEASE=2~bookworm                   0B
+<missing>      2 days ago    ENV NJS_VERSION=0.8.2                           0B
+<missing>      2 days ago    ENV NGINX_VERSION=1.25.3                        0B
+<missing>      2 days ago    LABEL maintainer=NGINX Docker Maintainers       0B
+<missing>      3 days ago    /bin/sh -c #(nop) CMD ["bash"]                  0B
+<missing>      3 days ago    /bin/sh -c #(nop) ADD file:a3d67... in /        74.8MB
+
+# Show full commands (not truncated)
+docker history --no-trunc nginx:1.25
+
+# Show sizes in human-readable format
+docker history --format "table {{.CreatedBy}}\t{{.Size}}" nginx:1.25
+```
+
+<Callout type="info" title="Reading Image History">
+The `<missing>` entries in the IMAGE column are normal — they indicate layers that were built as part of the same Dockerfile but don't have their own image ID. Only the final layer gets an image ID.
+</Callout>
+
+## Image Size Optimization
+
+Image size matters more than you might think:
+
+- **Faster deployments**: Smaller images pull faster, especially in CI/CD pipelines
+- **Lower bandwidth costs**: Less data transferred from registries
+- **Smaller attack surface**: Fewer packages mean fewer potential vulnerabilities
+- **Faster scaling**: When Kubernetes needs to spin up new pods on a fresh node, smaller images start faster
+
+### Comparing Image Sizes
+
+```bash
+# Let's compare Node.js image variants
+docker pull node:20
+docker pull node:20-slim
+docker pull node:20-alpine
+
+docker images node
+REPOSITORY   TAG         IMAGE ID       SIZE
+node         20          2c6d5e7b3a89   1.1GB
+node         20-slim     8f3e4c9a2d7b   243MB
+node         20-alpine   5b2a1c8d9e3f   135MB
+```
+
+| Variant | Size | Base OS | Package Manager | Use Case |
+|---|---|---|---|---|
+| `node:20` | ~1.1 GB | Debian (full) | apt, gcc, make | Development, native addons |
+| `node:20-slim` | ~243 MB | Debian (minimal) | apt (limited) | Production (most apps) |
+| `node:20-alpine` | ~135 MB | Alpine Linux | apk | Production (minimal) |
+
+### Why Smaller Is Better
+
+```
+Deployment Pipeline: Pull → Build → Push → Deploy
+
+Image size: 1.1 GB                Image size: 135 MB
+┌──────────┐                      ┌──────────┐
+│  Pull    │  45 seconds          │  Pull    │  6 seconds
+│  Build   │  90 seconds          │  Build   │  30 seconds
+│  Push    │  45 seconds          │  Push    │  6 seconds
+│  Deploy  │  30 seconds          │  Deploy  │  8 seconds
+├──────────┤                      ├──────────┤
+│  TOTAL   │  3.5 minutes         │  TOTAL   │  50 seconds
+└──────────┘                      └──────────┘
+
+× 10 deploys/day = 35 minutes     × 10 deploys/day = 8 minutes
+```
+
+<Callout type="warning" title="Alpine Considerations">
+Alpine Linux uses **musl libc** instead of **glibc**. Some applications, especially those with native C extensions (Python packages with C bindings, some Node.js native modules), may not work correctly on Alpine without additional build tools. Always test your application on Alpine before committing to it in production.
+</Callout>
+
+### Analyzing Image Size by Layer
+
+```bash
+# See the size contribution of each layer
+docker history --format "table {{.CreatedBy}}\t{{.Size}}" node:20-slim
+
+# Use docker image inspect to see total layer count
+docker image inspect --format '{{len .RootFS.Layers}}' node:20-slim
+# 5
+
+# Use 'docker system df' to see overall disk usage by images
+docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          12        5         4.231GB   2.876GB (67%)
+Containers      5         2         102.3MB   98.1MB (95%)
+Local Volumes   8         3         1.105GB   750MB (67%)
+Build Cache     25        0         512MB     512MB (100%)
+
+# Detailed view
+docker system df -v
+```
+
+## Managing Dangling and Unused Images
+
+Over time, your local image store accumulates unused images. Understanding the difference between **dangling** and **unused** images is important.
+
+### Dangling Images
+
+A **dangling image** is one that has no tag — it's been superseded by a newer build with the same tag. They show up as `<none>` in `docker images`:
+
+```bash
+# List dangling images
+docker images -f "dangling=true"
+REPOSITORY   TAG      IMAGE ID       SIZE
+<none>       <none>   3f5a1b2c8d9e   350MB
+<none>       <none>   7c8d9e1f2a3b   420MB
+
+# Remove dangling images
+docker image prune
+WARNING! This will remove all dangling images.
+Are you sure you want to continue? [y/N] y
+Deleted Images:
+deleted: sha256:3f5a1b2c8d9e...
+deleted: sha256:7c8d9e1f2a3b...
+Total reclaimed space: 770MB
+```
+
+### Unused Images
+
+An **unused image** is one that isn't referenced by any container (running or stopped):
+
+```bash
+# Remove ALL unused images (not just dangling)
+docker image prune -a
+WARNING! This will remove all images without at least one container associated to them.
+Are you sure you want to continue? [y/N] y
+
+# Remove images older than 24 hours
+docker image prune -a --filter "until=24h"
+
+# Skip the confirmation prompt
+docker image prune -a -f
+```
+
+### Removing Specific Images
+
+```bash
+# Remove by name and tag
+docker rmi nginx:1.25
+docker image rm nginx:1.25    # same command
+
+# Remove by image ID
+docker rmi a6bd71f48f68
+
+# Force remove (even if containers reference it)
+docker rmi -f a6bd71f48f68
+
+# Remove multiple images at once
+docker rmi nginx:1.25 node:20 ubuntu:22.04
+
+# Remove all images (nuclear option)
+docker rmi $(docker images -q)
+```
+
+<Callout type="warning" title="Cannot Remove In-Use Images">
+Docker will refuse to remove an image if a container (even a stopped one) is using it. You must remove the container first, or use `-f` (force). Be careful with force removal in production!
+
+```bash
+# This will fail if a container uses the image
+docker rmi nginx:1.25
+# Error: conflict: unable to remove - image is being used by stopped container abc123
+
+# Remove the container first, then the image
+docker rm abc123
+docker rmi nginx:1.25
+```
+</Callout>
+
+## Image Saving and Loading
+
+You can export and import images as tar files — useful for air-gapped environments or sharing images without a registry:
+
+```bash
+# Save an image to a tar file
+docker save nginx:1.25 -o nginx-1.25.tar
+docker save nginx:1.25 > nginx-1.25.tar    # alternative syntax
+
+# Check the file size
+ls -lh nginx-1.25.tar
+# -rw-r--r-- 1 user user 183M  nginx-1.25.tar
+
+# Load an image from a tar file
+docker load -i nginx-1.25.tar
+docker load < nginx-1.25.tar    # alternative syntax
+# Loaded image: nginx:1.25
+
+# Save multiple images into one file
+docker save nginx:1.25 node:20-alpine -o multi-images.tar
+```
+
+<Callout type="tip" title="Compress Before Transferring">
+Docker save files can be large. Compress them for transfer:
+
+```bash
+# Save and compress
+docker save nginx:1.25 | gzip > nginx-1.25.tar.gz
+
+# Load from compressed file
+gunzip -c nginx-1.25.tar.gz | docker load
+```
+</Callout>
+
+## Image Digest: The Immutable Identifier
+
+While tags can be reassigned (someone can push a different image as `nginx:1.25`), **digests** are immutable — they're a SHA256 hash of the image content:
+
+```bash
+# View digests
+docker images --digests nginx
+REPOSITORY   TAG     DIGEST                                                            IMAGE ID      SIZE
+nginx        1.25    sha256:0d17b565c37bcbd895e9d...   a6bd71f48f68  187MB
+
+# Pull by digest (guaranteed to get exact same image)
+docker pull nginx@sha256:0d17b565c37bcbd895e9d...
+
+# Use digest in Dockerfile for maximum reproducibility
+FROM nginx@sha256:0d17b565c37bcbd895e9d...
+```
+
+<Exercise title="Explore Image Layers" difficulty="beginner" xpReward={30} estimatedMinutes={15}
+  objectives={["Pull different image variants and compare sizes", "Inspect image metadata and layer history", "Understand the relationship between tags and image IDs"]}
+  hints={["Use docker images to compare sizes", "docker history shows each layer and its size", "The same image ID with different tags means they are the same image"]}
+  validationCriteria={[
+    "Pull nginx in three variants: latest, 1.25, and 1.25-alpine",
+    "Run docker images nginx to compare sizes",
+    "Run docker history nginx:1.25 to see the layer breakdown",
+    "Run docker image inspect --format '{{.Architecture}}' nginx:1.25 to check the architecture",
+    "Use docker image inspect --format '{{json .Config.ExposedPorts}}' nginx:1.25 to find exposed ports",
+    "Tag nginx:1.25-alpine as myregistry/nginx:production",
+    "Verify both tags point to the same Image ID with docker images"
+  ]}
+>
+
+Pull multiple variants of the nginx image, compare their sizes, and explore their layers and metadata.
+
+**Step 1: Pull three variants**
+
+```bash
+docker pull nginx:latest
+docker pull nginx:1.25
+docker pull nginx:1.25-alpine
+```
+
+**Step 2: Compare sizes**
+
+```bash
+docker images nginx
+```
+
+Notice the size difference between the full image and the Alpine variant.
+
+**Step 3: Explore layer history**
+
+```bash
+# See how the full image was built
+docker history nginx:1.25
+
+# Compare with the Alpine variant
+docker history nginx:1.25-alpine
+```
+
+How many layers does each variant have? Which layers are the largest?
+
+**Step 4: Inspect metadata**
+
+```bash
+# What architecture is this image built for?
+docker image inspect --format '{{.Architecture}}' nginx:1.25
+
+# What ports does it expose?
+docker image inspect --format '{{json .Config.ExposedPorts}}' nginx:1.25
+
+# What is the default command?
+docker image inspect --format '{{json .Config.Cmd}}' nginx:1.25
+
+# What environment variables are set?
+docker image inspect --format '{{json .Config.Env}}' nginx:1.25
+```
+
+**Step 5: Tag an image**
+
+```bash
+docker tag nginx:1.25-alpine myregistry/nginx:production
+docker images | grep nginx
+```
+
+Verify that `myregistry/nginx:production` and `nginx:1.25-alpine` share the same Image ID.
+
+</Exercise>
+
+<Exercise title="Image Cleanup Challenge" difficulty="intermediate" xpReward={30} estimatedMinutes={10}
+  objectives={["Identify dangling and unused images", "Reclaim disk space with prune commands", "Understand the difference between rmi and prune"]}
+  hints={["docker system df shows overall Docker disk usage", "docker images -f dangling=true shows untagged images", "docker image prune -a removes all images not used by containers"]}
+  validationCriteria={[
+    "Run docker system df to check current disk usage",
+    "Run docker images to list all images and identify unused ones",
+    "Run docker images -f dangling=true to find dangling images",
+    "Remove a specific image with docker rmi <image>",
+    "Run docker image prune to remove dangling images",
+    "Run docker system df again to verify space was reclaimed",
+    "Save an image to a tar file with docker save and verify the file exists"
+  ]}
+>
+
+Practice cleaning up Docker images and reclaiming disk space.
+
+**Step 1: Check disk usage**
+
+```bash
+docker system df
+docker system df -v
+```
+
+Note the total size used by images and how much is reclaimable.
+
+**Step 2: Pull some images for practice**
+
+```bash
+docker pull alpine:3.18
+docker pull alpine:3.19
+docker pull busybox:latest
+```
+
+**Step 3: Identify what's taking space**
+
+```bash
+# List all images sorted by size
+docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | sort -k3 -h
+
+# Check for dangling images
+docker images -f "dangling=true"
+```
+
+**Step 4: Remove specific images**
+
+```bash
+# Remove busybox
+docker rmi busybox:latest
+
+# Verify it's gone
+docker images busybox
+```
+
+**Step 5: Save an image before removing**
+
+```bash
+# Save alpine for backup
+docker save alpine:3.18 | gzip > alpine-3.18.tar.gz
+ls -lh alpine-3.18.tar.gz
+
+# Now remove it
+docker rmi alpine:3.18
+
+# You could restore it later with:
+# gunzip -c alpine-3.18.tar.gz | docker load
+```
+
+**Step 6: Prune and verify**
+
+```bash
+docker image prune -f
+docker system df
+```
+
+Compare the before and after disk usage.
+
+</Exercise>
+
+<MiniProject title="Image Investigation Report" difficulty="intermediate" xpReward={40} estimatedMinutes={20}
+  objectives={["Compare image variants systematically", "Document image metadata and layer composition", "Make informed decisions about which image to use"]}
+  hints={["Create a shell script that automates the comparison", "Use docker image inspect with format strings to extract specific data", "Consider size, layer count, and included tools when comparing"]}
+  validationCriteria={[
+    "Pull three variants of the Python image: python:3.12, python:3.12-slim, python:3.12-alpine",
+    "Create a script called image-report.sh that takes an image name and outputs: size, layer count, OS, architecture, Python version, and default command",
+    "Run the script against all three Python variants",
+    "Run a container from each variant to test which tools are available (gcc, make, curl, wget)",
+    "Write a summary explaining which variant is best for development vs production",
+    "Clean up by removing any images you no longer need"
+  ]}
+>
+
+Build a tool that generates a comparison report for Docker image variants. Use it to make an informed decision about which Python image is best for different use cases.
+
+**Step 1: Pull the Python variants**
+
+```bash
+docker pull python:3.12
+docker pull python:3.12-slim
+docker pull python:3.12-alpine
+```
+
+**Step 2: Create the investigation script**
+
+```bash
+cat > ~/image-report.sh << 'SCRIPT'
+#!/bin/bash
+# Docker Image Investigation Report
+
+IMAGE="$1"
+if [ -z "$IMAGE" ]; then
+    echo "Usage: $0 <image:tag>"
+    exit 1
+fi
+
+echo "=============================================="
+echo "  Image Report: $IMAGE"
+echo "=============================================="
+echo ""
+
+# Basic info
+SIZE=$(docker image inspect --format '{{.Size}}' "$IMAGE" 2>/dev/null)
+SIZE_MB=$((SIZE / 1024 / 1024))
+ARCH=$(docker image inspect --format '{{.Architecture}}' "$IMAGE")
+OS=$(docker image inspect --format '{{.Os}}' "$IMAGE")
+CREATED=$(docker image inspect --format '{{.Created}}' "$IMAGE")
+LAYERS=$(docker image inspect --format '{{len .RootFS.Layers}}' "$IMAGE")
+
+echo "Size:         ${SIZE_MB} MB"
+echo "Architecture: $ARCH"
+echo "OS:           $OS"
+echo "Created:      $CREATED"
+echo "Layers:       $LAYERS"
+echo ""
+
+# Config
+echo "--- Configuration ---"
+echo "Cmd:        $(docker image inspect --format '{{json .Config.Cmd}}' "$IMAGE")"
+echo "Entrypoint: $(docker image inspect --format '{{json .Config.Entrypoint}}' "$IMAGE")"
+echo "WorkingDir: $(docker image inspect --format '{{.Config.WorkingDir}}' "$IMAGE")"
+echo ""
+
+# Environment
+echo "--- Environment Variables ---"
+docker image inspect --format '{{range .Config.Env}}  {{.}}{{"\n"}}{{end}}' "$IMAGE"
+echo ""
+
+# Exposed ports
+echo "--- Exposed Ports ---"
+docker image inspect --format '{{json .Config.ExposedPorts}}' "$IMAGE"
+echo ""
+
+# Layer breakdown
+echo "--- Layer Sizes ---"
+docker history "$IMAGE" --format "table {{.CreatedBy}}\t{{.Size}}" | head -15
+echo ""
+echo "=============================================="
+SCRIPT
+
+chmod +x ~/image-report.sh
+```
+
+**Step 3: Run reports for each variant**
+
+```bash
+~/image-report.sh python:3.12
+~/image-report.sh python:3.12-slim
+~/image-report.sh python:3.12-alpine
+```
+
+**Step 4: Test available tools in each variant**
+
+```bash
+# Check what's available in the full image
+docker run --rm python:3.12 sh -c "gcc --version 2>/dev/null && echo 'gcc: YES' || echo 'gcc: NO'"
+docker run --rm python:3.12 sh -c "make --version 2>/dev/null && echo 'make: YES' || echo 'make: NO'"
+docker run --rm python:3.12 sh -c "curl --version 2>/dev/null && echo 'curl: YES' || echo 'curl: NO'"
+
+# Check the slim variant
+docker run --rm python:3.12-slim sh -c "gcc --version 2>/dev/null && echo 'gcc: YES' || echo 'gcc: NO'"
+docker run --rm python:3.12-slim sh -c "curl --version 2>/dev/null && echo 'curl: YES' || echo 'curl: NO'"
+
+# Check the Alpine variant
+docker run --rm python:3.12-alpine sh -c "gcc --version 2>/dev/null && echo 'gcc: YES' || echo 'gcc: NO'"
+docker run --rm python:3.12-alpine sh -c "curl --version 2>/dev/null && echo 'curl: YES' || echo 'curl: NO'"
+```
+
+**Step 5: Draw your conclusions**
+
+Which variant would you choose for:
+- A development environment where you need to compile C extensions?
+- A production API server running Flask or FastAPI?
+- A minimal Lambda-style function runner?
+
+</MiniProject>
+
+## Key Takeaways
+
+- Docker images are **immutable, layered filesystems** — each Dockerfile instruction creates a new layer
+- Layers are **shared** between images, saving disk space and speeding up pulls
+- **Tags** identify image versions — always use specific tags in production, never `latest`
+- Docker Hub has **Official**, **Verified Publisher**, and **Community** images — prefer official images
+- `docker image inspect` and `docker history` reveal an image's metadata, configuration, and build history
+- **Smaller images** deploy faster, cost less bandwidth, and have fewer vulnerabilities
+- Alpine variants are smallest but use **musl libc** — test compatibility before committing
+- Use `docker image prune` regularly to reclaim disk space from dangling and unused images
+- **Digests** (SHA256) are immutable identifiers — use them for maximum reproducibility
+
+## What's Next
+
+Now that you understand what images are and how they work, it's time to create your own. In **Writing Dockerfiles**, you'll learn every Dockerfile instruction — FROM, RUN, COPY, CMD, ENTRYPOINT, and more — and build custom images for real applications.

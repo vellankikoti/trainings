@@ -1,0 +1,1784 @@
+---
+title: "Production Automation Patterns"
+description: "Write automation that runs in production. Master configuration management, secrets handling, idempotency, and the patterns that separate scripts from tools."
+order: 20
+xpReward: 150
+estimatedMinutes: 45
+prerequisites:
+  - 19-monitoring-scripts
+objectives:
+  - Manage configuration with files, environment variables, and validation
+  - Handle secrets safely with environment variables and vault clients
+  - Write idempotent automation that is safe to run multiple times
+  - Add concurrency with ThreadPoolExecutor and asyncio basics
+  - Package and distribute Python tools for production use
+tags:
+  - python
+  - production
+  - patterns
+  - best-practices
+---
+
+<Callout type="story" title="The Story">
+Your automation scripts work perfectly on your laptop. Then they hit production. The config file path is different. The API key is hardcoded. Running the script twice creates duplicate resources. It cannot handle two servers at once because it runs sequentially. There are no logs, no error messages, and when it fails at 3 AM, nobody knows what happened. You refactor using production patterns: config files, secrets from a vault, idempotent operations, concurrent execution, structured logging, and proper packaging. The script becomes a tool. The tool becomes reliable. You sleep through the night.
+</Callout>
+
+## Configuration Management
+
+Production automation separates configuration from code. The configuration hierarchy (with later sources overriding earlier ones) is: defaults, config file, environment variables, command-line arguments.
+
+### Configuration from Multiple Sources
+
+```python
+import os
+import json
+import yaml
+from pathlib import Path
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+@dataclass
+class AppConfig:
+    """Application configuration with defaults."""
+    app_name: str = "devops-tool"
+    environment: str = "development"
+    log_level: str = "INFO"
+    database_url: str = ""
+    redis_url: str = ""
+    api_base_url: str = "http://localhost:8080"
+    workers: int = 4
+    timeout: int = 30
+    dry_run: bool = False
+    debug: bool = False
+
+
+def load_config(config_path=None, overrides=None):
+    """Load configuration from defaults, file, env vars, and overrides."""
+    config = AppConfig()
+
+    # 1. Load from config file (if provided)
+    if config_path:
+        path = Path(config_path)
+        if path.exists():
+            raw = path.read_text()
+            if path.suffix in (".yaml", ".yml"):
+                file_config = yaml.safe_load(raw) or {}
+            elif path.suffix == ".json":
+                file_config = json.loads(raw)
+            else:
+                raise ValueError(f"Unsupported config format: {path.suffix}")
+
+            for key, value in file_config.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+
+    # 2. Override with environment variables (prefixed with APP_)
+    env_mapping = {
+        "APP_NAME": "app_name",
+        "APP_ENV": "environment",
+        "APP_LOG_LEVEL": "log_level",
+        "DATABASE_URL": "database_url",
+        "REDIS_URL": "redis_url",
+        "APP_API_URL": "api_base_url",
+        "APP_WORKERS": "workers",
+        "APP_TIMEOUT": "timeout",
+        "APP_DRY_RUN": "dry_run",
+        "APP_DEBUG": "debug",
+    }
+
+    for env_var, attr_name in env_mapping.items():
+        value = os.environ.get(env_var)
+        if value is not None:
+            # Type conversion based on the default value type
+            current = getattr(config, attr_name)
+            if isinstance(current, bool):
+                setattr(config, attr_name, value.lower() in ("true", "1", "yes"))
+            elif isinstance(current, int):
+                setattr(config, attr_name, int(value))
+            else:
+                setattr(config, attr_name, value)
+
+    # 3. Override with explicit overrides (from CLI args)
+    if overrides:
+        for key, value in overrides.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
+
+    return config
+
+
+# Usage:
+# config = load_config("config.yaml", overrides={"dry_run": True})
+# config = load_config()  # defaults + env vars only
+```
+
+### Configuration Validation with Pydantic
+
+Pydantic gives you type checking, validation, and environment variable loading all in one:
+
+```python
+# pip install pydantic pydantic-settings
+
+from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+from typing import Optional
+
+
+class Settings(BaseSettings):
+    """Application settings with validation."""
+
+    app_name: str = "devops-tool"
+    environment: str = Field(default="development", pattern="^(development|staging|production)$")
+    log_level: str = Field(default="INFO", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
+
+    # Database
+    database_url: str = Field(default="", description="PostgreSQL connection URL")
+    database_pool_size: int = Field(default=5, ge=1, le=50)
+
+    # API
+    api_base_url: str = "http://localhost:8080"
+    api_timeout: int = Field(default=30, ge=1, le=300)
+    api_retries: int = Field(default=3, ge=0, le=10)
+
+    # Workers
+    workers: int = Field(default=4, ge=1, le=32)
+    dry_run: bool = False
+    debug: bool = False
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, v, info):
+        if info.data.get("environment") == "production" and not v:
+            raise ValueError("database_url is required in production")
+        return v
+
+    model_config = {
+        "env_prefix": "APP_",    # Reads APP_LOG_LEVEL, APP_WORKERS, etc.
+        "env_file": ".env",       # Also reads from .env file
+        "case_sensitive": False,
+    }
+
+
+# Usage:
+# settings = Settings()                              # From env + defaults
+# settings = Settings(environment="production")      # Override in code
+# settings = Settings(_env_file="production.env")    # Different .env file
+
+# Validation errors are clear:
+# try:
+#     settings = Settings(workers=100)
+# except ValidationError as e:
+#     print(e)  # "workers: ensure this value is less than or equal to 32"
+```
+
+<Callout type="tip" title="Config File Formats">
+YAML is the standard for human-edited config files (readable, supports comments). JSON works for machine-generated configs (strict, no comments). TOML is gaining popularity for Python tools (pyproject.toml). Use `.env` files for environment-specific secrets during development, but never commit them to version control.
+</Callout>
+
+## Secrets Handling
+
+The cardinal rule of secrets: never in code, never in version control, never in logs.
+
+### Environment Variables and .env Files
+
+```python
+import os
+from pathlib import Path
+
+
+def load_dotenv(env_file=".env"):
+    """Simple .env file loader (or use python-dotenv package)."""
+    path = Path(env_file)
+    if not path.exists():
+        return
+
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            os.environ.setdefault(key, value)  # Don't override existing env vars
+
+
+class SecretManager:
+    """Load secrets from environment variables with validation."""
+
+    def __init__(self, prefix=""):
+        self.prefix = prefix
+
+    def get(self, name, required=True):
+        """Get a secret from environment variables."""
+        env_var = f"{self.prefix}{name}" if self.prefix else name
+        value = os.environ.get(env_var)
+
+        if required and not value:
+            raise EnvironmentError(
+                f"Required secret '{env_var}' is not set. "
+                f"Set it with: export {env_var}=<value>"
+            )
+        return value
+
+    def get_all(self, names):
+        """Get multiple secrets, raising an error if any are missing."""
+        missing = []
+        secrets = {}
+        for name in names:
+            env_var = f"{self.prefix}{name}" if self.prefix else name
+            value = os.environ.get(env_var)
+            if value:
+                secrets[name] = value
+            else:
+                missing.append(env_var)
+
+        if missing:
+            raise EnvironmentError(
+                f"Missing required secrets: {', '.join(missing)}\n"
+                f"Set them in your environment or .env file."
+            )
+        return secrets
+
+
+# Usage:
+# load_dotenv(".env")
+# secrets = SecretManager(prefix="APP_")
+# db_password = secrets.get("DATABASE_PASSWORD")
+# all_secrets = secrets.get_all(["API_KEY", "DATABASE_PASSWORD", "SLACK_WEBHOOK"])
+```
+
+### AWS Secrets Manager
+
+```python
+# pip install boto3
+
+import boto3
+import json
+from functools import lru_cache
+
+
+@lru_cache(maxsize=32)
+def get_aws_secret(secret_name, region="us-east-1"):
+    """Retrieve a secret from AWS Secrets Manager (cached)."""
+    client = boto3.client("secretsmanager", region_name=region)
+    response = client.get_secret_value(SecretId=secret_name)
+
+    secret_string = response["SecretString"]
+    try:
+        return json.loads(secret_string)
+    except json.JSONDecodeError:
+        return secret_string
+
+
+# Usage:
+# db_creds = get_aws_secret("prod/database/credentials")
+# db_url = f"postgresql://{db_creds['username']}:{db_creds['password']}@{db_creds['host']}/app"
+```
+
+### HashiCorp Vault
+
+```python
+# pip install hvac
+
+import hvac
+import os
+
+
+class VaultClient:
+    """Simple HashiCorp Vault client for secret retrieval."""
+
+    def __init__(self, url=None, token=None):
+        self.client = hvac.Client(
+            url=url or os.environ.get("VAULT_ADDR", "http://localhost:8200"),
+            token=token or os.environ.get("VAULT_TOKEN"),
+        )
+        if not self.client.is_authenticated():
+            raise RuntimeError("Vault authentication failed")
+
+    def get_secret(self, path, mount_point="secret"):
+        """Read a secret from Vault KV v2."""
+        result = self.client.secrets.kv.v2.read_secret_version(
+            path=path,
+            mount_point=mount_point,
+        )
+        return result["data"]["data"]
+
+    def get_database_creds(self, role):
+        """Get dynamic database credentials from Vault."""
+        result = self.client.secrets.database.generate_credentials(name=role)
+        return {
+            "username": result["data"]["username"],
+            "password": result["data"]["password"],
+            "ttl": result["lease_duration"],
+        }
+
+
+# Usage:
+# vault = VaultClient()
+# secrets = vault.get_secret("app/production")
+# db_creds = vault.get_database_creds("app-readonly")
+```
+
+<Callout type="warning" title="Never Log Secrets">
+Secrets will inevitably end up in variables, function arguments, and error messages. Implement a secret redactor in your logging setup that replaces known secret patterns (API keys, passwords, tokens) with `***`. A single logged database password can compromise your entire infrastructure.
+</Callout>
+
+## Idempotency
+
+Idempotent operations produce the same result whether you run them once or a hundred times. This is critical for automation that might be retried, run by cron, or triggered by multiple events.
+
+### Check-Before-Act Pattern
+
+```python
+import os
+import subprocess
+
+
+def ensure_user_exists(username, groups=None):
+    """Ensure a system user exists (idempotent)."""
+    # Check current state
+    try:
+        result = subprocess.run(
+            ["id", username], capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            print(f"  User '{username}' already exists")
+            return False  # No change made
+    except FileNotFoundError:
+        pass
+
+    # Act: create the user
+    cmd = ["useradd", "-m", username]
+    if groups:
+        cmd.extend(["-G", ",".join(groups)])
+    subprocess.run(cmd, check=True)
+    print(f"  Created user '{username}'")
+    return True  # Change made
+
+
+def ensure_directory(path, mode=0o755, owner=None):
+    """Ensure a directory exists with correct permissions (idempotent)."""
+    changed = False
+
+    if not os.path.exists(path):
+        os.makedirs(path, mode=mode)
+        print(f"  Created directory: {path}")
+        changed = True
+    else:
+        current_mode = oct(os.stat(path).st_mode)[-3:]
+        desired_mode = oct(mode)[-3:]
+        if current_mode != desired_mode:
+            os.chmod(path, mode)
+            print(f"  Fixed permissions on {path}: {current_mode} -> {desired_mode}")
+            changed = True
+
+    if owner:
+        import pwd
+        uid = pwd.getpwnam(owner).pw_uid
+        gid = pwd.getpwnam(owner).pw_gid
+        current_uid = os.stat(path).st_uid
+        if current_uid != uid:
+            os.chown(path, uid, gid)
+            changed = True
+
+    if not changed:
+        print(f"  Directory OK: {path}")
+
+    return changed
+```
+
+### Desired State Pattern
+
+```python
+def ensure_desired_state(current_state, desired_state, apply_func):
+    """Generic desired-state reconciliation."""
+    changes = []
+
+    # Find items to add
+    for key, desired in desired_state.items():
+        current = current_state.get(key)
+        if current is None:
+            changes.append(("add", key, desired))
+        elif current != desired:
+            changes.append(("update", key, desired))
+
+    # Find items to remove
+    for key in current_state:
+        if key not in desired_state:
+            changes.append(("remove", key, None))
+
+    if not changes:
+        print("  No changes needed — desired state matches current state")
+        return []
+
+    # Apply changes
+    results = []
+    for action, key, value in changes:
+        try:
+            apply_func(action, key, value)
+            results.append({"action": action, "key": key, "status": "success"})
+            print(f"  {action.upper():8s} {key}")
+        except Exception as e:
+            results.append({"action": action, "key": key, "status": "error", "error": str(e)})
+            print(f"  {action.upper():8s} {key} — ERROR: {e}")
+
+    return results
+
+
+# Example usage with DNS records:
+# current_dns = get_current_dns_records("example.com")
+# desired_dns = {
+#     "web.example.com": "10.0.1.10",
+#     "api.example.com": "10.0.2.10",
+# }
+# changes = ensure_desired_state(current_dns, desired_dns, update_dns_record)
+```
+
+## Concurrency
+
+DevOps automation often needs to work on multiple servers, check multiple endpoints, or process multiple files simultaneously. Python offers threading for I/O-bound work and asyncio for high-concurrency I/O.
+
+### ThreadPoolExecutor
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+import time
+
+
+def check_server(server):
+    """Check a single server (I/O-bound: network call)."""
+    name, url = server
+    try:
+        start = time.time()
+        response = requests.get(url, timeout=5)
+        elapsed = time.time() - start
+        return {
+            "name": name,
+            "status": response.status_code,
+            "time_ms": round(elapsed * 1000),
+            "healthy": response.ok,
+        }
+    except requests.RequestException as e:
+        return {"name": name, "healthy": False, "error": str(e)}
+
+
+def check_all_servers(servers, max_workers=10):
+    """Check multiple servers concurrently."""
+    results = []
+    start = time.time()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_server = {
+            executor.submit(check_server, server): server
+            for server in servers
+        }
+
+        # Collect results as they complete
+        for future in as_completed(future_to_server):
+            server = future_to_server[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                results.append({"name": server[0], "healthy": False, "error": str(e)})
+
+    elapsed = time.time() - start
+    print(f"Checked {len(servers)} servers in {elapsed:.1f}s "
+          f"(would take ~{len(servers) * 5:.0f}s sequentially)")
+    return results
+
+
+# Usage:
+# servers = [(f"server-{i}", f"http://10.0.1.{i}:8080/health") for i in range(50)]
+# results = check_all_servers(servers)
+```
+
+### asyncio for High-Concurrency I/O
+
+```python
+# pip install aiohttp
+
+import asyncio
+import aiohttp
+import time
+
+
+async def check_server_async(session, name, url):
+    """Check a single server using async HTTP."""
+    try:
+        start = time.time()
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            elapsed = time.time() - start
+            return {
+                "name": name,
+                "status": response.status,
+                "time_ms": round(elapsed * 1000),
+                "healthy": response.status == 200,
+            }
+    except Exception as e:
+        return {"name": name, "healthy": False, "error": str(e)}
+
+
+async def check_all_async(servers):
+    """Check all servers concurrently with asyncio."""
+    start = time.time()
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [
+            check_server_async(session, name, url)
+            for name, url in servers
+        ]
+        results = await asyncio.gather(*tasks)
+
+    elapsed = time.time() - start
+    print(f"Checked {len(servers)} servers in {elapsed:.1f}s")
+    return results
+
+
+# Usage:
+# servers = [(f"server-{i}", f"http://10.0.1.{i}:8080/health") for i in range(100)]
+# results = asyncio.run(check_all_async(servers))
+```
+
+## Rate Limiting and Retry with Tenacity
+
+External APIs have rate limits and transient failures. The `tenacity` library provides sophisticated retry logic:
+
+```python
+# pip install tenacity
+
+from tenacity import (
+    retry, stop_after_attempt, wait_exponential,
+    retry_if_exception_type, before_sleep_log,
+)
+import requests
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=60),
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+def call_api(url, payload):
+    """Call an API with automatic retry on transient failures."""
+    response = requests.post(url, json=payload, timeout=10)
+    response.raise_for_status()
+    return response.json()
+
+
+# Retry behavior:
+# Attempt 1: immediate
+# Attempt 2: wait 1s
+# Attempt 3: wait 2s
+# Attempt 4: wait 4s
+# Attempt 5: wait 8s
+# Then give up
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type(Exception),
+)
+def deploy_with_retry(app_name, image):
+    """Deploy with retries for transient infrastructure issues."""
+    print(f"  Attempting deploy: {app_name} -> {image}")
+    # ... deployment logic ...
+    return {"status": "success"}
+```
+
+## Structured Logging
+
+Production scripts need structured logs — parseable by log aggregation tools (ELK, Datadog, CloudWatch), not just human eyes.
+
+```python
+import logging
+import json
+import sys
+import uuid
+from datetime import datetime
+
+
+class JSONFormatter(logging.Formatter):
+    """Format log records as JSON for log aggregation."""
+
+    def format(self, record):
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
+        }
+
+        # Include extra fields
+        if hasattr(record, "correlation_id"):
+            log_entry["correlation_id"] = record.correlation_id
+        if hasattr(record, "server"):
+            log_entry["server"] = record.server
+        if hasattr(record, "duration_ms"):
+            log_entry["duration_ms"] = record.duration_ms
+
+        # Include exception info
+        if record.exc_info and record.exc_info[0]:
+            log_entry["exception"] = {
+                "type": record.exc_info[0].__name__,
+                "message": str(record.exc_info[1]),
+            }
+
+        return json.dumps(log_entry)
+
+
+def setup_logging(level="INFO", json_output=True):
+    """Set up structured logging."""
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, level))
+
+    handler = logging.StreamHandler(sys.stdout)
+
+    if json_output:
+        handler.setFormatter(JSONFormatter())
+    else:
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+        ))
+
+    root_logger.addHandler(handler)
+    return root_logger
+
+
+# Correlation IDs for tracing operations across log lines
+class CorrelationContext:
+    """Add a correlation ID to all log messages in a block."""
+
+    def __init__(self, logger, operation_name=""):
+        self.logger = logger
+        self.correlation_id = str(uuid.uuid4())[:8]
+        self.operation = operation_name
+
+    def __enter__(self):
+        self.logger.info(
+            f"Starting: {self.operation}",
+            extra={"correlation_id": self.correlation_id},
+        )
+        return self
+
+    def __exit__(self, *args):
+        self.logger.info(
+            f"Completed: {self.operation}",
+            extra={"correlation_id": self.correlation_id},
+        )
+
+    def log(self, level, message, **extra):
+        extra["correlation_id"] = self.correlation_id
+        getattr(self.logger, level)(message, extra=extra)
+
+
+# Usage:
+# setup_logging(level="INFO", json_output=True)
+# logger = logging.getLogger("deploy")
+#
+# with CorrelationContext(logger, "deploy-web-app") as ctx:
+#     ctx.log("info", "Pulling image", server="web-01")
+#     ctx.log("info", "Starting containers", server="web-01", duration_ms=1200)
+```
+
+## Packaging and Distribution
+
+A production tool should be installable with `pip`, have a clear entry point, and include its dependencies.
+
+### pyproject.toml
+
+```toml
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "devops-toolkit"
+version = "1.0.0"
+description = "Production DevOps automation toolkit"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "DevOps Team", email = "devops@example.com"}]
+
+dependencies = [
+    "click>=8.0",
+    "requests>=2.28",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "tenacity>=8.0",
+    "tabulate>=0.9",
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1",
+]
+monitoring = [
+    "prometheus-client>=0.17",
+    "rich>=13.0",
+]
+
+[project.scripts]
+devops = "devops_toolkit.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --cov=devops_toolkit --cov-report=term-missing"
+```
+
+```bash
+# Build and install
+pip install -e ".[dev]"       # Editable install with dev dependencies
+pip install -e ".[monitoring]" # With monitoring extras
+
+# Build a wheel for distribution
+pip install build
+python -m build                # Creates dist/devops_toolkit-1.0.0-py3-none-any.whl
+
+# Install from wheel
+pip install dist/devops_toolkit-1.0.0-py3-none-any.whl
+
+# Upload to private PyPI
+pip install twine
+twine upload --repository private dist/*
+```
+
+## Deployment Patterns
+
+Production tools can be deployed as systemd services, Docker containers, or cloud functions.
+
+### systemd Service
+
+```ini
+# /etc/systemd/system/devops-monitor.service
+[Unit]
+Description=DevOps System Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=monitor
+Group=monitor
+ExecStart=/opt/devops-toolkit/venv/bin/python -m devops_toolkit.monitor
+Restart=always
+RestartSec=10
+EnvironmentFile=/etc/devops-toolkit/monitor.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/devops-toolkit
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Docker Container
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY pyproject.toml .
+COPY devops_toolkit/ devops_toolkit/
+
+RUN pip install --no-cache-dir .
+
+# Non-root user
+RUN useradd -r -s /bin/false appuser
+USER appuser
+
+ENTRYPOINT ["devops"]
+```
+
+```bash
+docker build -t devops-toolkit:latest .
+docker run --env-file .env devops-toolkit server list
+```
+
+## The Production Checklist
+
+Before any automation tool goes to production, run through this checklist:
+
+```python
+"""
+Production Readiness Checklist for Automation Tools
+====================================================
+
+Configuration:
+  [ ] No hardcoded values — all config from files, env vars, or CLI args
+  [ ] Sensible defaults for all non-secret settings
+  [ ] Validation of all configuration at startup (fail fast)
+  [ ] Config file format documented with examples
+
+Secrets:
+  [ ] No secrets in source code
+  [ ] No secrets in log output
+  [ ] Secrets loaded from environment variables or vault
+  [ ] .env files in .gitignore
+
+Error Handling:
+  [ ] All external calls have timeouts
+  [ ] Retry logic for transient failures
+  [ ] Graceful error messages (no raw tracebacks for users)
+  [ ] Non-zero exit code on failure
+
+Idempotency:
+  [ ] Safe to run multiple times without side effects
+  [ ] Check-before-act for resource creation
+  [ ] Handles "already exists" gracefully
+
+Logging:
+  [ ] Structured logging (JSON in production)
+  [ ] Correlation IDs for multi-step operations
+  [ ] Log level configurable (DEBUG for troubleshooting)
+  [ ] No secrets in log output (redaction)
+
+Testing:
+  [ ] Unit tests for core logic
+  [ ] Integration tests with mocked external services
+  [ ] CLI tests with CliRunner
+  [ ] Test coverage above 80%
+
+Documentation:
+  [ ] --help output for all commands
+  [ ] Docstrings on all public functions
+  [ ] README with installation and usage
+  [ ] Runbook for common operations
+
+Packaging:
+  [ ] pyproject.toml with pinned dependencies
+  [ ] Entry point defined (console_scripts)
+  [ ] Works on Python 3.9+
+  [ ] Docker image available
+
+Operations:
+  [ ] Health check endpoint or command
+  [ ] Metrics exposed (Prometheus)
+  [ ] Alerting configured
+  [ ] Graceful shutdown (signal handling)
+  [ ] Lock file to prevent concurrent runs (if applicable)
+"""
+```
+
+<Exercise number={1} title="Configuration and Secrets Manager">
+
+Build a configuration system that loads from multiple sources with validation and safe secret handling.
+
+```python
+#!/usr/bin/env python3
+"""Configuration and secrets management exercise."""
+
+import os
+import json
+import logging
+from pathlib import Path
+from dataclasses import dataclass, field, asdict
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+# --- Secret Redaction ---
+
+SECRET_PATTERNS = {"password", "secret", "token", "key", "credential", "api_key"}
+
+
+def redact_value(key, value):
+    """Redact a value if its key suggests it is a secret."""
+    key_lower = key.lower()
+    for pattern in SECRET_PATTERNS:
+        if pattern in key_lower:
+            if isinstance(value, str) and len(value) > 4:
+                return value[:2] + "***" + value[-2:]
+            return "***"
+    return value
+
+
+def redact_dict(d):
+    """Return a copy of a dict with secret values redacted."""
+    return {k: redact_value(k, v) for k, v in d.items()}
+
+
+# --- Configuration ---
+
+@dataclass
+class Config:
+    """Application configuration."""
+    app_name: str = "automation-tool"
+    environment: str = "development"
+    log_level: str = "INFO"
+    database_url: str = ""
+    database_password: str = ""
+    api_key: str = ""
+    api_base_url: str = "http://localhost:8080"
+    workers: int = 4
+    timeout: int = 30
+    dry_run: bool = False
+
+    def validate(self):
+        """Validate configuration, raising errors for invalid values."""
+        errors = []
+
+        if self.environment not in ("development", "staging", "production"):
+            errors.append(f"Invalid environment: {self.environment}")
+
+        if self.log_level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            errors.append(f"Invalid log_level: {self.log_level}")
+
+        if self.workers < 1 or self.workers > 32:
+            errors.append(f"workers must be 1-32, got {self.workers}")
+
+        if self.timeout < 1 or self.timeout > 300:
+            errors.append(f"timeout must be 1-300, got {self.timeout}")
+
+        if self.environment == "production":
+            if not self.database_url:
+                errors.append("database_url is required in production")
+            if not self.api_key:
+                errors.append("api_key is required in production")
+
+        if errors:
+            raise ValueError(f"Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
+
+    def to_safe_dict(self):
+        """Return config as a dict with secrets redacted."""
+        return redact_dict(asdict(self))
+
+
+def load_config_file(path):
+    """Load a config file (JSON or simple key=value)."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+
+    if path.suffix == ".json":
+        return json.loads(path.read_text())
+
+    # Simple key=value format
+    config = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            config[key.strip()] = value.strip()
+    return config
+
+
+def build_config(config_file=None, env_prefix="APP_", cli_overrides=None):
+    """Build configuration from multiple sources."""
+    config = Config()
+
+    # 1. Config file
+    if config_file:
+        file_data = load_config_file(config_file)
+        for key, value in file_data.items():
+            if hasattr(config, key):
+                current = getattr(config, key)
+                if isinstance(current, bool):
+                    value = str(value).lower() in ("true", "1", "yes")
+                elif isinstance(current, int):
+                    value = int(value)
+                setattr(config, key, value)
+        logger.info(f"Loaded config from: {config_file}")
+
+    # 2. Environment variables
+    env_mapping = {}
+    for attr_name in config.__dataclass_fields__:
+        env_var = f"{env_prefix}{attr_name.upper()}"
+        env_mapping[env_var] = attr_name
+
+    for env_var, attr_name in env_mapping.items():
+        value = os.environ.get(env_var)
+        if value is not None:
+            current = getattr(config, attr_name)
+            if isinstance(current, bool):
+                value = value.lower() in ("true", "1", "yes")
+            elif isinstance(current, int):
+                value = int(value)
+            setattr(config, attr_name, value)
+
+    # 3. CLI overrides (highest priority)
+    if cli_overrides:
+        for key, value in cli_overrides.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
+
+    # Validate
+    config.validate()
+
+    # Log the loaded config (redacted)
+    logger.info(f"Configuration loaded: {json.dumps(config.to_safe_dict(), indent=2)}")
+
+    return config
+
+
+# --- Demo ---
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    # Simulate environment variables
+    os.environ["APP_ENVIRONMENT"] = "staging"
+    os.environ["APP_API_KEY"] = "sk-12345-abcdef-67890"
+    os.environ["APP_DATABASE_URL"] = "postgresql://app:secretpass@db:5432/mydb"
+    os.environ["APP_DATABASE_PASSWORD"] = "super-secret-password"
+
+    config = build_config(
+        cli_overrides={"dry_run": True, "workers": 8},
+    )
+
+    print("\n  Configuration (safe to log):")
+    for key, value in config.to_safe_dict().items():
+        print(f"    {key:25s} = {value}")
+
+    print(f"\n  Environment: {config.environment}")
+    print(f"  Dry run: {config.dry_run}")
+    print(f"  Workers: {config.workers}")
+
+    # Clean up
+    for key in ["APP_ENVIRONMENT", "APP_API_KEY", "APP_DATABASE_URL", "APP_DATABASE_PASSWORD"]:
+        os.environ.pop(key, None)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</Exercise>
+
+<Exercise number={2} title="Idempotent Resource Manager">
+
+Build a resource manager that ensures desired state, handling create, update, and delete operations idempotently.
+
+```python
+#!/usr/bin/env python3
+"""Idempotent resource manager exercise."""
+
+import json
+import time
+import logging
+from pathlib import Path
+from dataclasses import dataclass, field
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+# --- Simulated Resource Store ---
+
+class ResourceStore:
+    """Simulates a resource backend (like a cloud API or database)."""
+
+    def __init__(self, state_file):
+        self.state_file = Path(state_file)
+        self._resources = self._load()
+
+    def _load(self):
+        if self.state_file.exists():
+            return json.loads(self.state_file.read_text())
+        return {}
+
+    def _save(self):
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        self.state_file.write_text(json.dumps(self._resources, indent=2))
+
+    def exists(self, resource_type, name):
+        return name in self._resources.get(resource_type, {})
+
+    def get(self, resource_type, name):
+        return self._resources.get(resource_type, {}).get(name)
+
+    def list_resources(self, resource_type):
+        return dict(self._resources.get(resource_type, {}))
+
+    def create(self, resource_type, name, spec):
+        if resource_type not in self._resources:
+            self._resources[resource_type] = {}
+        self._resources[resource_type][name] = {
+            "spec": spec,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        self._save()
+
+    def update(self, resource_type, name, spec):
+        if self.exists(resource_type, name):
+            self._resources[resource_type][name]["spec"] = spec
+            self._resources[resource_type][name]["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            self._save()
+
+    def delete(self, resource_type, name):
+        if self.exists(resource_type, name):
+            del self._resources[resource_type][name]
+            self._save()
+
+
+# --- Idempotent Resource Manager ---
+
+@dataclass
+class ReconcileResult:
+    created: list = field(default_factory=list)
+    updated: list = field(default_factory=list)
+    deleted: list = field(default_factory=list)
+    unchanged: list = field(default_factory=list)
+    errors: list = field(default_factory=list)
+
+    @property
+    def changed(self):
+        return bool(self.created or self.updated or self.deleted)
+
+    def summary(self):
+        return (f"created={len(self.created)}, updated={len(self.updated)}, "
+                f"deleted={len(self.deleted)}, unchanged={len(self.unchanged)}, "
+                f"errors={len(self.errors)}")
+
+
+class ResourceManager:
+    """Idempotent resource manager using desired-state reconciliation."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def reconcile(self, resource_type, desired_resources, delete_missing=False):
+        """
+        Reconcile current state with desired state.
+
+        Args:
+            resource_type: The type of resource (e.g., "servers", "configs")
+            desired_resources: Dict of {name: spec} for desired state
+            delete_missing: If True, delete resources not in desired state
+        """
+        result = ReconcileResult()
+        current_resources = self.store.list_resources(resource_type)
+
+        # Process desired resources
+        for name, desired_spec in desired_resources.items():
+            try:
+                current = self.store.get(resource_type, name)
+
+                if current is None:
+                    # Resource does not exist — create it
+                    logger.info(f"  CREATE {resource_type}/{name}")
+                    self.store.create(resource_type, name, desired_spec)
+                    result.created.append(name)
+
+                elif current["spec"] != desired_spec:
+                    # Resource exists but differs — update it
+                    logger.info(f"  UPDATE {resource_type}/{name}")
+                    logger.debug(f"    Current: {current['spec']}")
+                    logger.debug(f"    Desired: {desired_spec}")
+                    self.store.update(resource_type, name, desired_spec)
+                    result.updated.append(name)
+
+                else:
+                    # Resource matches desired state — no action
+                    logger.debug(f"  OK     {resource_type}/{name}")
+                    result.unchanged.append(name)
+
+            except Exception as e:
+                logger.error(f"  ERROR  {resource_type}/{name}: {e}")
+                result.errors.append({"name": name, "error": str(e)})
+
+        # Delete resources not in desired state (if enabled)
+        if delete_missing:
+            for name in current_resources:
+                if name not in desired_resources:
+                    try:
+                        logger.info(f"  DELETE {resource_type}/{name}")
+                        self.store.delete(resource_type, name)
+                        result.deleted.append(name)
+                    except Exception as e:
+                        logger.error(f"  ERROR deleting {resource_type}/{name}: {e}")
+                        result.errors.append({"name": name, "error": str(e)})
+
+        return result
+
+    def ensure(self, resource_type, name, spec):
+        """Ensure a single resource exists with the given spec (idempotent)."""
+        current = self.store.get(resource_type, name)
+
+        if current is None:
+            self.store.create(resource_type, name, spec)
+            return "created"
+        elif current["spec"] != spec:
+            self.store.update(resource_type, name, spec)
+            return "updated"
+        else:
+            return "unchanged"
+
+    def ensure_absent(self, resource_type, name):
+        """Ensure a resource does NOT exist (idempotent)."""
+        if self.store.exists(resource_type, name):
+            self.store.delete(resource_type, name)
+            return "deleted"
+        return "already_absent"
+
+
+# --- Demo ---
+
+def main():
+    import tempfile
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_file = Path(tmpdir) / "state.json"
+        store = ResourceStore(state_file)
+        manager = ResourceManager(store)
+
+        # === Run 1: Create initial state ===
+        print("=" * 50)
+        print("  Run 1: Initial reconciliation")
+        print("=" * 50)
+
+        desired_servers = {
+            "web-01": {"ip": "10.0.1.10", "role": "web", "env": "prod"},
+            "web-02": {"ip": "10.0.1.11", "role": "web", "env": "prod"},
+            "db-01": {"ip": "10.0.2.10", "role": "database", "env": "prod"},
+        }
+
+        result = manager.reconcile("servers", desired_servers)
+        print(f"\n  Result: {result.summary()}")
+        assert len(result.created) == 3
+        assert not result.updated
+
+        # === Run 2: Same desired state (idempotent — no changes) ===
+        print(f"\n{'=' * 50}")
+        print("  Run 2: Same state (should be no-op)")
+        print("=" * 50)
+
+        result = manager.reconcile("servers", desired_servers)
+        print(f"\n  Result: {result.summary()}")
+        assert not result.changed  # Nothing should change
+        assert len(result.unchanged) == 3
+
+        # === Run 3: Update and add ===
+        print(f"\n{'=' * 50}")
+        print("  Run 3: Update web-01 IP, add web-03")
+        print("=" * 50)
+
+        desired_servers["web-01"]["ip"] = "10.0.1.100"  # Changed
+        desired_servers["web-03"] = {"ip": "10.0.1.12", "role": "web", "env": "prod"}
+
+        result = manager.reconcile("servers", desired_servers)
+        print(f"\n  Result: {result.summary()}")
+        assert "web-01" in result.updated
+        assert "web-03" in result.created
+
+        # === Run 4: Delete removed resource ===
+        print(f"\n{'=' * 50}")
+        print("  Run 4: Remove db-01, delete_missing=True")
+        print("=" * 50)
+
+        del desired_servers["db-01"]
+        result = manager.reconcile("servers", desired_servers, delete_missing=True)
+        print(f"\n  Result: {result.summary()}")
+        assert "db-01" in result.deleted
+
+        # === Final state ===
+        print(f"\n{'=' * 50}")
+        print("  Final State:")
+        print("=" * 50)
+        final = store.list_resources("servers")
+        for name, data in sorted(final.items()):
+            print(f"    {name}: {data['spec']}")
+
+        print("\n  Idempotency verified: running the same desired state "
+              "multiple times produces no unnecessary changes.\n")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</Exercise>
+
+<MiniProject title="Production-Ready Automation Tool">
+
+Build a complete production-ready automation tool with configuration, structured logging, error handling, testing, and packaging.
+
+```python
+#!/usr/bin/env python3
+"""
+Production-Ready Automation Tool
+Complete DevOps tool demonstrating production patterns:
+- Configuration management (files, env vars, CLI args)
+- Structured logging with correlation IDs
+- Secret redaction
+- Idempotent operations
+- Concurrent execution
+- Error handling and retries
+- Health checking
+"""
+
+import os
+import sys
+import json
+import time
+import uuid
+import logging
+import socket
+from pathlib import Path
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field, asdict
+from typing import Optional
+
+try:
+    import click
+    HAS_CLICK = True
+except ImportError:
+    HAS_CLICK = False
+
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+
+
+# ============================================================
+# Structured Logging
+# ============================================================
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+        }
+        for key in ("correlation_id", "server", "operation", "duration_ms"):
+            if hasattr(record, key):
+                entry[key] = getattr(record, key)
+        if record.exc_info and record.exc_info[0]:
+            entry["exception"] = str(record.exc_info[1])
+        return json.dumps(entry)
+
+
+def setup_logging(level="INFO", json_output=False):
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, level))
+    root.handlers.clear()
+    handler = logging.StreamHandler(sys.stdout)
+    if json_output:
+        handler.setFormatter(JSONFormatter())
+    else:
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        ))
+    root.addHandler(handler)
+
+
+logger = logging.getLogger("prodtool")
+
+
+# ============================================================
+# Configuration
+# ============================================================
+
+SECRET_KEYS = {"api_key", "database_password", "slack_webhook"}
+
+
+@dataclass
+class Config:
+    app_name: str = "prod-automation"
+    environment: str = "development"
+    log_level: str = "INFO"
+    json_logs: bool = False
+    workers: int = 4
+    timeout: int = 30
+    dry_run: bool = False
+    api_key: str = ""
+    database_password: str = ""
+    slack_webhook: str = ""
+    servers: list = field(default_factory=list)
+
+    def validate(self):
+        errors = []
+        if self.environment not in ("development", "staging", "production"):
+            errors.append(f"Invalid environment: {self.environment}")
+        if self.workers < 1 or self.workers > 32:
+            errors.append(f"workers must be 1-32, got {self.workers}")
+        if self.environment == "production" and not self.api_key:
+            errors.append("api_key required in production")
+        if errors:
+            raise ValueError("Config errors:\n" + "\n".join(f"  - {e}" for e in errors))
+
+    def to_safe_dict(self):
+        d = asdict(self)
+        for key in SECRET_KEYS:
+            if key in d and d[key]:
+                v = d[key]
+                d[key] = v[:2] + "***" + v[-2:] if len(v) > 4 else "***"
+        return d
+
+
+def load_config(config_path=None, overrides=None):
+    config = Config()
+
+    if config_path and Path(config_path).exists():
+        data = json.loads(Path(config_path).read_text())
+        for k, v in data.items():
+            if hasattr(config, k):
+                setattr(config, k, v)
+
+    prefix = "PRODTOOL_"
+    for attr in config.__dataclass_fields__:
+        env_val = os.environ.get(f"{prefix}{attr.upper()}")
+        if env_val is not None:
+            current = getattr(config, attr)
+            if isinstance(current, bool):
+                env_val = env_val.lower() in ("true", "1", "yes")
+            elif isinstance(current, int):
+                env_val = int(env_val)
+            elif isinstance(current, list):
+                env_val = [s.strip() for s in env_val.split(",")]
+            setattr(config, attr, env_val)
+
+    if overrides:
+        for k, v in overrides.items():
+            if hasattr(config, k):
+                setattr(config, k, v)
+
+    config.validate()
+    return config
+
+
+# ============================================================
+# Operations (Idempotent)
+# ============================================================
+
+class OperationResult:
+    def __init__(self, target, action, success, message="", duration_ms=0):
+        self.target = target
+        self.action = action
+        self.success = success
+        self.message = message
+        self.duration_ms = duration_ms
+
+
+def check_server(server, config, correlation_id):
+    """Check a server's health (idempotent read operation)."""
+    start = time.time()
+    try:
+        # Simulate server check
+        time.sleep(0.1)  # Simulate network call
+        healthy = True
+        elapsed = int((time.time() - start) * 1000)
+
+        logger.info(
+            f"Server check: {server}",
+            extra={"server": server, "correlation_id": correlation_id, "duration_ms": elapsed},
+        )
+
+        return OperationResult(
+            target=server,
+            action="health_check",
+            success=healthy,
+            message="healthy" if healthy else "unreachable",
+            duration_ms=elapsed,
+        )
+    except Exception as e:
+        elapsed = int((time.time() - start) * 1000)
+        logger.error(
+            f"Server check failed: {server}: {e}",
+            extra={"server": server, "correlation_id": correlation_id},
+        )
+        return OperationResult(
+            target=server, action="health_check",
+            success=False, message=str(e), duration_ms=elapsed,
+        )
+
+
+def deploy_to_server(server, image, config, correlation_id):
+    """Deploy an image to a server (idempotent)."""
+    start = time.time()
+
+    if config.dry_run:
+        logger.info(
+            f"[DRY RUN] Would deploy {image} to {server}",
+            extra={"server": server, "correlation_id": correlation_id},
+        )
+        return OperationResult(
+            target=server, action="deploy",
+            success=True, message="dry run",
+        )
+
+    try:
+        # Simulate: check current version -> skip if same
+        time.sleep(0.2)
+        elapsed = int((time.time() - start) * 1000)
+
+        logger.info(
+            f"Deployed {image} to {server}",
+            extra={"server": server, "correlation_id": correlation_id, "duration_ms": elapsed},
+        )
+
+        return OperationResult(
+            target=server, action="deploy",
+            success=True, message=f"deployed {image}",
+            duration_ms=elapsed,
+        )
+    except Exception as e:
+        elapsed = int((time.time() - start) * 1000)
+        logger.error(
+            f"Deploy failed on {server}: {e}",
+            extra={"server": server, "correlation_id": correlation_id},
+        )
+        return OperationResult(
+            target=server, action="deploy",
+            success=False, message=str(e), duration_ms=elapsed,
+        )
+
+
+# ============================================================
+# Concurrent Executor
+# ============================================================
+
+def execute_concurrent(func, items, config, correlation_id, **kwargs):
+    """Execute a function across multiple items concurrently."""
+    results = []
+    max_workers = min(config.workers, len(items))
+
+    logger.info(
+        f"Executing on {len(items)} targets with {max_workers} workers",
+        extra={"correlation_id": correlation_id},
+    )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(func, item, config=config,
+                          correlation_id=correlation_id, **kwargs): item
+            for item in items
+        }
+
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                results.append(OperationResult(
+                    target=item, action="unknown",
+                    success=False, message=str(e),
+                ))
+
+    return results
+
+
+# ============================================================
+# Report
+# ============================================================
+
+def print_results(results, operation_name, correlation_id):
+    """Print a summary of operation results."""
+    succeeded = [r for r in results if r.success]
+    failed = [r for r in results if not r.success]
+
+    total_time = sum(r.duration_ms for r in results)
+    avg_time = total_time / len(results) if results else 0
+
+    print(f"\n{'=' * 60}")
+    print(f"  {operation_name} Results")
+    print(f"  Correlation ID: {correlation_id}")
+    print(f"{'=' * 60}")
+    print(f"\n  {'TARGET':25s} {'ACTION':15s} {'STATUS':10s} {'TIME':8s} {'MESSAGE'}")
+    print(f"  {'-' * 75}")
+
+    for r in sorted(results, key=lambda x: x.target):
+        status = "OK" if r.success else "FAIL"
+        time_str = f"{r.duration_ms}ms" if r.duration_ms else "--"
+        print(f"  {r.target:25s} {r.action:15s} {status:10s} {time_str:8s} {r.message}")
+
+    print(f"\n  Summary: {len(succeeded)} succeeded, {len(failed)} failed, "
+          f"total time: {total_time}ms, avg: {avg_time:.0f}ms")
+
+    if failed:
+        print(f"\n  Failed targets:")
+        for r in failed:
+            print(f"    - {r.target}: {r.message}")
+
+    print()
+
+
+# ============================================================
+# CLI (if Click is available)
+# ============================================================
+
+if HAS_CLICK:
+    @click.group()
+    @click.option("--config", "config_path", type=click.Path(), help="Config file path.")
+    @click.option("--env", "environment", type=click.Choice(["development", "staging", "production"]))
+    @click.option("--dry-run", is_flag=True, help="Preview changes without applying.")
+    @click.option("--json-logs", is_flag=True, help="Output logs in JSON format.")
+    @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
+    @click.version_option(version="1.0.0")
+    @click.pass_context
+    def cli(ctx, config_path, environment, dry_run, json_logs, verbose):
+        """Production-ready DevOps automation tool."""
+        overrides = {}
+        if environment:
+            overrides["environment"] = environment
+        if dry_run:
+            overrides["dry_run"] = True
+        if json_logs:
+            overrides["json_logs"] = True
+        if verbose:
+            overrides["log_level"] = "DEBUG"
+
+        config = load_config(config_path, overrides)
+        setup_logging(level=config.log_level, json_output=config.json_logs)
+
+        ctx.ensure_object(dict)
+        ctx.obj["config"] = config
+
+        logger.info("Configuration loaded", extra={"operation": "startup"})
+        logger.debug(f"Config: {json.dumps(config.to_safe_dict())}")
+
+    @cli.command()
+    @click.pass_context
+    def status(ctx):
+        """Check health of all configured servers."""
+        config = ctx.obj["config"]
+        cid = str(uuid.uuid4())[:8]
+
+        servers = config.servers or ["web-01", "web-02", "db-01", "cache-01"]
+
+        logger.info(f"Starting health check", extra={
+            "correlation_id": cid, "operation": "health_check",
+        })
+
+        results = execute_concurrent(check_server, servers, config, cid)
+        print_results(results, "Health Check", cid)
+
+        failed = [r for r in results if not r.success]
+        sys.exit(1 if failed else 0)
+
+    @cli.command()
+    @click.argument("image")
+    @click.option("--servers", "-s", multiple=True, help="Target servers.")
+    @click.pass_context
+    def deploy(ctx, image, servers):
+        """Deploy an image to servers."""
+        config = ctx.obj["config"]
+        cid = str(uuid.uuid4())[:8]
+
+        target_servers = list(servers) or config.servers or ["web-01", "web-02"]
+
+        logger.info(f"Starting deployment: {image}", extra={
+            "correlation_id": cid, "operation": "deploy",
+        })
+
+        results = execute_concurrent(
+            deploy_to_server, target_servers, config, cid, image=image,
+        )
+        print_results(results, f"Deploy {image}", cid)
+
+        failed = [r for r in results if not r.success]
+        sys.exit(1 if failed else 0)
+
+    @cli.command("show-config")
+    @click.pass_context
+    def show_config(ctx):
+        """Show current configuration (secrets redacted)."""
+        config = ctx.obj["config"]
+        print(json.dumps(config.to_safe_dict(), indent=2))
+
+    @cli.command()
+    def health(ctx=None):
+        """Health check for this tool itself."""
+        checks = {
+            "python": sys.version.split()[0],
+            "hostname": socket.gethostname(),
+            "click": "available" if HAS_CLICK else "missing",
+            "requests": "available" if HAS_REQUESTS else "missing",
+        }
+        print(json.dumps({"status": "ok", "checks": checks}, indent=2))
+
+
+# ============================================================
+# Non-Click fallback
+# ============================================================
+
+def main_fallback():
+    """Simple entry point when Click is not installed."""
+    config = load_config()
+    setup_logging(level=config.log_level)
+
+    cid = str(uuid.uuid4())[:8]
+    servers = config.servers or ["web-01", "web-02", "db-01"]
+
+    print("Running health check (install 'click' for full CLI)...\n")
+    results = execute_concurrent(check_server, servers, config, cid)
+    print_results(results, "Health Check", cid)
+
+
+# ============================================================
+# Entry Point
+# ============================================================
+
+def main():
+    if HAS_CLICK:
+        cli()
+    else:
+        main_fallback()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Configuration hierarchy: defaults < config file < environment variables < CLI arguments
+- Use Pydantic or dataclass validation to fail fast on invalid configuration at startup
+- Never put secrets in code or version control — load them from environment variables, `.env` files, or vault services
+- Redact secrets in log output by checking key names for patterns like "password", "secret", "token"
+- Idempotent operations are safe to run multiple times — use the check-before-act and desired-state patterns
+- Use `ThreadPoolExecutor` for concurrent I/O operations (checking multiple servers, deploying in parallel)
+- `asyncio` with `aiohttp` is better for very high concurrency (hundreds of concurrent connections)
+- Retry transient failures with exponential backoff — the `tenacity` library handles this elegantly
+- Structured logging (JSON) makes logs parseable by aggregation tools (ELK, Datadog, CloudWatch)
+- Correlation IDs link related log entries across a multi-step operation
+- Package tools with `pyproject.toml` and entry points for clean `pip install` and system-wide commands
+- Run through the production checklist before any automation tool goes live
+
+## Congratulations!
+
+You have completed the **Python Automation** module! You now have the skills to:
+
+- Write Python scripts for real DevOps automation tasks
+- Work with files, APIs, cloud services, and infrastructure tools
+- Control Docker and Kubernetes programmatically
+- Build professional CLI tools with Click
+- Test your automation with pytest and mocking
+- Monitor systems and send alerts when things go wrong
+- Apply production patterns: configuration, secrets, idempotency, concurrency, logging, and packaging
+
+These are not academic skills — they are the exact patterns used by DevOps engineers at companies of every size. Your scripts are no longer scripts. They are production tools. You are ready for the next step in your DevOps journey.

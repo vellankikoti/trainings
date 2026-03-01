@@ -1,0 +1,87 @@
+version: "3.8"
+
+# =============================================================================
+# Docker Fundamentals Lab — Docker-in-Docker Environment
+# =============================================================================
+# This lab provides a Docker-in-Docker (DinD) workspace so students can
+# practice core Docker skills: running containers, building images, volumes,
+# networking, and docker compose — all inside an isolated environment.
+#
+# Usage:
+#   docker compose up -d
+#   docker exec -it docker-fundamentals-lab bash
+#
+# Services:
+#   lab  — Docker CLI workspace (Alpine + Docker CLI + compose plugin)
+#   dind — Docker-in-Docker daemon (privileged)
+#
+# The lab container talks to the DinD daemon via DOCKER_HOST. All docker
+# commands executed inside the lab container run against the DinD engine.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # DinD — Docker-in-Docker Daemon
+  # ---------------------------------------------------------------------------
+  # Runs the Docker daemon in a privileged container. The lab container
+  # connects to this daemon over TCP on port 2376 (TLS disabled for
+  # simplicity in a lab setting).
+  # ---------------------------------------------------------------------------
+  dind:
+    image: docker:27-dind
+    container_name: docker-fundamentals-dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    networks:
+      - docker-lab
+    volumes:
+      - dind-storage:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Lab — Student Workspace
+  # ---------------------------------------------------------------------------
+  # An Alpine-based container with the Docker CLI and docker compose plugin
+  # pre-installed. DOCKER_HOST points to the DinD daemon so all docker
+  # commands work transparently. The /workspace directory persists work.
+  # ---------------------------------------------------------------------------
+  lab:
+    image: docker:27-cli
+    container_name: docker-fundamentals-lab
+    command: >
+      sh -c "
+        apk add --no-cache bash curl jq vim >/dev/null 2>&1 &&
+        mkdir -p /workspace &&
+        echo '========================================' &&
+        echo '  Docker Fundamentals Lab Ready.' &&
+        echo '  Docker CLI and compose are available.' &&
+        echo '  Run: docker info' &&
+        echo '========================================' &&
+        /bin/bash
+      "
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    environment:
+      - DOCKER_HOST=tcp://docker-fundamentals-dind:2375
+      - TERM=xterm-256color
+    depends_on:
+      dind:
+        condition: service_healthy
+    networks:
+      - docker-lab
+    volumes:
+      - workspace:/workspace
+
+networks:
+  docker-lab:
+    driver: bridge
+
+volumes:
+  dind-storage:
+  workspace:

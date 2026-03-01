@@ -1,0 +1,940 @@
+---
+title: "VPNs and Tunnels"
+description: "Secure connections across untrusted networks. Understand VPNs, SSH tunnels, and the tunneling protocols that enable remote work and site-to-site connectivity."
+order: 11
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 10-load-balancers-proxies
+objectives:
+  - Understand VPN types and use cases
+  - Create SSH tunnels for secure access
+  - Know common VPN protocols (OpenVPN, WireGuard, IPSec)
+  - Use tunneling for DevOps workflows
+tags:
+  - networking
+  - vpn
+  - tunnels
+  - ssh
+  - security
+---
+
+<Callout type="story" title="The Story">
+Your production database is in a private subnet with no public IP. You need to connect your local database client to debug an issue. SSH tunneling creates a secure encrypted channel from your laptop to the database through a bastion host. It's like a secret tunnel through the firewall — and every DevOps engineer uses it daily.
+</Callout>
+
+## What Is Tunneling?
+
+Tunneling is the process of encapsulating one network protocol inside another. Think of it as putting a letter inside another letter — the outer envelope gets you through the postal system, while the inner envelope carries your real message to its final destination.
+
+```
+Without tunnel:
+  Laptop ──── [BLOCKED by firewall] ──── Private Database
+
+With tunnel:
+  Laptop ═══ [Encrypted Tunnel via SSH] ═══ Bastion ──── Private Database
+              ↑ Passes through firewall
+              ↑ Looks like normal SSH traffic
+```
+
+Tunnels solve a fundamental DevOps problem: how do you securely access resources that are intentionally hidden from the public internet?
+
+## SSH Tunnels
+
+SSH tunnels are the most practical tunneling tool in a DevOps engineer's toolkit. They come in three flavors: local port forwarding, remote port forwarding, and dynamic SOCKS proxy.
+
+### Local Port Forwarding (`-L`)
+
+Local port forwarding maps a port on your local machine to a destination through the SSH server. This is the most common tunnel type — use it to access a remote service as if it were running locally.
+
+```bash
+# Syntax: ssh -L local_port:destination_host:destination_port user@ssh_server
+
+# Access a remote PostgreSQL database on your local port 5432
+ssh -L 5432:db.internal:5432 user@bastion.example.com
+
+# Now connect to the database locally:
+# psql -h localhost -p 5432 -U myuser mydb
+
+# Access a remote web dashboard on local port 8080
+ssh -L 8080:internal-dashboard:3000 user@bastion.example.com
+# Open http://localhost:8080 in your browser
+
+# Access multiple services through one tunnel
+ssh -L 5432:db.internal:5432 \
+    -L 6379:redis.internal:6379 \
+    -L 8080:dashboard.internal:3000 \
+    user@bastion.example.com
+```
+
+<Callout type="tip" title="Background Tunnels">
+Add `-f -N` to run the tunnel in the background without opening an interactive shell. `-f` forks to background, `-N` means no remote command execution.
+
+```bash
+ssh -f -N -L 5432:db.internal:5432 user@bastion.example.com
+# The tunnel runs in the background — your terminal is free
+```
+</Callout>
+
+### Remote Port Forwarding (`-R`)
+
+Remote port forwarding exposes a local service to the remote network. This is the reverse of local forwarding — it lets people on the remote side access something running on your machine.
+
+```bash
+# Syntax: ssh -R remote_port:local_host:local_port user@ssh_server
+
+# Expose your local dev server (port 3000) on the remote server's port 8080
+ssh -R 8080:localhost:3000 user@remote-server.example.com
+# Anyone on the remote network can now access remote-server:8080
+# and reach your local dev server
+
+# Expose a local API for testing
+ssh -R 9090:localhost:9090 user@staging.example.com
+# Staging environment can now call your local API at localhost:9090
+```
+
+<Callout type="warning" title="Security Note">
+Remote port forwarding can expose local services to remote networks. The SSH server must have `GatewayPorts yes` in its `sshd_config` for non-localhost bindings. Be careful about what you expose — only use this in controlled environments.
+</Callout>
+
+### Dynamic SOCKS Proxy (`-D`)
+
+A dynamic SOCKS proxy turns SSH into a general-purpose proxy. Instead of forwarding specific ports, it creates a proxy that can route any traffic through the SSH server.
+
+```bash
+# Syntax: ssh -D local_port user@ssh_server
+
+# Create a SOCKS proxy on port 1080
+ssh -D 1080 user@bastion.example.com
+
+# Configure your browser or application to use SOCKS5 proxy:
+#   Host: localhost
+#   Port: 1080
+
+# Use curl through the SOCKS proxy
+curl --socks5 localhost:1080 http://internal-service.private:8080
+
+# Use with any SOCKS-aware application
+# All DNS resolution happens on the remote side
+```
+
+This is useful when you need to access many internal services without setting up individual port forwards for each one.
+
+### SSH Tunnel Summary
+
+```
+Local (-L):    Your machine listens, traffic goes TO remote destination
+               You → [tunnel] → SSH server → destination
+               Use case: access remote resources locally
+
+Remote (-R):   Remote machine listens, traffic comes TO your machine
+               Remote users → SSH server → [tunnel] → you
+               Use case: expose local services remotely
+
+Dynamic (-D):  SOCKS proxy, route any traffic through SSH server
+               You → [SOCKS proxy] → SSH server → anywhere
+               Use case: browse internal network from your machine
+```
+
+## Bastion Hosts and Jump Boxes
+
+A bastion host (or jump box) is a hardened server that acts as the single entry point into a private network. Instead of exposing every server to the internet, you expose only the bastion and SSH through it to reach internal hosts.
+
+### SSH ProxyJump
+
+The modern way to connect through a bastion is `ProxyJump` (`-J`):
+
+```bash
+# Connect to a private server through a bastion
+ssh -J bastion.example.com private-server.internal
+
+# Chain through multiple bastions
+ssh -J bastion1.example.com,bastion2.internal target-server.internal
+
+# With different users and ports
+ssh -J admin@bastion.example.com:2222 deploy@app-server.internal
+```
+
+### SSH Config for Bastion Access
+
+The real power comes from configuring `~/.ssh/config` so you never have to type these long commands:
+
+```bash
+# ~/.ssh/config
+
+# Bastion host — the gateway to internal servers
+Host bastion
+    HostName bastion.example.com
+    User admin
+    Port 22
+    IdentityFile ~/.ssh/bastion_key
+
+# Private application server — accessed via bastion
+Host app-server
+    HostName 10.0.2.50
+    User deploy
+    ProxyJump bastion
+    IdentityFile ~/.ssh/app_key
+
+# Private database server — accessed via bastion
+Host db-server
+    HostName 10.0.3.20
+    User dbadmin
+    ProxyJump bastion
+    IdentityFile ~/.ssh/db_key
+
+# Wildcard: any host in the internal domain goes through bastion
+Host *.internal
+    ProxyJump bastion
+    User deploy
+    IdentityFile ~/.ssh/internal_key
+```
+
+Now connecting is simple:
+
+```bash
+# These all go through the bastion automatically
+ssh app-server
+ssh db-server
+ssh monitoring.internal
+
+# Tunnels also work through ProxyJump
+ssh -L 5432:localhost:5432 db-server
+# Creates a tunnel: laptop:5432 → bastion → db-server:5432
+
+# SCP and rsync also work transparently
+scp app-server:/var/log/app.log ./
+rsync -avz ./deploy/ app-server:/opt/app/
+```
+
+## VPN Types
+
+While SSH tunnels are great for individual connections, VPNs provide network-level connectivity — making your machine part of a remote network.
+
+### Remote Access VPN
+
+Connects individual users to a corporate network. This is what you use when working from home:
+
+```
+Home laptop ════ [VPN Tunnel over Internet] ════ Corporate Network
+                                                   ├── Internal apps
+                                                   ├── Databases
+                                                   └── File servers
+
+Your laptop gets an IP on the corporate network (e.g., 10.0.0.50)
+and can access resources as if you were in the office.
+```
+
+### Site-to-Site VPN
+
+Connects two entire networks together. Used for connecting offices, data centers, or cloud VPCs:
+
+```
+Office Network (10.1.0.0/16) ════ [VPN Tunnel] ════ AWS VPC (10.2.0.0/16)
+
+All machines in the office can reach all machines in the VPC,
+and vice versa — without individual VPN clients.
+```
+
+## VPN Protocols
+
+### OpenVPN
+
+The established standard. Uses SSL/TLS for encryption and runs on a single TCP or UDP port:
+
+```bash
+# OpenVPN client configuration example
+# client.ovpn
+client
+dev tun
+proto udp
+remote vpn.example.com 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca ca.crt
+cert client.crt
+key client.key
+cipher AES-256-GCM
+verb 3
+
+# Connect using OpenVPN
+sudo openvpn --config client.ovpn
+```
+
+- Mature and well-audited
+- Runs in userspace (no kernel module needed)
+- Can traverse firewalls using TCP port 443
+- Slower than WireGuard due to userspace overhead
+
+### WireGuard — Modern and Fast
+
+WireGuard is the modern VPN protocol. It is built into the Linux kernel, uses state-of-the-art cryptography, and has a codebase of roughly 4,000 lines (compared to OpenVPN's 100,000+):
+
+```bash
+# Install WireGuard
+sudo apt install wireguard
+
+# Generate key pair
+wg genkey | tee privatekey | wg pubkey > publickey
+
+# Server configuration: /etc/wireguard/wg0.conf
+[Interface]
+Address = 10.0.0.1/24
+ListenPort = 51820
+PrivateKey = <server_private_key>
+
+# Allow forwarding
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+
+[Peer]
+PublicKey = <client_public_key>
+AllowedIPs = 10.0.0.2/32
+
+# Client configuration: /etc/wireguard/wg0.conf
+[Interface]
+Address = 10.0.0.2/24
+PrivateKey = <client_private_key>
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = <server_public_key>
+Endpoint = vpn.example.com:51820
+AllowedIPs = 0.0.0.0/0        # Route all traffic through VPN
+PersistentKeepalive = 25
+
+# Manage WireGuard
+sudo wg-quick up wg0
+sudo wg-quick down wg0
+sudo wg show                   # Show connection status
+```
+
+<Callout type="tip" title="Why WireGuard Is Winning">
+WireGuard advantages over OpenVPN:
+- **Faster**: Runs in kernel space, uses modern crypto (ChaCha20, Curve25519)
+- **Simpler**: Configuration fits in a few lines
+- **Less attack surface**: 4,000 lines of code vs 100,000+
+- **Roaming**: Seamlessly handles IP changes (great for mobile)
+- **Built-in**: Part of the Linux kernel since 5.6
+</Callout>
+
+### IPSec
+
+IPSec operates at the network layer and is the standard for site-to-site VPNs, especially in enterprise and cloud environments:
+
+```
+IPSec modes:
+  Transport mode: Encrypts only the payload (host-to-host)
+  Tunnel mode: Encrypts the entire packet (network-to-network)
+
+IPSec components:
+  IKE (Internet Key Exchange): Negotiates keys
+  ESP (Encapsulating Security Payload): Encrypts data
+  AH (Authentication Header): Authenticates (no encryption)
+
+Common in: AWS VPN, Azure VPN Gateway, corporate site-to-site
+```
+
+### SSL VPN
+
+SSL VPNs run over HTTPS (port 443) and work through most firewalls. They are often browser-based or use lightweight clients:
+
+```
+SSL VPN advantages:
+  - Works through restrictive firewalls (uses HTTPS)
+  - No special client needed (browser-based options)
+  - Granular access control (specific apps vs full network)
+  - Common products: Cisco AnyConnect, Palo Alto GlobalProtect
+```
+
+## Tunnel Use Cases for DevOps
+
+### Accessing Private Databases
+
+```bash
+# Tunnel to a private RDS instance through a bastion
+ssh -f -N -L 5432:mydb.abc123.us-east-1.rds.amazonaws.com:5432 \
+    ec2-user@bastion.example.com
+
+# Now connect with psql locally
+psql -h localhost -p 5432 -U myuser production_db
+```
+
+### Accessing Private APIs
+
+```bash
+# Tunnel to an internal microservice
+ssh -f -N -L 8080:api.internal.service:8080 user@bastion.example.com
+
+# Test the API locally
+curl http://localhost:8080/health
+curl http://localhost:8080/api/v1/users
+```
+
+### Accessing Internal Dashboards
+
+```bash
+# Tunnel to Grafana running in a private subnet
+ssh -f -N -L 3000:grafana.internal:3000 user@bastion.example.com
+
+# Open http://localhost:3000 in your browser
+
+# Tunnel to multiple dashboards
+ssh -f -N \
+    -L 3000:grafana.internal:3000 \
+    -L 9090:prometheus.internal:9090 \
+    -L 5601:kibana.internal:5601 \
+    user@bastion.example.com
+```
+
+### Accessing Kubernetes Clusters
+
+```bash
+# Tunnel to a private Kubernetes API server
+ssh -f -N -L 6443:k8s-api.internal:6443 user@bastion.example.com
+
+# Configure kubectl to use the tunnel
+kubectl --server=https://localhost:6443 get pods
+
+# Or use kubectl's built-in proxy
+kubectl port-forward svc/my-service 8080:80
+```
+
+## Split Tunneling vs Full Tunneling
+
+```
+Full tunneling:
+  ALL traffic goes through the VPN
+  ├── Corporate traffic → VPN → corporate network
+  ├── Internet traffic → VPN → corporate network → internet
+  └── Pros: All traffic encrypted, central control
+      Cons: Slower internet, bandwidth bottleneck
+
+Split tunneling:
+  Only specific traffic goes through the VPN
+  ├── Corporate traffic (10.0.0.0/8) → VPN → corporate network
+  ├── Internet traffic → direct to internet
+  └── Pros: Faster internet, less bandwidth on VPN
+      Cons: Internet traffic not protected by corporate firewall
+```
+
+```bash
+# WireGuard split tunneling example
+[Peer]
+PublicKey = <server_public_key>
+Endpoint = vpn.example.com:51820
+# Full tunnel — route everything through VPN:
+# AllowedIPs = 0.0.0.0/0
+# Split tunnel — only route corporate traffic through VPN:
+AllowedIPs = 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+```
+
+## VPN vs Zero Trust
+
+Traditional VPNs follow a "castle and moat" model — once you are inside the VPN, you can access everything. Zero trust flips this model.
+
+```
+Traditional VPN:
+  User → [VPN] → Inside network → Access everything
+  "Trust the network boundary"
+
+Zero Trust:
+  User → [Identity verification] → Access only specific resource
+  "Never trust, always verify"
+
+Zero trust principles:
+  - Every request is authenticated and authorized
+  - No implicit trust based on network location
+  - Least-privilege access to specific resources
+  - Continuous verification (not just at login)
+
+Tools: Google BeyondCorp, Cloudflare Access, Tailscale, Zscaler
+```
+
+<Callout type="tip" title="Tailscale: Zero Trust Meets WireGuard">
+Tailscale builds a zero-trust mesh network using WireGuard underneath. Every device gets a stable IP, connections are peer-to-peer when possible, and access is controlled by identity — not network location. It is increasingly popular in DevOps for replacing traditional VPN infrastructure.
+</Callout>
+
+<Exercise number={1} title="SSH Tunnel Mastery">
+
+Practice creating local and remote port forwards using SSH:
+
+```bash
+# === Part 1: Local Port Forwarding ===
+
+# Start a simple HTTP server to simulate a remote service
+python3 -m http.server 9999 &
+SERVER_PID=$!
+echo "Started test server on port 9999 (PID: $SERVER_PID)"
+
+# Create a local port forward from port 8888 to localhost:9999
+# (In a real scenario, the destination would be a remote host)
+ssh -f -N -L 8888:localhost:9999 localhost 2>/dev/null || \
+    echo "Note: SSH to localhost may not be available in this environment"
+
+# Test: verify the tunnel works
+echo ""
+echo "--- Testing local port forward ---"
+curl -s http://localhost:9999 | head -5 && echo "Direct connection works"
+
+# === Part 2: Set up a tunnel configuration file ===
+echo ""
+echo "--- Creating SSH tunnel config ---"
+cat > /tmp/tunnel-config.sh << 'EOF'
+#!/bin/bash
+# Reusable tunnel definitions
+
+# Define tunnels: name|local_port|remote_host|remote_port
+TUNNELS=(
+    "database|5432|db.internal|5432"
+    "redis|6379|redis.internal|6379"
+    "grafana|3000|grafana.internal|3000"
+    "kibana|5601|kibana.internal|5601"
+)
+
+BASTION="user@bastion.example.com"
+
+# Display available tunnels
+echo "Available tunnels:"
+for tunnel in "${TUNNELS[@]}"; do
+    IFS='|' read -r name lport rhost rport <<< "$tunnel"
+    echo "  $name: localhost:$lport -> $rhost:$rport"
+done
+
+# Generate SSH command for all tunnels
+echo ""
+echo "SSH command to open all tunnels:"
+CMD="ssh -f -N"
+for tunnel in "${TUNNELS[@]}"; do
+    IFS='|' read -r name lport rhost rport <<< "$tunnel"
+    CMD="$CMD -L $lport:$rhost:$rport"
+done
+CMD="$CMD $BASTION"
+echo "  $CMD"
+EOF
+chmod +x /tmp/tunnel-config.sh
+bash /tmp/tunnel-config.sh
+
+# Cleanup
+kill $SERVER_PID 2>/dev/null
+echo ""
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Bastion Host">
+
+Configure SSH ProxyJump through a bastion to reach a private server:
+
+```bash
+# === Create a complete SSH config for bastion access ===
+echo "--- Building SSH bastion configuration ---"
+
+# Create a sample SSH config
+cat > /tmp/ssh_config_example << 'EOF'
+# ==============================================
+# SSH Config for Multi-Environment Bastion Access
+# ==============================================
+
+# --- Shared defaults ---
+Host *
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    AddKeysToAgent yes
+    IdentitiesOnly yes
+
+# --- Production Bastion ---
+Host prod-bastion
+    HostName bastion.prod.example.com
+    User ops
+    Port 22
+    IdentityFile ~/.ssh/prod_bastion_key
+
+# --- Production servers via bastion ---
+Host prod-app-*
+    ProxyJump prod-bastion
+    User deploy
+    IdentityFile ~/.ssh/prod_app_key
+
+Host prod-app-1
+    HostName 10.0.1.10
+
+Host prod-app-2
+    HostName 10.0.1.11
+
+Host prod-db
+    HostName 10.0.2.20
+    User dbadmin
+    ProxyJump prod-bastion
+    IdentityFile ~/.ssh/prod_db_key
+    LocalForward 5432 localhost:5432
+
+# --- Staging Bastion ---
+Host staging-bastion
+    HostName bastion.staging.example.com
+    User ops
+    Port 2222
+    IdentityFile ~/.ssh/staging_bastion_key
+
+# --- Staging servers via bastion ---
+Host staging-*
+    ProxyJump staging-bastion
+    User deploy
+    IdentityFile ~/.ssh/staging_key
+
+Host staging-app
+    HostName 172.16.1.10
+
+Host staging-db
+    HostName 172.16.2.20
+    LocalForward 5433 localhost:5432
+
+# --- Development jump host ---
+Host dev-jump
+    HostName dev-bastion.example.com
+    User developer
+    IdentityFile ~/.ssh/dev_key
+    DynamicForward 1080
+
+Host dev-*
+    ProxyJump dev-jump
+    User developer
+
+Host dev-api
+    HostName 192.168.10.5
+
+Host dev-frontend
+    HostName 192.168.10.6
+EOF
+
+echo "Generated SSH config:"
+echo ""
+cat /tmp/ssh_config_example
+
+# === Demonstrate what each config enables ===
+echo ""
+echo "=========================================="
+echo "  What this config enables:"
+echo "=========================================="
+echo ""
+echo "Simple commands that handle complex routing:"
+echo "  ssh prod-app-1          # Laptop -> prod-bastion -> 10.0.1.10"
+echo "  ssh prod-db             # Auto-creates tunnel for PostgreSQL"
+echo "  ssh staging-app         # Laptop -> staging-bastion:2222 -> 172.16.1.10"
+echo "  ssh dev-api             # Goes through dev-jump with SOCKS proxy"
+echo ""
+echo "File transfers work transparently:"
+echo "  scp prod-app-1:/var/log/app.log ./"
+echo "  rsync -avz ./build/ staging-app:/opt/app/"
+echo ""
+echo "Tunnels compose with ProxyJump:"
+echo "  ssh -L 3000:grafana:3000 prod-bastion"
+echo "  ssh -L 9090:prometheus:9090 staging-bastion"
+
+# === Verify config syntax ===
+echo ""
+echo "--- Validating SSH config syntax ---"
+if ssh -G -F /tmp/ssh_config_example prod-app-1 > /dev/null 2>&1; then
+    echo "Config syntax: VALID"
+else
+    echo "Config syntax check: ssh -G not available or config references missing keys (expected)"
+fi
+
+echo ""
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<MiniProject title="Tunnel Manager">
+
+Build a script that manages SSH tunnels — start, stop, list active tunnels, and auto-reconnect:
+
+```bash
+cat > ~/tunnel-manager.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# ============================================
+# Tunnel Manager
+# Manage SSH tunnels: start, stop, list, auto-reconnect
+# ============================================
+
+TUNNEL_DIR="${HOME}/.tunnels"
+TUNNEL_CONFIG="${TUNNEL_DIR}/tunnels.conf"
+PID_DIR="${TUNNEL_DIR}/pids"
+
+# --- Initialize ---
+init() {
+    mkdir -p "$TUNNEL_DIR" "$PID_DIR"
+
+    if [ ! -f "$TUNNEL_CONFIG" ]; then
+        cat > "$TUNNEL_CONFIG" << 'EOF'
+# Tunnel configuration file
+# Format: name|bastion|local_port|remote_host|remote_port|type
+# type: L (local forward), R (remote forward), D (dynamic/SOCKS)
+#
+# Examples:
+prod-db|user@bastion.prod.example.com|5432|db.internal|5432|L
+prod-redis|user@bastion.prod.example.com|6379|redis.internal|6379|L
+staging-db|user@bastion.staging.example.com|5433|db.internal|5432|L
+grafana|user@bastion.prod.example.com|3000|grafana.internal|3000|L
+prometheus|user@bastion.prod.example.com|9090|prometheus.internal|9090|L
+socks-proxy|user@bastion.prod.example.com|1080|||D
+EOF
+        echo "Created default config at $TUNNEL_CONFIG"
+    fi
+}
+
+# --- Parse tunnel config ---
+get_tunnel() {
+    local name="$1"
+    grep "^${name}|" "$TUNNEL_CONFIG" 2>/dev/null || return 1
+}
+
+# --- Build SSH command for a tunnel ---
+build_ssh_cmd() {
+    local name="$1"
+    local config
+    config=$(get_tunnel "$name") || { echo "Tunnel '$name' not found in config"; return 1; }
+
+    IFS='|' read -r t_name t_bastion t_lport t_rhost t_rport t_type <<< "$config"
+
+    local cmd="ssh -f -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes"
+
+    case "$t_type" in
+        L) cmd="$cmd -L ${t_lport}:${t_rhost}:${t_rport}" ;;
+        R) cmd="$cmd -R ${t_rport}:${t_rhost}:${t_lport}" ;;
+        D) cmd="$cmd -D ${t_lport}" ;;
+        *) echo "Unknown tunnel type: $t_type"; return 1 ;;
+    esac
+
+    cmd="$cmd $t_bastion"
+    echo "$cmd"
+}
+
+# --- Start a tunnel ---
+start_tunnel() {
+    local name="$1"
+    local pidfile="${PID_DIR}/${name}.pid"
+
+    # Check if already running
+    if [ -f "$pidfile" ]; then
+        local pid
+        pid=$(cat "$pidfile")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "  [SKIP] $name is already running (PID: $pid)"
+            return 0
+        else
+            rm -f "$pidfile"
+        fi
+    fi
+
+    local config
+    config=$(get_tunnel "$name") || { echo "  [ERROR] Tunnel '$name' not found"; return 1; }
+    IFS='|' read -r t_name t_bastion t_lport t_rhost t_rport t_type <<< "$config"
+
+    # Check if port is already in use
+    if ss -tlnp 2>/dev/null | grep -q ":${t_lport} " 2>/dev/null; then
+        echo "  [ERROR] Port $t_lport is already in use"
+        return 1
+    fi
+
+    local ssh_cmd
+    ssh_cmd=$(build_ssh_cmd "$name") || return 1
+
+    echo "  [START] $name — localhost:$t_lport"
+    echo "          Command: $ssh_cmd"
+
+    # In a real environment, this would execute the SSH command:
+    # eval "$ssh_cmd"
+    # SSH_PID=$!
+    # echo "$SSH_PID" > "$pidfile"
+
+    # For demonstration, we simulate it:
+    echo "$$" > "$pidfile"
+    echo "  [OK] $name started (simulated)"
+}
+
+# --- Stop a tunnel ---
+stop_tunnel() {
+    local name="$1"
+    local pidfile="${PID_DIR}/${name}.pid"
+
+    if [ ! -f "$pidfile" ]; then
+        echo "  [SKIP] $name is not running"
+        return 0
+    fi
+
+    local pid
+    pid=$(cat "$pidfile")
+
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "  [STOP] $name (PID: $pid)"
+        # In real usage: kill "$pid"
+        rm -f "$pidfile"
+        echo "  [OK] $name stopped"
+    else
+        echo "  [CLEAN] $name — stale PID file removed"
+        rm -f "$pidfile"
+    fi
+}
+
+# --- List all tunnels and their status ---
+list_tunnels() {
+    echo "============================================="
+    echo "  Tunnel Manager — Status"
+    echo "============================================="
+    echo ""
+    printf "  %-15s %-8s %-12s %-30s %s\n" "NAME" "STATUS" "LOCAL PORT" "DESTINATION" "BASTION"
+    printf "  %-15s %-8s %-12s %-30s %s\n" "----" "------" "----------" "-----------" "-------"
+
+    while IFS= read -r line; do
+        [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+
+        IFS='|' read -r t_name t_bastion t_lport t_rhost t_rport t_type <<< "$line"
+        local status="DOWN"
+        local pidfile="${PID_DIR}/${t_name}.pid"
+
+        if [ -f "$pidfile" ]; then
+            local pid
+            pid=$(cat "$pidfile")
+            if kill -0 "$pid" 2>/dev/null; then
+                status="UP"
+            else
+                status="STALE"
+            fi
+        fi
+
+        local dest
+        case "$t_type" in
+            L) dest="${t_rhost}:${t_rport}" ;;
+            R) dest="${t_rhost}:${t_rport} (reverse)" ;;
+            D) dest="SOCKS proxy" ;;
+        esac
+
+        printf "  %-15s %-8s %-12s %-30s %s\n" "$t_name" "$status" ":$t_lport" "$dest" "$t_bastion"
+    done < "$TUNNEL_CONFIG"
+    echo ""
+}
+
+# --- Start all tunnels ---
+start_all() {
+    echo "Starting all tunnels..."
+    while IFS= read -r line; do
+        [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+        IFS='|' read -r t_name _ <<< "$line"
+        start_tunnel "$t_name"
+    done < "$TUNNEL_CONFIG"
+}
+
+# --- Stop all tunnels ---
+stop_all() {
+    echo "Stopping all tunnels..."
+    while IFS= read -r line; do
+        [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+        IFS='|' read -r t_name _ <<< "$line"
+        stop_tunnel "$t_name"
+    done < "$TUNNEL_CONFIG"
+}
+
+# --- Auto-reconnect: check and restart dead tunnels ---
+reconnect() {
+    echo "Checking tunnel health..."
+    local reconnected=0
+
+    while IFS= read -r line; do
+        [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+        IFS='|' read -r t_name _ <<< "$line"
+
+        local pidfile="${PID_DIR}/${t_name}.pid"
+        if [ -f "$pidfile" ]; then
+            local pid
+            pid=$(cat "$pidfile")
+            if ! kill -0 "$pid" 2>/dev/null; then
+                echo "  [RECONNECT] $t_name — tunnel died, restarting..."
+                rm -f "$pidfile"
+                start_tunnel "$t_name"
+                reconnected=$((reconnected + 1))
+            fi
+        fi
+    done < "$TUNNEL_CONFIG"
+
+    if [ "$reconnected" -eq 0 ]; then
+        echo "  All active tunnels are healthy."
+    else
+        echo "  Reconnected $reconnected tunnel(s)."
+    fi
+}
+
+# --- Usage ---
+usage() {
+    echo "Usage: $0 {start|stop|list|reconnect|start-all|stop-all} [tunnel-name]"
+    echo ""
+    echo "Commands:"
+    echo "  start <name>   Start a specific tunnel"
+    echo "  stop <name>    Stop a specific tunnel"
+    echo "  list           List all tunnels and status"
+    echo "  start-all      Start all configured tunnels"
+    echo "  stop-all       Stop all tunnels"
+    echo "  reconnect      Check and restart any dead tunnels"
+    echo ""
+    echo "Config: $TUNNEL_CONFIG"
+}
+
+# --- Main ---
+init
+
+case "${1:-}" in
+    start)
+        [ -z "${2:-}" ] && { echo "Usage: $0 start <tunnel-name>"; exit 1; }
+        start_tunnel "$2"
+        ;;
+    stop)
+        [ -z "${2:-}" ] && { echo "Usage: $0 stop <tunnel-name>"; exit 1; }
+        stop_tunnel "$2"
+        ;;
+    list)       list_tunnels ;;
+    start-all)  start_all ;;
+    stop-all)   stop_all ;;
+    reconnect)  reconnect ;;
+    *)          usage ;;
+esac
+SCRIPT
+
+chmod +x ~/tunnel-manager.sh
+
+# Demonstrate the tunnel manager
+echo "=== Tunnel Manager Demo ==="
+echo ""
+~/tunnel-manager.sh list
+echo ""
+~/tunnel-manager.sh start prod-db
+~/tunnel-manager.sh start grafana
+echo ""
+~/tunnel-manager.sh list
+echo ""
+~/tunnel-manager.sh reconnect
+echo ""
+~/tunnel-manager.sh stop-all
+echo ""
+~/tunnel-manager.sh list
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- SSH tunnels are the daily workhorse: `-L` for local forwarding, `-R` for remote, `-D` for SOCKS proxy
+- Bastion hosts with `ProxyJump` in `~/.ssh/config` make accessing private networks seamless and secure
+- WireGuard is the modern VPN choice — fast, simple, and built into the Linux kernel
+- Split tunneling routes only corporate traffic through the VPN, keeping internet traffic direct
+- Zero trust is replacing traditional VPNs — verify every request instead of trusting the network boundary
+- Tunnel management scripts save time when you regularly connect to multiple private resources
+
+## What's Next
+
+You can now create secure tunnels to access any private resource. But what happens when things break? In **Network Troubleshooting**, you'll learn a systematic methodology for diagnosing network issues — layer by layer — using tools like ping, traceroute, tcpdump, and curl to turn "it's not working" into a precise diagnosis.

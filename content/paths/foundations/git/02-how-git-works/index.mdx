@@ -1,0 +1,330 @@
+---
+title: "How Git Works"
+description: "Understand Git's internal model — blobs, trees, commits, and refs. When you know how Git stores data, every command makes sense."
+order: 2
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 01-the-git-story
+objectives:
+  - Understand the three areas: working directory, staging, repository
+  - Know Git's object types: blob, tree, commit
+  - Understand refs, HEAD, and branches
+  - Trace how a commit is created internally
+tags:
+  - git
+  - internals
+  - objects
+  - architecture
+---
+
+<Callout type="story" title="The Story">
+You're in a code review and someone says "just rebase onto main." You freeze. You've used Git for a year but you're afraid of rebase because you don't understand what it actually does. The engineers who are confident with Git aren't smarter — they understand the mental model. Once you see how Git stores data, operations like rebase, cherry-pick, and reset become intuitive instead of scary.
+</Callout>
+
+## The Three Areas
+
+Git has three distinct areas:
+
+```
+Working Directory    →    Staging Area (Index)    →    Repository (.git/)
+(your files)              (next commit preview)        (permanent history)
+      |                          |                            |
+   git add ─────────────────────►│                            |
+                                 │       git commit ─────────►│
+   git checkout ◄────────────────┘◄──────────────────────────┘
+```
+
+| Area | What It Is | Key Commands |
+|---|---|---|
+| Working Directory | Your actual files on disk | Edit with any tool |
+| Staging Area (Index) | Preview of the next commit | `git add`, `git reset` |
+| Repository | Permanent history of commits | `git commit`, `git log` |
+
+```bash
+# See the status of all three areas
+git status
+
+# Stage changes (working → staging)
+git add file.txt
+
+# Unstage (staging → working)
+git reset file.txt
+
+# Commit (staging → repository)
+git commit -m "Description"
+```
+
+## Git's Object Model
+
+Everything in Git is stored as one of four object types:
+
+### Blob — File Content
+
+A blob stores the contents of a file (no filename, no metadata — just content):
+
+```bash
+# Create a blob manually
+echo "Hello" | git hash-object --stdin
+# ce013625030ba8dba906f756967f9e9ca394464a
+
+# Same content = same hash, always
+echo "Hello" | git hash-object --stdin
+# ce013625030ba8dba906f756967f9e9ca394464a (identical)
+```
+
+### Tree — Directory Structure
+
+A tree maps filenames to blobs (like a directory listing):
+
+```
+tree 8a3f2b...
+├── README.md     → blob abc123...
+├── src/          → tree def456...
+│   ├── app.js    → blob 789abc...
+│   └── utils.js  → blob 012def...
+└── package.json  → blob 345ghi...
+```
+
+### Commit — Snapshot in Time
+
+A commit points to a tree (the snapshot) and has metadata:
+
+```
+commit a1b2c3...
+├── tree: 8a3f2b... (the root tree)
+├── parent: 9d8e7f... (previous commit)
+├── author: Alice <alice@example.com> 1705312800
+├── committer: Alice <alice@example.com> 1705312800
+└── message: "Add user authentication"
+```
+
+### Refs — Human-Readable Pointers
+
+Branches and tags are just files containing a commit hash:
+
+```bash
+# A branch is a pointer to a commit
+cat .git/refs/heads/main
+# a1b2c3d4e5f6...
+
+# HEAD points to the current branch
+cat .git/HEAD
+# ref: refs/heads/main
+
+# Tags point to commits too
+cat .git/refs/tags/v1.0.0
+# 7a8b9c0d1e2f...
+```
+
+## How a Commit Is Created
+
+```bash
+# Step 1: You edit files (working directory changes)
+echo "new content" > file.txt
+
+# Step 2: git add creates blobs and updates the index
+git add file.txt
+# → Creates a blob object for "new content"
+# → Updates .git/index to point to the new blob
+
+# Step 3: git commit creates tree + commit objects
+git commit -m "Update file"
+# → Creates a tree object from the current index
+# → Creates a commit object pointing to that tree
+# → Updates the current branch ref to point to the new commit
+# → Moves HEAD along with the branch
+```
+
+<Exercise number={1} title="Explore Git Objects">
+
+```bash
+# Create a test repo
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Create a file and commit
+echo "Hello Git" > hello.txt
+git add hello.txt
+git commit -q -m "First commit"
+
+# Explore the objects
+echo "=== HEAD ==="
+cat .git/HEAD
+
+echo ""
+echo "=== Current Branch Ref ==="
+cat .git/refs/heads/main 2>/dev/null || cat .git/refs/heads/master
+
+echo ""
+echo "=== Commit Object ==="
+COMMIT=$(git rev-parse HEAD)
+git cat-file -t "$COMMIT"    # type
+git cat-file -p "$COMMIT"    # content
+
+echo ""
+echo "=== Tree Object ==="
+TREE=$(git cat-file -p "$COMMIT" | grep tree | awk '{print $2}')
+git cat-file -p "$TREE"
+
+echo ""
+echo "=== Blob Object ==="
+BLOB=$(git cat-file -p "$TREE" | awk '{print $3}')
+git cat-file -p "$BLOB"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+## Understanding Branches
+
+A branch is just a movable pointer to a commit. When you commit, the branch pointer moves forward:
+
+```
+Before commit:
+  main → C3 → C2 → C1
+
+After commit:
+  main → C4 → C3 → C2 → C1
+```
+
+Creating a branch is nearly instant — Git just creates a new pointer:
+
+```bash
+# Create a branch (new pointer to current commit)
+git branch feature
+
+# Before:  main → C3
+# After:   main → C3 ← feature
+
+# Switch to it
+git checkout feature
+# (or: git switch feature)
+
+# HEAD now points to feature instead of main
+```
+
+## The SHA-1 Hash
+
+Every object in Git is identified by its SHA-1 hash. This gives Git:
+
+- **Integrity**: If any bit changes, the hash changes
+- **Deduplication**: Same content = same hash = stored once
+- **Addressing**: Any object can be found by its hash
+
+```bash
+# Short form (7 chars is usually unique)
+git log --oneline
+# a3f2b1c Fix payment timeout
+
+# Full form (40 characters)
+git log --format="%H"
+# a3f2b1c4e5d6f7a8b9c0d1e2f3a4b5c6d7e8f9a0
+```
+
+<Exercise number={2} title="Branch Mechanics">
+
+```bash
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Create initial commit
+echo "v1" > file.txt
+git add file.txt && git commit -q -m "Version 1"
+
+# Create and switch to a branch
+git branch feature
+git checkout feature
+
+# Make a change on feature
+echo "v2-feature" > file.txt
+git add file.txt && git commit -q -m "Feature change"
+
+# Switch back to main
+git checkout main 2>/dev/null || git checkout master
+
+# main still has v1
+echo "Main has: $(cat file.txt)"
+
+# Feature has v2
+git checkout feature
+echo "Feature has: $(cat file.txt)"
+
+# View the branch divergence
+git log --all --oneline --graph
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Git Object Explorer">
+
+```bash
+cat > ~/git-explorer.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Explore Git objects in any repository
+
+REPO="${1:-.}"
+
+if [ ! -d "$REPO/.git" ]; then
+    echo "Error: $REPO is not a git repository"
+    exit 1
+fi
+
+cd "$REPO"
+
+echo "=== Git Object Explorer ==="
+echo "Repository: $(pwd)"
+echo ""
+
+echo "--- References ---"
+echo "  HEAD: $(cat .git/HEAD)"
+for ref in .git/refs/heads/*; do
+    [ -f "$ref" ] && echo "  $(basename "$ref"): $(cat "$ref")"
+done 2>/dev/null
+
+echo ""
+echo "--- Recent Commits ---"
+git log --oneline -5
+
+echo ""
+echo "--- Object Count ---"
+BLOB_COUNT=$(git rev-list --objects --all | wc -l)
+echo "  Total objects: $BLOB_COUNT"
+
+echo ""
+echo "--- Latest Commit Breakdown ---"
+COMMIT=$(git rev-parse HEAD)
+echo "  Commit: $COMMIT"
+echo "  Tree:   $(git cat-file -p "$COMMIT" | grep tree | awk '{print $2}')"
+echo "  Parent: $(git cat-file -p "$COMMIT" | grep parent | awk '{print $2}' || echo 'none (root)')"
+
+TREE=$(git cat-file -p "$COMMIT" | grep tree | awk '{print $2}')
+echo ""
+echo "--- Files in Latest Commit ---"
+git cat-file -p "$TREE" | while read mode type hash name; do
+    echo "  $type $name ($hash)"
+done
+SCRIPT
+
+chmod +x ~/git-explorer.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Git has three areas: working directory, staging area, and repository
+- Four object types: blob (content), tree (directory), commit (snapshot), tag
+- Branches are just movable pointers to commits — creating them is instant
+- HEAD points to your current branch (or directly to a commit in "detached" state)
+- Every object has a SHA-1 hash — same content always produces the same hash
+- Understanding this model makes merge, rebase, reset, and cherry-pick intuitive
+
+## What's Next
+
+Now that you understand the model, let's set up your Git environment properly. In **Installation and Setup**, you'll configure Git for professional use — SSH keys, aliases, editor, and the settings that make daily Git work smooth.

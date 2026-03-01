@@ -1,0 +1,114 @@
+name: docker-advanced
+title: "Docker Advanced Lab"
+description: "Master advanced Docker techniques including BuildKit optimization, private registries, advanced networking, compose profiles, container debugging, performance benchmarking, Swarm orchestration, and production deployment patterns."
+module: "docker-advanced"
+difficulty: intermediate-to-advanced
+duration: 90
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: da-lab-1
+    title: "BuildKit cache optimization"
+    description: "Create /workspace/buildkit-app/Dockerfile for a Node.js application that demonstrates BuildKit cache mount optimization. The Dockerfile should use 'node:20-alpine' as the base, copy package.json first (for layer caching), use RUN --mount=type=cache,target=/root/.npm to cache npm downloads, then copy the rest of the source. Create a minimal package.json with at least one dependency (e.g., express). Build the image as 'buildkit-app:v1' with BuildKit enabled. Rebuild it a second time and confirm the second build is faster due to caching."
+    hints:
+      - "Enable BuildKit: export DOCKER_BUILDKIT=1 (already set in this lab)"
+      - "Use: RUN --mount=type=cache,target=/root/.npm npm install"
+      - "Create package.json: echo '{\"dependencies\":{\"express\":\"^4.18.0\"}}' > package.json"
+      - "Build twice: docker build -t buildkit-app:v1 . && docker build -t buildkit-app:v1 ."
+    validation:
+      type: command
+      command: "test -f /workspace/buildkit-app/Dockerfile && grep -q 'mount=type=cache' /workspace/buildkit-app/Dockerfile && docker image inspect buildkit-app:v1 >/dev/null 2>&1 && echo 'pass'"
+      expected_output: "pass"
+
+  - id: da-lab-2
+    title: "Set up a private Docker registry"
+    description: "Run a private Docker registry as a container named 'local-registry' on port 5000. Tag the 'buildkit-app:v1' image from the previous exercise as 'localhost:5000/buildkit-app:v1' and push it to your private registry. Then remove the local image and pull it back from the registry to verify the round-trip works."
+    hints:
+      - "Start registry: docker run -d --name local-registry -p 5000:5000 registry:2"
+      - "Tag: docker tag buildkit-app:v1 localhost:5000/buildkit-app:v1"
+      - "Push: docker push localhost:5000/buildkit-app:v1"
+      - "Verify: docker rmi localhost:5000/buildkit-app:v1 && docker pull localhost:5000/buildkit-app:v1"
+    validation:
+      type: command
+      command: "docker ps --filter name=local-registry -q | grep -q . && curl -s http://localhost:5000/v2/_catalog 2>/dev/null | grep -q 'buildkit-app' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: da-lab-3
+    title: "Advanced Docker networking"
+    description: "Create three custom networks: 'frontend' (bridge), 'backend' (bridge), and 'db-net' (bridge, internal — no external access). Run an nginx container named 'proxy' attached to 'frontend'. Run a Python app container named 'app' attached to both 'frontend' and 'backend'. Run an Alpine container named 'database' attached to both 'backend' and 'db-net'. Verify that 'proxy' can reach 'app' but NOT 'database', and that 'app' can reach both 'proxy' and 'database'."
+    hints:
+      - "Create internal network: docker network create --internal db-net"
+      - "Attach container to multiple networks: docker network connect backend app"
+      - "Test connectivity: docker exec proxy ping -c1 -W2 app"
+      - "Verify isolation: docker exec proxy ping -c1 -W2 database should fail"
+    validation:
+      type: command
+      command: "docker network inspect frontend >/dev/null 2>&1 && docker network inspect backend >/dev/null 2>&1 && docker network inspect db-net >/dev/null 2>&1 && docker ps --filter name=proxy -q | grep -q . && docker ps --filter name=app -q | grep -q . && docker ps --filter name=database -q | grep -q . && docker exec app ping -c1 -W2 proxy >/dev/null 2>&1 && docker exec app ping -c1 -W2 database >/dev/null 2>&1 && echo 'pass'"
+      expected_output: "pass"
+
+  - id: da-lab-4
+    title: "Docker Compose profiles"
+    description: "Create /workspace/profiles-app/docker-compose.yml that uses Compose profiles to define different service sets. Define: (1) a 'web' service (nginx) with no profile (always starts), (2) a 'debug' service (alpine with curl/bash) with profile 'debug', (3) a 'monitoring' service (alpine running a simple metrics loop) with profile 'monitoring', (4) a 'test' service (alpine running echo 'tests-passed') with profile 'test'. Start the default services, then start with the 'debug' profile, and verify both 'web' and 'debug' are running."
+    hints:
+      - "Add profiles to a service: profiles: [\"debug\"]"
+      - "Start with profile: docker compose --profile debug up -d"
+      - "Default services (no profile) always start"
+      - "Multiple profiles: docker compose --profile debug --profile monitoring up -d"
+    validation:
+      type: command
+      command: "test -f /workspace/profiles-app/docker-compose.yml && cd /workspace/profiles-app && docker compose --profile debug up -d 2>/dev/null && docker compose ps --format '{{.Name}}' 2>/dev/null | grep -c . | awk '$1 >= 2 {print \"pass\"}'"
+      expected_output: "pass"
+
+  - id: da-lab-5
+    title: "Debug a failing container"
+    description: "Create /workspace/debug-app/Dockerfile that deliberately has an issue: build a Python app from 'python:3.11-alpine' that tries to import a module that is not installed (e.g., 'flask') and crashes on startup. Build it as 'debug-app:v1'. Then debug the issue using 'docker logs', 'docker inspect', and by overriding the entrypoint with 'docker run --entrypoint sh'. Fix the Dockerfile by adding the missing pip install, rebuild as 'debug-app:v2', and verify it starts successfully."
+    hints:
+      - "Create a broken app: RUN echo 'import flask; print(\"app-debug-fixed\")' > app.py"
+      - "Check logs: docker logs <container_id>"
+      - "Debug interactively: docker run --rm -it --entrypoint sh debug-app:v1"
+      - "Fix: add 'RUN pip install flask' before the CMD"
+    validation:
+      type: command
+      command: "test -f /workspace/debug-app/Dockerfile && docker image inspect debug-app:v2 >/dev/null 2>&1 && docker run --rm debug-app:v2 2>/dev/null | grep -q 'app-debug-fixed' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: da-lab-6
+    title: "Image analysis and security scanning"
+    description: "Use 'dive' to analyze the 'debug-app:v2' image from the previous exercise and save the layer analysis summary to /workspace/dive-report.txt. Then use 'trivy' to scan the 'python:3.11-alpine' base image for vulnerabilities and save the results to /workspace/trivy-report.txt. Finally, create /workspace/security-summary.txt containing the total number of vulnerabilities found (extract the count from the trivy report)."
+    hints:
+      - "Dive analysis: dive debug-app:v2 --ci > /workspace/dive-report.txt 2>&1 || true"
+      - "Trivy scan: trivy image --severity HIGH,CRITICAL python:3.11-alpine > /workspace/trivy-report.txt 2>&1"
+      - "Count vulnerabilities: grep -c 'HIGH\\|CRITICAL' /workspace/trivy-report.txt"
+    validation:
+      type: command
+      command: "test -s /workspace/dive-report.txt && test -s /workspace/trivy-report.txt && test -s /workspace/security-summary.txt && echo 'pass'"
+      expected_output: "pass"
+
+  - id: da-lab-7
+    title: "Docker Swarm setup and service deployment"
+    description: "Initialize a Docker Swarm on the current node. Create a service named 'web-cluster' using 'nginx:alpine' with 3 replicas and publish port 8080:80. Verify all 3 replicas are running. Then update the service to use 'nginx:1.25-alpine' with a rolling update strategy (update 1 at a time with 10s delay). Verify the update completes successfully."
+    hints:
+      - "Initialize swarm: docker swarm init"
+      - "Create service: docker service create --name web-cluster --replicas 3 -p 8080:80 nginx:alpine"
+      - "Check replicas: docker service ps web-cluster"
+      - "Rolling update: docker service update --image nginx:1.25-alpine --update-parallelism 1 --update-delay 10s web-cluster"
+    validation:
+      type: command
+      command: "docker info 2>/dev/null | grep -q 'Swarm: active' && docker service ls --filter name=web-cluster --format '{{.Replicas}}' 2>/dev/null | grep -q '3/3' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: da-lab-8
+    title: "Production deployment patterns"
+    description: "Create /workspace/production/docker-compose.yml implementing production best practices: (1) a reverse proxy (nginx) with custom nginx.conf for load balancing, health checks, and rate limiting headers, (2) two app replicas behind the proxy (use python:3.11-alpine running a simple HTTP server), (3) a Redis cache with persistence (appendonly yes), (4) proper resource limits on all services, (5) a restart policy, (6) named volumes for all persistent data, and (7) a .env file for configuration. Create a matching /workspace/production/nginx.conf that load-balances between the app instances. Start the stack and verify all services are healthy."
+    hints:
+      - "Use deploy.resources.limits for CPU and memory constraints"
+      - "Nginx upstream block: upstream app { server app-1:8000; server app-2:8000; }"
+      - "Redis persistence: command: redis-server --appendonly yes"
+      - "Use .env file: env_file: - .env"
+    validation:
+      type: command
+      command: "test -f /workspace/production/docker-compose.yml && test -f /workspace/production/nginx.conf && cd /workspace/production && docker compose ps --format '{{.Name}}' 2>/dev/null | wc -l | awk '$1 >= 4 {print \"pass\"}'"
+      expected_output: "pass"

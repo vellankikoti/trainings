@@ -1,0 +1,1039 @@
+---
+title: "Advanced Docker Networking"
+description: "Go beyond basic bridge networks to master overlay networks for multi-host communication, macvlan and ipvlan for direct network access, custom DNS resolution, IPv6 configuration, and network traffic control with iptables policies."
+order: 3
+xpReward: 50
+estimatedMinutes: 60
+prerequisites:
+  - "docker-fundamentals/09-docker-networking"
+  - "foundations/networking/03-ip-addressing-subnets"
+objectives:
+  - Configure overlay networks for multi-host container communication
+  - Implement macvlan and ipvlan networks for containers that need direct LAN access
+  - Design custom bridge networks with specific subnets, gateways, and IP ranges
+  - Configure Docker's embedded DNS server and understand service discovery
+  - Enable IPv6 networking in Docker containers
+  - Apply iptables rules for network traffic shaping and security policies
+tags:
+  - docker
+  - networking
+  - overlay
+  - macvlan
+  - dns
+  - advanced
+---
+
+<Callout type="story" title="The Story">
+Your company is migrating a legacy application to containers. The application consists of 12 microservices that currently run across 5 physical servers, communicating over the corporate LAN. The database team insists their containerized PostgreSQL must have a real IP address on the corporate network because their monitoring tools scan IP ranges. The security team requires network isolation between the payment service and the logging service. The operations team needs containers on different Docker hosts to communicate as if they were on the same network. And one ancient service only speaks IPv6. You spend a week deep in Docker networking, configuring overlay networks, macvlan interfaces, custom subnets, and iptables rules. By the end, every requirement is met, every team is satisfied, and you have learned that Docker networking is far more powerful than the default bridge everyone starts with.
+</Callout>
+
+## Docker Network Architecture Deep Dive
+
+Before diving into advanced networks, understand how Docker networking works at the Linux kernel level.
+
+```
+Docker Networking Stack:
+┌─────────────────────────────────────────────────────────┐
+│                    Container                            │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  Application (listens on 0.0.0.0:8080)          │   │
+│  └──────────────────┬───────────────────────────────┘   │
+│                     │                                   │
+│  ┌──────────────────┴───────────────────────────────┐   │
+│  │  eth0 (veth pair endpoint) - 172.17.0.2/16       │   │
+│  └──────────────────┬───────────────────────────────┘   │
+│                     │ Network Namespace                  │
+└─────────────────────┼───────────────────────────────────┘
+                      │ veth pair
+┌─────────────────────┼───────────────────────────────────┐
+│  Host               │                                   │
+│  ┌──────────────────┴───────────────────────────────┐   │
+│  │  vethXXXX (veth pair host endpoint)              │   │
+│  └──────────────────┬───────────────────────────────┘   │
+│                     │                                   │
+│  ┌──────────────────┴───────────────────────────────┐   │
+│  │  docker0 bridge (172.17.0.1/16)                  │   │
+│  │  ┌────────┐ ┌────────┐ ┌────────┐               │   │
+│  │  │veth001 │ │veth002 │ │veth003 │               │   │
+│  │  └────────┘ └────────┘ └────────┘               │   │
+│  └──────────────────┬───────────────────────────────┘   │
+│                     │ iptables NAT / FORWARD            │
+│  ┌──────────────────┴───────────────────────────────┐   │
+│  │  eth0 (host physical interface) - 192.168.1.10   │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Network Drivers Overview
+
+```bash
+# List available network drivers
+docker network ls
+# NETWORK ID     NAME      DRIVER    SCOPE
+# a1b2c3d4e5f6   bridge    bridge    local
+# f6e5d4c3b2a1   host      host      local
+# 1a2b3c4d5e6f   none      null      local
+```
+
+```
+┌──────────────┬──────────────────────────────────────────┬───────────┐
+│ Driver       │ Description                              │ Scope     │
+├──────────────┼──────────────────────────────────────────┼───────────┤
+│ bridge       │ Software bridge on single host.           │ local     │
+│              │ Default for standalone containers.        │           │
+├──────────────┼──────────────────────────────────────────┼───────────┤
+│ overlay      │ Multi-host networking via VXLAN.          │ swarm     │
+│              │ Spans across Docker nodes.                │           │
+├──────────────┼──────────────────────────────────────────┼───────────┤
+│ macvlan      │ Assigns MAC address to container.         │ local     │
+│              │ Container appears as physical device.     │           │
+├──────────────┼──────────────────────────────────────────┼───────────┤
+│ ipvlan       │ Shares host MAC, unique IP.               │ local     │
+│              │ Less overhead than macvlan.                │           │
+├──────────────┼──────────────────────────────────────────┼───────────┤
+│ host         │ Container shares host network stack.      │ local     │
+│              │ No isolation, maximum performance.        │           │
+├──────────────┼──────────────────────────────────────────┼───────────┤
+│ none         │ No networking.                            │ local     │
+│              │ Container is completely isolated.         │           │
+└──────────────┴──────────────────────────────────────────┴───────────┘
+```
+
+## Custom Bridge Network Configuration
+
+The default `docker0` bridge is limited. Custom bridges provide DNS resolution, isolation, and fine-grained control.
+
+### Creating Custom Bridge Networks
+
+```bash
+# Create a custom bridge with specific subnet and gateway
+docker network create \
+  --driver bridge \
+  --subnet 10.10.0.0/24 \
+  --gateway 10.10.0.1 \
+  --ip-range 10.10.0.128/25 \
+  --opt com.docker.network.bridge.name=br-backend \
+  --opt com.docker.network.bridge.enable_icc=true \
+  --opt com.docker.network.bridge.enable_ip_masquerade=true \
+  --opt com.docker.network.driver.mtu=1500 \
+  --label environment=production \
+  backend-network
+
+# Inspect the network
+docker network inspect backend-network
+```
+
+```
+Network Configuration Breakdown:
+
+--subnet 10.10.0.0/24
+  Available IPs: 10.10.0.1 - 10.10.0.254 (254 hosts)
+
+--gateway 10.10.0.1
+  Bridge interface IP (containers use this as default route)
+
+--ip-range 10.10.0.128/25
+  DHCP range: 10.10.0.128 - 10.10.0.254 (126 hosts)
+  10.10.0.2 - 10.10.0.127 available for static assignment
+
+Network layout:
+┌──────────────────────────────────────────┐
+│  Subnet: 10.10.0.0/24                   │
+│                                          │
+│  Gateway:  10.10.0.1  (bridge)           │
+│                                          │
+│  Static:   10.10.0.2  - 10.10.0.127     │
+│  DHCP:     10.10.0.128 - 10.10.0.254    │
+│                                          │
+│  Container A: 10.10.0.128 (auto)         │
+│  Container B: 10.10.0.10  (static)       │
+│  Container C: 10.10.0.129 (auto)         │
+└──────────────────────────────────────────┘
+```
+
+### Static IP Assignment
+
+```bash
+# Run a container with a specific IP address
+docker run -d \
+  --name postgres \
+  --network backend-network \
+  --ip 10.10.0.10 \
+  -e POSTGRES_PASSWORD=secret \
+  postgres:16
+
+# Verify the IP
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' postgres
+# 10.10.0.10
+```
+
+### Multi-Network Containers
+
+```bash
+# Create two isolated networks
+docker network create --subnet 10.20.0.0/24 frontend-network
+docker network create --subnet 10.30.0.0/24 backend-network
+
+# API gateway connects to both networks
+docker run -d --name api-gateway --network frontend-network nginx:alpine
+docker network connect backend-network api-gateway
+
+# Frontend can only reach API gateway
+docker run -d --name web-app --network frontend-network node:18-alpine
+
+# Database only on backend network
+docker run -d --name postgres --network backend-network postgres:16
+```
+
+```
+Multi-Network Isolation:
+
+frontend-network (10.20.0.0/24)
+┌─────────────────────────────────┐
+│  web-app ◄──────► api-gateway   │
+│  10.20.0.2        10.20.0.3     │
+└─────────────────────┼───────────┘
+                      │ (connected to both)
+backend-network (10.30.0.0/24)
+┌─────────────────────┼───────────┐
+│  api-gateway ◄──────► postgres  │
+│  10.30.0.2           10.30.0.3  │
+└─────────────────────────────────┘
+
+web-app CANNOT reach postgres (different networks)
+api-gateway CAN reach both (connected to both)
+```
+
+<Callout type="info" title="Custom Bridge vs Default Bridge">
+The default `docker0` bridge does NOT provide automatic DNS resolution between containers. You must use `--link` (deprecated) or refer to containers by IP. Custom bridges provide automatic DNS: containers can reach each other by name. Always use custom bridges in production.
+</Callout>
+
+## Overlay Networks: Multi-Host Communication
+
+Overlay networks use VXLAN tunneling to create a virtual network that spans multiple Docker hosts. This is the foundation of Docker Swarm networking.
+
+### How Overlay Networks Work
+
+```
+Overlay Network (VXLAN):
+
+Host A (192.168.1.10)                Host B (192.168.1.11)
+┌──────────────────────┐            ┌──────────────────────┐
+│                      │            │                      │
+│  ┌────────────────┐  │            │  ┌────────────────┐  │
+│  │  Container 1   │  │            │  │  Container 2   │  │
+│  │  10.0.1.2      │  │            │  │  10.0.1.3      │  │
+│  └───────┬────────┘  │            │  └───────┬────────┘  │
+│          │           │            │          │           │
+│  ┌───────┴────────┐  │            │  ┌───────┴────────┐  │
+│  │ Overlay Bridge │  │            │  │ Overlay Bridge │  │
+│  │  (br0)         │  │            │  │  (br0)         │  │
+│  └───────┬────────┘  │            │  └───────┬────────┘  │
+│          │           │            │          │           │
+│  ┌───────┴────────┐  │            │  ┌───────┴────────┐  │
+│  │ VXLAN Tunnel   │◄─┼────────────┼─►│ VXLAN Tunnel   │  │
+│  │ Endpoint       │  │  UDP 4789  │  │ Endpoint       │  │
+│  └───────┬────────┘  │            │  └───────┬────────┘  │
+│          │           │            │          │           │
+│  ┌───────┴────────┐  │            │  ┌───────┴────────┐  │
+│  │  eth0          │  │            │  │  eth0          │  │
+│  │  192.168.1.10  │──┼────────────┼──│  192.168.1.11  │  │
+│  └────────────────┘  │  Physical  │  └────────────────┘  │
+│                      │  Network   │                      │
+└──────────────────────┘            └──────────────────────┘
+
+Container 1 talks to Container 2 as if they are on the same LAN,
+even though they are on different physical hosts.
+```
+
+### Setting Up Overlay Networks
+
+```bash
+# Initialize Docker Swarm (required for overlay networks)
+docker swarm init --advertise-addr 192.168.1.10
+# Swarm initialized: current node (abc123) is now a manager.
+# To add a worker to this swarm, run the following command:
+#   docker swarm join --token SWMTKN-1-xxx 192.168.1.10:2377
+
+# On Host B: Join the swarm
+docker swarm join --token SWMTKN-1-xxx 192.168.1.10:2377
+# This node joined a swarm as a worker.
+
+# Create an overlay network
+docker network create \
+  --driver overlay \
+  --subnet 10.0.1.0/24 \
+  --gateway 10.0.1.1 \
+  --opt encrypted \
+  --attachable \
+  my-overlay
+
+# --encrypted: Encrypts VXLAN traffic with IPsec (AES-GCM)
+# --attachable: Allows standalone containers (not just services) to attach
+```
+
+### Deploying Services on Overlay Networks
+
+```bash
+# Deploy a service that spans multiple nodes
+docker service create \
+  --name web \
+  --network my-overlay \
+  --replicas 3 \
+  --publish published=80,target=8080 \
+  nginx:alpine
+
+# Deploy a backend service on the same overlay
+docker service create \
+  --name api \
+  --network my-overlay \
+  --replicas 2 \
+  mycompany/api:latest
+
+# The 'web' containers can reach 'api' containers by service name
+# Even across different physical hosts
+# curl http://api:8080 works from any 'web' container
+```
+
+### Overlay Network with Standalone Containers
+
+```bash
+# With --attachable flag, regular containers can use overlay networks
+docker run -d \
+  --name debug-tools \
+  --network my-overlay \
+  nicolaka/netshoot
+
+# From debug-tools, you can reach services on other hosts
+docker exec debug-tools ping api
+# PING api (10.0.1.5) 56(84) bytes of data.
+# 64 bytes from 10.0.1.5: icmp_seq=1 ttl=64 time=0.892 ms
+```
+
+<Callout type="warning" title="Overlay Network Performance">
+VXLAN encapsulation adds approximately 50 bytes of overhead per packet, reducing the effective MTU. The default VXLAN MTU is 1450 (Ethernet 1500 minus 50 bytes overhead). For performance-sensitive workloads, consider using jumbo frames on the physical network (MTU 9000) so the VXLAN MTU can be 8950. Encryption (`--opt encrypted`) adds further CPU overhead for IPsec.
+</Callout>
+
+## Macvlan Networks: Direct Network Access
+
+Macvlan gives containers their own MAC address, making them appear as physical devices on the network. This is essential when containers need to be directly accessible on the LAN.
+
+### How Macvlan Works
+
+```
+Macvlan Network:
+
+Physical Network: 192.168.1.0/24
+┌─────────────────────────────────────────────┐
+│                                             │
+│  Router/Switch                              │
+│  192.168.1.1                                │
+│        │                                    │
+│  ┌─────┴──────────────────────────────────┐ │
+│  │     Physical LAN (Ethernet)            │ │
+│  │  ┌───────┐  ┌───────┐  ┌───────┐      │ │
+│  │  │ Host  │  │Cont A │  │Cont B │      │ │
+│  │  │.1.10  │  │.1.100 │  │.1.101 │      │ │
+│  │  │MAC:   │  │MAC:   │  │MAC:   │      │ │
+│  │  │aa:bb  │  │cc:dd  │  │ee:ff  │      │ │
+│  │  └───────┘  └───────┘  └───────┘      │ │
+│  │                                        │ │
+│  │  All devices are on the SAME L2 segment│ │
+│  │  Containers have their own MAC address │ │
+│  └────────────────────────────────────────┘ │
+│                                             │
+└─────────────────────────────────────────────┘
+
+Key insight: The containers are indistinguishable from physical
+devices on the network. DHCP, ARP, broadcasts all work normally.
+```
+
+### Creating a Macvlan Network
+
+```bash
+# Identify your host's physical interface
+ip link show
+# 2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 ...
+
+# Create a macvlan network using the host's physical interface
+docker network create \
+  --driver macvlan \
+  --subnet 192.168.1.0/24 \
+  --gateway 192.168.1.1 \
+  --ip-range 192.168.1.100/28 \
+  -o parent=eth0 \
+  macvlan-net
+
+# ip-range 192.168.1.100/28 gives us 192.168.1.100 - 192.168.1.115
+# Make sure these IPs are not used by DHCP or other devices!
+```
+
+```bash
+# Run containers on the macvlan network
+docker run -d \
+  --name db-server \
+  --network macvlan-net \
+  --ip 192.168.1.100 \
+  postgres:16
+
+docker run -d \
+  --name monitoring-target \
+  --network macvlan-net \
+  --ip 192.168.1.101 \
+  mycompany/app:latest
+
+# These containers are directly reachable from the physical network
+# Any device on 192.168.1.0/24 can ping 192.168.1.100
+```
+
+### Macvlan Modes
+
+```bash
+# Bridge mode (default) - containers can communicate with each other
+# and with external network
+docker network create \
+  --driver macvlan \
+  -o parent=eth0 \
+  -o macvlan_mode=bridge \
+  --subnet 192.168.1.0/24 \
+  macvlan-bridge
+
+# 802.1q trunk mode - uses VLAN tagging
+# Creates sub-interface eth0.100 for VLAN 100
+docker network create \
+  --driver macvlan \
+  -o parent=eth0.100 \
+  --subnet 10.100.0.0/24 \
+  --gateway 10.100.0.1 \
+  macvlan-vlan100
+
+docker network create \
+  --driver macvlan \
+  -o parent=eth0.200 \
+  --subnet 10.200.0.0/24 \
+  --gateway 10.200.0.1 \
+  macvlan-vlan200
+```
+
+<Callout type="tip" title="Macvlan Host Communication">
+By default, the Docker host CANNOT communicate with macvlan containers because Linux blocks traffic between a physical interface and its macvlan sub-interfaces. To fix this, create a macvlan interface on the host: `ip link add macvlan-host link eth0 type macvlan mode bridge && ip addr add 192.168.1.200/32 dev macvlan-host && ip link set macvlan-host up && ip route add 192.168.1.100/32 dev macvlan-host`. This creates a host-side macvlan interface that can communicate with the container macvlan interfaces.
+</Callout>
+
+## IPvlan Networks
+
+IPvlan is similar to macvlan but shares the parent interface's MAC address. This is useful when the network switch enforces MAC address restrictions (port security).
+
+```bash
+# IPvlan L2 mode (similar to macvlan but shared MAC)
+docker network create \
+  --driver ipvlan \
+  --subnet 192.168.1.0/24 \
+  --gateway 192.168.1.1 \
+  -o parent=eth0 \
+  -o ipvlan_mode=l2 \
+  ipvlan-l2
+
+# IPvlan L3 mode (containers on different subnets, routed)
+docker network create \
+  --driver ipvlan \
+  --subnet 10.10.0.0/24 \
+  -o parent=eth0 \
+  -o ipvlan_mode=l3 \
+  ipvlan-l3
+```
+
+```
+Macvlan vs IPvlan:
+
+Macvlan:                          IPvlan:
+┌─────────────┐                   ┌─────────────┐
+│ Container A │                   │ Container A │
+│ MAC: aa:bb  │                   │ MAC: (host) │ ◄── Shares host MAC
+│ IP: .1.100  │                   │ IP: .1.100  │
+└─────────────┘                   └─────────────┘
+
+┌─────────────┐                   ┌─────────────┐
+│ Container B │                   │ Container B │
+│ MAC: cc:dd  │                   │ MAC: (host) │ ◄── Same MAC as host
+│ IP: .1.101  │                   │ IP: .1.101  │
+└─────────────┘                   └─────────────┘
+
+Unique MAC per container          All share host MAC
+Works with most switches          Works with port-security
+Higher overhead (more MACs)       Lower overhead
+Can trigger MAC flooding          Switch-friendly
+```
+
+## DNS Round-Robin and Load Balancing
+
+Docker provides built-in DNS-based service discovery and load balancing.
+
+### Embedded DNS Server Deep Dive
+
+```bash
+# Every container on a custom network gets Docker's embedded DNS
+docker run -d --name web1 --network backend-network nginx:alpine
+docker run -d --name web2 --network backend-network nginx:alpine
+docker run -d --name web3 --network backend-network nginx:alpine
+
+# DNS resolution from any container on the same network
+docker run --rm --network backend-network alpine nslookup web1
+# Server:    127.0.0.11        <-- Docker's embedded DNS
+# Address:   127.0.0.11:53
+#
+# Name:      web1
+# Address:   10.10.0.128
+
+# The DNS server at 127.0.0.11 is injected into every container
+docker exec web1 cat /etc/resolv.conf
+# nameserver 127.0.0.11
+# options ndots:0
+```
+
+```
+Docker Embedded DNS Architecture:
+
+┌──────────────────────────────────────────┐
+│ Container                                │
+│                                          │
+│ Application → DNS query "web2"           │
+│                  │                       │
+│           ┌──────┴──────┐                │
+│           │ 127.0.0.11  │ (iptables      │
+│           │ DNS stub    │  redirects      │
+│           └──────┬──────┘  to Docker)     │
+│                  │                        │
+└──────────────────┼────────────────────────┘
+                   │
+           ┌───────┴───────┐
+           │  Docker DNS   │
+           │  Server       │
+           │               │
+           │  Container    │
+           │  name → IP    │
+           │  mapping      │
+           │               │
+           │  Falls through│──► External DNS
+           │  to host DNS  │   (8.8.8.8 etc)
+           │  for external │
+           │  names        │
+           └───────────────┘
+```
+
+### DNS Round-Robin (--network-alias)
+
+```bash
+# Create containers with the same network alias
+docker run -d --name web1 --network backend-network \
+  --network-alias web-pool nginx:alpine
+
+docker run -d --name web2 --network backend-network \
+  --network-alias web-pool nginx:alpine
+
+docker run -d --name web3 --network backend-network \
+  --network-alias web-pool nginx:alpine
+
+# DNS resolves the alias to all matching containers
+docker run --rm --network backend-network alpine nslookup web-pool
+# Server:    127.0.0.11
+# Address:   127.0.0.11:53
+#
+# Name:      web-pool
+# Address:   10.10.0.128
+# Address:   10.10.0.129
+# Address:   10.10.0.130
+
+# Each resolution returns IPs in different order (round-robin)
+docker run --rm --network backend-network alpine \
+  sh -c "for i in 1 2 3 4 5; do nslookup web-pool | grep Address | tail -1; done"
+# Address: 10.10.0.129
+# Address: 10.10.0.130
+# Address: 10.10.0.128
+# Address: 10.10.0.129
+# Address: 10.10.0.130
+```
+
+<Callout type="warning" title="DNS Round-Robin Limitations">
+DNS round-robin is NOT true load balancing. It has significant limitations: DNS caching means clients may keep hitting the same backend, there is no health checking (DNS returns IPs of stopped containers until they are removed), and load distribution depends on the client's DNS resolution behavior. For production load balancing, use a reverse proxy (Nginx, HAProxy, Traefik) or Docker Swarm's built-in VIP-based load balancing.
+</Callout>
+
+### Custom DNS Configuration
+
+```bash
+# Set custom DNS servers for a container
+docker run -d \
+  --name app \
+  --network backend-network \
+  --dns 8.8.8.8 \
+  --dns 8.8.4.4 \
+  --dns-search mycompany.com \
+  --dns-opt timeout:2 \
+  --dns-opt attempts:3 \
+  nginx:alpine
+
+# Configure DNS at the daemon level (all containers)
+# /etc/docker/daemon.json
+{
+  "dns": ["10.0.0.2", "8.8.8.8"],
+  "dns-search": ["mycompany.com", "internal.mycompany.com"],
+  "dns-opts": ["timeout:2", "ndots:5"]
+}
+```
+
+## IPv6 in Docker Containers
+
+Docker supports IPv6, but it requires explicit configuration.
+
+### Enabling IPv6
+
+```json
+// /etc/docker/daemon.json
+{
+  "ipv6": true,
+  "fixed-cidr-v6": "fd00:dead:beef::/48",
+  "ip6tables": true,
+  "experimental": true
+}
+```
+
+```bash
+# Restart Docker daemon
+sudo systemctl restart docker
+
+# Create a dual-stack network (IPv4 + IPv6)
+docker network create \
+  --ipv6 \
+  --subnet 10.10.0.0/24 \
+  --subnet fd00:dead:beef:1::/64 \
+  --gateway 10.10.0.1 \
+  --gateway fd00:dead:beef:1::1 \
+  dual-stack-net
+
+# Run a container on the dual-stack network
+docker run -d \
+  --name web \
+  --network dual-stack-net \
+  nginx:alpine
+
+# Verify IPv6 connectivity
+docker exec web ip -6 addr show eth0
+# inet6 fd00:dead:beef:1::2/64 scope global
+# inet6 fe80::42:acff:fe12:3/64 scope link
+
+docker exec web ping6 -c 3 fd00:dead:beef:1::1
+# PING fd00:dead:beef:1::1 (fd00:dead:beef:1::1): 56 data bytes
+# 64 bytes from fd00:dead:beef:1::1: seq=0 ttl=64 time=0.098 ms
+```
+
+### IPv6 NAT and Port Publishing
+
+```bash
+# Enable IPv6 NAT (similar to IPv4 masquerade)
+# Docker handles this automatically with ip6tables: true
+
+# Port publishing works for both IPv4 and IPv6
+docker run -d \
+  --name web \
+  --network dual-stack-net \
+  -p 80:80 \
+  nginx:alpine
+
+# Accessible via both protocols:
+# curl http://[::1]:80     (IPv6 loopback)
+# curl http://127.0.0.1:80 (IPv4 loopback)
+```
+
+<Callout type="info" title="IPv6 Address Planning">
+Use ULA (Unique Local Address) ranges `fd00::/8` for private container networks. These are the IPv6 equivalent of RFC 1918 private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16). For internet-facing containers, you can assign from your organization's public IPv6 prefix.
+</Callout>
+
+## Network Plugins and CNI
+
+Docker supports third-party network plugins that implement the Container Network Interface (CNI) or Docker's libnetwork plugin API.
+
+### Popular Network Plugins
+
+```
+┌───────────────┬──────────────────────────────────────────┐
+│ Plugin        │ Features                                 │
+├───────────────┼──────────────────────────────────────────┤
+│ Calico        │ BGP routing, network policies, L3 only   │
+│               │ High performance, Kubernetes-native       │
+├───────────────┼──────────────────────────────────────────┤
+│ Weave Net     │ Mesh overlay, encryption, multicast       │
+│               │ Simple setup, DNS service discovery       │
+├───────────────┼──────────────────────────────────────────┤
+│ Flannel       │ Simple overlay (VXLAN, host-gw)           │
+│               │ Lightweight, Kubernetes-focused           │
+├───────────────┼──────────────────────────────────────────┤
+│ Cilium        │ eBPF-based, L7 policies, observability    │
+│               │ High performance, Hubble monitoring       │
+├───────────────┼──────────────────────────────────────────┤
+│ Contiv        │ Policy-driven, VXLAN/VLAN/BGP             │
+│               │ Cisco ACI integration                     │
+└───────────────┴──────────────────────────────────────────┘
+```
+
+### Installing a Network Plugin (Weave Example)
+
+```bash
+# Install Weave Net
+docker plugin install weaveworks/net-plugin:latest_release \
+  --grant-all-permissions \
+  --disable
+docker plugin set weaveworks/net-plugin:latest_release \
+  WEAVE_PASSWORD=mysecretpassword
+docker plugin enable weaveworks/net-plugin:latest_release
+
+# Create a network using the plugin
+docker network create \
+  --driver weaveworks/net-plugin:latest_release \
+  --subnet 10.32.0.0/12 \
+  weave-net
+
+# Run containers on the Weave network
+docker run -d --name app --network weave-net myapp:latest
+```
+
+## Traffic Shaping and Network Policies with iptables
+
+Docker uses iptables for NAT and filtering. You can add custom rules for traffic control.
+
+### Understanding Docker's iptables Rules
+
+```bash
+# View Docker's iptables rules
+sudo iptables -L -n -v --line-numbers
+
+# Docker creates several chains:
+# DOCKER - Forward rules for published ports
+# DOCKER-ISOLATION-STAGE-1 - Network isolation between bridges
+# DOCKER-ISOLATION-STAGE-2 - Network isolation between bridges
+# DOCKER-USER - Custom user rules (processed BEFORE Docker rules)
+
+# View NAT rules (port mapping)
+sudo iptables -t nat -L -n -v
+```
+
+```
+Docker iptables Flow:
+
+Incoming packet
+      │
+      ▼
+┌──────────────┐
+│  PREROUTING  │  NAT: Port mapping (e.g., 8080 → container:80)
+│  (nat table) │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
+│   FORWARD    │
+│ (filter)     │
+│              │
+│ ┌──────────┐ │
+│ │DOCKER-   │ │  ◄── YOUR custom rules go here
+│ │USER      │ │      Processed FIRST
+│ └────┬─────┘ │
+│      │       │
+│ ┌────┴─────┐ │
+│ │DOCKER-   │ │  ◄── Network isolation
+│ │ISOLATION │ │
+│ └────┬─────┘ │
+│      │       │
+│ ┌────┴─────┐ │
+│ │DOCKER    │ │  ◄── Container forwarding
+│ └──────────┘ │
+└──────────────┘
+```
+
+### Adding Custom Network Policies
+
+```bash
+# IMPORTANT: Always use the DOCKER-USER chain for custom rules
+# Docker manages the DOCKER chain -- never modify it directly
+
+# Block all incoming traffic to a specific container IP
+sudo iptables -I DOCKER-USER -d 172.17.0.5 -j DROP
+
+# Allow only specific port to a container
+sudo iptables -I DOCKER-USER -d 172.17.0.5 -p tcp --dport 5432 -j ACCEPT
+sudo iptables -A DOCKER-USER -d 172.17.0.5 -j DROP
+
+# Block traffic between two specific containers
+sudo iptables -I DOCKER-USER \
+  -s 172.17.0.3 -d 172.17.0.5 -j DROP
+
+# Rate limit connections to a container
+sudo iptables -I DOCKER-USER \
+  -d 172.17.0.5 -p tcp --dport 80 \
+  -m connlimit --connlimit-above 100 \
+  -j REJECT
+
+# Log dropped packets for debugging
+sudo iptables -I DOCKER-USER \
+  -d 172.17.0.5 -j LOG \
+  --log-prefix "DOCKER-DROPPED: " \
+  --log-level 4
+```
+
+### Persisting iptables Rules
+
+```bash
+# Save current rules
+sudo iptables-save > /etc/iptables/rules.v4
+
+# Restore on boot (Debian/Ubuntu)
+sudo apt-get install iptables-persistent
+# Rules in /etc/iptables/rules.v4 are loaded automatically
+
+# Or create a systemd service
+cat > /etc/systemd/system/docker-firewall.service << 'EOF'
+[Unit]
+Description=Docker custom firewall rules
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iptables-restore /etc/iptables/docker-rules.v4
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable docker-firewall
+```
+
+<Callout type="warning" title="iptables and Docker Restarts">
+Docker recreates its iptables rules when the daemon restarts. Rules in the DOCKER chain are overwritten. Rules in DOCKER-USER are preserved because Docker inserts them with `-I DOCKER-USER -j RETURN` as the last rule and does not flush the chain. Always use DOCKER-USER for your custom rules.
+</Callout>
+
+### Network Bandwidth Limiting with tc
+
+```bash
+# Limit container bandwidth using Linux tc (traffic control)
+# Find the container's veth interface on the host
+CONTAINER_PID=$(docker inspect -f '{{.State.Pid}}' mycontainer)
+VETH=$(nsenter -t $CONTAINER_PID -n ip link show eth0 | head -1 | awk '{print $2}' | cut -d@ -f2 | tr -d ':')
+
+# Or find it by looking at veth interfaces
+CONTAINER_ID=$(docker inspect -f '{{.Id}}' mycontainer | cut -c1-12)
+VETH=$(ip link | grep "veth.*@" | grep -B1 "$CONTAINER_ID" | head -1 | awk '{print $2}' | cut -d@ -f1)
+
+# Limit egress bandwidth to 10 Mbps
+sudo tc qdisc add dev $VETH root tbf rate 10mbit burst 32kbit latency 400ms
+
+# Limit ingress bandwidth (using ifb)
+sudo modprobe ifb
+sudo ip link set dev ifb0 up
+sudo tc qdisc add dev $VETH ingress
+sudo tc filter add dev $VETH parent ffff: protocol ip u32 match u32 0 0 \
+  action mirred egress redirect dev ifb0
+sudo tc qdisc add dev ifb0 root tbf rate 10mbit burst 32kbit latency 400ms
+
+# Verify the limits
+sudo tc qdisc show dev $VETH
+```
+
+## Network Troubleshooting Toolkit
+
+```bash
+# Use the nicolaka/netshoot container for network debugging
+docker run -it --rm \
+  --network container:mycontainer \
+  nicolaka/netshoot
+
+# Inside netshoot, you have access to:
+# ping, traceroute, mtr, nslookup, dig, nmap, tcpdump,
+# iperf3, curl, wget, netstat, ss, ip, iftop, ethtool
+
+# Capture traffic on a container's interface
+docker run -it --rm \
+  --network container:mycontainer \
+  nicolaka/netshoot \
+  tcpdump -i eth0 -n port 80
+
+# Test connectivity between containers
+docker exec container1 ping container2
+
+# Check DNS resolution
+docker exec container1 nslookup myservice
+
+# View container's network configuration
+docker exec container1 ip addr show
+docker exec container1 ip route show
+docker exec container1 cat /etc/resolv.conf
+
+# Check for port conflicts
+docker exec container1 ss -tlnp
+```
+
+<Exercise title="Build a Multi-Host Overlay Network" difficulty="intermediate" xpReward={35} estimatedMinutes={25}
+  objectives={["Initialize a Docker Swarm cluster with multiple nodes", "Create and configure overlay networks with encryption", "Deploy services that communicate across hosts via overlay networking", "Verify cross-host connectivity and troubleshoot networking issues"]}
+  hints={["You can simulate multi-host with Docker-in-Docker or docker-machine", "Use docker swarm init on the first node and docker swarm join on others", "The --attachable flag is needed for standalone containers on overlay networks", "Use nicolaka/netshoot for network debugging"]}
+  validationCriteria={["A Docker Swarm cluster is initialized with at least 2 nodes (can be simulated)", "An encrypted overlay network is created with a custom subnet", "Services are deployed that communicate across the overlay network", "Cross-host DNS resolution works (containers resolve service names)", "Connectivity is verified with ping and curl between containers on different hosts", "Network inspection shows the correct configuration and connected containers"]}
+>
+
+Build a multi-host networking setup using Docker overlay networks.
+
+**Architecture:**
+
+```
+Host A (Manager)              Host B (Worker)
+┌─────────────────┐          ┌─────────────────┐
+│ nginx (frontend)│          │ api (backend)    │
+│ 10.0.1.2        │◄────────►│ 10.0.1.3        │
+└─────────────────┘          └─────────────────┘
+        overlay-net: 10.0.1.0/24 (encrypted)
+```
+
+**Tasks:**
+
+1. **Initialize Swarm**: Set up a Swarm cluster. If you only have one machine, use Docker-in-Docker (`docker:dind`) to simulate a second node.
+
+2. **Create Overlay Network**:
+   - Subnet: `10.0.1.0/24`
+   - Encryption enabled
+   - Attachable for standalone containers
+
+3. **Deploy Services**:
+   - `frontend` service (nginx) with 2 replicas
+   - `backend` service (a simple HTTP server) with 2 replicas
+   - Both on the overlay network
+
+4. **Verify Connectivity**:
+   - From frontend, resolve and reach backend by service name
+   - Use `netshoot` to capture and inspect VXLAN traffic
+   - Verify encryption is active on the overlay
+
+5. **Test Failover**:
+   - Stop one backend replica
+   - Verify frontend can still reach the remaining backend
+   - Watch Swarm reschedule the stopped replica
+
+</Exercise>
+
+<Exercise title="Configure Macvlan for Direct LAN Connectivity" difficulty="intermediate" xpReward={35} estimatedMinutes={20}
+  objectives={["Create a macvlan network attached to the host's physical interface", "Deploy containers with real LAN IP addresses", "Configure host-to-macvlan container communication", "Implement VLAN tagging with 802.1q trunk mode"]}
+  hints={["Use ip link show to find your physical interface name", "Reserve an IP range that does not overlap with your DHCP pool", "To communicate between host and macvlan containers, create a macvlan shim interface on the host", "For VLAN trunking, use the parent=eth0.VLANID syntax"]}
+  validationCriteria={["A macvlan network is created with a specific subnet and IP range", "Containers have IP addresses on the physical network subnet", "External devices (or the host with a shim) can ping the macvlan containers", "Containers can reach external network resources", "VLAN tagging is configured for at least one additional macvlan network", "The difference between macvlan bridge mode and 802.1q trunk mode is documented"]}
+>
+
+Set up macvlan networking so containers get real IP addresses on your local network.
+
+**Scenario:** Your monitoring system scans the 192.168.1.0/24 network and needs to discover containerized services by IP. DHCP assigns 192.168.1.50-192.168.1.200. You will use 192.168.1.220-192.168.1.235 for containers.
+
+**Tasks:**
+
+1. **Create the Macvlan Network**:
+   - Parent interface: your host's primary network interface
+   - Subnet: matching your LAN (e.g., 192.168.1.0/24)
+   - IP range: 192.168.1.220/28 (220-235)
+   - Gateway: your router's IP
+
+2. **Deploy Containers**:
+   - A PostgreSQL container at 192.168.1.220
+   - An nginx container at 192.168.1.221
+   - Both should be reachable from other LAN devices
+
+3. **Fix Host Communication**:
+   - Create a macvlan shim interface on the host
+   - Verify the host can ping macvlan containers
+   - Verify containers can ping the host
+
+4. **VLAN Setup** (if switch supports trunking):
+   - Create a macvlan network on VLAN 100 (10.100.0.0/24)
+   - Deploy a container on the VLAN
+   - Verify isolation between VLANs
+
+**Note:** If you are running in a VM or cloud instance, macvlan may not work due to hypervisor restrictions on MAC address changes. In that case, document the commands and expected behavior.
+
+</Exercise>
+
+<MiniProject title="Microservices Network Architecture" difficulty="advanced" xpReward={50} estimatedMinutes={35}
+  objectives={["Design a complete multi-tier network architecture for a microservices application", "Implement network isolation between service tiers", "Configure DNS-based service discovery and load balancing", "Apply iptables policies for security between network segments"]}
+  hints={["Use multiple custom bridge networks for tier isolation", "Connect gateway containers to multiple networks", "Use network aliases for DNS round-robin within a tier", "Use DOCKER-USER iptables chain for custom firewall rules"]}
+  validationCriteria={["At least 3 isolated network tiers are created (frontend, backend, data)", "An API gateway connects the frontend and backend networks", "No container can directly reach a tier it should not access", "DNS round-robin is configured for horizontally-scaled services", "iptables rules in DOCKER-USER enforce network policies", "A network diagram documents the full architecture", "Connectivity is verified with ping and curl from each tier", "A troubleshooting runbook covers common networking issues"]}
+>
+
+Design and implement the network architecture for a microservices application with proper isolation, service discovery, and security policies.
+
+**Application Architecture:**
+
+```
+Internet
+    │
+    ▼
+┌──────────────────── Frontend Network ────────────────────┐
+│  Load Balancer (nginx)                                   │
+│  Web App (3 replicas) ─── network-alias: web-pool        │
+└──────────┬───────────────────────────────────────────────┘
+           │
+    ┌──────┴──────┐
+    │ API Gateway │  (connected to frontend AND backend networks)
+    └──────┬──────┘
+           │
+┌──────────┴──────── Backend Network ──────────────────────┐
+│  User Service (2 replicas) ─── network-alias: user-svc   │
+│  Order Service (2 replicas) ── network-alias: order-svc  │
+│  Auth Service (1 replica)                                │
+└──────────┬───────────────────────────────────────────────┘
+           │
+    ┌──────┴──────┐
+    │ Data Proxy  │  (connected to backend AND data networks)
+    └──────┬──────┘
+           │
+┌──────────┴──────── Data Network ─────────────────────────┐
+│  PostgreSQL (primary)                                    │
+│  Redis (cache)                                           │
+│  Elasticsearch                                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Deliverables:**
+
+1. **Network Configuration Script** (`setup-networks.sh`):
+   - Creates all three networks with proper subnets
+   - No subnet overlap
+   - Appropriate MTU settings
+
+2. **Container Deployment Script** (`deploy.sh`):
+   - Deploys all containers with correct network assignments
+   - Configures network aliases for load balancing
+   - Sets static IPs for database containers
+
+3. **Network Policies** (`firewall-rules.sh`):
+   - Frontend containers cannot reach data network
+   - Backend containers cannot reach the internet directly
+   - Only the data proxy can reach database containers
+   - Rate limiting on the load balancer
+
+4. **Testing Script** (`test-connectivity.sh`):
+   - Verifies allowed connections succeed
+   - Verifies blocked connections fail
+   - Tests DNS resolution for service aliases
+   - Tests load balancing distribution
+
+5. **Documentation**:
+   - Network architecture diagram (ASCII)
+   - IP addressing plan
+   - Troubleshooting runbook
+
+</MiniProject>
+
+## Key Takeaways
+
+- Custom bridge networks provide DNS-based service discovery, configurable subnets, and proper isolation -- always use them instead of the default `docker0` bridge
+- Overlay networks use VXLAN tunneling to create virtual L2 networks spanning multiple Docker hosts, forming the basis of Docker Swarm networking
+- Macvlan gives containers their own MAC address and a real IP on the physical network, essential when external systems need to reach containers by IP
+- IPvlan shares the host's MAC address while giving containers unique IPs, useful when switch port security restricts MAC addresses
+- Docker's embedded DNS server at 127.0.0.11 handles container name resolution and falls through to the host's DNS for external names
+- Network aliases enable DNS round-robin for basic load distribution, but use a proper reverse proxy for production load balancing
+- IPv6 requires explicit daemon configuration and dual-stack network creation but is fully supported
+- Always use the DOCKER-USER iptables chain for custom firewall rules because Docker manages and recreates the DOCKER chain on restart
+
+## What's Next
+
+Now that your containers can communicate efficiently and securely, the next challenge is persistent data. In the next lesson, **Storage Drivers and Advanced Volumes**, you will learn how Docker stores container data at the filesystem level, compare storage drivers like overlay2 and ZFS, configure NFS and distributed volume plugins, and benchmark I/O performance for different storage configurations.

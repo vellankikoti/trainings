@@ -1,0 +1,107 @@
+name: linux-networking
+title: "Linux Networking Lab"
+description: "Practice networking commands with two interconnected servers. Test connectivity, DNS, ports, and HTTP between containers."
+lesson_ref: foundations/linux/17-networking-essentials
+difficulty: medium
+duration: 40
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: net-ex-1
+    title: "Check your IP address"
+    description: "On server-b, find your IP address and write it to /root/my-ip.txt."
+    hints:
+      - "Use 'ip addr show' or 'hostname -I'"
+      - "Try: hostname -I | awk '{print $1}' > /root/my-ip.txt"
+    validation:
+      type: command
+      command: "cat /root/my-ip.txt"
+      expected_output: "172.20.0.20"
+    target: server-b
+
+  - id: net-ex-2
+    title: "Ping server-a"
+    description: "From server-b, ping server-a (172.20.0.10) and confirm connectivity."
+    hints:
+      - "Use 'ping -c 3 172.20.0.10'"
+      - "You should see replies with 0% packet loss"
+    validation:
+      type: command
+      command: "ping -c 1 -W 2 172.20.0.10 >/dev/null 2>&1 && echo 'reachable'"
+      expected_output: "reachable"
+    target: server-b
+
+  - id: net-ex-3
+    title: "Check open ports on server-a"
+    description: "From server-b, check if port 80 is open on server-a."
+    hints:
+      - "Use 'nc -zv 172.20.0.10 80' or curl"
+      - "Port 80 should be open because nginx is running on server-a"
+    validation:
+      type: command
+      command: "nc -z -w2 172.20.0.10 80 && echo 'port-open'"
+      expected_output: "port-open"
+    target: server-b
+
+  - id: net-ex-4
+    title: "Fetch a web page"
+    description: "From server-b, use curl to fetch the web page from server-a and save it to /root/response.txt."
+    hints:
+      - "Use 'curl http://172.20.0.10'"
+      - "Try: curl -s http://172.20.0.10 > /root/response.txt"
+    validation:
+      type: command
+      command: "cat /root/response.txt"
+      expected_output: "Hello from Server A"
+    target: server-b
+
+  - id: net-ex-5
+    title: "DNS resolution"
+    description: "On server-b, use the 'host' command to look up google.com and save the first IP to /root/dns-result.txt."
+    hints:
+      - "Use 'host google.com' and extract the IP"
+      - "Try: host google.com | head -1 > /root/dns-result.txt"
+    validation:
+      type: command
+      command: "test -s /root/dns-result.txt && echo 'resolved'"
+      expected_output: "resolved"
+    target: server-b
+
+  - id: net-ex-6
+    title: "View routing table"
+    description: "On server-b, display the default gateway and save it to /root/gateway.txt."
+    hints:
+      - "Use 'ip route' and look for the 'default via' line"
+      - "Try: ip route | grep default | awk '{print $3}' > /root/gateway.txt"
+    validation:
+      type: command
+      command: "cat /root/gateway.txt"
+      expected_output: "172.20.0.1"
+    target: server-b
+
+  - id: net-ex-7
+    title: "List listening services on server-a"
+    description: "On server-a, list all listening TCP ports and save the output to /root/ports.txt."
+    hints:
+      - "Use 'ss -tlnp' or 'netstat -tlnp'"
+      - "You should see port 80 (nginx)"
+    validation:
+      type: command
+      command: "cat /root/ports.txt | grep ':80'"
+      expected_output: ""
+    target: server-a
+
+  - id: net-ex-8
+    title: "Add a hosts entry"
+    description: "On server-b, add '172.20.0.10 webserver' to /etc/hosts and verify you can curl http://webserver."
+    hints:
+      - "Echo the entry to /etc/hosts"
+      - "Try: echo '172.20.0.10 webserver' >> /etc/hosts && curl -s http://webserver"
+    validation:
+      type: command
+      command: "curl -s http://webserver 2>/dev/null"
+      expected_output: "Hello from Server A"
+    target: server-b

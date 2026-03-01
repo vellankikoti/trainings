@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "./Logo";
 import { MobileNav } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
+import { SearchDialog } from "./SearchDialog";
 
 const NAV_ITEMS = [
   { label: "Learning Paths", href: "/paths" },
@@ -18,7 +19,7 @@ export function Header() {
         <div className="flex items-center gap-6">
           <MobileNav />
           <Logo />
-          <nav className="hidden items-center gap-6 md:flex">
+          <nav aria-label="Main navigation" className="hidden items-center gap-6 md:flex">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.href}
@@ -31,6 +32,7 @@ export function Header() {
           </nav>
         </div>
         <div className="flex items-center gap-2">
+          <SearchDialog />
           <ThemeToggle />
           <SignedOut>
             <Button variant="ghost" asChild>

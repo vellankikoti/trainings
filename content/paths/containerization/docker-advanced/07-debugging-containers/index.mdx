@@ -1,0 +1,1504 @@
+---
+title: "Debugging Containers"
+description: "Master the art of diagnosing and fixing container problems. Learn advanced docker logs, docker exec, docker inspect, and docker diff techniques. Debug crashed containers with docker commit, use nicolaka/netshoot for network issues, and solve common problems like OOM kills, permission errors, and DNS failures."
+order: 7
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - 06-docker-in-cicd
+objectives:
+  - Diagnose why a container fails to start using error messages, exit codes, and logs
+  - Use docker logs with filtering, timestamps, and follow mode for real-time debugging
+  - Inspect container internals with docker exec, docker inspect, and docker diff
+  - Debug crashed containers by committing their state and exploring the filesystem
+  - Use nicolaka/netshoot as a sidecar for network troubleshooting
+  - Solve common container issues including OOM kills, permission denied, DNS failures, and port conflicts
+tags:
+  - docker
+  - debugging
+  - troubleshooting
+  - logs
+  - inspect
+  - netshoot
+  - oom
+  - devops
+---
+
+<Callout type="story" title="The Story">
+It is 3 AM and your monitoring system is firing alerts. The API container keeps restarting every 30 seconds. You SSH into the server, run `docker ps`, and see the container in a restart loop with status "Restarting (137)". What does exit code 137 mean? Is it an OOM kill? A signal? You run `docker logs` but the output is empty — the container crashes before writing anything. You try `docker exec` but the container is not running long enough to attach. You need a systematic debugging toolkit. Today you build one.
+</Callout>
+
+## When a Container Will Not Start
+
+The first step in debugging is understanding what the container is telling you. Docker provides exit codes, status messages, and error output that narrate exactly what went wrong.
+
+### Reading Exit Codes
+
+```bash
+# Check a container's exit code
+docker ps -a --filter "name=myapp" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+# NAMES    STATUS                      PORTS
+# myapp    Exited (1) 2 minutes ago
+
+# Get the exact exit code
+docker inspect myapp --format '{{.State.ExitCode}}'
+# 1
+
+# Get the full state information
+docker inspect myapp --format '{{json .State}}' | jq .
+# {
+#   "Status": "exited",
+#   "Running": false,
+#   "Paused": false,
+#   "Restarting": false,
+#   "OOMKilled": false,
+#   "Dead": false,
+#   "Pid": 0,
+#   "ExitCode": 1,
+#   "Error": "",
+#   "StartedAt": "2025-01-15T10:30:00Z",
+#   "FinishedAt": "2025-01-15T10:30:05Z"
+# }
+```
+
+### Common Exit Codes
+
+| Exit Code | Meaning | Common Cause |
+|-----------|---------|--------------|
+| **0** | Success | Container completed normally |
+| **1** | General error | Application error, missing file, bad config |
+| **2** | Shell misuse | Invalid command or argument in CMD/ENTRYPOINT |
+| **126** | Command not executable | Permission issue on the binary |
+| **127** | Command not found | Binary does not exist in PATH |
+| **137** | SIGKILL (128 + 9) | OOM kill or `docker kill` |
+| **139** | SIGSEGV (128 + 11) | Segmentation fault in application |
+| **143** | SIGTERM (128 + 15) | Graceful shutdown via `docker stop` |
+
+```bash
+# Demonstrate common exit codes
+
+# Exit code 127 — command not found
+docker run --rm alpine nonexistent_command
+# docker: Error response from daemon: failed to create task for container:
+#   failed to create shim task: OCI runtime create failed:
+#   runc create failed: unable to start container process:
+#   exec: "nonexistent_command": executable file not found in $PATH
+echo $?
+# 127
+
+# Exit code 126 — permission denied
+docker run --rm alpine sh -c 'echo "test" > /tmp/script.sh && /tmp/script.sh'
+# sh: /tmp/script.sh: Permission denied
+echo $?
+# 126
+
+# Exit code 137 — OOM killed
+docker run --rm --memory 10m alpine sh -c \
+  'dd if=/dev/zero of=/dev/null bs=1M count=100'
+echo $?
+# 137
+
+# Exit code 1 — application error
+docker run --rm node:20-alpine node -e "process.exit(1)"
+echo $?
+# 1
+```
+
+<Callout type="info" title="Exit Code 137 Does Not Always Mean OOM">
+Exit code 137 means the process received SIGKILL (signal 9). This can happen because of an OOM kill, but also because someone ran `docker kill`, or because the container exceeded its PID limit and the kernel killed a process. Always check `docker inspect --format '{{.State.OOMKilled}}'` to confirm whether it was an OOM event.
+</Callout>
+
+### Debugging Startup Failures
+
+```bash
+# Step 1: Check the error message
+docker run --name failing-app myapp:latest
+# Error: Cannot find module '/app/index.js'
+
+# Step 2: Check what files are actually in the image
+docker run --rm --entrypoint sh myapp:latest -c 'ls -la /app/'
+# total 8
+# drwxr-xr-x    2 root root  4096 Jan 15 10:30 .
+# drwxr-xr-x    1 root root  4096 Jan 15 10:30 ..
+# -rw-r--r--    1 root root   245 Jan 15 10:30 server.js
+# (The file is server.js, not index.js!)
+
+# Step 3: Check the CMD/ENTRYPOINT
+docker inspect myapp:latest --format '{{json .Config.Cmd}}'
+# ["node","index.js"]  <-- Wrong filename!
+
+docker inspect myapp:latest --format '{{json .Config.Entrypoint}}'
+# null
+
+# Step 4: Check the working directory
+docker inspect myapp:latest --format '{{.Config.WorkingDir}}'
+# /app
+
+# Step 5: Verify the fix works
+docker run --rm --entrypoint node myapp:latest server.js
+# Server running on port 3000  <-- Works!
+```
+
+## Advanced Docker Logs
+
+`docker logs` is your primary tool for understanding what happened inside a container. Master its options to find the information you need quickly.
+
+### Log Filtering and Formatting
+
+```bash
+# Basic log output
+docker logs myapp
+
+# Follow logs in real-time (like tail -f)
+docker logs -f myapp
+
+# Show timestamps with each log line
+docker logs -t myapp
+# 2025-01-15T10:30:00.123456789Z Server started on port 3000
+# 2025-01-15T10:30:01.234567890Z Connected to database
+# 2025-01-15T10:30:05.345678901Z GET /health 200 2ms
+
+# Show only the last N lines
+docker logs --tail 50 myapp
+
+# Show logs since a specific time
+docker logs --since "2025-01-15T10:30:00" myapp
+docker logs --since "10m" myapp   # Last 10 minutes
+docker logs --since "1h" myapp    # Last hour
+docker logs --since "2h" --until "1h" myapp  # Between 2h and 1h ago
+
+# Combine: follow with timestamps, starting from recent
+docker logs -f -t --tail 100 myapp
+
+# Separate stdout and stderr
+docker logs myapp 2>/dev/null      # Only stdout
+docker logs myapp 1>/dev/null      # Only stderr
+
+# Pipe to grep for filtering
+docker logs myapp 2>&1 | grep -i "error"
+docker logs myapp 2>&1 | grep -E "(ERROR|WARN|FATAL)"
+docker logs myapp 2>&1 | grep "GET /api" | tail -20
+```
+
+### Structured Log Parsing
+
+```bash
+# If your app logs JSON (which it should in production):
+docker logs myapp 2>&1 | jq .
+# {
+#   "level": "info",
+#   "message": "Server started",
+#   "port": 3000,
+#   "timestamp": "2025-01-15T10:30:00.000Z"
+# }
+
+# Filter JSON logs by level
+docker logs myapp 2>&1 | jq -r 'select(.level == "error")'
+
+# Extract specific fields
+docker logs myapp 2>&1 | jq -r '[.timestamp, .level, .message] | @tsv'
+# 2025-01-15T10:30:00.000Z   info    Server started
+# 2025-01-15T10:30:01.000Z   info    Database connected
+# 2025-01-15T10:30:05.000Z   error   Connection refused to redis:6379
+
+# Count errors per minute
+docker logs myapp 2>&1 | \
+  jq -r 'select(.level == "error") | .timestamp[:16]' | \
+  sort | uniq -c | sort -rn
+#   15 2025-01-15T10:35
+#    3 2025-01-15T10:34
+#    1 2025-01-15T10:30
+
+# Find slow requests (assuming response_time field)
+docker logs myapp 2>&1 | \
+  jq -r 'select(.response_time > 1000) | "\(.method) \(.path) \(.response_time)ms"'
+# GET /api/users 2340ms
+# POST /api/orders 5120ms
+```
+
+<Callout type="tip" title="Log to stdout and stderr, Never to Files">
+Docker captures everything written to the container's stdout (file descriptor 1) and stderr (file descriptor 2). If your application writes logs to a file inside the container, `docker logs` will show nothing. Configure your application to write to stdout/stderr. For applications that insist on file logging, create a symlink: `ln -sf /dev/stdout /var/log/app.log`.
+</Callout>
+
+### Log Driver Configuration
+
+```bash
+# Check which log driver a container is using
+docker inspect myapp --format '{{.HostConfig.LogConfig.Type}}'
+# json-file
+
+# Check log driver configuration
+docker inspect myapp --format '{{json .HostConfig.LogConfig}}' | jq .
+# {
+#   "Type": "json-file",
+#   "Config": {
+#     "max-size": "10m",
+#     "max-file": "3"
+#   }
+# }
+
+# Run a container with specific log configuration
+docker run -d --name myapp \
+  --log-driver json-file \
+  --log-opt max-size=10m \
+  --log-opt max-file=5 \
+  myapp:latest
+
+# WARNING: Some log drivers disable docker logs
+# These drivers DO support docker logs:
+#   json-file, local, journald
+# These drivers DO NOT support docker logs:
+#   syslog, gelf, fluentd, awslogs, splunk
+#   (logs go directly to the external system)
+
+# Find the actual log file on disk
+docker inspect myapp --format '{{.LogPath}}'
+# /var/lib/docker/containers/abc123.../abc123...-json.log
+```
+
+## Interactive Debugging with docker exec
+
+`docker exec` runs a command inside a running container. It is the most direct way to inspect a container's state.
+
+```bash
+# Open an interactive shell
+docker exec -it myapp sh
+docker exec -it myapp /bin/bash  # If bash is available
+
+# Run as a specific user
+docker exec -u root -it myapp sh
+
+# Set environment variables for the exec session
+docker exec -e DEBUG=true -it myapp sh
+
+# Set the working directory
+docker exec -w /app/config -it myapp ls -la
+
+# Common debugging commands inside a container
+docker exec myapp cat /etc/os-release           # OS info
+docker exec myapp cat /etc/resolv.conf          # DNS config
+docker exec myapp env                           # Environment vars
+docker exec myapp ps aux                        # Running processes
+docker exec myapp df -h                         # Disk usage
+docker exec myapp free -m                       # Memory usage
+docker exec myapp cat /proc/1/status            # PID 1 details
+docker exec myapp cat /proc/1/limits            # Resource limits
+docker exec myapp cat /proc/1/cgroup            # Cgroup membership
+docker exec myapp netstat -tlnp                 # Listening ports
+docker exec myapp ss -tlnp                      # Listening ports (alt)
+docker exec myapp wget -qO- http://localhost:3000/health  # Test endpoint
+```
+
+### Debugging Without a Shell
+
+Minimal images (like distroless) do not have a shell. You can still debug them:
+
+```bash
+# Option 1: Use docker inspect
+docker inspect myapp --format '{{json .NetworkSettings.Networks}}' | jq .
+docker inspect myapp --format '{{.State.Pid}}'
+
+# Option 2: Use nsenter from the host to enter the container's namespaces
+PID=$(docker inspect myapp --format '{{.State.Pid}}')
+
+# Enter the container's network namespace
+sudo nsenter -t $PID -n ip addr show
+sudo nsenter -t $PID -n ss -tlnp
+sudo nsenter -t $PID -n cat /etc/resolv.conf
+
+# Enter the container's mount namespace
+sudo nsenter -t $PID -m ls -la /app/
+
+# Enter all namespaces
+sudo nsenter -t $PID -m -u -i -n -p -- /bin/sh
+
+# Option 3: Use docker debug (Docker Desktop feature)
+docker debug myapp
+# Opens a shell with debugging tools even in distroless images
+```
+
+## Deep Dive into docker inspect
+
+`docker inspect` reveals every detail about a container's configuration, state, and runtime environment.
+
+```bash
+# Full JSON output (overwhelming but complete)
+docker inspect myapp | jq .
+
+# ─── State and Health ───
+docker inspect myapp --format '{{.State.Status}}'        # running, exited, etc.
+docker inspect myapp --format '{{.State.StartedAt}}'     # When it started
+docker inspect myapp --format '{{.State.OOMKilled}}'     # Was it OOM killed?
+docker inspect myapp --format '{{.State.ExitCode}}'      # Exit code
+docker inspect myapp --format '{{.State.Pid}}'           # PID on host
+
+# Health check results
+docker inspect myapp --format '{{json .State.Health}}' | jq .
+# {
+#   "Status": "healthy",
+#   "FailingStreak": 0,
+#   "Log": [
+#     {
+#       "Start": "2025-01-15T10:30:15Z",
+#       "End": "2025-01-15T10:30:15Z",
+#       "ExitCode": 0,
+#       "Output": "..."
+#     }
+#   ]
+# }
+
+# ─── Network Configuration ───
+docker inspect myapp --format '{{range .NetworkSettings.Networks}}
+  Network: {{.NetworkID}}
+  IP:      {{.IPAddress}}
+  Gateway: {{.Gateway}}
+  MAC:     {{.MacAddress}}
+{{end}}'
+
+# Get the container IP
+docker inspect myapp --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+
+# ─── Mount Points ───
+docker inspect myapp --format '{{json .Mounts}}' | jq .
+# [
+#   {
+#     "Type": "volume",
+#     "Name": "app-data",
+#     "Source": "/var/lib/docker/volumes/app-data/_data",
+#     "Destination": "/data",
+#     "Mode": "rw",
+#     "RW": true
+#   }
+# ]
+
+# ─── Port Mappings ───
+docker inspect myapp --format '{{json .NetworkSettings.Ports}}' | jq .
+# {
+#   "3000/tcp": [
+#     {
+#       "HostIp": "0.0.0.0",
+#       "HostPort": "8080"
+#     }
+#   ]
+# }
+
+# ─── Resource Limits ───
+docker inspect myapp --format '
+  Memory Limit: {{.HostConfig.Memory}}
+  CPU Shares:   {{.HostConfig.CpuShares}}
+  CPU Quota:    {{.HostConfig.CpuQuota}}
+  CPU Period:   {{.HostConfig.CpuPeriod}}
+  PID Limit:    {{.HostConfig.PidsLimit}}'
+
+# ─── Environment Variables ───
+docker inspect myapp --format '{{range .Config.Env}}{{println .}}{{end}}'
+
+# ─── Detailed image and command info ───
+docker inspect myapp --format '
+  Image:       {{.Config.Image}}
+  Entrypoint:  {{json .Config.Entrypoint}}
+  Cmd:         {{json .Config.Cmd}}
+  WorkingDir:  {{.Config.WorkingDir}}
+  User:        {{.Config.User}}'
+```
+
+## Filesystem Changes with docker diff
+
+`docker diff` shows every file that was added, changed, or deleted in a running container's filesystem compared to its image.
+
+```bash
+# See filesystem changes
+docker diff myapp
+
+# Output format:
+# A /tmp/session-abc123          <-- Added
+# C /var/log                     <-- Changed (directory modified)
+# A /var/log/app.log             <-- Added
+# C /etc                         <-- Changed
+# C /etc/resolv.conf             <-- Changed
+# D /app/config/old.conf         <-- Deleted
+
+# A = Added
+# C = Changed
+# D = Deleted
+```
+
+This is extremely useful for understanding what a container has done to its filesystem during execution — especially for diagnosing data corruption or unexpected file modifications.
+
+## Copying Files with docker cp
+
+```bash
+# Copy a file FROM a container to the host
+docker cp myapp:/app/config/settings.json ./settings.json
+
+# Copy a file TO a container from the host
+docker cp ./fix.patch myapp:/app/fix.patch
+
+# Copy an entire directory
+docker cp myapp:/var/log/ ./container-logs/
+
+# Copy from a stopped container (still works!)
+docker cp stopped-app:/app/crash-dump.log ./crash-dump.log
+
+# Useful debugging patterns:
+# 1. Extract the config a running container is actually using
+docker cp myapp:/etc/nginx/nginx.conf ./actual-nginx.conf
+
+# 2. Copy debug tools into a minimal container
+docker cp $(which strace) myapp:/usr/local/bin/strace
+
+# 3. Copy out core dumps or crash logs
+docker cp myapp:/tmp/core.1234 ./core-dump
+```
+
+## Debugging Crashed Containers
+
+When a container crashes, you cannot `docker exec` into it. But the filesystem is still there. You can commit the stopped container to a new image and explore it.
+
+```bash
+# The container has crashed
+docker ps -a
+# NAMES    STATUS
+# myapp    Exited (139) 5 minutes ago    <-- Segfault
+
+# Step 1: Save the crashed container's filesystem as a new image
+docker commit myapp myapp-debug:crashed
+# sha256:abc123...
+
+# Step 2: Run the debug image with an interactive shell
+docker run --rm -it --entrypoint sh myapp-debug:crashed
+
+# Now you can explore the filesystem at the moment of the crash
+ls -la /app/
+cat /app/logs/error.log
+cat /tmp/core.*
+
+# Step 3: Check what changed from the original image
+docker diff myapp
+# A /tmp/core.1234
+# C /app/data/cache.db
+# A /app/logs/error.log
+
+# Step 4: Copy specific files from the stopped container
+docker cp myapp:/tmp/core.1234 ./core-dump
+docker cp myapp:/app/logs/error.log ./error.log
+
+# Step 5: Clean up the debug image
+docker rmi myapp-debug:crashed
+```
+
+<Callout type="warning" title="docker commit Captures Everything">
+When you `docker commit`, the resulting image includes all environment variables, exposed ports, and filesystem changes from the running container. This may include secrets or sensitive data that was injected at runtime. Never push a committed debug image to a public registry. Use it locally and delete it when done.
+</Callout>
+
+## Network Debugging with netshoot
+
+The [nicolaka/netshoot](https://github.com/nicolaka/netshoot) image is a purpose-built container packed with every network debugging tool you could need: tcpdump, dig, nslookup, curl, netstat, iperf, nmap, and dozens more.
+
+```bash
+# Run netshoot in the same network namespace as a target container
+docker run --rm -it \
+  --network container:myapp \
+  nicolaka/netshoot
+
+# Now you have access to all network tools, and you share
+# the same network namespace as "myapp":
+# - Same IP address
+# - Same ports
+# - Same DNS resolution
+# - Same network interfaces
+
+# Inside netshoot:
+ip addr show          # See network interfaces
+ss -tlnp              # See listening ports
+dig mydb              # DNS lookup for service names
+curl http://localhost:3000/health   # Hit the app from inside
+tcpdump -i eth0 -n    # Capture all traffic
+ping redis            # Test connectivity
+nslookup api          # DNS resolution
+traceroute gateway    # Trace network path
+iperf3 -c target      # Bandwidth test
+nmap -p 1-1000 mydb   # Port scan a service
+```
+
+### Common Network Debugging Scenarios
+
+```bash
+# Scenario 1: Container cannot resolve DNS
+docker run --rm -it --network container:myapp nicolaka/netshoot sh -c '
+  echo "=== DNS Configuration ==="
+  cat /etc/resolv.conf
+
+  echo ""
+  echo "=== DNS Lookup Tests ==="
+  dig mydb +short
+  dig google.com +short
+
+  echo ""
+  echo "=== DNS Server Reachability ==="
+  # Extract nameserver and test connectivity
+  NS=$(grep nameserver /etc/resolv.conf | head -1 | awk "{print \$2}")
+  echo "Testing nameserver: $NS"
+  nc -zv $NS 53
+'
+
+# Scenario 2: Container cannot connect to another service
+docker run --rm -it --network container:myapp nicolaka/netshoot sh -c '
+  echo "=== Testing connectivity to mydb:5432 ==="
+  nc -zv mydb 5432
+
+  echo ""
+  echo "=== Route to mydb ==="
+  traceroute -m 5 mydb
+
+  echo ""
+  echo "=== ARP table ==="
+  arp -a
+'
+
+# Scenario 3: Capture traffic for analysis
+docker run --rm -it \
+  --network container:myapp \
+  -v $(pwd):/captures \
+  nicolaka/netshoot \
+  tcpdump -i eth0 -w /captures/traffic.pcap -c 1000
+
+# Analyze the capture on your host with Wireshark
+# wireshark traffic.pcap
+```
+
+<Callout type="tip" title="Attach netshoot to Docker Compose Networks">
+To debug services in a Docker Compose stack, attach netshoot to the compose network:
+```bash
+docker run --rm -it \
+  --network myproject_default \
+  nicolaka/netshoot
+```
+This lets you resolve and connect to all services in the compose stack by their service names.
+</Callout>
+
+## Host-Level Debugging
+
+Sometimes the problem is not inside the container — it is between the container and the host. These tools let you debug from the host side.
+
+### strace — System Call Tracing
+
+```bash
+# Get the container's PID on the host
+PID=$(docker inspect myapp --format '{{.State.Pid}}')
+
+# Trace system calls made by the container's main process
+sudo strace -f -p $PID -e trace=network 2>&1 | head -50
+# [pid 12345] connect(5, {sa_family=AF_INET, sin_port=htons(5432),
+#   sin_addr=inet_addr("172.18.0.3")}, 16) = -1 ECONNREFUSED
+# ^^ The container is trying to connect to 172.18.0.3:5432 and being refused
+
+# Trace file operations
+sudo strace -f -p $PID -e trace=file 2>&1 | head -50
+# [pid 12345] openat(AT_FDCWD, "/app/config/settings.json", O_RDONLY) = -1 ENOENT
+# ^^ The container is trying to open a file that does not exist
+
+# Trace with timestamps for performance debugging
+sudo strace -f -p $PID -T -e trace=network 2>&1 | head -20
+# [pid 12345] connect(5, ..., 16) = 0 <0.000234>
+# [pid 12345] sendto(5, ..., 256, 0, NULL, 0) = 256 <0.000012>
+# [pid 12345] recvfrom(5, ..., 4096, 0, NULL, NULL) = 1024 <2.501234>
+# ^^ The recvfrom took 2.5 seconds — that is the bottleneck
+```
+
+### nsenter — Enter Container Namespaces
+
+```bash
+PID=$(docker inspect myapp --format '{{.State.Pid}}')
+
+# Enter just the network namespace
+sudo nsenter -t $PID -n ip addr show
+sudo nsenter -t $PID -n ss -tlnp
+sudo nsenter -t $PID -n iptables -L -n
+
+# Enter the mount namespace to see the container's filesystem
+sudo nsenter -t $PID -m ls -la /app/
+
+# Enter all namespaces (like exec but works with distroless)
+sudo nsenter -t $PID -m -u -i -n -p -- /bin/sh
+
+# Enter PID namespace to see container's process tree
+sudo nsenter -t $PID -p -- ps aux
+```
+
+## Common Issues and Solutions
+
+### OOM Kills
+
+```bash
+# Symptom: Container exits with code 137
+docker inspect myapp --format '{{.State.OOMKilled}}'
+# true
+
+# Check the kernel OOM log
+dmesg | grep -i "oom\|killed" | tail -5
+# [12345.678] Out of memory: Killed process 9876 (node)
+#   total-vm:2048000kB, anon-rss:524288kB, file-rss:8192kB
+
+# Check what memory limit the container had
+docker inspect myapp --format '{{.HostConfig.Memory}}'
+# 134217728  (128MB)
+
+# Check actual memory usage before it was killed
+docker stats --no-stream myapp
+# CONTAINER   CPU %   MEM USAGE / LIMIT   MEM %   NET I/O   BLOCK I/O   PIDS
+# myapp       0.15%   127.8MiB / 128MiB   99.84%  ...       ...         12
+
+# Solutions:
+# 1. Increase the memory limit
+docker update --memory 512m --memory-swap 512m myapp
+
+# 2. Find the memory leak in your application
+#    (see Performance Tuning lesson for profiling tools)
+
+# 3. Set memory-swap equal to memory to disable swap
+docker run --memory 256m --memory-swap 256m myapp:latest
+```
+
+```
+┌─────────────────────────────────────────────────────┐
+│              OOM Kill Decision Flow                  │
+│                                                      │
+│  Container memory usage exceeds limit                │
+│       │                                              │
+│       ▼                                              │
+│  Is --memory-swap > --memory?                        │
+│  ├── Yes: Use swap up to swap limit                  │
+│  │         │                                         │
+│  │         ▼                                         │
+│  │    Swap also exhausted?                           │
+│  │    ├── Yes: OOM Kill → Exit 137                   │
+│  │    └── No:  Continue with degraded performance    │
+│  │                                                   │
+│  └── No (or --memory-swap == --memory):              │
+│       │                                              │
+│       ▼                                              │
+│  OOM Kill → Exit 137                                 │
+│                                                      │
+│  The OOM killer selects the process with the         │
+│  highest oom_score_adj within the cgroup.            │
+└─────────────────────────────────────────────────────┘
+```
+
+### Permission Denied
+
+```bash
+# Symptom: EACCES or "Permission denied" errors
+
+# Case 1: File ownership mismatch
+docker exec myapp ls -la /app/data/
+# -rw-r--r-- 1 root root 4096 Jan 15 10:30 config.json
+# ^^ File owned by root, but container runs as appuser (UID 1001)
+
+# Fix: Set correct ownership in Dockerfile
+# COPY --chown=appuser:appgroup config.json /app/data/
+
+# Case 2: Volume permission mismatch
+docker run -v $(pwd)/data:/app/data -u 1001:1001 myapp:latest
+# Error: permission denied: /app/data/database.sqlite
+
+# Check ownership on the host
+ls -la $(pwd)/data/
+# -rw------- 1 root root 4096 Jan 15 10:30 database.sqlite
+
+# Fix: Change ownership on the host
+sudo chown -R 1001:1001 $(pwd)/data/
+
+# Case 3: Read-only filesystem
+docker exec myapp touch /app/test
+# touch: /app/test: Read-only file system
+
+# Check if read-only is enabled
+docker inspect myapp --format '{{.HostConfig.ReadonlyRootfs}}'
+# true
+
+# Fix: Use tmpfs for writable paths
+# docker run --read-only --tmpfs /tmp:rw,noexec,nosuid myapp:latest
+
+# Case 4: Capability required
+docker exec myapp ping google.com
+# ping: permission denied (are you root?)
+
+# Fix: Add the NET_RAW capability
+# docker run --cap-add NET_RAW myapp:latest
+```
+
+### DNS Resolution Failures
+
+```bash
+# Symptom: "Could not resolve host" or "Name or service not known"
+
+# Step 1: Check DNS configuration inside the container
+docker exec myapp cat /etc/resolv.conf
+# nameserver 127.0.0.11    <-- Docker's embedded DNS server
+# options ndots:0
+
+# Step 2: Test DNS resolution
+docker exec myapp nslookup mydb
+# ;; connection timed out; no servers could be reached
+
+# Step 3: Check if containers are on the same network
+docker inspect myapp --format '{{json .NetworkSettings.Networks}}' | jq 'keys'
+# ["bridge"]
+
+docker inspect mydb --format '{{json .NetworkSettings.Networks}}' | jq 'keys'
+# ["myapp_default"]
+# ^^ Different networks! They cannot resolve each other.
+
+# Fix: Put containers on the same user-defined network
+docker network create shared
+docker network connect shared myapp
+docker network connect shared mydb
+
+# Now test again
+docker exec myapp nslookup mydb
+# Name:   mydb
+# Address: 172.20.0.3   <-- It resolves!
+
+# NOTE: The default bridge network does NOT support DNS resolution
+# between containers by name. Only user-defined networks do.
+```
+
+### Port Conflicts
+
+```bash
+# Symptom: "port is already allocated"
+docker run -p 8080:3000 myapp:latest
+# Error: Ports are not available: listen tcp4 0.0.0.0:8080:
+#   bind: address already in use
+
+# Find what is using port 8080
+sudo lsof -i :8080
+# COMMAND   PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+# docker-pr 1234 root   4u   IPv4 12345  0t0      TCP *:8080 (LISTEN)
+
+# Or use ss
+sudo ss -tlnp | grep 8080
+# LISTEN  0  4096  *:8080  *:*  users:(("docker-proxy",pid=1234,fd=4))
+
+# Find which container is using that port
+docker ps --format "table {{.Names}}\t{{.Ports}}" | grep 8080
+# old-app    0.0.0.0:8080->3000/tcp
+
+# Solutions:
+# 1. Stop the container using that port
+docker stop old-app
+
+# 2. Use a different host port
+docker run -p 8081:3000 myapp:latest
+
+# 3. Use a random port
+docker run -p 0:3000 myapp:latest
+docker port myapp 3000
+# 0.0.0.0:49153
+```
+
+### Container Restart Loops
+
+```bash
+# Symptom: Container keeps restarting
+docker ps
+# NAMES   STATUS
+# myapp   Restarting (1) 5 seconds ago
+
+# Step 1: Check the restart policy
+docker inspect myapp --format '{{.HostConfig.RestartPolicy.Name}}'
+# always
+
+# Step 2: Stop the restart loop temporarily
+docker update --restart no myapp
+docker stop myapp
+
+# Step 3: Read the logs to find the root cause
+docker logs --tail 50 myapp
+# Error: ECONNREFUSED 172.18.0.3:5432
+# (The database is not available)
+
+# Step 4: Fix the issue (start the database)
+docker start mydb
+
+# Step 5: Re-enable restart policy and start
+docker update --restart unless-stopped myapp
+docker start myapp
+```
+
+<Exercise title="Debug a Failing Container" difficulty="intermediate" xpReward={35} estimatedMinutes={20}>
+
+You have been given a container image that fails to start. Your job is to diagnose and fix the issue using the debugging techniques from this lesson.
+
+**Objectives:**
+- Identify why the container fails to start from the exit code and logs
+- Use docker inspect to examine the container configuration
+- Use docker exec or docker cp to investigate the filesystem
+- Apply a fix and verify the container runs successfully
+
+**Hints:**
+- Start by checking the exit code and container state
+- Use `--entrypoint sh` to bypass the normal startup command and explore
+- Check file permissions, the working directory, and the CMD/ENTRYPOINT
+- The issue may be a missing file, wrong permissions, or incorrect command
+- Use `docker diff` on the stopped container to see filesystem changes
+
+**Validation Criteria:**
+- You can identify the exit code and its meaning
+- You can determine the root cause from logs or filesystem inspection
+- You can fix the issue and get the container running
+- You can verify the fix works with a health check or curl
+
+<CollapsibleSolution>
+
+```bash
+# ─── Create a deliberately broken container for practice ───
+
+# Create a broken Dockerfile
+mkdir -p ~/debug-exercise
+cat > ~/debug-exercise/app.js << 'EOF'
+const http = require('http');
+const fs = require('fs');
+
+// Try to read a config file that does not exist
+const config = JSON.parse(fs.readFileSync('/app/config/settings.json', 'utf8'));
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ status: 'running', port: config.port }));
+});
+
+server.listen(config.port, () => {
+  console.log(`Server on port ${config.port}`);
+});
+EOF
+
+cat > ~/debug-exercise/Dockerfile << 'EOF'
+FROM node:20-alpine
+WORKDIR /app
+COPY app.js .
+# Note: we forgot to create /app/config/settings.json
+CMD ["node", "app.js"]
+EOF
+
+cd ~/debug-exercise
+docker build -t broken-app:latest .
+
+# ─── Start debugging ───
+
+# Step 1: Try to run it
+docker run --name broken-test broken-app:latest
+# node:internal/fs/sync:86
+#   return binding.open(path, ...);
+# Error: ENOENT: no such file or directory, open '/app/config/settings.json'
+
+echo ""
+echo "=== Step 2: Check exit code ==="
+docker inspect broken-test --format '{{.State.ExitCode}}'
+# 1
+
+echo ""
+echo "=== Step 3: Check container state ==="
+docker inspect broken-test --format '{{json .State}}' | jq '{Status, ExitCode, OOMKilled, Error}'
+
+echo ""
+echo "=== Step 4: Check what files exist ==="
+docker run --rm --entrypoint sh broken-app:latest -c 'find /app -type f'
+# /app/app.js
+# (No config directory or settings.json!)
+
+echo ""
+echo "=== Step 5: Read the application code ==="
+docker run --rm --entrypoint sh broken-app:latest -c 'cat /app/app.js'
+# Shows the code trying to read /app/config/settings.json
+
+echo ""
+echo "=== Step 6: Create the missing config and fix ==="
+mkdir -p ~/debug-exercise/config
+cat > ~/debug-exercise/config/settings.json << 'CONFIGEOF'
+{
+  "port": 3000,
+  "name": "debug-exercise"
+}
+CONFIGEOF
+
+# Fix the Dockerfile
+cat > ~/debug-exercise/Dockerfile << 'EOF'
+FROM node:20-alpine
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+COPY --chown=appuser:appgroup app.js .
+COPY --chown=appuser:appgroup config/ ./config/
+
+USER appuser
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+
+EXPOSE 3000
+CMD ["node", "app.js"]
+EOF
+
+# Rebuild
+docker build -t broken-app:fixed .
+
+echo ""
+echo "=== Step 7: Verify the fix ==="
+docker rm -f broken-test 2>/dev/null
+docker run -d --name fixed-test -p 3000:3000 broken-app:fixed
+sleep 3
+
+curl -s http://localhost:3000/ | jq .
+# {
+#   "status": "running",
+#   "port": 3000
+# }
+
+echo ""
+echo "=== Step 8: Verify health check ==="
+docker inspect fixed-test --format '{{.State.Health.Status}}'
+# healthy
+
+# Clean up
+docker rm -f fixed-test
+docker rmi broken-app:latest broken-app:fixed
+```
+
+The debugging flow is systematic: check the exit code, read the error message, explore the filesystem, identify the root cause (missing config file), apply the fix, and verify. This is the same process you follow for any container failure in production.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise title="Diagnose Container Networking Issues" difficulty="advanced" xpReward={40} estimatedMinutes={25}>
+
+Set up a multi-container application where the API cannot connect to the database, then use networking tools to diagnose and fix the issue.
+
+**Objectives:**
+- Set up containers on different networks that cannot communicate
+- Use nicolaka/netshoot to diagnose the connectivity failure
+- Identify the root cause using DNS lookups, port scans, and route analysis
+- Fix the networking issue and verify the connection works
+
+**Hints:**
+- Create two separate Docker networks and put each container on a different one
+- Use `--network container:target` with netshoot to share the target's network namespace
+- Use `dig`, `nc -zv`, and `traceroute` to test connectivity
+- Docker DNS only works on user-defined networks, not the default bridge
+- You may need to connect a container to an additional network
+
+**Validation Criteria:**
+- Two containers are created on separate networks
+- netshoot is used to diagnose DNS and connectivity issues
+- The root cause (separate networks) is identified
+- A fix is applied by connecting containers to a shared network
+- End-to-end connectivity is verified
+
+<CollapsibleSolution>
+
+```bash
+# ─── Setup: Create the broken networking scenario ───
+
+# Create two separate networks
+docker network create net-frontend
+docker network create net-backend
+
+# Start a PostgreSQL database on the backend network
+docker run -d --name debug-db \
+  --network net-backend \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_USER=app \
+  -e POSTGRES_DB=mydb \
+  postgres:16-alpine
+
+# Start an API container on the frontend network
+# (Cannot reach the database!)
+docker run -d --name debug-api \
+  --network net-frontend \
+  -p 8080:3000 \
+  node:20-alpine \
+  sh -c '
+    cat > /app/server.js << "APPEOF"
+const http = require("http");
+const { execSync } = require("child_process");
+http.createServer((req, res) => {
+  try {
+    const result = execSync("wget -qO- --timeout=3 http://debug-db:5432/ 2>&1", {timeout: 5000});
+    res.writeHead(200);
+    res.end("DB reachable: " + result);
+  } catch(e) {
+    res.writeHead(500);
+    res.end("DB unreachable: " + e.stderr?.toString() || e.message);
+  }
+}).listen(3000, () => console.log("API on 3000"));
+APPEOF
+    node /app/server.js
+  '
+
+sleep 3
+
+# ─── Step 1: Observe the failure ───
+echo "=== Step 1: Observe the failure ==="
+curl -s http://localhost:8080/
+# DB unreachable: ...
+
+# ─── Step 2: Diagnose with netshoot from the API's perspective ───
+echo ""
+echo "=== Step 2: Diagnose from API's network namespace ==="
+
+# Check DNS resolution
+docker run --rm --network container:debug-api nicolaka/netshoot \
+  sh -c 'echo "--- DNS lookup for debug-db ---" && dig debug-db +short 2>&1 || echo "DNS failed"'
+
+# Check connectivity
+docker run --rm --network container:debug-api nicolaka/netshoot \
+  sh -c 'echo "--- Port scan debug-db:5432 ---" && nc -zv debug-db 5432 2>&1; echo "Exit: $?"'
+
+# Check what network the API is on
+echo ""
+echo "=== Step 3: Check network configurations ==="
+echo "API networks:"
+docker inspect debug-api --format '{{range $key, $val := .NetworkSettings.Networks}}  {{$key}}: {{$val.IPAddress}}{{"\n"}}{{end}}'
+
+echo "DB networks:"
+docker inspect debug-db --format '{{range $key, $val := .NetworkSettings.Networks}}  {{$key}}: {{$val.IPAddress}}{{"\n"}}{{end}}'
+
+# ─── Step 4: Identify the root cause ───
+echo ""
+echo "=== Step 4: Root cause ==="
+echo "API is on net-frontend, DB is on net-backend."
+echo "They are on different networks and cannot communicate."
+
+# ─── Step 5: Fix by connecting the API to the backend network ───
+echo ""
+echo "=== Step 5: Apply fix ==="
+docker network connect net-backend debug-api
+echo "Connected debug-api to net-backend"
+
+# ─── Step 6: Verify the fix ───
+echo ""
+echo "=== Step 6: Verify DNS resolution ==="
+docker run --rm --network container:debug-api nicolaka/netshoot \
+  sh -c 'dig debug-db +short'
+
+echo ""
+echo "=== Step 7: Verify port connectivity ==="
+docker run --rm --network container:debug-api nicolaka/netshoot \
+  sh -c 'nc -zv debug-db 5432 2>&1'
+
+echo ""
+echo "=== Step 8: Verify API network configuration ==="
+docker inspect debug-api --format '{{range $key, $val := .NetworkSettings.Networks}}  {{$key}}: {{$val.IPAddress}}{{"\n"}}{{end}}'
+# Now shows both net-frontend and net-backend
+
+# ─── Clean up ───
+docker rm -f debug-api debug-db
+docker network rm net-frontend net-backend
+```
+
+The root cause is that the API and database containers are on different Docker networks. Docker networks are isolated by design — containers on different networks cannot communicate or resolve each other's names. The fix is to connect the API container to the backend network with `docker network connect`. In production, you would define this properly in your Docker Compose file with both services sharing a common network.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Container Debugging Toolkit">
+
+Build a comprehensive debugging toolkit — a set of scripts that systematically diagnose common container issues and produce a diagnostic report.
+
+Your toolkit must include:
+
+1. A **container health check** script that inspects state, logs, resources, and network
+2. A **crash analyzer** that examines stopped containers for the root cause
+3. A **network diagnostics** script that tests DNS, connectivity, and port availability
+4. A **resource monitor** that identifies containers approaching their limits
+
+```bash
+mkdir -p ~/debug-toolkit
+
+# ═══════════════════════════════════════════
+# Script 1: Container Health Report
+# ═══════════════════════════════════════════
+cat > ~/debug-toolkit/health-report.sh << 'HEALTHEOF'
+#!/bin/bash
+set -euo pipefail
+
+CONTAINER="${1:?Usage: $0 <container-name>}"
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Container Health Report                         ║"
+echo "║          Container: $CONTAINER"
+echo "║          Date: $(date '+%Y-%m-%d %H:%M:%S')              ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+# Check if container exists
+if ! docker inspect "$CONTAINER" > /dev/null 2>&1; then
+  echo "ERROR: Container '$CONTAINER' not found"
+  exit 1
+fi
+
+STATUS=$(docker inspect "$CONTAINER" --format '{{.State.Status}}')
+echo "=== Basic Info ==="
+echo "  Status:      $STATUS"
+echo "  Image:       $(docker inspect "$CONTAINER" --format '{{.Config.Image}}')"
+echo "  Created:     $(docker inspect "$CONTAINER" --format '{{.Created}}')"
+echo "  Started:     $(docker inspect "$CONTAINER" --format '{{.State.StartedAt}}')"
+echo "  Restart:     $(docker inspect "$CONTAINER" --format '{{.RestartCount}}') times"
+echo "  PID:         $(docker inspect "$CONTAINER" --format '{{.State.Pid}}')"
+echo ""
+
+echo "=== Exit Info ==="
+echo "  Exit Code:   $(docker inspect "$CONTAINER" --format '{{.State.ExitCode}}')"
+echo "  OOM Killed:  $(docker inspect "$CONTAINER" --format '{{.State.OOMKilled}}')"
+echo "  Error:       $(docker inspect "$CONTAINER" --format '{{.State.Error}}')"
+echo ""
+
+echo "=== Health Check ==="
+HEALTH=$(docker inspect "$CONTAINER" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}not configured{{end}}')
+echo "  Status:      $HEALTH"
+if [ "$HEALTH" != "not configured" ]; then
+  echo "  Failing:     $(docker inspect "$CONTAINER" --format '{{.State.Health.FailingStreak}}') streak"
+  echo "  Last check:"
+  docker inspect "$CONTAINER" --format '{{range $i, $log := .State.Health.Log}}{{if eq $i 0}}    Exit: {{$log.ExitCode}} | Output: {{$log.Output}}{{end}}{{end}}'
+fi
+echo ""
+
+echo "=== Resource Limits ==="
+MEM=$(docker inspect "$CONTAINER" --format '{{.HostConfig.Memory}}')
+if [ "$MEM" != "0" ] && [ -n "$MEM" ]; then
+  echo "  Memory:      $((MEM / 1024 / 1024))MB"
+else
+  echo "  Memory:      unlimited"
+fi
+CPUS=$(docker inspect "$CONTAINER" --format '{{.HostConfig.NanoCpus}}')
+if [ "$CPUS" != "0" ] && [ -n "$CPUS" ]; then
+  echo "  CPUs:        $(echo "scale=2; $CPUS / 1000000000" | bc 2>/dev/null || echo "$CPUS nanocpus")"
+else
+  echo "  CPUs:        unlimited"
+fi
+echo "  PIDs Limit:  $(docker inspect "$CONTAINER" --format '{{.HostConfig.PidsLimit}}')"
+echo ""
+
+if [ "$STATUS" = "running" ]; then
+  echo "=== Current Resource Usage ==="
+  docker stats --no-stream --format \
+    "  CPU:     {{.CPUPerc}}\n  Memory:  {{.MemUsage}} ({{.MemPerc}})\n  PIDs:    {{.PIDs}}\n  Net I/O: {{.NetIO}}\n  Block:   {{.BlockIO}}" \
+    "$CONTAINER"
+  echo ""
+fi
+
+echo "=== Network Configuration ==="
+docker inspect "$CONTAINER" --format '{{range $net, $config := .NetworkSettings.Networks}}  Network: {{$net}}
+    IP:      {{$config.IPAddress}}
+    Gateway: {{$config.Gateway}}
+    MAC:     {{$config.MacAddress}}
+{{end}}'
+
+echo "=== Port Mappings ==="
+docker inspect "$CONTAINER" --format '{{range $port, $bindings := .NetworkSettings.Ports}}  {{$port}} -> {{range $bindings}}{{.HostIp}}:{{.HostPort}}{{end}}
+{{end}}'
+
+echo "=== Recent Logs (last 20 lines) ==="
+docker logs --tail 20 -t "$CONTAINER" 2>&1 | sed 's/^/  /'
+
+echo ""
+echo "=== Filesystem Changes ==="
+if [ "$STATUS" = "running" ] || [ "$STATUS" = "exited" ]; then
+  CHANGES=$(docker diff "$CONTAINER" 2>/dev/null | head -20)
+  if [ -n "$CHANGES" ]; then
+    echo "$CHANGES" | sed 's/^/  /'
+    TOTAL=$(docker diff "$CONTAINER" 2>/dev/null | wc -l)
+    if [ "$TOTAL" -gt 20 ]; then
+      echo "  ... and $((TOTAL - 20)) more changes"
+    fi
+  else
+    echo "  No filesystem changes"
+  fi
+fi
+echo ""
+echo "Report complete."
+HEALTHEOF
+
+chmod +x ~/debug-toolkit/health-report.sh
+
+# ═══════════════════════════════════════════
+# Script 2: Crash Analyzer
+# ═══════════════════════════════════════════
+cat > ~/debug-toolkit/crash-analyzer.sh << 'CRASHEOF'
+#!/bin/bash
+set -euo pipefail
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Crashed Container Analyzer                      ║"
+echo "║          $(date '+%Y-%m-%d %H:%M:%S')                    ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+# Find all exited containers
+EXITED=$(docker ps -a --filter "status=exited" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
+RESTARTING=$(docker ps --filter "status=restarting" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
+
+if [ -z "$EXITED" ] && [ -z "$RESTARTING" ]; then
+  echo "No crashed or restarting containers found."
+  exit 0
+fi
+
+echo "=== Exited Containers ==="
+if [ -n "$EXITED" ]; then
+  echo "$EXITED" | while IFS=$'\t' read -r name status; do
+    EXIT_CODE=$(docker inspect "$name" --format '{{.State.ExitCode}}')
+    OOM=$(docker inspect "$name" --format '{{.State.OOMKilled}}')
+
+    # Classify the exit
+    case $EXIT_CODE in
+      0)   DIAGNOSIS="Clean exit" ;;
+      1)   DIAGNOSIS="Application error" ;;
+      2)   DIAGNOSIS="Shell/command misuse" ;;
+      126) DIAGNOSIS="Command not executable (permission issue)" ;;
+      127) DIAGNOSIS="Command not found" ;;
+      137) DIAGNOSIS="SIGKILL (OOM kill or docker kill)" ;;
+      139) DIAGNOSIS="Segmentation fault" ;;
+      143) DIAGNOSIS="SIGTERM (graceful shutdown)" ;;
+      *)   DIAGNOSIS="Unknown (exit code $EXIT_CODE)" ;;
+    esac
+
+    if [ "$OOM" = "true" ]; then
+      DIAGNOSIS="OOM KILLED"
+    fi
+
+    echo ""
+    echo "  Container: $name"
+    echo "  Status:    $status"
+    echo "  Exit Code: $EXIT_CODE"
+    echo "  OOM Kill:  $OOM"
+    echo "  Diagnosis: $DIAGNOSIS"
+    echo "  Last logs:"
+    docker logs --tail 5 "$name" 2>&1 | sed 's/^/    /'
+  done
+else
+  echo "  None"
+fi
+
+echo ""
+echo "=== Restarting Containers ==="
+if [ -n "$RESTARTING" ]; then
+  echo "$RESTARTING" | while IFS=$'\t' read -r name status; do
+    RESTARTS=$(docker inspect "$name" --format '{{.RestartCount}}')
+    echo ""
+    echo "  Container: $name"
+    echo "  Status:    $status"
+    echo "  Restarts:  $RESTARTS"
+    echo "  Last logs:"
+    docker logs --tail 5 "$name" 2>&1 | sed 's/^/    /'
+  done
+else
+  echo "  None"
+fi
+CRASHEOF
+
+chmod +x ~/debug-toolkit/crash-analyzer.sh
+
+# ═══════════════════════════════════════════
+# Script 3: Network Diagnostics
+# ═══════════════════════════════════════════
+cat > ~/debug-toolkit/net-diag.sh << 'NETEOF'
+#!/bin/bash
+set -euo pipefail
+
+CONTAINER="${1:?Usage: $0 <container-name> [target-host] [target-port]}"
+TARGET_HOST="${2:-}"
+TARGET_PORT="${3:-}"
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Network Diagnostics                             ║"
+echo "║          Container: $CONTAINER"
+echo "║          Date: $(date '+%Y-%m-%d %H:%M:%S')              ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+# Check container exists and is running
+STATUS=$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || echo "not_found")
+if [ "$STATUS" != "running" ]; then
+  echo "ERROR: Container '$CONTAINER' is not running (status: $STATUS)"
+  exit 1
+fi
+
+echo "=== Container Network Config ==="
+docker inspect "$CONTAINER" --format '{{range $net, $config := .NetworkSettings.Networks}}  Network:  {{$net}}
+  IP:       {{$config.IPAddress}}
+  Subnet:   {{$config.IPPrefixLen}}
+  Gateway:  {{$config.Gateway}}
+{{end}}'
+
+echo "=== DNS Configuration ==="
+docker exec "$CONTAINER" cat /etc/resolv.conf 2>/dev/null | sed 's/^/  /' || \
+  echo "  Cannot read /etc/resolv.conf (no shell in container)"
+
+echo ""
+echo "=== Listening Ports ==="
+docker exec "$CONTAINER" sh -c 'ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "  No socket tools available"' | sed 's/^/  /'
+
+if [ -n "$TARGET_HOST" ]; then
+  echo ""
+  echo "=== Connectivity Tests to $TARGET_HOST ==="
+
+  # DNS resolution
+  echo "  DNS lookup:"
+  docker run --rm --network container:"$CONTAINER" nicolaka/netshoot \
+    sh -c "dig +short $TARGET_HOST 2>/dev/null || nslookup $TARGET_HOST 2>/dev/null" | sed 's/^/    /'
+
+  # Port connectivity
+  if [ -n "$TARGET_PORT" ]; then
+    echo ""
+    echo "  Port test ($TARGET_HOST:$TARGET_PORT):"
+    docker run --rm --network container:"$CONTAINER" nicolaka/netshoot \
+      sh -c "nc -zv $TARGET_HOST $TARGET_PORT 2>&1" | sed 's/^/    /'
+  fi
+
+  # Traceroute
+  echo ""
+  echo "  Route to $TARGET_HOST:"
+  docker run --rm --network container:"$CONTAINER" nicolaka/netshoot \
+    sh -c "traceroute -m 5 -w 2 $TARGET_HOST 2>&1" | sed 's/^/    /'
+fi
+
+echo ""
+echo "Diagnostics complete."
+NETEOF
+
+chmod +x ~/debug-toolkit/net-diag.sh
+
+# ═══════════════════════════════════════════
+# Script 4: Resource Monitor
+# ═══════════════════════════════════════════
+cat > ~/debug-toolkit/resource-monitor.sh << 'RESEOF'
+#!/bin/bash
+set -euo pipefail
+
+WARN_MEM_PERCENT=80
+WARN_CPU_PERCENT=80
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Container Resource Monitor                      ║"
+echo "║          $(date '+%Y-%m-%d %H:%M:%S')                    ║"
+echo "║          Warning thresholds: CPU>${WARN_CPU_PERCENT}% MEM>${WARN_MEM_PERCENT}%   ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+# Get all running containers
+RUNNING=$(docker ps --format '{{.Names}}' 2>/dev/null)
+if [ -z "$RUNNING" ]; then
+  echo "No running containers found."
+  exit 0
+fi
+
+echo "=== Resource Usage ==="
+docker stats --no-stream --format \
+  "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.PIDs}}\t{{.NetIO}}\t{{.BlockIO}}"
+
+echo ""
+echo "=== Alerts ==="
+
+ALERTS=0
+for CONTAINER in $RUNNING; do
+  # Memory check
+  MEM_LIMIT=$(docker inspect "$CONTAINER" --format '{{.HostConfig.Memory}}')
+  if [ "$MEM_LIMIT" = "0" ] || [ -z "$MEM_LIMIT" ]; then
+    echo "  [WARN] $CONTAINER: No memory limit set"
+    ALERTS=$((ALERTS + 1))
+  fi
+
+  # Check OOM kill history
+  OOM=$(docker inspect "$CONTAINER" --format '{{.State.OOMKilled}}')
+  if [ "$OOM" = "true" ]; then
+    echo "  [CRIT] $CONTAINER: Has been OOM killed!"
+    ALERTS=$((ALERTS + 1))
+  fi
+
+  # Restart count
+  RESTARTS=$(docker inspect "$CONTAINER" --format '{{.RestartCount}}')
+  if [ "$RESTARTS" -gt 0 ]; then
+    echo "  [WARN] $CONTAINER: Has restarted $RESTARTS times"
+    ALERTS=$((ALERTS + 1))
+  fi
+
+  # CPU limit check
+  CPU_LIMIT=$(docker inspect "$CONTAINER" --format '{{.HostConfig.NanoCpus}}')
+  if [ "$CPU_LIMIT" = "0" ] || [ -z "$CPU_LIMIT" ]; then
+    echo "  [WARN] $CONTAINER: No CPU limit set"
+    ALERTS=$((ALERTS + 1))
+  fi
+done
+
+echo ""
+if [ "$ALERTS" -eq 0 ]; then
+  echo "No alerts. All containers within normal parameters."
+else
+  echo "$ALERTS alert(s) found. Review the warnings above."
+fi
+RESEOF
+
+chmod +x ~/debug-toolkit/resource-monitor.sh
+
+# ═══════════════════════════════════════════
+# Test the toolkit
+# ═══════════════════════════════════════════
+echo "=== Testing the debugging toolkit ==="
+echo ""
+
+# Create a test container
+docker run -d --name toolkit-test \
+  --memory 128m --cpus 0.5 \
+  -p 9090:3000 \
+  node:20-alpine sh -c '
+    cat > /app/server.js << "EOF"
+const http = require("http");
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end(JSON.stringify({status: "ok"}));
+}).listen(3000, () => console.log("Running on 3000"));
+EOF
+    node /app/server.js
+  '
+
+sleep 3
+
+# Run health report
+echo ">>> Health Report <<<"
+bash ~/debug-toolkit/health-report.sh toolkit-test
+
+echo ""
+echo ">>> Crash Analyzer <<<"
+bash ~/debug-toolkit/crash-analyzer.sh
+
+echo ""
+echo ">>> Resource Monitor <<<"
+bash ~/debug-toolkit/resource-monitor.sh
+
+# Clean up
+docker rm -f toolkit-test
+```
+
+This debugging toolkit provides four scripts that cover the most common debugging scenarios: health inspection, crash analysis, network diagnostics, and resource monitoring. Each script produces a structured report that can be shared with team members or attached to incident tickets. The health report covers state, resources, networking, logs, and filesystem changes. The crash analyzer classifies exit codes and identifies OOM kills. The network diagnostics script uses netshoot for DNS and connectivity testing. The resource monitor identifies containers without limits or approaching their limits.
+
+</MiniProject>
+
+## Key Takeaways
+
+- **Exit codes tell the story**: 0 is success, 1 is application error, 127 is command not found, 137 is SIGKILL (often OOM), 143 is graceful SIGTERM — always start debugging by checking the exit code with `docker inspect --format '{{.State.ExitCode}}'`
+- **docker logs** is your first tool: use `--tail`, `--since`, `-f`, and `-t` to filter and follow logs; pipe through `jq` for structured JSON logs; split stdout and stderr with shell redirection
+- **docker exec** provides live access to running containers; use `--entrypoint sh` when starting a container to bypass the normal command and explore the filesystem
+- **docker inspect** reveals everything about a container's configuration, state, network, mounts, and resource limits — use Go template formatting to extract specific fields
+- **docker diff** shows filesystem changes (Added, Changed, Deleted) since the container started, which is essential for understanding what a container has been doing
+- **docker commit** saves a crashed container's filesystem as a new image, letting you explore the state at the moment of failure even after the container has exited
+- **nicolaka/netshoot** is an indispensable sidecar for network debugging — run it with `--network container:target` to share the target's network namespace and access tools like dig, tcpdump, nc, and traceroute
+- **OOM kills** show exit code 137 and `OOMKilled: true` in docker inspect — always check `dmesg` on the host for kernel OOM messages
+- **DNS resolution** only works on user-defined networks, not the default bridge — this is the most common cause of "cannot resolve hostname" errors between containers
+- **Host-level tools** like strace and nsenter let you debug from outside the container when docker exec is not available or the container has no shell
+
+## What's Next
+
+In the next lesson, **Container Performance Tuning**, you will learn how to benchmark and optimize container performance. You will use tools like sysbench, wrk, and fio to measure baseline performance, then tune CPU scheduling, memory management, and I/O throttling. You will learn runtime-specific optimizations for JVM, Node.js, and Python applications running in containers, and use profiling tools like cAdvisor and flame graphs to identify bottlenecks.

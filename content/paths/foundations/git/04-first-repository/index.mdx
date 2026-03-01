@@ -1,0 +1,744 @@
+---
+title: "Your First Repository"
+description: "Create repositories, understand git init vs git clone, set up remotes, and establish the workflow that every Git project follows."
+order: 4
+xpReward: 75
+estimatedMinutes: 25
+prerequisites:
+  - 03-installation-and-setup
+objectives:
+  - Create repos with git init and git clone
+  - Understand the .git directory structure
+  - Work with remotes (origin)
+  - Push and pull changes
+tags:
+  - git
+  - repository
+  - clone
+  - remote
+---
+
+<Callout type="story" title="The Story">
+You've been asked to start a new microservice from scratch AND contribute to an existing project. For the new service, you need `git init`. For the existing project, you need `git clone`. Both paths lead to a working repository, but understanding the difference — and how remotes connect them — is fundamental to every Git workflow you'll ever use.
+</Callout>
+
+## Creating a Repository with git init
+
+`git init` creates a brand new Git repository in the current directory:
+
+```bash
+# Create a project directory and initialize Git
+mkdir my-api && cd my-api
+git init
+# Initialized empty Git repository in /home/user/my-api/.git/
+```
+
+This creates a `.git/` directory — the repository itself. Your project files live alongside it. Without `.git/`, it's just a folder. With it, Git tracks every change.
+
+```bash
+# Common pattern: init and first commit
+mkdir my-api && cd my-api
+git init
+
+# Create initial files
+echo "# My API" > README.md
+echo "node_modules/" > .gitignore
+echo '{ "name": "my-api", "version": "1.0.0" }' > package.json
+
+# First commit
+git add .
+git commit -m "Initial commit: project scaffolding"
+```
+
+<Callout type="tip" title="Start with Structure">
+Always create at least a README.md, .gitignore, and a license file in your first commit. This gives collaborators immediate context and prevents junk files from ever entering the repository.
+</Callout>
+
+## Cloning a Repository with git clone
+
+`git clone` copies an existing repository — all files, all history, all branches:
+
+```bash
+# Clone via SSH (recommended — uses your SSH key)
+git clone git@github.com:torvalds/linux.git
+
+# Clone via HTTPS (prompts for credentials)
+git clone https://github.com/torvalds/linux.git
+
+# Clone into a specific directory name
+git clone git@github.com:torvalds/linux.git my-linux-copy
+```
+
+### Shallow Clones
+
+Large repos with long histories can take a while to clone. Shallow clones grab only recent history:
+
+```bash
+# Clone only the last commit (fastest)
+git clone --depth 1 git@github.com:torvalds/linux.git
+# Great for CI/CD where you just need to build
+
+# Clone last 10 commits
+git clone --depth 10 git@github.com:torvalds/linux.git
+
+# Later, if you need full history
+git fetch --unshallow
+```
+
+### Cloning a Specific Branch
+
+```bash
+# Clone only the develop branch
+git clone --branch develop --single-branch git@github.com:company/api.git
+
+# This only downloads one branch — useful for large repos
+# when you know exactly which branch you need
+```
+
+<Callout type="warning" title="SSH vs HTTPS">
+Use SSH for repositories you contribute to — it's passwordless after setup. HTTPS is fine for quick read-only clones of public repos. If `git clone` asks for a password, your SSH key isn't configured for that host. Check with `ssh -T git@github.com`.
+</Callout>
+
+## The .git Directory Tour
+
+The `.git/` directory is the entire repository. Understanding its structure demystifies Git:
+
+```bash
+ls -la .git/
+```
+
+```
+.git/
+├── HEAD            # Points to the current branch
+├── config          # Repository-level configuration
+├── description     # Used by GitWeb (rarely relevant)
+├── hooks/          # Scripts triggered by Git events
+│   ├── pre-commit.sample
+│   ├── pre-push.sample
+│   └── ...
+├── info/
+│   └── exclude     # Local ignore rules (not shared)
+├── objects/        # All blobs, trees, commits (the data)
+│   ├── pack/       # Compressed objects for efficiency
+│   └── info/
+├── refs/           # Branch and tag pointers
+│   ├── heads/      # Local branches
+│   │   └── main    # File containing commit hash
+│   ├── tags/       # Tags
+│   └── remotes/    # Remote tracking branches
+│       └── origin/
+│           └── main
+└── index           # The staging area (binary file)
+```
+
+Let's explore the key files:
+
+```bash
+# HEAD — where are you right now?
+cat .git/HEAD
+# ref: refs/heads/main
+
+# Branch pointer — what commit is main pointing to?
+cat .git/refs/heads/main
+# a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+
+# Config — repo-level settings
+cat .git/config
+# [core]
+#     repositoryformatversion = 0
+#     bare = false
+# [remote "origin"]
+#     url = git@github.com:user/repo.git
+#     fetch = +refs/heads/*:refs/remotes/origin/*
+# [branch "main"]
+#     remote = origin
+#     merge = refs/heads/main
+```
+
+<Callout type="warning" title="Never Manually Edit .git/">
+The `.git/` directory is Git's database. Modifying files inside it directly can corrupt your repository. Always use Git commands to interact with it. The one exception: `.git/hooks/`, where you add custom scripts.
+</Callout>
+
+## Working with Remotes
+
+A remote is a connection to another copy of your repository, typically on GitHub, GitLab, or Bitbucket. The default remote is called `origin`.
+
+### Viewing Remotes
+
+```bash
+# List all remotes
+git remote -v
+# origin  git@github.com:user/my-api.git (fetch)
+# origin  git@github.com:user/my-api.git (push)
+```
+
+### Adding a Remote
+
+When you `git init` a local repo, it has no remotes. You add one to connect it to GitHub:
+
+```bash
+# Add a remote named "origin"
+git remote add origin git@github.com:user/my-api.git
+
+# Verify it was added
+git remote -v
+```
+
+### Renaming and Removing Remotes
+
+```bash
+# Rename a remote
+git remote rename origin upstream
+
+# Remove a remote
+git remote remove upstream
+
+# Change a remote's URL (HTTPS to SSH, for example)
+git remote set-url origin git@github.com:user/my-api.git
+```
+
+### Multiple Remotes
+
+You can have multiple remotes — common in open source:
+
+```bash
+# Your fork
+git remote add origin git@github.com:you/project.git
+
+# The original project (conventional name: "upstream")
+git remote add upstream git@github.com:original/project.git
+
+# Fetch from the original to stay up to date
+git fetch upstream
+
+# View all remotes
+git remote -v
+# origin    git@github.com:you/project.git (fetch)
+# origin    git@github.com:you/project.git (push)
+# upstream  git@github.com:original/project.git (fetch)
+# upstream  git@github.com:original/project.git (push)
+```
+
+## The First Push Workflow
+
+You've created a local repo and want to push it to GitHub for the first time:
+
+```bash
+# Step 1: Create the repo on GitHub (via web UI or gh CLI)
+gh repo create my-api --public --source=. --push
+# Or manually on github.com, then:
+
+# Step 2: Add the remote
+git remote add origin git@github.com:user/my-api.git
+
+# Step 3: Push with -u (sets upstream tracking)
+git push -u origin main
+```
+
+The `-u` flag (short for `--set-upstream`) links your local branch to the remote branch. After this, you can just use `git push` and `git pull` without specifying the remote and branch:
+
+```bash
+# First time: need -u to set tracking
+git push -u origin main
+
+# Every time after: Git knows where to push/pull
+git push
+git pull
+```
+
+## Push and Pull
+
+### Pushing Changes
+
+```bash
+# Push current branch to its tracked remote
+git push
+
+# Push a specific branch
+git push origin feature-login
+
+# Push all branches
+git push --all
+
+# Push tags
+git push --tags
+```
+
+### Pulling Changes
+
+```bash
+# Pull = fetch + merge (or rebase if configured)
+git pull
+
+# Explicitly fetch then merge
+git fetch origin
+git merge origin/main
+
+# Fetch + rebase (cleaner history)
+git pull --rebase
+```
+
+<Callout type="tip" title="Fetch First">
+When in doubt, `git fetch` first. It downloads changes from the remote without modifying your local branches. You can then inspect what changed with `git log origin/main` before merging. `git pull` fetches and merges in one step — convenient, but sometimes you want to look before you leap.
+</Callout>
+
+## Bare Repositories
+
+A bare repository has no working directory — it's just the `.git/` contents. Servers use bare repos because nobody edits files directly on the server:
+
+```bash
+# Create a bare repo (used for servers/remotes)
+git init --bare my-project.git
+
+# It contains what's normally inside .git/
+ls my-project.git/
+# HEAD  config  description  hooks  info  objects  refs
+
+# Clone from it like any remote
+git clone /path/to/my-project.git
+```
+
+You'll encounter bare repos when setting up self-hosted Git servers or understanding how GitHub stores your repositories.
+
+## git init vs git clone — Summary
+
+| Scenario | Command | Remote? | History? |
+|---|---|---|---|
+| New project from scratch | `git init` | No remote — add one later | Empty — you create it |
+| Existing project on GitHub | `git clone URL` | `origin` set automatically | Full history included |
+| Fork contribution | `git clone` your fork | `origin` = fork, add `upstream` | Full history included |
+| CI/CD build | `git clone --depth 1` | `origin` set automatically | Only latest commit |
+
+<Exercise number={1} title="Init and First Commit">
+
+Create a repository from scratch, add files, and make meaningful commits:
+
+```bash
+# 1. Create a project directory
+PROJECT=$(mktemp -d)/my-project
+mkdir -p "$PROJECT" && cd "$PROJECT"
+
+# 2. Initialize Git
+git init
+echo "Repository initialized at: $(pwd)"
+
+# 3. Check the status — empty repo, no commits yet
+git status
+
+# 4. Create project files
+cat > README.md << 'EOF'
+# My Project
+
+A demo project to learn Git repository basics.
+
+## Getting Started
+
+1. Clone this repo
+2. Install dependencies
+3. Run the app
+EOF
+
+cat > .gitignore << 'EOF'
+# Dependencies
+node_modules/
+vendor/
+
+# Build
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+EOF
+
+cat > app.js << 'EOF'
+// Main application entry point
+function main() {
+    console.log("Hello from my project!");
+}
+
+main();
+EOF
+
+# 5. Check status — three untracked files
+git status
+
+# 6. Stage and commit — first commit
+git add README.md .gitignore app.js
+git commit -m "Initial commit: project scaffolding
+
+- Add README with getting started guide
+- Add .gitignore for common patterns
+- Add main application entry point"
+
+# 7. Make another change
+cat >> app.js << 'EOF'
+
+function add(a, b) {
+    return a + b;
+}
+EOF
+
+git add app.js
+git commit -m "Add arithmetic helper function"
+
+# 8. View the history
+echo ""
+echo "=== Commit History ==="
+git log --oneline
+
+echo ""
+echo "=== Detailed Last Commit ==="
+git log -1 --stat
+
+echo ""
+echo "=== Files in Repository ==="
+git ls-files
+
+# Clean up
+cd / && rm -rf "$(dirname "$PROJECT")"
+echo ""
+echo "Done! Repository created, committed to, and cleaned up."
+```
+
+</Exercise>
+
+<Exercise number={2} title="Clone and Explore">
+
+Clone a repository and explore its internal structure:
+
+```bash
+# 1. Create a "remote" repo to clone from (simulating GitHub)
+REMOTE=$(mktemp -d)/origin.git
+git init --bare "$REMOTE"
+
+# Populate it with some commits
+WORK=$(mktemp -d) && cd "$WORK"
+git init -q
+git remote add origin "$REMOTE"
+
+echo "# Demo Project" > README.md
+git add README.md && git commit -q -m "Initial commit"
+
+echo "console.log('hello');" > index.js
+git add index.js && git commit -q -m "Add entry point"
+
+echo "v1.0" > VERSION
+git add VERSION && git commit -q -m "Add version file"
+
+git push -q -u origin main 2>/dev/null || git push -q -u origin master
+cd / && rm -rf "$WORK"
+
+# 2. Clone the repo (like cloning from GitHub)
+CLONE_DIR=$(mktemp -d)/my-clone
+git clone "$REMOTE" "$CLONE_DIR"
+cd "$CLONE_DIR"
+
+# 3. Explore the clone
+echo "=== Remote Info ==="
+git remote -v
+
+echo ""
+echo "=== Branch Info ==="
+git branch -a
+
+echo ""
+echo "=== Commit History ==="
+git log --oneline
+
+# 4. Explore .git directory
+echo ""
+echo "=== .git Directory ==="
+ls .git/
+
+echo ""
+echo "=== HEAD ==="
+cat .git/HEAD
+
+echo ""
+echo "=== Local Branch Ref ==="
+BRANCH=$(git branch --show-current)
+cat ".git/refs/heads/$BRANCH"
+
+echo ""
+echo "=== Remote Tracking ==="
+ls .git/refs/remotes/origin/
+
+echo ""
+echo "=== Repo Config ==="
+cat .git/config
+
+# 5. Explore objects
+echo ""
+echo "=== Latest Commit Object ==="
+git cat-file -p HEAD
+
+echo ""
+echo "=== Tree of Latest Commit ==="
+TREE=$(git cat-file -p HEAD | grep tree | awk '{print $2}')
+git cat-file -p "$TREE"
+
+# Clean up
+cd / && rm -rf "$REMOTE" "$CLONE_DIR" "$(dirname "$CLONE_DIR")"
+echo ""
+echo "Done! Cloned, explored, and cleaned up."
+```
+
+</Exercise>
+
+<MiniProject title="Repository Setup Tool">
+
+Create a script that initializes a new project with best practices and pushes to a remote:
+
+```bash
+cat > ~/repo-setup.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# ============================================================
+# Repository Setup Tool
+# Creates a new project with README, .gitignore, license,
+# and optionally pushes to a GitHub remote
+# ============================================================
+
+echo "============================================"
+echo "  Repository Setup Tool"
+echo "============================================"
+echo ""
+
+# ---- Project Name ----
+read -p "Project name: " PROJECT_NAME
+read -p "Project description: " PROJECT_DESC
+
+# ---- Language ----
+echo ""
+echo "Select language/stack:"
+echo "  1) Node.js"
+echo "  2) Python"
+echo "  3) Go"
+echo "  4) Generic"
+read -p "Selection [4]: " LANG_CHOICE
+
+# ---- License ----
+echo ""
+echo "Select license:"
+echo "  1) MIT"
+echo "  2) Apache 2.0"
+echo "  3) None"
+read -p "Selection [1]: " LICENSE_CHOICE
+
+# ---- Create Directory ----
+mkdir -p "$PROJECT_NAME" && cd "$PROJECT_NAME"
+git init -q
+
+# ---- README ----
+cat > README.md << EOF
+# $PROJECT_NAME
+
+$PROJECT_DESC
+
+## Getting Started
+
+\`\`\`bash
+git clone <url>
+cd $PROJECT_NAME
+\`\`\`
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (\`git checkout -b feature/my-feature\`)
+3. Commit your changes (\`git commit -m 'Add my feature'\`)
+4. Push to the branch (\`git push origin feature/my-feature\`)
+5. Open a Pull Request
+
+## License
+
+See [LICENSE](LICENSE) for details.
+EOF
+
+# ---- .gitignore ----
+GITIGNORE_CONTENT="# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/settings.json
+*.swp
+*~
+
+# Environment
+.env
+.env.local
+"
+
+case "${LANG_CHOICE:-4}" in
+    1)
+        GITIGNORE_CONTENT+="
+# Node.js
+node_modules/
+dist/
+build/
+coverage/
+*.log
+npm-debug.log*
+"
+        echo '{ "name": "'"$PROJECT_NAME"'", "version": "1.0.0", "description": "'"$PROJECT_DESC"'" }' > package.json
+        ;;
+    2)
+        GITIGNORE_CONTENT+="
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+.pytest_cache/
+"
+        echo "# $PROJECT_NAME" > requirements.txt
+        ;;
+    3)
+        GITIGNORE_CONTENT+="
+# Go
+bin/
+vendor/
+*.exe
+*.test
+*.out
+"
+        mkdir -p cmd pkg internal
+        ;;
+    4)
+        GITIGNORE_CONTENT+="
+# Build
+dist/
+build/
+out/
+"
+        ;;
+esac
+
+echo "$GITIGNORE_CONTENT" > .gitignore
+
+# ---- License ----
+case "${LICENSE_CHOICE:-1}" in
+    1)
+        YEAR=$(date +%Y)
+        cat > LICENSE << LICEOF
+MIT License
+
+Copyright (c) $YEAR
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+LICEOF
+        ;;
+    2)
+        cat > LICENSE << 'LICEOF'
+Apache License, Version 2.0
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+LICEOF
+        ;;
+    3)
+        echo "(No license selected)"
+        ;;
+esac
+
+# ---- Initial Commit ----
+git add -A
+git commit -q -m "Initial commit: project scaffolding
+
+- Add README with project description and contributing guide
+- Add .gitignore for common patterns
+- Add LICENSE"
+
+echo ""
+echo "[OK] Repository initialized"
+echo ""
+
+# ---- Push to Remote ----
+read -p "Push to GitHub? [y/N]: " PUSH_CHOICE
+
+if [[ "${PUSH_CHOICE:-n}" =~ ^[Yy]$ ]]; then
+    read -p "GitHub username: " GH_USER
+    REMOTE_URL="git@github.com:${GH_USER}/${PROJECT_NAME}.git"
+    echo "Remote URL: $REMOTE_URL"
+    echo ""
+    echo "Make sure the repo exists on GitHub, then run:"
+    echo "  git remote add origin $REMOTE_URL"
+    echo "  git push -u origin main"
+else
+    echo "To push later:"
+    echo "  git remote add origin git@github.com:USER/${PROJECT_NAME}.git"
+    echo "  git push -u origin main"
+fi
+
+# ---- Summary ----
+echo ""
+echo "============================================"
+echo "  Setup Complete!"
+echo "============================================"
+echo ""
+echo "Project: $(pwd)"
+echo ""
+echo "Files created:"
+git ls-files | while read -r f; do echo "  $f"; done
+echo ""
+echo "Commit:"
+git log --oneline
+SCRIPT
+
+chmod +x ~/repo-setup.sh
+echo "Repository setup tool created at ~/repo-setup.sh"
+echo "Run it with: ~/repo-setup.sh"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `git init` creates a new empty repository; `git clone` copies an existing one with full history
+- The `.git/` directory IS the repository — it contains objects, refs, config, and the staging index
+- A remote is a named connection to another repository (`origin` is the conventional default)
+- `git push -u origin main` sets upstream tracking so future push/pull commands are shorter
+- `git clone --depth 1` creates a shallow clone for speed when you don't need full history
+- Bare repositories (no working directory) are used for servers and shared remotes
+- Always start a project with README, .gitignore, and a license file
+
+## What's Next
+
+You have repositories and remotes. In **Staging and Committing**, you'll learn to craft clean commits — staging specific hunks with `git add -p`, writing great commit messages, and building the kind of history your teammates will thank you for.

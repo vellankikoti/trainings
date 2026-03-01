@@ -1,0 +1,1375 @@
+---
+title: "Docker Volumes and Data Persistence"
+description: "Master data persistence in Docker with volumes, bind mounts, and tmpfs mounts. Learn to persist database data, share files between containers, and implement backup strategies."
+order: 9
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - 08-multi-stage-builds
+objectives:
+  - Understand why containers are ephemeral and data is lost on removal
+  - Use named volumes, bind mounts, and tmpfs mounts for different scenarios
+  - Persist database data across container restarts and removals
+  - Share data between multiple containers using shared volumes
+  - Manage volumes with docker volume commands
+  - Implement volume backup and restore strategies
+tags:
+  - docker
+  - volumes
+  - persistence
+  - storage
+  - bind-mounts
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your team deploys a PostgreSQL database inside a Docker container. It runs perfectly for three weeks. Then a routine update requires replacing the container — `docker stop db && docker rm db` followed by `docker run` with the new image. The new container starts, the application connects, and the support tickets start pouring in: "Where's all our data?" Three weeks of customer records, order history, and product catalog — gone. The database files lived inside the container's writable layer, and when the container was removed, so was every byte of data. "We need volumes," your lead says. You never lose data to a container removal again.
+</Callout>
+
+## The Ephemeral Container Problem
+
+By default, all files created inside a container are stored in the container's **writable layer**. This means:
+
+1. The data does not persist when the container is removed
+2. The data is tightly coupled to the host machine where the container runs
+3. Writing to the container's writable layer requires a storage driver, which is slower than writing to the host filesystem directly
+
+```
+Container Lifecycle Without Volumes:
+
+  docker run                  Container Running              docker rm
+  ┌──────────┐              ┌──────────────────┐            ┌──────────┐
+  │ Create   │─────────────▶│  App writes data │───────────▶│  Remove  │
+  │ container│              │  to /var/lib/db   │            │ container│
+  └──────────┘              │                  │            └──────────┘
+                            │  Data lives in   │                  │
+                            │  writable layer  │                  │
+                            └──────────────────┘                  │
+                                                                  ▼
+                                                          ┌──────────────┐
+                                                          │  DATA LOST!  │
+                                                          │  All writes  │
+                                                          │  are gone.   │
+                                                          └──────────────┘
+```
+
+Let's prove this with a simple experiment:
+
+```bash
+# Create a container and write some data
+docker run --name test-data alpine sh -c "echo 'important data' > /data.txt && cat /data.txt"
+# Output: important data
+
+# Stop and remove the container
+docker rm test-data
+
+# Create a new container with the same name
+docker run --name test-data alpine sh -c "cat /data.txt"
+# Output: cat: can't open '/data.txt': No such file or directory
+
+docker rm test-data
+```
+
+The data is gone. Every container starts with a fresh filesystem from its image. This is by design — containers are meant to be disposable. But your data should not be.
+
+<Callout type="warning" title="The Container Writable Layer Is Temporary">
+Never store important data in the container's filesystem without a volume. This includes:
+- Database files (MySQL, PostgreSQL, MongoDB data directories)
+- User-uploaded files (images, documents, media)
+- Application state (sessions, caches that must survive restarts)
+- Configuration files that are modified at runtime
+- Log files you need to retain after the container stops
+</Callout>
+
+## Docker Storage Options
+
+Docker provides three ways to persist data from containers to the host machine:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Docker Host                                   │
+│                                                                      │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────┐  │
+│  │   Volumes    │    │ Bind Mounts │    │     tmpfs Mounts        │  │
+│  │             │    │             │    │                         │  │
+│  │ Managed by  │    │ Host path   │    │ Host memory only        │  │
+│  │ Docker      │    │ mapped to   │    │ Never written to disk   │  │
+│  │             │    │ container   │    │                         │  │
+│  │ /var/lib/   │    │ path        │    │ Lost when container     │  │
+│  │ docker/     │    │             │    │ stops                   │  │
+│  │ volumes/    │    │ /home/user/ │    │                         │  │
+│  │             │    │ projects/   │    │                         │  │
+│  └──────┬──────┘    └──────┬──────┘    └────────────┬────────────┘  │
+│         │                  │                        │               │
+│  ┌──────┴──────────────────┴────────────────────────┴──────────┐    │
+│  │                     Container                                │    │
+│  │                                                              │    │
+│  │    /data          /app/src          /tmp/secrets              │    │
+│  │    (volume)       (bind mount)      (tmpfs)                  │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Comparison Table
+
+| Feature | Volumes | Bind Mounts | tmpfs Mounts |
+|---|---|---|---|
+| **Managed by** | Docker | User | Kernel (memory) |
+| **Host location** | `/var/lib/docker/volumes/` | Anywhere on host | RAM only |
+| **Survives container removal** | Yes | Yes (on host) | No |
+| **Shared between containers** | Yes | Yes | No |
+| **Pre-populated with image data** | Yes | No | No |
+| **Performance** | Near-native | Native | Fastest (RAM) |
+| **Works on all platforms** | Yes | Path format varies | Linux only |
+| **Backup with Docker tools** | Yes | Manual | N/A |
+| **Best for** | Databases, app data | Development, config | Secrets, temp data |
+
+<Callout type="info" title="When to Use Which">
+- **Volumes**: The default choice. Use for databases, application state, and any data that must persist across container lifecycles. Docker manages the storage location.
+- **Bind mounts**: Use for development workflows where you want live code reloading. Map your source code directory into the container so changes appear immediately.
+- **tmpfs mounts**: Use for sensitive data (secrets, tokens) that should never be written to disk, or for scratch space that benefits from RAM speed.
+</Callout>
+
+## Named Volumes
+
+Named volumes are the **recommended mechanism** for persisting data. Docker manages the volume's lifecycle and storage location. You don't need to know or care where the data is stored on the host.
+
+### Creating and Using Volumes
+
+```bash
+# Create a named volume
+docker volume create mydata
+
+# List all volumes
+docker volume ls
+DRIVER    VOLUME NAME
+local     mydata
+
+# Inspect the volume
+docker volume inspect mydata
+[
+    {
+        "CreatedAt": "2025-01-15T10:30:00Z",
+        "Driver": "local",
+        "Labels": {},
+        "Mountpoint": "/var/lib/docker/volumes/mydata/_data",
+        "Name": "mydata",
+        "Options": {},
+        "Scope": "local"
+    }
+]
+```
+
+### Mounting a Volume to a Container
+
+Use the `-v` (or `--mount`) flag to attach a volume to a container:
+
+```bash
+# Short syntax: -v volume_name:container_path
+docker run -d --name app1 -v mydata:/app/data alpine sh -c "while true; do sleep 3600; done"
+
+# Write data from inside the container
+docker exec app1 sh -c "echo 'Hello from app1' > /app/data/message.txt"
+docker exec app1 cat /app/data/message.txt
+# Output: Hello from app1
+
+# Stop and remove the container
+docker stop app1 && docker rm app1
+
+# Create a NEW container with the SAME volume
+docker run -d --name app2 -v mydata:/app/data alpine sh -c "while true; do sleep 3600; done"
+
+# The data persists!
+docker exec app2 cat /app/data/message.txt
+# Output: Hello from app1
+
+docker stop app2 && docker rm app2
+```
+
+The data survived the container being removed and replaced. The volume exists independently of any container.
+
+### The -v vs --mount Syntax
+
+Docker supports two syntaxes for mounting volumes. They do the same thing but differ in verbosity:
+
+```bash
+# -v syntax (shorter, older)
+docker run -v mydata:/app/data myimage
+
+# --mount syntax (explicit, newer, recommended for clarity)
+docker run --mount type=volume,source=mydata,target=/app/data myimage
+
+# --mount with read-only
+docker run --mount type=volume,source=mydata,target=/app/data,readonly myimage
+
+# -v with read-only
+docker run -v mydata:/app/data:ro myimage
+```
+
+<Callout type="tip" title="-v Creates Volumes Automatically">
+If you use `-v` with a volume name that doesn't exist, Docker creates it automatically. This is convenient but can lead to typo-based volume names that are hard to track down.
+
+```bash
+# This creates a volume called "mydat" (typo!) automatically
+docker run -v mydat:/app/data myimage
+
+# Now you have two volumes and data goes to the wrong one
+docker volume ls
+DRIVER    VOLUME NAME
+local     mydata     # <-- your intended volume
+local     mydat      # <-- typo, created automatically
+```
+
+Using `--mount` with a non-existent volume produces an error, which is safer.
+</Callout>
+
+### Volume with Automatic Initialization
+
+When you mount a named volume to a container directory that already contains files in the image, Docker copies those files into the volume (only on first use, when the volume is empty):
+
+```bash
+# The nginx image has files in /usr/share/nginx/html
+docker run -d --name web -v web-content:/usr/share/nginx/html nginx:1.25-alpine
+
+# The volume now contains nginx's default HTML files
+docker exec web ls /usr/share/nginx/html
+# Output: 50x.html  index.html
+
+docker stop web && docker rm web
+```
+
+This pre-population only happens once. If the volume already has data, the existing data takes precedence.
+
+## Bind Mounts
+
+Bind mounts map a **specific directory on the host** to a directory inside the container. Unlike volumes, you control exactly where the data lives on the host filesystem.
+
+### Basic Bind Mount Usage
+
+```bash
+# Create a directory on the host
+mkdir -p ~/myproject/src
+
+echo '<h1>Hello from bind mount!</h1>' > ~/myproject/src/index.html
+
+# Mount the host directory into the container
+docker run -d --name web \
+  -p 8080:80 \
+  -v ~/myproject/src:/usr/share/nginx/html:ro \
+  nginx:1.25-alpine
+
+# Test it
+curl http://localhost:8080
+# Output: <h1>Hello from bind mount!</h1>
+
+# Edit the file on the host — changes appear immediately in the container
+echo '<h1>Updated content!</h1>' > ~/myproject/src/index.html
+curl http://localhost:8080
+# Output: <h1>Updated content!</h1>
+
+docker stop web && docker rm web
+```
+
+### Bind Mounts for Development
+
+The most common use case for bind mounts is local development. You mount your source code into the container so changes you make on your host are immediately reflected:
+
+```bash
+# Node.js development with live reload
+docker run -d --name dev \
+  -p 3000:3000 \
+  -v $(pwd)/src:/app/src \
+  -v $(pwd)/package.json:/app/package.json \
+  node:20-slim \
+  sh -c "cd /app && npm install && npx nodemon src/server.js"
+```
+
+```
+Development Workflow with Bind Mounts:
+
+  Host Machine                        Container
+  ┌────────────────┐                 ┌────────────────┐
+  │ ~/project/     │                 │ /app/           │
+  │                │   bind mount    │                │
+  │ src/           │◄───────────────▶│ src/           │
+  │  └─ server.js  │   (two-way)     │  └─ server.js  │
+  │  └─ routes.js  │                 │  └─ routes.js  │
+  │                │                 │                │
+  │ You edit       │                 │ nodemon detects│
+  │ server.js in   │────────────────▶│ the change and │
+  │ your IDE       │                 │ restarts the   │
+  │                │                 │ application    │
+  └────────────────┘                 └────────────────┘
+```
+
+<Callout type="warning" title="Bind Mount Gotchas">
+Bind mounts have important differences from volumes:
+
+1. **They overwrite container contents**: If the host directory is empty and the container directory has files, the container sees an empty directory. The image files are hidden (not deleted).
+2. **Permissions can conflict**: Files created in the container have the container user's UID, which may not match your host UID.
+3. **Path must be absolute**: The `-v` syntax requires an absolute path on the host (use `$(pwd)` for current directory).
+4. **Performance on macOS/Windows**: Bind mounts can be slow on Docker Desktop because files must be synchronized between the host and the Linux VM.
+</Callout>
+
+### Bind Mount vs Volume: A Key Difference
+
+```bash
+# Volume: Docker pre-populates with image data
+docker run --rm -v test-vol:/usr/share/nginx/html nginx:1.25-alpine \
+  ls /usr/share/nginx/html
+# Output: 50x.html  index.html  (image files are copied into volume)
+
+# Bind mount: Host directory OVERRIDES container directory
+mkdir -p /tmp/empty-dir
+docker run --rm -v /tmp/empty-dir:/usr/share/nginx/html nginx:1.25-alpine \
+  ls /usr/share/nginx/html
+# Output: (empty — host directory wins)
+
+docker volume rm test-vol
+```
+
+## tmpfs Mounts
+
+A tmpfs mount stores data in the host's **memory only**. The data is never written to the host's filesystem and is discarded when the container stops. Use tmpfs for sensitive data that should never touch disk.
+
+```bash
+# Create a container with a tmpfs mount
+docker run -d --name secure-app \
+  --tmpfs /run/secrets:size=64m,noexec \
+  alpine sh -c "echo 'api-key-12345' > /run/secrets/token && while true; do sleep 3600; done"
+
+# The secret exists in memory only
+docker exec secure-app cat /run/secrets/token
+# Output: api-key-12345
+
+# Using --mount syntax
+docker run -d --name secure-app2 \
+  --mount type=tmpfs,destination=/run/secrets,tmpfs-size=67108864 \
+  alpine sh -c "while true; do sleep 3600; done"
+
+docker stop secure-app secure-app2 && docker rm secure-app secure-app2
+```
+
+<Callout type="info" title="tmpfs Use Cases">
+- **Secrets and credentials**: API keys, database passwords, TLS certificates that should never be written to disk
+- **Scratch space**: Temporary files for image processing, file conversion, or data transformation
+- **Performance-sensitive caches**: In-memory caches that don't need persistence
+- **Security compliance**: Regulations that require sensitive data to remain in volatile memory
+</Callout>
+
+## Volume Management Commands
+
+Docker provides a complete set of commands for managing volumes:
+
+### Listing Volumes
+
+```bash
+# List all volumes
+docker volume ls
+DRIVER    VOLUME NAME
+local     mydata
+local     postgres_data
+local     redis_data
+local     2f4d8a1e3b5c7d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3
+
+# Filter volumes by name
+docker volume ls --filter name=postgres
+DRIVER    VOLUME NAME
+local     postgres_data
+
+# Filter dangling volumes (not used by any container)
+docker volume ls --filter dangling=true
+DRIVER    VOLUME NAME
+local     2f4d8a1e3b5c7d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3
+```
+
+### Inspecting Volumes
+
+```bash
+# Get detailed information about a volume
+docker volume inspect postgres_data
+[
+    {
+        "CreatedAt": "2025-01-15T10:30:00Z",
+        "Driver": "local",
+        "Labels": {},
+        "Mountpoint": "/var/lib/docker/volumes/postgres_data/_data",
+        "Name": "postgres_data",
+        "Options": {},
+        "Scope": "local"
+    }
+]
+
+# Get just the mount point
+docker volume inspect --format '{{ .Mountpoint }}' postgres_data
+# Output: /var/lib/docker/volumes/postgres_data/_data
+```
+
+### Removing Volumes
+
+```bash
+# Remove a specific volume (must not be in use)
+docker volume rm mydata
+
+# Remove multiple volumes
+docker volume rm vol1 vol2 vol3
+
+# Force remove (even if errors occur)
+docker volume rm -f mydata
+
+# Remove ALL unused volumes (dangerous!)
+docker volume prune
+WARNING! This will remove all local volumes not used by at least one container.
+Are you sure you want to continue? [y/N] y
+Deleted Volumes:
+2f4d8a1e3b5c7d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3
+old-project-data
+
+Total reclaimed space: 2.3GB
+
+# Prune with a filter (remove volumes older than 24 hours)
+docker volume prune --filter "until=24h"
+```
+
+<Callout type="warning" title="docker volume prune Is Destructive">
+`docker volume prune` removes ALL volumes not currently attached to a running container. If your containers are stopped (not running), their volumes are considered "unused" and will be deleted. Always check what will be removed before confirming.
+
+```bash
+# Check which volumes are unused BEFORE pruning
+docker volume ls --filter dangling=true
+```
+</Callout>
+
+## Database Persistence with Volumes
+
+The most critical use case for volumes is persisting database data. Without a volume, stopping and removing a database container destroys all your data.
+
+### MySQL with Named Volume
+
+```bash
+# Create a volume for MySQL data
+docker volume create mysql_data
+
+# Run MySQL with the volume
+docker run -d \
+  --name mysql-db \
+  -e MYSQL_ROOT_PASSWORD=secretpassword \
+  -e MYSQL_DATABASE=myapp \
+  -e MYSQL_USER=appuser \
+  -e MYSQL_PASSWORD=apppassword \
+  -p 3306:3306 \
+  -v mysql_data:/var/lib/mysql \
+  mysql:8.0
+
+# Wait for MySQL to initialize (first run takes ~30 seconds)
+docker logs -f mysql-db
+# Wait until you see: "ready for connections"
+# Press Ctrl+C to stop following logs
+
+# Create a table and insert data
+docker exec -i mysql-db mysql -uappuser -papppassword myapp << 'SQL'
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO users (name, email) VALUES
+    ('Alice Johnson', 'alice@example.com'),
+    ('Bob Smith', 'bob@example.com'),
+    ('Charlie Brown', 'charlie@example.com');
+
+SELECT * FROM users;
+SQL
+# Output:
+# +----+----------------+---------------------+---------------------+
+# | id | name           | email               | created_at          |
+# +----+----------------+---------------------+---------------------+
+# |  1 | Alice Johnson  | alice@example.com   | 2025-01-15 10:35:00 |
+# |  2 | Bob Smith      | bob@example.com     | 2025-01-15 10:35:00 |
+# |  3 | Charlie Brown  | charlie@example.com | 2025-01-15 10:35:00 |
+# +----+----------------+---------------------+---------------------+
+```
+
+Now, destroy the container and prove the data persists:
+
+```bash
+# Stop and remove the container completely
+docker stop mysql-db && docker rm mysql-db
+
+# Verify the container is gone
+docker ps -a --filter name=mysql-db
+# Output: (nothing)
+
+# Start a NEW container with the SAME volume
+docker run -d \
+  --name mysql-db-new \
+  -e MYSQL_ROOT_PASSWORD=secretpassword \
+  -p 3306:3306 \
+  -v mysql_data:/var/lib/mysql \
+  mysql:8.0
+
+# Wait for MySQL to start
+sleep 15
+
+# Query the data — it's still there!
+docker exec -i mysql-db-new mysql -uappuser -papppassword myapp -e "SELECT * FROM users;"
+# Output:
+# +----+----------------+---------------------+---------------------+
+# | id | name           | email               | created_at          |
+# +----+----------------+---------------------+---------------------+
+# |  1 | Alice Johnson  | alice@example.com   | 2025-01-15 10:35:00 |
+# |  2 | Bob Smith      | bob@example.com     | 2025-01-15 10:35:00 |
+# |  3 | Charlie Brown  | charlie@example.com | 2025-01-15 10:35:00 |
+# +----+----------------+---------------------+---------------------+
+
+docker stop mysql-db-new && docker rm mysql-db-new
+```
+
+### PostgreSQL with Named Volume
+
+```bash
+# Run PostgreSQL with a named volume
+docker run -d \
+  --name postgres-db \
+  -e POSTGRES_PASSWORD=secretpassword \
+  -e POSTGRES_DB=myapp \
+  -e POSTGRES_USER=appuser \
+  -p 5432:5432 \
+  -v pgdata:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+# Wait for PostgreSQL to initialize
+sleep 10
+
+# Create data
+docker exec -i postgres-db psql -U appuser -d myapp << 'SQL'
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    price DECIMAL(10,2) NOT NULL,
+    stock INT DEFAULT 0
+);
+
+INSERT INTO products (name, price, stock) VALUES
+    ('Widget', 9.99, 100),
+    ('Gadget', 24.99, 50),
+    ('Doohickey', 4.99, 200);
+
+SELECT * FROM products;
+SQL
+
+# The volume preserves data across container replacements
+docker stop postgres-db && docker rm postgres-db
+```
+
+<Callout type="tip" title="Database Volume Mount Points">
+Every database stores data in a specific directory. Here are the common mount points:
+
+| Database | Data Directory | Volume Mount |
+|---|---|---|
+| MySQL | `/var/lib/mysql` | `-v mysql_data:/var/lib/mysql` |
+| PostgreSQL | `/var/lib/postgresql/data` | `-v pgdata:/var/lib/postgresql/data` |
+| MongoDB | `/data/db` | `-v mongo_data:/data/db` |
+| Redis | `/data` | `-v redis_data:/data` |
+| Elasticsearch | `/usr/share/elasticsearch/data` | `-v es_data:/usr/share/elasticsearch/data` |
+| MariaDB | `/var/lib/mysql` | `-v mariadb_data:/var/lib/mysql` |
+</Callout>
+
+## Sharing Data Between Containers
+
+Volumes can be mounted by multiple containers simultaneously. This enables patterns like data sharing, logging sidecars, and shared file processing.
+
+### Shared Volume Between Two Containers
+
+```bash
+# Create a shared volume
+docker volume create shared_data
+
+# Container 1: A writer that produces data
+docker run -d --name writer \
+  -v shared_data:/data \
+  alpine sh -c '
+    while true; do
+      echo "$(date): Data from writer" >> /data/log.txt
+      sleep 5
+    done
+  '
+
+# Container 2: A reader that consumes data
+docker run -d --name reader \
+  -v shared_data:/data:ro \
+  alpine sh -c '
+    while true; do
+      echo "=== Latest entries ==="
+      tail -3 /data/log.txt
+      sleep 10
+    done
+  '
+
+# Check that both containers see the same data
+sleep 12
+docker logs reader
+# Output shows entries written by the writer container
+
+docker stop writer reader && docker rm writer reader
+docker volume rm shared_data
+```
+
+```
+Shared Volume Pattern:
+
+  ┌─────────────┐          ┌────────────────┐          ┌─────────────┐
+  │  Writer      │          │  Named Volume  │          │  Reader      │
+  │  Container   │          │  "shared_data" │          │  Container   │
+  │              │  write   │                │   read   │              │
+  │  Generates  │─────────▶│  /data/log.txt │◀─────────│  Reads and  │
+  │  log entries│          │  /data/cache/  │  (read-  │  processes  │
+  │              │          │                │   only)  │  the data   │
+  └─────────────┘          └────────────────┘          └─────────────┘
+```
+
+### Application with Shared Upload Volume
+
+A practical example — a web application that handles file uploads, with a separate container for processing:
+
+```bash
+# Create the upload volume
+docker volume create uploads
+
+# Web server that receives uploads
+docker run -d --name web-app \
+  -p 8080:80 \
+  -v uploads:/var/www/uploads \
+  nginx:1.25-alpine
+
+# File processor (e.g., image resizer, virus scanner)
+docker run -d --name processor \
+  -v uploads:/input:ro \
+  -v processed:/output \
+  alpine sh -c '
+    while true; do
+      for file in /input/*; do
+        if [ -f "$file" ]; then
+          echo "Processing: $file"
+          # In reality, this would resize images, scan for viruses, etc.
+          cp "$file" /output/
+        fi
+      done
+      sleep 5
+    done
+  '
+
+# Simulate an upload
+docker exec web-app sh -c 'echo "uploaded file content" > /var/www/uploads/document.txt'
+
+# The processor sees the file
+sleep 6
+docker exec processor ls /input/
+# Output: document.txt
+
+docker stop web-app processor && docker rm web-app processor
+docker volume rm uploads processed
+```
+
+## Volume Backup and Restore
+
+Since Docker volumes are managed by Docker, you can't simply copy files from the host filesystem (the mount point is owned by root). Instead, use a temporary container to access the volume data.
+
+### Backing Up a Volume
+
+```bash
+# Create a volume with some data
+docker volume create important_data
+
+docker run --rm -v important_data:/data alpine sh -c '
+  mkdir -p /data/config /data/uploads
+  echo "database_url=postgres://..." > /data/config/settings.conf
+  echo "user data file 1" > /data/uploads/file1.txt
+  echo "user data file 2" > /data/uploads/file2.txt
+'
+
+# Backup the volume to a tar file on the host
+docker run --rm \
+  -v important_data:/source:ro \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/important_data_backup.tar.gz -C /source .
+
+# Verify the backup
+ls -lh important_data_backup.tar.gz
+tar tzf important_data_backup.tar.gz
+# Output:
+# ./
+# ./config/
+# ./config/settings.conf
+# ./uploads/
+# ./uploads/file1.txt
+# ./uploads/file2.txt
+```
+
+Let's break down what happens in the backup command:
+
+```
+Backup Process:
+
+  ┌────────────────────────────────────────────────────┐
+  │              Temporary Container                    │
+  │                                                    │
+  │  -v important_data:/source:ro                      │
+  │     Volume mounted as read-only at /source         │
+  │                                                    │
+  │  -v $(pwd):/backup                                 │
+  │     Host current directory mounted at /backup      │
+  │                                                    │
+  │  tar czf /backup/backup.tar.gz -C /source .        │
+  │     Creates compressed archive from volume data    │
+  │     and writes it to the host directory             │
+  │                                                    │
+  └────────────────────────────────────────────────────┘
+
+  Volume ──read──▶ Container ──tar──▶ Host filesystem
+```
+
+### Restoring a Volume from Backup
+
+```bash
+# Create a new volume (or use an existing one)
+docker volume create restored_data
+
+# Restore the backup into the new volume
+docker run --rm \
+  -v restored_data:/target \
+  -v $(pwd):/backup:ro \
+  alpine tar xzf /backup/important_data_backup.tar.gz -C /target
+
+# Verify the restored data
+docker run --rm -v restored_data:/data alpine ls -R /data
+# Output:
+# /data:
+# config
+# uploads
+#
+# /data/config:
+# settings.conf
+#
+# /data/uploads:
+# file1.txt
+# file2.txt
+
+docker run --rm -v restored_data:/data alpine cat /data/config/settings.conf
+# Output: database_url=postgres://...
+
+docker volume rm important_data restored_data
+```
+
+### Using --volumes-from
+
+The `--volumes-from` flag mounts all volumes from another container. This is useful for backup containers, sidecar patterns, and debugging:
+
+```bash
+# Start a database container with a volume
+docker run -d --name db \
+  -v db_data:/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=secret \
+  postgres:16-alpine
+
+sleep 10
+
+# Create a backup container that shares the database volume
+docker run --rm \
+  --volumes-from db \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/db_backup.tar.gz -C /var/lib/postgresql/data .
+
+# The backup container had access to the same /var/lib/postgresql/data
+ls -lh db_backup.tar.gz
+
+docker stop db && docker rm db
+docker volume rm db_data
+```
+
+<Callout type="warning" title="Hot Backups vs Cold Backups">
+Backing up database files while the database is running (hot backup) can result in corrupted backups. The files may be in an inconsistent state during a write operation. For production databases:
+
+1. Use the database's native backup tools (`pg_dump`, `mysqldump`, `mongodump`) for consistent logical backups
+2. Stop the container before file-level backups if possible
+3. Use database replication for zero-downtime backups
+
+```bash
+# PostgreSQL logical backup (safe while running)
+docker exec db pg_dump -U postgres myapp > backup.sql
+
+# MySQL logical backup (safe while running)
+docker exec mysql-db mysqldump -u root -p myapp > backup.sql
+
+# File-level backup (stop first for consistency)
+docker stop db
+docker run --rm --volumes-from db -v $(pwd):/backup alpine tar czf /backup/db_files.tar.gz -C /var/lib/postgresql/data .
+docker start db
+```
+</Callout>
+
+## Volume Drivers and Remote Storage
+
+By default, Docker uses the `local` driver, which stores volume data on the host filesystem. For production environments, you may need remote storage drivers.
+
+### Overview of Volume Drivers
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│                    Volume Drivers                              │
+├───────────────┬───────────────────────────────────────────────┤
+│ local         │ Default. Files on the local host filesystem   │
+│ nfs           │ Network File System for shared storage        │
+│ aws (EBS/EFS) │ Amazon Elastic Block Store / File System      │
+│ azure         │ Azure File Share                              │
+│ gce           │ Google Compute Engine persistent disk         │
+│ rexray        │ Multi-cloud storage orchestration             │
+│ convoy        │ Docker volume plugin for snapshots/backups    │
+│ portworx      │ Cloud-native storage for containers          │
+└───────────────┴───────────────────────────────────────────────┘
+```
+
+### Creating a Volume with NFS Driver
+
+```bash
+# Create a volume backed by an NFS share
+docker volume create \
+  --driver local \
+  --opt type=nfs \
+  --opt o=addr=192.168.1.100,rw \
+  --opt device=:/shared/data \
+  nfs_volume
+
+# Use it like any other volume
+docker run -d --name app -v nfs_volume:/data myapp
+```
+
+### Creating a Volume with Custom Options
+
+```bash
+# Create a volume with specific mount options
+docker volume create \
+  --driver local \
+  --opt type=tmpfs \
+  --opt device=tmpfs \
+  --opt o=size=100m,uid=1000 \
+  fast_scratch
+
+# This creates a tmpfs-backed volume with a 100MB limit
+docker run -d --name worker -v fast_scratch:/tmp/work alpine sh -c "while true; do sleep 3600; done"
+
+docker stop worker && docker rm worker
+docker volume rm fast_scratch
+```
+
+<Callout type="info" title="Volume Drivers in Production">
+In production Kubernetes or Docker Swarm environments, volume drivers enable:
+- **Data replication** across hosts for high availability
+- **Snapshots** for point-in-time recovery
+- **Encryption** at rest for compliance requirements
+- **Performance tuning** with SSD-backed or provisioned IOPS storage
+
+The choice of volume driver depends on your infrastructure. For AWS, use EBS or EFS. For on-premise, NFS or GlusterFS are common choices.
+</Callout>
+
+## Read-Only Volumes
+
+You can mount volumes as read-only to prevent containers from modifying the data. This is useful for configuration files, shared reference data, and security hardening.
+
+```bash
+# Create a volume with configuration data
+docker volume create app_config
+
+docker run --rm -v app_config:/config alpine sh -c '
+  echo "log_level=info" > /config/app.conf
+  echo "max_connections=100" >> /config/app.conf
+'
+
+# Mount as read-only — the container cannot modify the config
+docker run --rm -v app_config:/config:ro alpine sh -c '
+  cat /config/app.conf
+  echo "log_level=debug" >> /config/app.conf
+'
+# Output:
+# log_level=info
+# max_connections=100
+# sh: can't create /config/app.conf: Read-only file system
+
+docker volume rm app_config
+```
+
+## Anonymous Volumes
+
+When a Dockerfile contains a `VOLUME` instruction, Docker creates an **anonymous volume** (with a random hash name) every time a container is created from that image:
+
+```dockerfile
+# In Dockerfile
+VOLUME /var/lib/mysql
+```
+
+```bash
+# Anonymous volume is created automatically
+docker run -d --name db mysql:8.0
+
+docker volume ls
+DRIVER    VOLUME NAME
+local     2f4d8a1e3b5c7d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3
+
+# These are hard to manage — always use named volumes instead
+docker run -d --name db -v mysql_data:/var/lib/mysql mysql:8.0
+```
+
+<Callout type="tip" title="Always Use Named Volumes">
+Anonymous volumes (created by `VOLUME` in Dockerfile or `-v /path` without a name) get random hash names like `2f4d8a1e3b5c...`. These are impossible to identify and easy to accidentally delete with `docker volume prune`. Always use named volumes (`-v myname:/path`) for any data you care about.
+</Callout>
+
+## Volumes in Dockerfiles
+
+The `VOLUME` instruction in a Dockerfile declares that a directory should be a volume. However, it creates anonymous volumes, and you cannot specify a named volume in a Dockerfile:
+
+```dockerfile
+# Dockerfile
+FROM postgres:16-alpine
+# This tells Docker (and users) that /var/lib/postgresql/data
+# should be a volume
+VOLUME /var/lib/postgresql/data
+```
+
+```bash
+# When running, you should always override with a named volume
+docker run -d \
+  -v my_pgdata:/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=secret \
+  postgres:16-alpine
+```
+
+The `VOLUME` instruction is primarily **documentation** — it tells users of the image which directories contain data that should be persisted. The actual named volume is always specified at runtime.
+
+<Exercise title="Database Persistence with Volumes" difficulty="beginner" xpReward={35} estimatedMinutes={15}
+  objectives={["Create a named volume for database storage", "Persist MySQL data across container replacements", "Verify data survives container removal"]}
+  hints={["MySQL stores data in /var/lib/mysql — mount your volume there", "Use docker exec to run SQL commands inside the container", "Wait about 15 seconds for MySQL to initialize on first run", "Remember to use the same volume name when creating the replacement container"]}
+  validationCriteria={[
+    "Create a named volume called 'exercise_mysql_data' with docker volume create",
+    "Run a MySQL 8.0 container with the volume mounted at /var/lib/mysql",
+    "Create a database table called 'tasks' with columns: id (INT AUTO_INCREMENT PRIMARY KEY), title (VARCHAR(200)), completed (BOOLEAN DEFAULT FALSE)",
+    "Insert at least 3 rows into the tasks table",
+    "Stop and remove the MySQL container completely with docker stop and docker rm",
+    "Start a new MySQL container using the same volume",
+    "Query the tasks table and verify all 3 rows are still present",
+    "Clean up: stop and remove the container, then remove the volume"
+  ]}
+>
+
+Prove that Docker volumes persist data across container removals by running a MySQL database, adding data, destroying the container, and recovering the data with a new container.
+
+**Step 1: Create the volume and start MySQL**
+
+```bash
+# Create a named volume
+docker volume create exercise_mysql_data
+
+# Start MySQL with the volume
+docker run -d \
+  --name exercise-mysql \
+  -e MYSQL_ROOT_PASSWORD=rootpass \
+  -e MYSQL_DATABASE=tododb \
+  -e MYSQL_USER=todouser \
+  -e MYSQL_PASSWORD=todopass \
+  -p 3306:3306 \
+  -v exercise_mysql_data:/var/lib/mysql \
+  mysql:8.0
+
+# Wait for MySQL to initialize
+echo "Waiting for MySQL to start..."
+sleep 20
+
+# Verify MySQL is ready
+docker exec exercise-mysql mysql -utodouser -ptodopass tododb -e "SELECT 1;"
+```
+
+**Step 2: Create a table and insert data**
+
+```bash
+docker exec -i exercise-mysql mysql -utodouser -ptodopass tododb << 'SQL'
+CREATE TABLE tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    completed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO tasks (title, completed) VALUES
+    ('Learn Docker volumes', TRUE),
+    ('Set up database persistence', TRUE),
+    ('Deploy to production', FALSE);
+
+SELECT * FROM tasks;
+SQL
+```
+
+**Step 3: Destroy the container**
+
+```bash
+# Stop and remove — this would normally destroy all data
+docker stop exercise-mysql
+docker rm exercise-mysql
+
+# Confirm the container is gone
+docker ps -a --filter name=exercise-mysql
+# (empty output)
+
+# But the volume still exists!
+docker volume inspect exercise_mysql_data
+```
+
+**Step 4: Start a new container with the same volume**
+
+```bash
+docker run -d \
+  --name exercise-mysql-new \
+  -e MYSQL_ROOT_PASSWORD=rootpass \
+  -p 3306:3306 \
+  -v exercise_mysql_data:/var/lib/mysql \
+  mysql:8.0
+
+# Wait for MySQL to start (faster on subsequent runs)
+sleep 15
+
+# Query the data — it survived!
+docker exec -i exercise-mysql-new mysql -utodouser -ptodopass tododb -e "SELECT * FROM tasks;"
+# All 3 rows should be present
+```
+
+**Step 5: Clean up**
+
+```bash
+docker stop exercise-mysql-new && docker rm exercise-mysql-new
+docker volume rm exercise_mysql_data
+```
+
+</Exercise>
+
+<Exercise title="Shared Volumes Between Containers" difficulty="intermediate" xpReward={40} estimatedMinutes={20}
+  objectives={["Share data between two containers using a named volume", "Use read-only mounts for consumer containers", "Implement a producer-consumer pattern with volumes"]}
+  hints={["Create one volume and mount it in both containers", "The producer writes to the volume with read-write access", "The consumer reads from the volume with :ro (read-only) access", "Use docker logs to verify the consumer sees the producer's data"]}
+  validationCriteria={[
+    "Create a named volume called 'exercise_shared'",
+    "Start a 'producer' container that writes a timestamped JSON file to the volume every 3 seconds",
+    "Start a 'consumer' container that reads and displays the JSON file every 5 seconds, mounting the volume as read-only",
+    "Use docker logs to verify the consumer successfully reads the producer's data",
+    "Verify the consumer cannot write to the volume (read-only mount)",
+    "Stop the producer, start a new producer, and verify the consumer sees the new producer's data on the same volume",
+    "Clean up all containers and the volume"
+  ]}
+>
+
+Build a producer-consumer system where one container generates data and another container reads it, connected through a shared volume.
+
+**Step 1: Create the shared volume**
+
+```bash
+docker volume create exercise_shared
+```
+
+**Step 2: Start the producer**
+
+```bash
+docker run -d --name producer \
+  -v exercise_shared:/data \
+  alpine sh -c '
+    COUNT=0
+    while true; do
+      COUNT=$((COUNT + 1))
+      cat > /data/status.json << ENDJSON
+{
+  "producer": "producer-1",
+  "message_number": $COUNT,
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "status": "running"
+}
+ENDJSON
+      echo "[Producer] Wrote message #$COUNT"
+      sleep 3
+    done
+  '
+```
+
+**Step 3: Start the consumer (read-only)**
+
+```bash
+docker run -d --name consumer \
+  -v exercise_shared:/data:ro \
+  alpine sh -c '
+    while true; do
+      if [ -f /data/status.json ]; then
+        echo "[Consumer] Read: $(cat /data/status.json)"
+      else
+        echo "[Consumer] Waiting for data..."
+      fi
+      sleep 5
+    done
+  '
+```
+
+**Step 4: Verify data sharing**
+
+```bash
+# Wait for a few cycles
+sleep 12
+
+# Check producer logs
+docker logs producer
+
+# Check consumer logs — should show the producer's data
+docker logs consumer
+
+# Verify the consumer CANNOT write
+docker exec consumer sh -c 'echo "hack" > /data/test.txt'
+# Expected error: Read-only file system
+```
+
+**Step 5: Replace the producer**
+
+```bash
+# Stop the old producer
+docker stop producer && docker rm producer
+
+# Start a new producer — the consumer keeps reading from the same volume
+docker run -d --name producer-v2 \
+  -v exercise_shared:/data \
+  alpine sh -c '
+    COUNT=1000
+    while true; do
+      COUNT=$((COUNT + 1))
+      cat > /data/status.json << ENDJSON
+{
+  "producer": "producer-v2",
+  "message_number": $COUNT,
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "status": "upgraded"
+}
+ENDJSON
+      echo "[Producer-v2] Wrote message #$COUNT"
+      sleep 3
+    done
+  '
+
+# Wait and verify the consumer now sees data from producer-v2
+sleep 10
+docker logs --tail 5 consumer
+# Should show "producer-v2" in the output
+```
+
+**Step 6: Clean up**
+
+```bash
+docker stop producer-v2 consumer && docker rm producer-v2 consumer
+docker volume rm exercise_shared
+```
+
+</Exercise>
+
+<MiniProject title="Complete Data Persistence Pipeline" difficulty="intermediate" xpReward={50} estimatedMinutes={25}
+  objectives={["Build a multi-container application with persistent storage", "Implement volume backup and restore procedures", "Use different mount types (volume, bind mount, tmpfs) in one system"]}
+  hints={["Use a named volume for the database, a bind mount for config files, and tmpfs for secrets", "The backup container should use --volumes-from or mount the same named volume", "Test the restore by creating a brand new volume from the backup", "Use pg_dump for a consistent database backup rather than file-level backup"]}
+  validationCriteria={[
+    "Create a PostgreSQL container with a named volume for data persistence",
+    "Use a bind mount to provide a custom PostgreSQL configuration file from the host",
+    "Use a tmpfs mount for the container's /run/secrets directory",
+    "Insert sample data into the database (at least one table with 5+ rows)",
+    "Perform a logical backup using pg_dump and save it to the host via a bind mount",
+    "Stop and remove the database container AND delete the volume",
+    "Create a new volume and a new database container",
+    "Restore the backup into the new database and verify all data is intact",
+    "Clean up all containers, volumes, and temporary files"
+  ]}
+>
+
+Build a database system with persistent storage, configuration management, secret handling, and a complete backup/restore workflow.
+
+**Step 1: Set up the project directory**
+
+```bash
+mkdir -p ~/persistence-project/config ~/persistence-project/backups
+cd ~/persistence-project
+
+# Create a custom PostgreSQL config
+cat > config/custom-postgresql.conf << 'CONF'
+# Custom PostgreSQL Configuration
+max_connections = 50
+shared_buffers = 128MB
+log_statement = 'all'
+log_destination = 'stderr'
+logging_collector = off
+CONF
+```
+
+**Step 2: Start PostgreSQL with all three mount types**
+
+```bash
+docker volume create pg_project_data
+
+docker run -d \
+  --name project-db \
+  -e POSTGRES_PASSWORD=projectpass \
+  -e POSTGRES_DB=project \
+  -e POSTGRES_USER=projectuser \
+  -p 5432:5432 \
+  -v pg_project_data:/var/lib/postgresql/data \
+  -v $(pwd)/config/custom-postgresql.conf:/etc/postgresql/custom.conf:ro \
+  --tmpfs /run/secrets:size=10m,noexec,nosuid \
+  postgres:16-alpine \
+  -c 'config_file=/etc/postgresql/custom.conf'
+
+# Wait for PostgreSQL to start
+echo "Waiting for PostgreSQL to initialize..."
+sleep 10
+```
+
+**Step 3: Insert sample data**
+
+```bash
+docker exec -i project-db psql -U projectuser -d project << 'SQL'
+-- Create tables
+CREATE TABLE customers (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    plan TEXT DEFAULT 'free',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    customer_id INT REFERENCES customers(id),
+    product TEXT NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    ordered_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Insert sample data
+INSERT INTO customers (name, email, plan) VALUES
+    ('Alice Corp', 'alice@corp.com', 'enterprise'),
+    ('Bob LLC', 'bob@llc.com', 'pro'),
+    ('Charlie Inc', 'charlie@inc.com', 'free'),
+    ('Diana Ltd', 'diana@ltd.com', 'pro'),
+    ('Eve Startup', 'eve@startup.com', 'enterprise');
+
+INSERT INTO orders (customer_id, product, amount) VALUES
+    (1, 'Widget Pro', 299.99),
+    (1, 'Gadget Plus', 149.99),
+    (2, 'Widget Basic', 99.99),
+    (3, 'Starter Pack', 49.99),
+    (4, 'Widget Pro', 299.99),
+    (5, 'Enterprise Suite', 999.99),
+    (5, 'Support Plan', 499.99);
+
+-- Verify
+SELECT c.name, COUNT(o.id) as order_count, SUM(o.amount) as total_spent
+FROM customers c
+LEFT JOIN orders o ON c.id = o.customer_id
+GROUP BY c.id, c.name
+ORDER BY total_spent DESC;
+SQL
+```
+
+**Step 4: Verify the tmpfs mount**
+
+```bash
+# Write a secret to tmpfs — it's in memory only
+docker exec project-db sh -c 'echo "db_master_key=supersecret123" > /run/secrets/db_key'
+docker exec project-db cat /run/secrets/db_key
+# Output: db_master_key=supersecret123
+
+# Verify the bind-mounted config
+docker exec project-db cat /etc/postgresql/custom.conf
+```
+
+**Step 5: Perform a backup**
+
+```bash
+# Use pg_dump for a consistent logical backup
+docker exec project-db pg_dump -U projectuser -d project -F c -f /tmp/backup.dump
+
+# Copy the backup to the host
+docker cp project-db:/tmp/backup.dump $(pwd)/backups/project_backup.dump
+
+# Also create a SQL-format backup
+docker exec project-db pg_dump -U projectuser -d project > $(pwd)/backups/project_backup.sql
+
+ls -lh backups/
+```
+
+**Step 6: Simulate disaster — destroy everything**
+
+```bash
+docker stop project-db && docker rm project-db
+docker volume rm pg_project_data
+
+# Verify everything is gone
+docker ps -a --filter name=project-db
+docker volume ls --filter name=pg_project
+```
+
+**Step 7: Restore from backup**
+
+```bash
+# Create a fresh volume
+docker volume create pg_project_data_restored
+
+# Start a new PostgreSQL container
+docker run -d \
+  --name project-db-restored \
+  -e POSTGRES_PASSWORD=projectpass \
+  -e POSTGRES_DB=project \
+  -e POSTGRES_USER=projectuser \
+  -p 5432:5432 \
+  -v pg_project_data_restored:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+sleep 10
+
+# Restore from the SQL backup
+docker exec -i project-db-restored psql -U projectuser -d project < $(pwd)/backups/project_backup.sql
+
+# Verify the restoration
+docker exec -i project-db-restored psql -U projectuser -d project -c "
+SELECT c.name, COUNT(o.id) as order_count, SUM(o.amount) as total_spent
+FROM customers c
+LEFT JOIN orders o ON c.id = o.customer_id
+GROUP BY c.id, c.name
+ORDER BY total_spent DESC;
+"
+# All data should match the original!
+```
+
+**Step 8: Clean up**
+
+```bash
+docker stop project-db-restored && docker rm project-db-restored
+docker volume rm pg_project_data_restored
+rm -rf ~/persistence-project
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Containers are **ephemeral** — data in the container's writable layer is lost when the container is removed
+- **Named volumes** are the recommended way to persist data. Docker manages the storage location, and data survives container replacements
+- **Bind mounts** map host directories into containers. They are ideal for development (live code reloading) and configuration files
+- **tmpfs mounts** store data in memory only. Use them for secrets and sensitive data that should never be written to disk
+- Every database has a specific data directory — mount a named volume there (e.g., `-v pgdata:/var/lib/postgresql/data`)
+- Volumes can be **shared between containers** for producer-consumer patterns, sidecar logging, and shared file processing
+- Mount volumes as **read-only** (`:ro`) when a container should not modify the data
+- Back up volumes using a temporary container that mounts the volume and creates a tar archive
+- For database backups, prefer **logical backups** (`pg_dump`, `mysqldump`) over file-level copies of running databases
+- Use `docker volume prune` carefully — it removes ALL volumes not attached to running containers
+- Always use **named volumes** instead of anonymous volumes to keep your data identifiable and manageable
+
+## What's Next
+
+Your containers can persist data, but they can't talk to each other yet. In **Docker Networking**, you'll learn how containers communicate over virtual networks, how DNS resolution works inside Docker, and how to isolate services with custom networks — the foundation for building multi-container applications.

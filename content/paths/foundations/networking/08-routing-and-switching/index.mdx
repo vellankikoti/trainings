@@ -1,0 +1,674 @@
+---
+title: "Routing and Switching"
+description: "Understand how packets find their way across networks. Master routing tables, default gateways, and the switching that connects devices on the same network."
+order: 8
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 07-ports-and-sockets
+objectives:
+  - Read and interpret routing tables
+  - Understand the default gateway concept
+  - Know the difference between routing and switching
+  - Trace packet paths through a network
+tags:
+  - networking
+  - routing
+  - switching
+  - gateway
+---
+
+<Callout type="story" title="The Story">
+Your Docker container can reach other containers on the same network but can't reach the internet. The container has an IP, but no default gateway configured. Without a route to the outside world, packets have nowhere to go. Understanding routing — how packets find their destination step by step — is essential for debugging container networking, VPNs, and cloud VPCs.
+</Callout>
+
+## Switching — Layer 2 Communication
+
+Switching operates at **Layer 2** (Data Link) of the OSI model. Switches forward frames based on **MAC addresses** and connect devices on the **same network** (same subnet).
+
+### How a Switch Works
+
+```
+Device A (MAC: AA:AA:AA:AA:AA:AA)
+    |
+    +--- Switch Port 1
+    |
+Device B (MAC: BB:BB:BB:BB:BB:BB)
+    |
+    +--- Switch Port 2
+    |
+Device C (MAC: CC:CC:CC:CC:CC:CC)
+    |
+    +--- Switch Port 3
+```
+
+The switch maintains a **forwarding table** (MAC address table):
+
+| MAC Address | Port |
+|-------------|------|
+| AA:AA:AA:AA:AA:AA | Port 1 |
+| BB:BB:BB:BB:BB:BB | Port 2 |
+| CC:CC:CC:CC:CC:CC | Port 3 |
+
+When Device A sends a frame to Device B, the switch looks up BB:BB:BB:BB:BB:BB in its table and forwards the frame only to Port 2. No other device sees the traffic.
+
+### ARP — Address Resolution Protocol
+
+Switching uses MAC addresses, but applications use IP addresses. ARP bridges this gap by mapping IP addresses to MAC addresses:
+
+```
+Device A wants to talk to 192.168.1.20 (Device B)
+  |
+  1. A checks ARP cache: "Do I know the MAC for 192.168.1.20?"
+  |
+  2. If not → ARP Request (broadcast): "Who has 192.168.1.20?"
+  |   (Every device on the network hears this)
+  |
+  3. Device B responds (unicast): "I have 192.168.1.20, my MAC is BB:BB:..."
+  |
+  4. A caches the mapping and sends the frame
+```
+
+```bash
+# View your ARP cache (IP → MAC mappings)
+ip neigh show
+# Or the legacy command:
+arp -a 2>/dev/null
+
+# Example output:
+# 192.168.1.1 dev eth0 lladdr 00:1a:2b:3c:4d:5e REACHABLE
+# 192.168.1.20 dev eth0 lladdr aa:bb:cc:dd:ee:ff STALE
+
+# ARP cache states:
+# REACHABLE — recently confirmed
+# STALE — not confirmed recently, will re-probe
+# DELAY — waiting for confirmation
+# FAILED — resolution failed (host unreachable at L2)
+```
+
+<Callout type="tip" title="ARP in Docker and Cloud">
+In Docker bridge networks, containers use ARP to find each other. In cloud environments, ARP is often handled by the hypervisor (virtual switching). Understanding ARP helps you debug "host unreachable" errors on local networks.
+</Callout>
+
+## Routing — Layer 3 Communication
+
+Routing operates at **Layer 3** (Network) and forwards packets based on **IP addresses**. Routing is what gets packets between different networks — from your office to a server in AWS, or from one subnet to another.
+
+### The Key Difference
+
+```
+Switching (Layer 2):
+  Device A ←→ Switch ←→ Device B
+  Same network (192.168.1.0/24)
+  Uses MAC addresses
+
+Routing (Layer 3):
+  Network A ←→ Router ←→ Network B
+  Different networks (192.168.1.0/24 → 10.0.0.0/8)
+  Uses IP addresses
+```
+
+## The Routing Table
+
+Every device that communicates on a network has a routing table. It tells the kernel: "To reach this destination, send packets through this gateway via this interface."
+
+```bash
+# View your routing table
+ip route show
+# Or shorter:
+ip route
+
+# Typical output:
+# default via 192.168.1.1 dev eth0 proto dhcp metric 100
+# 192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.10
+# 172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+```
+
+### Reading Routing Table Entries
+
+```bash
+# Let's break down each part:
+ip route show
+
+# default via 192.168.1.1 dev eth0 proto dhcp metric 100
+#   default       → matches any destination not in other routes (0.0.0.0/0)
+#   via 192.168.1.1 → send to this gateway (your router)
+#   dev eth0      → use this network interface
+#   proto dhcp    → this route was learned via DHCP
+#   metric 100    → priority (lower = preferred)
+
+# 192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.10
+#   192.168.1.0/24 → destination network
+#   dev eth0       → directly connected via this interface
+#   proto kernel   → automatically added by kernel
+#   scope link     → on the local network (no gateway needed)
+#   src 192.168.1.10 → use this as the source IP
+
+# 172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+#   172.17.0.0/16  → Docker's default bridge network
+#   dev docker0    → the Docker bridge interface
+```
+
+### Route Lookup
+
+| Destination | Gateway | Interface | Metric | Meaning |
+|-------------|---------|-----------|--------|---------|
+| `default` (0.0.0.0/0) | 192.168.1.1 | eth0 | 100 | Everything else goes here |
+| `192.168.1.0/24` | — (direct) | eth0 | 0 | Local network, no gateway |
+| `172.17.0.0/16` | — (direct) | docker0 | 0 | Docker network |
+| `10.0.0.0/8` | 192.168.1.254 | eth0 | 50 | VPN or office network |
+
+```bash
+# Ask the kernel which route it would use for a specific destination
+ip route get 8.8.8.8
+# 8.8.8.8 via 192.168.1.1 dev eth0 src 192.168.1.10
+
+ip route get 172.17.0.2
+# 172.17.0.2 dev docker0 src 172.17.0.1
+
+ip route get 192.168.1.20
+# 192.168.1.20 dev eth0 src 192.168.1.10
+```
+
+## The Default Gateway
+
+The default gateway is the "if nothing else matches" route. It's typically your router — the device that connects your local network to the internet.
+
+```bash
+# View the default gateway
+ip route | grep default
+# default via 192.168.1.1 dev eth0
+
+# Or use this older command
+route -n 2>/dev/null | grep "^0.0.0.0"
+
+# Without a default gateway, you can only reach local networks
+# This is exactly the Docker container problem from our story
+```
+
+### How a Packet Is Routed (Step by Step)
+
+```
+You run: curl http://93.184.216.34 (example.com)
+
+Step 1: Kernel checks routing table
+  "Is 93.184.216.34 in 192.168.1.0/24?" → No
+  "Is 93.184.216.34 in 172.17.0.0/16?"  → No
+  "Use default route via 192.168.1.1"    → Yes!
+
+Step 2: ARP for the gateway
+  "What's the MAC address of 192.168.1.1?"
+  ARP response: 00:1a:2b:3c:4d:5e
+
+Step 3: Send packet
+  Ethernet frame:
+    Src MAC: (your MAC)
+    Dst MAC: 00:1a:2b:3c:4d:5e  (gateway's MAC)
+  IP packet inside:
+    Src IP: 192.168.1.10         (your IP)
+    Dst IP: 93.184.216.34        (still the final destination)
+
+Step 4: Router receives packet
+  Strips Ethernet header, looks at IP destination
+  Checks ITS routing table, forwards to next hop
+  Repeats until the packet reaches the destination
+```
+
+<Callout type="warning" title="MAC Addresses Change at Every Hop">
+A crucial networking concept: the IP addresses stay the same from source to destination, but the MAC addresses change at every hop. Each router strips the old Ethernet header and creates a new one with its own MAC as source and the next hop's MAC as destination.
+</Callout>
+
+## Managing Routes
+
+```bash
+# Add a static route
+# Route traffic for 10.0.0.0/8 through gateway 192.168.1.254
+sudo ip route add 10.0.0.0/8 via 192.168.1.254
+
+# Add a route for a specific host
+sudo ip route add 10.0.0.5/32 via 192.168.1.254
+
+# Delete a route
+sudo ip route del 10.0.0.0/8
+
+# Replace a route (add or update)
+sudo ip route replace 10.0.0.0/8 via 192.168.1.253
+
+# Add a default gateway
+sudo ip route add default via 192.168.1.1
+
+# Delete the default gateway
+sudo ip route del default
+```
+
+<Callout type="warning" title="Routes Are Temporary">
+Routes added with `ip route add` are lost on reboot. For persistent routes, configure them in your network manager (NetworkManager, netplan, or /etc/network/interfaces depending on your distribution).
+</Callout>
+
+## Static vs Dynamic Routing
+
+**Static routing** is configured manually:
+
+```bash
+# You tell the system exactly where to send traffic
+sudo ip route add 10.0.0.0/8 via 192.168.1.254
+# Simple, predictable, but doesn't adapt to failures
+```
+
+**Dynamic routing** uses protocols to automatically discover and update routes:
+
+| Protocol | Type | Common Use |
+|----------|------|------------|
+| OSPF | Interior | Within an organization's network |
+| BGP | Exterior | Between ISPs and large networks (the internet backbone) |
+| RIP | Interior | Small networks (legacy) |
+
+For DevOps, you mostly work with static routes and cloud-managed routing. Dynamic routing is more for network engineers, but understanding BGP helps with cloud networking and CDNs.
+
+## Traceroute — Following the Path
+
+`traceroute` shows you every hop a packet takes from source to destination. It works by sending packets with incrementing TTL (Time to Live) values:
+
+```
+TTL=1 → First router responds "TTL exceeded" → Hop 1 identified
+TTL=2 → Second router responds "TTL exceeded" → Hop 2 identified
+TTL=3 → Third router responds "TTL exceeded" → Hop 3 identified
+...
+TTL=N → Destination reached → Done
+```
+
+```bash
+# Basic traceroute
+traceroute 8.8.8.8 2>/dev/null || tracepath 8.8.8.8 2>/dev/null
+
+# Example output:
+# traceroute to 8.8.8.8, 30 hops max
+#  1  192.168.1.1 (192.168.1.1)     1.234 ms  1.123 ms  1.089 ms
+#  2  10.0.0.1 (10.0.0.1)           5.678 ms  5.432 ms  5.321 ms
+#  3  * * *                          (no response — firewall blocking)
+#  4  72.14.237.89 (72.14.237.89)   12.345 ms 12.234 ms 12.123 ms
+#  5  8.8.8.8 (8.8.8.8)            15.678 ms 15.432 ms 15.321 ms
+```
+
+### Reading Traceroute Output
+
+```bash
+# Each line shows:
+#  hop_number  hostname (IP)  rtt1  rtt2  rtt3
+#
+#  1  gateway (192.168.1.1)   1.2ms  1.1ms  1.0ms
+#     ^hop    ^name  ^IP      ^three round-trip time measurements
+
+# * * * means the hop didn't respond (common — not always a problem)
+# Increasing latency between hops = congestion at that point
+# Sudden big jump = long physical distance or congestion
+
+# Use TCP traceroute (better for firewalled destinations)
+sudo traceroute -T -p 443 8.8.8.8 2>/dev/null
+
+# Use mtr for continuous traceroute (combines ping + traceroute)
+mtr --report -c 5 8.8.8.8 2>/dev/null || echo "mtr not installed"
+```
+
+## VLANs — Virtual LANs
+
+VLANs allow you to create separate Layer 2 networks on the same physical switch:
+
+```
+Physical Switch
+├── VLAN 10 (Engineering): Ports 1-8
+├── VLAN 20 (Marketing):   Ports 9-16
+└── VLAN 30 (Servers):     Ports 17-24
+
+Devices on VLAN 10 cannot talk to VLAN 20 at Layer 2.
+Traffic between VLANs must go through a router (inter-VLAN routing).
+```
+
+```bash
+# Check VLAN interfaces on Linux
+ip -d link show | grep vlan 2>/dev/null
+
+# VLANs add a tag (802.1Q) to Ethernet frames
+# The VLAN ID is a number from 1-4094
+
+# Create a VLAN interface (example)
+# sudo ip link add link eth0 name eth0.10 type vlan id 10
+# sudo ip addr add 10.10.0.1/24 dev eth0.10
+# sudo ip link set eth0.10 up
+```
+
+## Routing in Cloud Environments
+
+Cloud networking mirrors physical networking but is software-defined:
+
+### VPC Route Tables (AWS/GCP)
+
+```
+VPC: 10.0.0.0/16
+├── Subnet A (10.0.1.0/24) — Public subnet
+│   Route table:
+│     10.0.0.0/16 → local
+│     0.0.0.0/0   → Internet Gateway (igw-xxx)
+│
+├── Subnet B (10.0.2.0/24) — Private subnet
+│   Route table:
+│     10.0.0.0/16 → local
+│     0.0.0.0/0   → NAT Gateway (nat-xxx)
+│
+└── Subnet C (10.0.3.0/24) — Isolated subnet
+    Route table:
+      10.0.0.0/16 → local
+      (no default route → no internet access)
+```
+
+```bash
+# The Docker container from our story is like Subnet C:
+# It has a local route but no default gateway
+
+# Docker network routing
+docker network inspect bridge 2>/dev/null | head -30
+
+# Check routes inside a container
+# docker exec container_name ip route
+# default via 172.17.0.1 dev eth0
+# 172.17.0.0/16 dev eth0 scope link
+```
+
+<Callout type="tip" title="Cloud vs Physical Routing">
+In cloud environments, route tables are managed through the cloud console or API, not with `ip route`. But the concepts are identical: destination networks, gateways, and the "most specific route wins" rule all apply the same way.
+</Callout>
+
+<Exercise number={1} title="Reading Routing Tables">
+
+Examine routing tables, understand default gateway, and practice route management:
+
+```bash
+# 1. Display the full routing table
+echo "=== Current Routing Table ==="
+ip route show
+
+# 2. Show the default gateway
+echo ""
+echo "=== Default Gateway ==="
+ip route | grep default
+DEFAULT_GW=$(ip route | grep default | awk '{print $3}')
+echo "Gateway IP: $DEFAULT_GW"
+
+# 3. Check which interface is used for the default route
+echo ""
+echo "=== Default Route Interface ==="
+ip route | grep default | awk '{print "Interface:", $5}'
+
+# 4. Query routes for specific destinations
+echo ""
+echo "=== Route Lookups ==="
+for dest in 8.8.8.8 127.0.0.1 10.0.0.1; do
+    echo -n "  Route to $dest: "
+    ip route get "$dest" 2>/dev/null | head -1
+done
+
+# 5. Show the ARP table (IP → MAC mappings)
+echo ""
+echo "=== ARP Table ==="
+ip neigh show
+
+# 6. Show all interfaces and their addresses
+echo ""
+echo "=== Network Interfaces ==="
+ip -br addr show
+
+# 7. Show the routing table in different formats
+echo ""
+echo "=== Route Table (detailed) ==="
+ip route show table all 2>/dev/null | head -20
+
+# 8. Add and remove a test route (requires sudo)
+echo ""
+echo "=== Route Management Demo ==="
+# Add a test route (to a non-existent network, via loopback)
+sudo ip route add 198.51.100.0/24 dev lo 2>/dev/null && \
+    echo "Added route: 198.51.100.0/24 via lo"
+ip route | grep "198.51.100"
+# Clean up
+sudo ip route del 198.51.100.0/24 dev lo 2>/dev/null && \
+    echo "Removed route: 198.51.100.0/24"
+
+# 9. Verify the route is gone
+echo ""
+echo "=== Final Routing Table ==="
+ip route show
+```
+
+</Exercise>
+
+<Exercise number={2} title="Tracing Packet Paths">
+
+Use traceroute to trace paths to various destinations and interpret the results:
+
+```bash
+# 1. Trace to a well-known DNS server
+echo "=== Trace to Google DNS (8.8.8.8) ==="
+traceroute -m 15 -w 2 8.8.8.8 2>/dev/null || \
+    tracepath -m 15 8.8.8.8 2>/dev/null || \
+    echo "traceroute/tracepath not available, using ping TTL method"
+
+# 2. Trace to localhost (should be immediate)
+echo ""
+echo "=== Trace to Localhost ==="
+traceroute -m 5 127.0.0.1 2>/dev/null || \
+    tracepath -m 5 127.0.0.1 2>/dev/null
+
+# 3. Compare different destinations
+echo ""
+echo "=== Path Comparison ==="
+for target in 1.1.1.1 8.8.8.8; do
+    echo ""
+    echo "--- Path to $target ---"
+    hops=$(traceroute -m 15 -w 2 "$target" 2>/dev/null | tail -n +2 | wc -l)
+    first_hop=$(traceroute -m 15 -w 2 "$target" 2>/dev/null | sed -n '2p')
+    echo "  Hops: $hops"
+    echo "  First hop: $first_hop"
+done
+
+# 4. Analyze path latency
+echo ""
+echo "=== Latency Analysis ==="
+echo "Tracing to 8.8.8.8 and analyzing each hop..."
+traceroute -m 15 -w 2 8.8.8.8 2>/dev/null | while IFS= read -r line; do
+    # Skip the header
+    echo "$line" | grep -qE "^traceroute" && continue
+    # Extract hop number and latency
+    hop=$(echo "$line" | awk '{print $1}')
+    if echo "$line" | grep -q '\*.*\*.*\*'; then
+        echo "  Hop $hop: No response (filtered)"
+    else
+        latency=$(echo "$line" | grep -oP '[0-9]+\.[0-9]+ ms' | head -1)
+        echo "  Hop $hop: ${latency:-N/A}"
+    fi
+done
+
+# 5. Check the route the kernel would take
+echo ""
+echo "=== Kernel Route Decisions ==="
+for dest in 8.8.8.8 1.1.1.1 10.0.0.1 172.17.0.2; do
+    route_info=$(ip route get "$dest" 2>/dev/null | head -1)
+    if [ -n "$route_info" ]; then
+        echo "  $dest → $route_info"
+    else
+        echo "  $dest → No route"
+    fi
+done
+```
+
+</Exercise>
+
+<MiniProject title="Network Path Analyzer">
+
+Build a script that analyzes routing for a given destination, showing each hop with latency:
+
+```bash
+cat > ~/path-analyzer.sh << 'SCRIPT'
+#!/bin/bash
+# Network Path Analyzer
+# Analyzes the route to a destination with detailed hop information
+
+TARGET="${1:-8.8.8.8}"
+MAX_HOPS="${2:-20}"
+PROBES=3
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+echo "============================================="
+echo "  Network Path Analyzer"
+echo "  Target: $TARGET"
+echo "  Max hops: $MAX_HOPS"
+echo "  Time: $(date)"
+echo "============================================="
+
+# Step 1: DNS resolution
+echo ""
+echo "--- Step 1: DNS Resolution ---"
+if host "$TARGET" >/dev/null 2>&1; then
+    resolved=$(host "$TARGET" 2>/dev/null | head -1)
+    echo -e "  ${GREEN}[OK]${NC} $resolved"
+else
+    echo "  Using IP directly: $TARGET"
+fi
+
+# Step 2: Route lookup
+echo ""
+echo "--- Step 2: Kernel Route ---"
+route_info=$(ip route get "$TARGET" 2>/dev/null | head -1)
+if [ -n "$route_info" ]; then
+    echo "  $route_info"
+    gateway=$(echo "$route_info" | grep -oP 'via \K[0-9.]+')
+    interface=$(echo "$route_info" | grep -oP 'dev \K\S+')
+    src_ip=$(echo "$route_info" | grep -oP 'src \K[0-9.]+')
+    echo "  Gateway: ${gateway:-direct}"
+    echo "  Interface: ${interface:-unknown}"
+    echo "  Source IP: ${src_ip:-unknown}"
+else
+    echo -e "  ${RED}[ERROR]${NC} No route to $TARGET"
+    exit 1
+fi
+
+# Step 3: Basic connectivity
+echo ""
+echo "--- Step 3: Connectivity Test ---"
+if ping -c 1 -W 3 "$TARGET" >/dev/null 2>&1; then
+    ping_result=$(ping -c 3 -W 3 "$TARGET" 2>/dev/null | tail -1)
+    echo -e "  ${GREEN}[OK]${NC} Host is reachable"
+    echo "  $ping_result"
+else
+    echo -e "  ${YELLOW}[WARN]${NC} Host may be unreachable or ICMP is filtered"
+fi
+
+# Step 4: Traceroute with analysis
+echo ""
+echo "--- Step 4: Path Trace ---"
+echo ""
+printf "${CYAN}%-5s %-40s %-12s %-12s %-12s %s${NC}\n" \
+    "HOP" "HOST" "RTT1" "RTT2" "RTT3" "STATUS"
+printf "%-5s %-40s %-12s %-12s %-12s %s\n" \
+    "---" "----" "----" "----" "----" "------"
+
+PREV_RTT=0
+HOP_COUNT=0
+TIMEOUT_COUNT=0
+MAX_RTT=0
+TOTAL_RTT=0
+
+# Run traceroute and parse output
+traceroute -m "$MAX_HOPS" -w 3 "$TARGET" 2>/dev/null | tail -n +2 | \
+while IFS= read -r line; do
+    hop=$(echo "$line" | awk '{print $1}')
+    HOP_COUNT=$((HOP_COUNT + 1))
+
+    if echo "$line" | grep -qP '\*\s+\*\s+\*'; then
+        printf "%-5s %-40s %-12s %-12s %-12s " "$hop" "* * *" "-" "-" "-"
+        echo -e "${YELLOW}timeout${NC}"
+        TIMEOUT_COUNT=$((TIMEOUT_COUNT + 1))
+    else
+        host_info=$(echo "$line" | awk '{print $2, $3}' | sed 's/[()]//g')
+        rtt1=$(echo "$line" | grep -oP '[0-9]+\.[0-9]+ ms' | sed -n '1p' | sed 's/ ms//')
+        rtt2=$(echo "$line" | grep -oP '[0-9]+\.[0-9]+ ms' | sed -n '2p' | sed 's/ ms//')
+        rtt3=$(echo "$line" | grep -oP '[0-9]+\.[0-9]+ ms' | sed -n '3p' | sed 's/ ms//')
+
+        status="${GREEN}ok${NC}"
+
+        # Check for high latency jump
+        if [ -n "$rtt1" ]; then
+            rtt_int=${rtt1%.*}
+            if [ "$rtt_int" -gt 100 ]; then
+                status="${YELLOW}high latency${NC}"
+            fi
+            if [ "$rtt_int" -gt 300 ]; then
+                status="${RED}very high latency${NC}"
+            fi
+        fi
+
+        printf "%-5s %-40s %-12s %-12s %-12s " \
+            "$hop" "$host_info" "${rtt1:-*}ms" "${rtt2:-*}ms" "${rtt3:-*}ms"
+        echo -e "$status"
+    fi
+done
+
+# Step 5: Summary
+echo ""
+echo "--- Step 5: Analysis Summary ---"
+total_hops=$(traceroute -m "$MAX_HOPS" -w 3 "$TARGET" 2>/dev/null | tail -n +2 | wc -l)
+timeout_hops=$(traceroute -m "$MAX_HOPS" -w 3 "$TARGET" 2>/dev/null | tail -n +2 | grep -c '\* \* \*')
+responsive_hops=$((total_hops - timeout_hops))
+
+echo "  Total hops: $total_hops"
+echo "  Responsive: $responsive_hops"
+echo "  Timeouts: $timeout_hops"
+
+# Final latency
+final_rtt=$(ping -c 3 -W 3 "$TARGET" 2>/dev/null | tail -1 | grep -oP '= [0-9.]+' | head -1 | sed 's/= //')
+if [ -n "$final_rtt" ]; then
+    echo "  End-to-end latency (avg): ${final_rtt}ms"
+fi
+
+# Check ARP entry for gateway
+if [ -n "$gateway" ]; then
+    gw_mac=$(ip neigh show "$gateway" 2>/dev/null | awk '{print $5}')
+    if [ -n "$gw_mac" ]; then
+        echo "  Gateway MAC: $gw_mac"
+    fi
+fi
+
+echo ""
+echo "============================================="
+echo "  Path analysis complete."
+echo "============================================="
+SCRIPT
+
+chmod +x ~/path-analyzer.sh
+
+# Run the analyzer
+~/path-analyzer.sh 8.8.8.8
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- **Switching** is Layer 2 (MAC addresses, same network); **routing** is Layer 3 (IP addresses, between networks)
+- The **routing table** tells the kernel where to send packets — read it with `ip route show`
+- The **default gateway** (0.0.0.0/0) is the "everything else" route — typically your router
+- **ARP** maps IP addresses to MAC addresses for local delivery — check with `ip neigh show`
+- Packets keep the same source/destination IP across all hops, but MAC addresses change at every router
+- `ip route get <IP>` shows you exactly which route the kernel would use
+- `traceroute` shows the path packets take — essential for finding where connectivity breaks
+- **VLANs** create separate Layer 2 domains on the same physical switch
+- Cloud **VPC route tables** work the same as Linux route tables — destination, gateway, interface
+- A missing default gateway is the most common reason a container or VM cannot reach the internet
+
+## What's Next
+
+Now that you understand how packets are routed across networks, how do you control which packets are allowed through? In **Firewalls and Network Security**, you'll learn to use iptables, ufw, and security groups to protect your infrastructure — and why that Redis server from the story should never have been exposed.

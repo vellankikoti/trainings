@@ -1,0 +1,448 @@
+---
+title: "Automation with Cron Jobs"
+description: "Schedule tasks with cron and systemd timers. Learn to automate backups, monitoring, cleanup, and maintenance — the foundation of DevOps automation."
+order: 20
+xpReward: 150
+estimatedMinutes: 40
+prerequisites:
+  - 19-text-processing
+objectives:
+  - Create and manage cron jobs with crontab
+  - Understand cron schedule syntax
+  - Use systemd timers as a modern alternative
+  - Build automated maintenance scripts
+tags:
+  - linux
+  - cron
+  - automation
+  - systemd
+  - scheduling
+---
+
+<Callout type="story" title="The Story">
+Every night at 2 AM, your production database needs to be backed up. Every hour, log files need to be rotated. Every Monday, a security scan should run. Every 5 minutes, a health check should verify all services are running. You could set 47 alarms on your phone — or you could use cron, the scheduler that's been running automation on Linux since 1975.
+</Callout>
+
+## How Cron Works
+
+The cron daemon (`crond`) runs continuously and checks every minute if any scheduled tasks need to run. Each user can have their own crontab (cron table) with their scheduled tasks.
+
+```bash
+# Check if cron is running
+systemctl status cron
+
+# View your crontab
+crontab -l
+
+# Edit your crontab
+crontab -e
+
+# View another user's crontab (requires root)
+sudo crontab -u deploy -l
+```
+
+## Cron Schedule Syntax
+
+```
+┌───────────── minute (0-59)
+│ ┌───────────── hour (0-23)
+│ │ ┌───────────── day of month (1-31)
+│ │ │ ┌───────────── month (1-12)
+│ │ │ │ ┌───────────── day of week (0-7, 0 and 7 = Sunday)
+│ │ │ │ │
+* * * * * command to run
+```
+
+### Examples
+
+| Schedule | Meaning |
+|---|---|
+| `* * * * *` | Every minute |
+| `*/5 * * * *` | Every 5 minutes |
+| `0 * * * *` | Every hour (at minute 0) |
+| `0 2 * * *` | Daily at 2:00 AM |
+| `0 2 * * 0` | Every Sunday at 2:00 AM |
+| `0 0 1 * *` | First day of every month at midnight |
+| `30 8 * * 1-5` | Weekdays at 8:30 AM |
+| `0 */6 * * *` | Every 6 hours |
+| `0 9,17 * * *` | At 9 AM and 5 PM |
+| `@reboot` | Once at startup |
+| `@daily` | Once a day (midnight) |
+| `@weekly` | Once a week (Sunday midnight) |
+| `@monthly` | Once a month (1st at midnight) |
+| `@hourly` | Once an hour |
+
+### Special Characters
+
+| Char | Meaning | Example |
+|---|---|---|
+| `*` | Any value | `* * * * *` = every minute |
+| `,` | List | `1,15 * * * *` = minute 1 and 15 |
+| `-` | Range | `0 9-17 * * *` = hours 9 through 17 |
+| `/` | Step | `*/10 * * * *` = every 10 minutes |
+
+<Exercise number={1} title="Cron Syntax Practice">
+
+Write the cron expression for each schedule:
+
+```bash
+# 1. Every day at 3:30 AM
+# Answer: 30 3 * * *
+
+# 2. Every Monday and Friday at noon
+# Answer: 0 12 * * 1,5
+
+# 3. Every 15 minutes during business hours (9-17)
+# Answer: */15 9-17 * * *
+
+# 4. First of every month at midnight
+# Answer: 0 0 1 * *
+
+# 5. Every Sunday at 11 PM
+# Answer: 0 23 * * 0
+
+# Verify by adding a test cron job:
+(crontab -l 2>/dev/null; echo "* * * * * echo 'cron works' >> /tmp/cron-test.log") | crontab -
+
+# Wait 1 minute, then check:
+sleep 65
+cat /tmp/cron-test.log
+
+# Remove the test job:
+crontab -l | grep -v "cron works" | crontab -
+rm -f /tmp/cron-test.log
+```
+
+</Exercise>
+
+## Writing Cron Jobs Properly
+
+### Best Practices
+
+```bash
+# 1. Always use full paths (cron has minimal PATH)
+# BAD:
+* * * * * python3 backup.py
+
+# GOOD:
+* * * * * /usr/bin/python3 /home/ubuntu/scripts/backup.py
+
+# 2. Redirect output (or it becomes email)
+0 2 * * * /home/ubuntu/backup.sh >> /var/log/backup.log 2>&1
+
+# 3. Use a lock to prevent overlapping runs
+0 * * * * /usr/bin/flock -n /tmp/myjob.lock /home/ubuntu/scripts/hourly-task.sh
+
+# 4. Set environment variables at the top of crontab
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+MAILTO=admin@example.com
+
+# 5. Add comments for documentation
+# Backup database every night at 2 AM
+0 2 * * * /opt/scripts/db-backup.sh >> /var/log/db-backup.log 2>&1
+```
+
+### Common Cron Jobs for DevOps
+
+```bash
+# Edit crontab
+crontab -e
+
+# Add these jobs:
+
+# Disk space check every hour
+0 * * * * /opt/scripts/check-disk.sh
+
+# Database backup at 2 AM
+0 2 * * * /opt/scripts/db-backup.sh >> /var/log/db-backup.log 2>&1
+
+# Log cleanup weekly on Sunday at 3 AM
+0 3 * * 0 /usr/bin/find /var/log -name "*.log.gz" -mtime +30 -delete
+
+# SSL certificate check daily
+0 8 * * * /opt/scripts/check-ssl.sh
+
+# Health check every 5 minutes
+*/5 * * * * /opt/scripts/health-check.sh >> /var/log/health.log 2>&1
+
+# System update check on Mondays
+0 6 * * 1 /usr/bin/apt update -qq && /usr/bin/apt list --upgradable 2>/dev/null > /var/log/updates-available.log
+```
+
+## System Cron Directories
+
+Besides per-user crontabs, Linux has system-wide cron directories:
+
+```bash
+# System crontab
+cat /etc/crontab
+
+# Drop-in directories (scripts here run automatically)
+ls /etc/cron.hourly/
+ls /etc/cron.daily/
+ls /etc/cron.weekly/
+ls /etc/cron.monthly/
+
+# To add a daily job, just drop a script in:
+sudo cp backup.sh /etc/cron.daily/
+sudo chmod +x /etc/cron.daily/backup.sh
+
+# Per-application cron configs
+ls /etc/cron.d/
+```
+
+## systemd Timers — The Modern Alternative
+
+systemd timers are more flexible than cron and integrate with the journal for logging:
+
+### Creating a Timer
+
+```bash
+# Step 1: Create a service unit (what to run)
+sudo tee /etc/systemd/system/backup.service > /dev/null << 'EOF'
+[Unit]
+Description=Daily Backup
+
+[Service]
+Type=oneshot
+ExecStart=/opt/scripts/backup.sh
+User=root
+EOF
+
+# Step 2: Create a timer unit (when to run)
+sudo tee /etc/systemd/system/backup.timer > /dev/null << 'EOF'
+[Unit]
+Description=Run backup daily at 2 AM
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Step 3: Enable and start the timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now backup.timer
+
+# Check timer status
+systemctl list-timers
+systemctl status backup.timer
+
+# View logs
+journalctl -u backup.service
+```
+
+### Timer Schedule Syntax
+
+```bash
+# systemd calendar expressions:
+OnCalendar=*-*-* 02:00:00       # Daily at 2 AM
+OnCalendar=Mon *-*-* 06:00:00    # Every Monday at 6 AM
+OnCalendar=*-*-01 00:00:00       # First of month
+OnCalendar=hourly                 # Every hour
+OnCalendar=daily                  # Every day at midnight
+OnCalendar=weekly                 # Every Monday at midnight
+
+# Monotonic timers (relative to events):
+OnBootSec=5min                    # 5 minutes after boot
+OnUnitActiveSec=1h                # 1 hour after last activation
+```
+
+### Cron vs systemd Timers
+
+| Feature | Cron | systemd Timer |
+|---|---|---|
+| Logging | Must redirect output | Automatic journal |
+| Dependencies | None | After=, Requires= |
+| Resource limits | None | CPUQuota=, MemoryMax= |
+| Random delay | No | RandomizedDelaySec= |
+| Missed runs | Lost | Persistent=true catches up |
+| Status check | Not built-in | `systemctl status` |
+| Complexity | Simpler | More boilerplate |
+
+<Exercise number={2} title="Automation Setup">
+
+```bash
+# 1. List current cron jobs
+crontab -l 2>/dev/null || echo "No crontab"
+
+# 2. List system timers
+systemctl list-timers --all 2>/dev/null | head -15
+
+# 3. Check system cron directories
+echo "Hourly:" && ls /etc/cron.hourly/ 2>/dev/null
+echo "Daily:" && ls /etc/cron.daily/ 2>/dev/null
+echo "Weekly:" && ls /etc/cron.weekly/ 2>/dev/null
+
+# 4. View the system crontab
+cat /etc/crontab
+
+# 5. Create a test cron job
+(crontab -l 2>/dev/null; echo "# Test job - remove me") | crontab -
+crontab -l
+
+# 6. Remove the test job
+crontab -l | grep -v "Test job" | crontab -
+crontab -l 2>/dev/null || echo "Crontab empty"
+```
+
+</Exercise>
+
+<MiniProject title="Automated Maintenance Suite">
+
+Create a complete maintenance automation setup:
+
+```bash
+mkdir -p ~/maintenance-scripts
+
+# 1. Disk cleanup script
+cat > ~/maintenance-scripts/disk-cleanup.sh << 'SCRIPT'
+#!/bin/bash
+# Disk Cleanup — remove old files and free space
+
+LOG="/var/log/maintenance/disk-cleanup.log"
+mkdir -p "$(dirname "$LOG")"
+
+echo "=== Disk Cleanup $(date) ===" >> "$LOG"
+
+# Clean old logs
+CLEANED=$(find /var/log -name "*.gz" -mtime +30 -delete -print 2>/dev/null | wc -l)
+echo "  Removed $CLEANED old compressed logs" >> "$LOG"
+
+# Clean /tmp files older than 7 days
+CLEANED=$(find /tmp -type f -mtime +7 -delete -print 2>/dev/null | wc -l)
+echo "  Removed $CLEANED old temp files" >> "$LOG"
+
+# Clean apt cache
+apt clean 2>/dev/null
+echo "  Cleaned apt cache" >> "$LOG"
+
+# Report disk usage
+USAGE=$(df -h / | awk 'NR==2 {print $5}')
+echo "  Root disk usage: $USAGE" >> "$LOG"
+echo "=== Done ===" >> "$LOG"
+SCRIPT
+
+# 2. Health check script
+cat > ~/maintenance-scripts/health-check.sh << 'SCRIPT'
+#!/bin/bash
+# Health Check — verify system is healthy
+
+ISSUES=0
+LOG="/var/log/maintenance/health.log"
+mkdir -p "$(dirname "$LOG")"
+
+check() {
+    local name="$1" result="$2" threshold="$3"
+    if [ "$result" -gt "$threshold" ] 2>/dev/null; then
+        echo "[WARN] $name: $result (threshold: $threshold)" >> "$LOG"
+        ISSUES=$((ISSUES + 1))
+    fi
+}
+
+echo "=== Health Check $(date) ===" >> "$LOG"
+
+# CPU load
+LOAD=$(cat /proc/loadavg | awk '{printf "%d", $1}')
+CORES=$(nproc)
+check "CPU Load" "$LOAD" "$CORES"
+
+# Memory usage
+MEM_PCT=$(free | awk '/Mem:/ {printf "%d", $3/$2*100}')
+check "Memory" "$MEM_PCT" 90
+
+# Disk usage
+DISK_PCT=$(df / | awk 'NR==2 {gsub(/%/,""); print $5}')
+check "Disk" "$DISK_PCT" 85
+
+# Report
+if [ "$ISSUES" -eq 0 ]; then
+    echo "[OK] All checks passed" >> "$LOG"
+else
+    echo "[ALERT] $ISSUES issues found" >> "$LOG"
+fi
+SCRIPT
+
+# 3. Backup script
+cat > ~/maintenance-scripts/backup-configs.sh << 'SCRIPT'
+#!/bin/bash
+# Backup important configuration files
+
+BACKUP_DIR="/var/backups/configs/$(date +%Y%m%d)"
+mkdir -p "$BACKUP_DIR"
+
+# Backup critical configs
+for dir in /etc/nginx /etc/ssh /etc/systemd/system; do
+    if [ -d "$dir" ]; then
+        cp -r "$dir" "$BACKUP_DIR/" 2>/dev/null
+    fi
+done
+
+# Backup crontabs
+crontab -l > "$BACKUP_DIR/crontab-$(whoami)" 2>/dev/null
+
+# Compress
+tar czf "${BACKUP_DIR}.tar.gz" -C "$(dirname "$BACKUP_DIR")" "$(basename "$BACKUP_DIR")" 2>/dev/null
+rm -rf "$BACKUP_DIR"
+
+echo "Backup created: ${BACKUP_DIR}.tar.gz"
+
+# Remove backups older than 30 days
+find /var/backups/configs/ -name "*.tar.gz" -mtime +30 -delete 2>/dev/null
+SCRIPT
+
+# Make all executable
+chmod +x ~/maintenance-scripts/*.sh
+
+# 4. Create the crontab entries
+cat << 'CRONTAB'
+
+# === Maintenance Crontab ===
+# Paste these into: crontab -e
+
+# Health check every 5 minutes
+*/5 * * * * /home/ubuntu/maintenance-scripts/health-check.sh
+
+# Disk cleanup daily at 3 AM
+0 3 * * * /home/ubuntu/maintenance-scripts/disk-cleanup.sh
+
+# Config backup daily at 2 AM
+0 2 * * * /home/ubuntu/maintenance-scripts/backup-configs.sh
+
+CRONTAB
+
+echo ""
+echo "Created maintenance scripts in ~/maintenance-scripts/"
+echo "Add the cron entries above to your crontab with: crontab -e"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Cron runs scheduled tasks; `crontab -e` to edit, `crontab -l` to list
+- Cron syntax: `minute hour day-of-month month day-of-week command`
+- Always use full paths in cron jobs — cron has a minimal PATH
+- Redirect output: `>> /var/log/job.log 2>&1` to capture errors
+- Use `flock` to prevent overlapping cron job runs
+- systemd timers offer logging, dependencies, and missed-run catching
+- Drop scripts in `/etc/cron.daily/` for simple daily automation
+- The `@reboot` shortcut runs commands once at system startup
+
+## Congratulations!
+
+You've completed the **Linux Fundamentals** module! You now have the skills to:
+
+- Navigate and manage the Linux filesystem
+- Control users, groups, and permissions
+- Install software and manage packages
+- Monitor processes, services, and system health
+- Troubleshoot networking and security issues
+- Process text with grep, sed, and awk
+- Automate tasks with cron and systemd timers
+
+These skills are the foundation of everything in DevOps. Every container runs Linux. Every CI/CD pipeline executes on Linux. Every cloud server is Linux. You're ready for the next step: **Shell Scripting**, where you'll combine these commands into powerful automation scripts.

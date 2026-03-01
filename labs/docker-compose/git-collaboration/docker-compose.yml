@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  remote:
+    image: ubuntu:22.04
+    container_name: devops-git-remote
+    command: >
+      bash -c "apt-get update -qq &&
+      apt-get install -y -qq git openssh-server >/dev/null 2>&1 &&
+      mkdir -p /git/project.git &&
+      cd /git/project.git && git init --bare &&
+      echo 'Git Remote Ready.' &&
+      tail -f /dev/null"
+    volumes:
+      - git-repos:/git
+    environment:
+      - TERM=xterm-256color
+
+  developer:
+    image: ubuntu:22.04
+    container_name: devops-git-developer
+    command: >
+      bash -c "apt-get update -qq &&
+      apt-get install -y -qq git vim nano >/dev/null 2>&1 &&
+      git config --global user.name 'Developer' &&
+      git config --global user.email 'dev@devops.training' &&
+      git config --global init.defaultBranch main &&
+      echo 'Git Developer Lab Ready.' &&
+      /bin/bash"
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    volumes:
+      - ./workspace:/workspace
+      - git-repos:/git
+    depends_on:
+      - remote
+    environment:
+      - TERM=xterm-256color
+
+volumes:
+  git-repos:

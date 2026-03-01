@@ -1,0 +1,219 @@
+---
+title: "The Git Story"
+description: "Discover why Linus Torvalds created Git in 2 weeks, how it revolutionized software development, and why every DevOps engineer needs to master it."
+order: 1
+xpReward: 75
+estimatedMinutes: 25
+prerequisites: []
+objectives:
+  - Understand why Git was created and the problem it solves
+  - Know the difference between centralized and distributed version control
+  - Recognize Git's role in modern DevOps workflows
+  - Run your first Git commands
+tags:
+  - git
+  - version-control
+  - devops
+  - history
+---
+
+<Callout type="story" title="The Story">
+April 2005. The Linux kernel development community just lost access to BitKeeper, their proprietary version control system. Linus Torvalds, the creator of Linux, was furious. He looked at every existing version control system and found them all too slow. So he built his own — in just two weeks. He called it "Git" (British slang for a foolish person — he said he names all his projects after himself). That weekend project now manages the source code for practically every piece of software on the planet.
+</Callout>
+
+## Why Version Control Matters
+
+Without version control, teams do this:
+
+```
+project_final.zip
+project_final_v2.zip
+project_final_v2_fixed.zip
+project_final_v2_fixed_ACTUAL_FINAL.zip
+project_final_v2_johns_changes.zip
+```
+
+With Git:
+
+```bash
+git log --oneline
+# a3f2b1c Fix payment processing timeout
+# 8d4e2a1 Add user authentication API
+# 1b3c5d7 Initial project setup
+```
+
+Every change is tracked. You can see who changed what, when, and why. You can undo any change, compare versions, and work simultaneously with thousands of developers without overwriting each other's work.
+
+## Centralized vs Distributed
+
+### Centralized (SVN, CVS)
+
+```
+Developer → Central Server ← Developer
+              ↑
+           Developer
+```
+
+One server holds the truth. If the server dies, history is gone. If you're offline, you can't commit.
+
+### Distributed (Git)
+
+```
+Developer (full repo) ↔ Remote (GitHub/GitLab) ↔ Developer (full repo)
+                              ↑
+                    Developer (full repo)
+```
+
+Every developer has the complete history. You can commit offline, branch locally, and sync when ready. If any server dies, any clone is a full backup.
+
+## Git's Design Principles
+
+Linus designed Git with specific goals:
+
+1. **Speed** — Operations should be nearly instant
+2. **Distributed** — Every clone is a full backup
+3. **Integrity** — Every object is checksummed (SHA-1/SHA-256)
+4. **Non-linear development** — Branching and merging must be cheap
+5. **Large projects** — Must handle the Linux kernel (millions of files, thousands of contributors)
+
+## Git in DevOps
+
+Git isn't just for code. In DevOps, it's the foundation of:
+
+| Practice | Git's Role |
+|---|---|
+| CI/CD | Triggers builds on every push |
+| Infrastructure as Code | Terraform/Ansible configs in Git |
+| GitOps | Git is the single source of truth for deployments |
+| Code Review | Pull requests for quality control |
+| Audit Trail | Every change is attributed and timestamped |
+
+<Exercise number={1} title="First Git Commands">
+
+```bash
+# 1. Check if Git is installed
+git --version
+
+# 2. Configure your identity (Git needs this for commits)
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+
+# 3. Create your first repository
+mkdir ~/git-playground && cd ~/git-playground
+git init
+echo "# My First Repo" > README.md
+
+# 4. Stage and commit
+git add README.md
+git commit -m "Initial commit: add README"
+
+# 5. View the log
+git log
+
+# 6. Make another change
+echo "This is a learning project." >> README.md
+git add README.md
+git commit -m "Update README with description"
+
+# 7. View the history
+git log --oneline
+```
+
+</Exercise>
+
+<Exercise number={2} title="Explore Git Internals">
+
+```bash
+cd ~/git-playground
+
+# 1. See what's inside .git/
+ls -la .git/
+
+# 2. View the HEAD reference
+cat .git/HEAD
+
+# 3. View the config
+cat .git/config
+
+# 4. See what Git tracks
+git status
+
+# 5. See the diff between working directory and last commit
+echo "More content" >> README.md
+git diff
+
+# 6. Discard the change
+git checkout -- README.md
+cat README.md
+
+# 7. Clean up
+cd ~ && rm -rf ~/git-playground
+```
+
+</Exercise>
+
+<MiniProject title="Git Exploration Report">
+
+```bash
+cat > ~/git-report.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Create a repo and explore it
+
+REPO_DIR=$(mktemp -d)
+cd "$REPO_DIR"
+git init -q
+
+echo "=== Git Exploration Report ==="
+echo "Repo: $REPO_DIR"
+echo "Git version: $(git --version)"
+echo ""
+
+# Make several commits
+for i in {1..5}; do
+    echo "Content for file $i" > "file${i}.txt"
+    git add "file${i}.txt"
+    git commit -q -m "Add file ${i}"
+done
+
+echo "--- Commit History ---"
+git log --oneline
+
+echo ""
+echo "--- Objects Created ---"
+echo "Total objects: $(find .git/objects -type f | wc -l)"
+
+echo ""
+echo "--- File Types in .git/ ---"
+ls .git/
+
+echo ""
+echo "--- Last Commit Details ---"
+git log -1 --format="  Hash: %H%n  Author: %an <%ae>%n  Date: %ai%n  Message: %s"
+
+# Clean up
+cd /
+rm -rf "$REPO_DIR"
+echo ""
+echo "(Cleaned up temporary repo)"
+SCRIPT
+
+chmod +x ~/git-report.sh
+~/git-report.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Git was created by Linus Torvalds in 2 weeks because existing tools were too slow
+- Git is distributed — every clone has the full history
+- Every object in Git is checksummed for integrity
+- Git is the foundation of CI/CD, GitOps, Infrastructure as Code, and code review
+- `git init` creates a repository; `git add` + `git commit` saves changes
+- The `.git/` directory contains the entire repository history
+
+## What's Next
+
+You've seen what Git is and why it exists. In **How Git Works**, you'll look under the hood at Git's object model — blobs, trees, commits, and refs. Understanding the internals makes every Git command make sense.

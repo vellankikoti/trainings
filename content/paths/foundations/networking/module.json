@@ -1,0 +1,27 @@
+{
+  "id": "networking",
+  "title": "Networking Fundamentals",
+  "slug": "networking",
+  "pathSlug": "foundations",
+  "description": "Understand how computers communicate. Master TCP/IP, DNS, HTTP, firewalls, and the networking concepts that underpin everything in DevOps.",
+  "order": 4,
+  "estimatedHours": 35,
+  "lessonsCount": 15,
+  "lessons": [
+    { "slug": "01-how-the-internet-works", "title": "How the Internet Works", "order": 1 },
+    { "slug": "02-osi-and-tcp-ip", "title": "The OSI and TCP/IP Models", "order": 2 },
+    { "slug": "03-ip-addressing-subnets", "title": "IP Addressing and Subnets", "order": 3 },
+    { "slug": "04-dns-deep-dive", "title": "DNS Deep Dive", "order": 4 },
+    { "slug": "05-http-and-https", "title": "HTTP and HTTPS", "order": 5 },
+    { "slug": "06-tcp-vs-udp", "title": "TCP vs UDP", "order": 6 },
+    { "slug": "07-ports-and-sockets", "title": "Ports and Sockets", "order": 7 },
+    { "slug": "08-routing-and-switching", "title": "Routing and Switching", "order": 8 },
+    { "slug": "09-firewalls-and-security", "title": "Firewalls and Network Security", "order": 9 },
+    { "slug": "10-load-balancers-proxies", "title": "Load Balancers and Proxies", "order": 10 },
+    { "slug": "11-vpns-and-tunnels", "title": "VPNs and Tunnels", "order": 11 },
+    { "slug": "12-network-troubleshooting", "title": "Network Troubleshooting", "order": 12 },
+    { "slug": "13-cloud-networking", "title": "Cloud Networking Basics", "order": 13 },
+    { "slug": "14-container-networking", "title": "Container Networking", "order": 14 },
+    { "slug": "15-networking-for-devops", "title": "Networking for DevOps", "order": 15 }
+  ]
+}

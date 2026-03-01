@@ -1,0 +1,1386 @@
+---
+title: "Docker SDK for Python"
+description: "Control Docker from Python. Build images, manage containers, inspect networks, and automate Docker workflows programmatically."
+order: 15
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 14-paramiko-ssh
+objectives:
+  - Install and configure the Docker SDK for Python
+  - Manage containers programmatically (run, stop, remove, logs)
+  - Build, tag, and push Docker images from Python
+  - Work with networks, volumes, and Docker Compose via code
+  - Implement container health checks and cleanup automation
+tags:
+  - python
+  - docker
+  - sdk
+  - containers
+---
+
+<Callout type="story" title="The Story">
+Your team runs 40 microservices in Docker. Every developer needs a local environment with specific containers, networks, and volumes. They keep running the wrong `docker run` commands, forgetting port mappings, or leaving zombie containers eating disk space. You write a Python tool that sets up, tears down, and health-checks their entire dev environment in one command. Docker CLI is for humans. Docker SDK is for automation.
+</Callout>
+
+## Setting Up docker-py
+
+The Docker SDK for Python (`docker-py`) gives you full programmatic control over the Docker daemon — the same power as the `docker` CLI, but scriptable, composable, and integratable with your existing Python automation.
+
+```python
+# Install the Docker SDK
+# pip install docker
+
+import docker
+
+# Connect to the local Docker daemon (reads DOCKER_HOST env or uses unix socket)
+client = docker.from_env()
+
+# Verify the connection
+info = client.info()
+print(f"Docker version: {info['ServerVersion']}")
+print(f"Containers: {info['Containers']} ({info['ContainersRunning']} running)")
+print(f"Images: {info['Images']}")
+print(f"OS: {info['OperatingSystem']}")
+
+# You can also connect to a remote Docker host
+# client = docker.DockerClient(base_url='tcp://remote-host:2375')
+
+# Or with TLS for production
+# tls_config = docker.tls.TLSConfig(
+#     client_cert=('/path/to/client-cert.pem', '/path/to/client-key.pem'),
+#     ca_cert='/path/to/ca.pem',
+#     verify=True
+# )
+# client = docker.DockerClient(base_url='tcp://remote-host:2376', tls=tls_config)
+```
+
+<Callout type="tip" title="from_env() Is Your Friend">
+`docker.from_env()` reads the same environment variables as the Docker CLI (`DOCKER_HOST`, `DOCKER_TLS_VERIFY`, `DOCKER_CERT_PATH`). If your `docker` CLI works, `docker.from_env()` will work too. Use it in scripts that should respect the user's Docker configuration without hardcoding connection details.
+</Callout>
+
+## Managing Containers
+
+Containers are the core of Docker. The SDK lets you run, inspect, stop, and remove them — plus stream logs, execute commands inside running containers, and monitor their status.
+
+### Listing and Inspecting Containers
+
+```python
+import docker
+
+client = docker.from_env()
+
+# List all running containers
+running = client.containers.list()
+for container in running:
+    print(f"{container.short_id}  {container.name:30s}  {container.status}  {container.image.tags}")
+
+# List ALL containers (including stopped)
+all_containers = client.containers.list(all=True)
+print(f"\nTotal containers: {len(all_containers)}")
+print(f"Running: {len([c for c in all_containers if c.status == 'running'])}")
+print(f"Stopped: {len([c for c in all_containers if c.status == 'exited'])}")
+
+# Inspect a specific container
+container = client.containers.get("my-container-name")
+print(f"ID: {container.id}")
+print(f"Status: {container.status}")
+print(f"IP: {container.attrs['NetworkSettings']['IPAddress']}")
+print(f"Ports: {container.ports}")
+print(f"Created: {container.attrs['Created']}")
+```
+
+### Running Containers
+
+```python
+import docker
+
+client = docker.from_env()
+
+# Simple container run (like docker run)
+container = client.containers.run(
+    "nginx:alpine",
+    name="web-server",
+    detach=True,                          # Run in background
+    ports={"80/tcp": 8080},               # Map port 80 to host 8080
+    environment={"NGINX_HOST": "localhost"},
+    labels={"app": "web", "env": "dev"},
+    restart_policy={"Name": "unless-stopped"},
+)
+print(f"Started: {container.name} ({container.short_id})")
+
+# Run with volume mounts
+container = client.containers.run(
+    "postgres:15",
+    name="dev-db",
+    detach=True,
+    ports={"5432/tcp": 5432},
+    environment={
+        "POSTGRES_USER": "devuser",
+        "POSTGRES_PASSWORD": "devpass",
+        "POSTGRES_DB": "appdb",
+    },
+    volumes={
+        "pgdata": {"bind": "/var/lib/postgresql/data", "mode": "rw"},
+    },
+)
+
+# Run a one-shot command (like docker run --rm)
+output = client.containers.run(
+    "alpine:latest",
+    command="echo Hello from Python SDK",
+    remove=True,     # Remove after exit
+)
+print(output.decode("utf-8"))  # "Hello from Python SDK\n"
+
+# Run with resource limits
+container = client.containers.run(
+    "python:3.11-slim",
+    name="worker",
+    detach=True,
+    command="python -c 'import time; time.sleep(3600)'",
+    mem_limit="256m",
+    cpu_quota=50000,          # 50% of one CPU
+    nano_cpus=500_000_000,    # 0.5 CPUs (alternative)
+)
+```
+
+### Container Lifecycle Operations
+
+```python
+import docker
+import time
+
+client = docker.from_env()
+
+container = client.containers.get("web-server")
+
+# Stop a container (sends SIGTERM, then SIGKILL after timeout)
+container.stop(timeout=10)
+print(f"Stopped: {container.name}")
+
+# Start a stopped container
+container.start()
+print(f"Started: {container.name}")
+
+# Restart
+container.restart(timeout=10)
+print(f"Restarted: {container.name}")
+
+# Pause and unpause (freezes processes without stopping)
+container.pause()
+print(f"Paused: {container.name}")
+time.sleep(5)
+container.unpause()
+print(f"Unpaused: {container.name}")
+
+# Remove a container (must be stopped first, or force=True)
+container.stop()
+container.remove()
+print(f"Removed: {container.name}")
+
+# Force remove a running container
+container = client.containers.get("stuck-container")
+container.remove(force=True)
+```
+
+### Container Logs and Exec
+
+```python
+import docker
+
+client = docker.from_env()
+container = client.containers.get("web-server")
+
+# Get all logs
+logs = container.logs().decode("utf-8")
+print(logs)
+
+# Get last 50 lines
+logs = container.logs(tail=50).decode("utf-8")
+
+# Stream logs in real-time (like docker logs -f)
+for line in container.logs(stream=True, follow=True):
+    print(line.decode("utf-8"), end="")
+
+# Logs with timestamps
+logs = container.logs(timestamps=True, since=1700000000).decode("utf-8")
+
+# Execute a command inside a running container
+exit_code, output = container.exec_run("nginx -t")
+print(f"Exit code: {exit_code}")
+print(f"Output: {output.decode('utf-8')}")
+
+# Execute with environment variables
+exit_code, output = container.exec_run(
+    "env",
+    environment={"DEBUG": "true"},
+    user="root",
+)
+
+# Execute interactively (returns a socket for streaming)
+exec_id = container.exec_run(
+    "sh",
+    stdin=True,
+    tty=True,
+    detach=True,
+)
+```
+
+<Callout type="warning" title="Always Clean Up Containers">
+Leaked containers consume memory, ports, and disk space. Every script that creates containers should have cleanup logic — either `try/finally` blocks or a dedicated cleanup function. In CI/CD pipelines, always label containers so you can find and remove them by label if a pipeline fails midway.
+</Callout>
+
+## Working with Images
+
+Images are the blueprints for containers. The SDK lets you list, pull, build, tag, and push images programmatically.
+
+```python
+import docker
+
+client = docker.from_env()
+
+# List all local images
+for image in client.images.list():
+    tags = image.tags if image.tags else ["<none>"]
+    size_mb = image.attrs["Size"] / (1024 * 1024)
+    print(f"  {tags[0]:40s}  {size_mb:.1f} MB")
+
+# Pull an image
+print("Pulling nginx:alpine...")
+image = client.images.pull("nginx", tag="alpine")
+print(f"Pulled: {image.tags}")
+
+# Pull with progress (using low-level API)
+for line in client.api.pull("redis", tag="7-alpine", stream=True, decode=True):
+    status = line.get("status", "")
+    progress = line.get("progress", "")
+    if progress:
+        print(f"  {status}: {progress}")
+
+# Build an image from a Dockerfile
+# Assumes a Dockerfile exists in ./app/
+image, build_logs = client.images.build(
+    path="./app/",
+    tag="myapp:latest",
+    rm=True,              # Remove intermediate containers
+    buildargs={"APP_VERSION": "1.2.3"},
+)
+for chunk in build_logs:
+    if "stream" in chunk:
+        print(chunk["stream"], end="")
+print(f"\nBuilt: {image.tags}")
+
+# Tag an image for a registry
+image.tag("registry.example.com/myapp", tag="v1.2.3")
+image.tag("registry.example.com/myapp", tag="latest")
+
+# Push to a registry
+for line in client.images.push("registry.example.com/myapp", tag="v1.2.3", stream=True, decode=True):
+    print(line.get("status", ""), line.get("progress", ""))
+
+# Remove an image
+client.images.remove("myapp:old-version", force=True)
+
+# Prune unused images (like docker image prune)
+pruned = client.images.prune()
+space_reclaimed = pruned.get("SpaceReclaimed", 0) / (1024 * 1024)
+print(f"Pruned {len(pruned.get('ImagesDeleted', []))} images, reclaimed {space_reclaimed:.1f} MB")
+```
+
+## Networks and Volumes
+
+Docker networking and volumes are critical for multi-container setups. The SDK makes it easy to create isolated networks and persistent storage.
+
+### Networks
+
+```python
+import docker
+
+client = docker.from_env()
+
+# List networks
+for network in client.networks.list():
+    print(f"  {network.name:30s}  {network.attrs['Driver']:10s}  {network.short_id}")
+
+# Create a network
+network = client.networks.create(
+    "app-network",
+    driver="bridge",
+    labels={"project": "myapp"},
+)
+print(f"Created network: {network.name}")
+
+# Run containers on the network
+web = client.containers.run(
+    "nginx:alpine",
+    name="web",
+    detach=True,
+    network="app-network",
+)
+
+# Connect an existing container to a network
+db = client.containers.get("dev-db")
+network.connect(db, aliases=["database", "db"])
+
+# Disconnect from a network
+network.disconnect(db)
+
+# Inspect network to see connected containers
+network.reload()
+for container_id, info in network.attrs["Containers"].items():
+    print(f"  {info['Name']:20s}  {info['IPv4Address']}")
+
+# Remove a network (must disconnect all containers first)
+network.remove()
+```
+
+### Volumes
+
+```python
+import docker
+
+client = docker.from_env()
+
+# List volumes
+for volume in client.volumes.list():
+    print(f"  {volume.name:40s}  {volume.attrs['Driver']}")
+
+# Create a volume
+volume = client.volumes.create(
+    name="app-data",
+    driver="local",
+    labels={"project": "myapp", "type": "persistent"},
+)
+print(f"Created volume: {volume.name}")
+
+# Use a volume with a container
+container = client.containers.run(
+    "postgres:15",
+    name="db-with-volume",
+    detach=True,
+    volumes={"app-data": {"bind": "/var/lib/postgresql/data", "mode": "rw"}},
+)
+
+# Remove a volume
+volume.remove(force=True)
+
+# Prune unused volumes (like docker volume prune)
+pruned = client.volumes.prune()
+space = pruned.get("SpaceReclaimed", 0) / (1024 * 1024)
+print(f"Reclaimed {space:.1f} MB from unused volumes")
+```
+
+## Docker Compose via Python
+
+While `docker-compose` is typically a CLI tool, you can orchestrate multi-container setups purely in Python for more flexibility:
+
+```python
+import docker
+import time
+
+client = docker.from_env()
+
+PROJECT = "myapp"
+NETWORK_NAME = f"{PROJECT}-net"
+
+
+def compose_up():
+    """Start the full application stack."""
+    # Create the network
+    try:
+        network = client.networks.get(NETWORK_NAME)
+    except docker.errors.NotFound:
+        network = client.networks.create(NETWORK_NAME, driver="bridge")
+    print(f"Network: {network.name}")
+
+    # Start the database
+    try:
+        db = client.containers.get(f"{PROJECT}-db")
+        if db.status != "running":
+            db.start()
+    except docker.errors.NotFound:
+        db = client.containers.run(
+            "postgres:15-alpine",
+            name=f"{PROJECT}-db",
+            detach=True,
+            network=NETWORK_NAME,
+            environment={
+                "POSTGRES_DB": "appdb",
+                "POSTGRES_USER": "app",
+                "POSTGRES_PASSWORD": "secret",
+            },
+            volumes={f"{PROJECT}-pgdata": {"bind": "/var/lib/postgresql/data", "mode": "rw"}},
+            labels={"project": PROJECT, "role": "database"},
+        )
+    print(f"Database: {db.name} ({db.status})")
+
+    # Start Redis cache
+    try:
+        cache = client.containers.get(f"{PROJECT}-cache")
+        if cache.status != "running":
+            cache.start()
+    except docker.errors.NotFound:
+        cache = client.containers.run(
+            "redis:7-alpine",
+            name=f"{PROJECT}-cache",
+            detach=True,
+            network=NETWORK_NAME,
+            labels={"project": PROJECT, "role": "cache"},
+        )
+    print(f"Cache: {cache.name} ({cache.status})")
+
+    # Start the web application
+    try:
+        web = client.containers.get(f"{PROJECT}-web")
+        if web.status != "running":
+            web.start()
+    except docker.errors.NotFound:
+        web = client.containers.run(
+            "nginx:alpine",
+            name=f"{PROJECT}-web",
+            detach=True,
+            network=NETWORK_NAME,
+            ports={"80/tcp": 8080},
+            environment={
+                "DATABASE_URL": f"postgresql://app:secret@{PROJECT}-db:5432/appdb",
+                "REDIS_URL": f"redis://{PROJECT}-cache:6379",
+            },
+            labels={"project": PROJECT, "role": "web"},
+        )
+    print(f"Web: {web.name} ({web.status})")
+
+    return [db, cache, web]
+
+
+def compose_down():
+    """Stop and remove the full application stack."""
+    # Stop and remove containers by label
+    containers = client.containers.list(
+        all=True,
+        filters={"label": f"project={PROJECT}"},
+    )
+    for container in containers:
+        print(f"Stopping {container.name}...")
+        container.stop(timeout=5)
+        container.remove()
+        print(f"  Removed {container.name}")
+
+    # Remove the network
+    try:
+        network = client.networks.get(NETWORK_NAME)
+        network.remove()
+        print(f"Removed network: {NETWORK_NAME}")
+    except docker.errors.NotFound:
+        pass
+
+
+def compose_status():
+    """Show status of the application stack."""
+    containers = client.containers.list(
+        all=True,
+        filters={"label": f"project={PROJECT}"},
+    )
+    if not containers:
+        print("No containers found for this project.")
+        return
+
+    print(f"\n{'NAME':30s} {'STATUS':15s} {'IMAGE':25s} {'PORTS'}")
+    print("-" * 90)
+    for c in containers:
+        ports = ", ".join(f"{k}->{v}" for k, v in (c.ports or {}).items() if v)
+        print(f"{c.name:30s} {c.status:15s} {str(c.image.tags[0]) if c.image.tags else 'N/A':25s} {ports}")
+```
+
+## Container Health Checks and Event Monitoring
+
+Production automation needs to know when containers are healthy and when things go wrong.
+
+### Health Checks
+
+```python
+import docker
+import time
+
+client = docker.from_env()
+
+
+def check_container_health(container_name, timeout=30):
+    """Wait for a container to become healthy."""
+    container = client.containers.get(container_name)
+    start = time.time()
+
+    while time.time() - start < timeout:
+        container.reload()
+        health = container.attrs.get("State", {}).get("Health", {})
+
+        if health:
+            status = health.get("Status", "unknown")
+            if status == "healthy":
+                print(f"{container_name}: healthy")
+                return True
+            elif status == "unhealthy":
+                # Show the last health check log
+                log = health.get("Log", [{}])[-1]
+                print(f"{container_name}: unhealthy — {log.get('Output', 'no output')}")
+                return False
+
+        # No health check defined — check if running
+        if container.status == "running":
+            print(f"{container_name}: running (no healthcheck defined)")
+            return True
+
+        time.sleep(2)
+
+    print(f"{container_name}: timeout after {timeout}s")
+    return False
+
+
+def check_all_containers():
+    """Health check all running containers."""
+    containers = client.containers.list()
+    results = {}
+
+    for container in containers:
+        container.reload()
+        health_state = container.attrs.get("State", {}).get("Health", {})
+
+        if health_state:
+            status = health_state.get("Status", "unknown")
+        elif container.status == "running":
+            status = "running"
+        else:
+            status = container.status
+
+        results[container.name] = status
+        emoji_map = {"healthy": "OK", "running": "OK", "unhealthy": "FAIL"}
+        label = emoji_map.get(status, "WARN")
+        print(f"  [{label:4s}] {container.name:30s} {status}")
+
+    return results
+```
+
+### Streaming Logs and Events
+
+```python
+import docker
+import threading
+
+client = docker.from_env()
+
+
+def stream_container_logs(container_name):
+    """Stream logs from a container in real-time."""
+    container = client.containers.get(container_name)
+    print(f"--- Streaming logs from {container_name} ---")
+    for line in container.logs(stream=True, follow=True, tail=10):
+        print(f"[{container_name}] {line.decode('utf-8').rstrip()}")
+
+
+def monitor_docker_events(filters=None):
+    """Monitor Docker events (container start, stop, die, etc.)."""
+    print("Monitoring Docker events (Ctrl+C to stop)...")
+    for event in client.events(decode=True, filters=filters):
+        event_type = event.get("Type", "unknown")
+        action = event.get("Action", "unknown")
+        actor = event.get("Actor", {}).get("Attributes", {}).get("name", "unknown")
+        timestamp = event.get("time", 0)
+        print(f"  [{timestamp}] {event_type}/{action}: {actor}")
+
+
+# Monitor only container events
+# monitor_docker_events(filters={"type": "container"})
+
+# Stream logs in a background thread
+# thread = threading.Thread(target=stream_container_logs, args=("web-server",), daemon=True)
+# thread.start()
+```
+
+## Error Handling
+
+The Docker SDK raises specific exceptions for different failure modes. Handling them properly is the difference between automation that works and automation that fails silently.
+
+```python
+import docker
+from docker.errors import (
+    ContainerError,
+    ImageNotFound,
+    NotFound,
+    APIError,
+    BuildError,
+)
+
+client = docker.from_env()
+
+
+def safe_container_run(image, name, **kwargs):
+    """Run a container with comprehensive error handling."""
+    try:
+        container = client.containers.run(image, name=name, detach=True, **kwargs)
+        print(f"Started: {container.name}")
+        return container
+
+    except ImageNotFound:
+        print(f"Image not found: {image}")
+        print("Attempting to pull...")
+        try:
+            client.images.pull(image)
+            return client.containers.run(image, name=name, detach=True, **kwargs)
+        except APIError as e:
+            print(f"Failed to pull {image}: {e}")
+            return None
+
+    except APIError as e:
+        if "Conflict" in str(e):
+            print(f"Container '{name}' already exists. Removing and retrying...")
+            try:
+                old = client.containers.get(name)
+                old.remove(force=True)
+                return client.containers.run(image, name=name, detach=True, **kwargs)
+            except Exception as inner:
+                print(f"Failed to replace container: {inner}")
+                return None
+        else:
+            print(f"Docker API error: {e}")
+            return None
+
+    except ContainerError as e:
+        print(f"Container exited with error: {e}")
+        return None
+
+
+def safe_remove(container_name):
+    """Safely remove a container (ignore if not found)."""
+    try:
+        container = client.containers.get(container_name)
+        container.stop(timeout=5)
+        container.remove()
+        print(f"Removed: {container_name}")
+    except NotFound:
+        print(f"Not found (already removed): {container_name}")
+    except APIError as e:
+        print(f"Error removing {container_name}: {e}")
+```
+
+## Cleanup Automation
+
+One of the most valuable Docker automation tasks is cleaning up unused resources. In development, containers, images, and volumes accumulate fast.
+
+```python
+import docker
+
+client = docker.from_env()
+
+
+def full_cleanup(project_label=None, dry_run=False):
+    """Clean up Docker resources — containers, images, volumes, networks."""
+    reclaimed = {"containers": 0, "images": 0, "volumes": 0, "networks": 0}
+
+    # 1. Remove stopped containers
+    filters = {"status": "exited"}
+    if project_label:
+        filters["label"] = project_label
+
+    stopped = client.containers.list(all=True, filters=filters)
+    for container in stopped:
+        print(f"  Container: {container.name} ({container.short_id})")
+        if not dry_run:
+            container.remove(v=True)  # v=True removes anonymous volumes too
+        reclaimed["containers"] += 1
+
+    # 2. Remove dangling images (untagged)
+    dangling = client.images.list(filters={"dangling": True})
+    for image in dangling:
+        size_mb = image.attrs["Size"] / (1024 * 1024)
+        print(f"  Image: {image.short_id} ({size_mb:.1f} MB)")
+        if not dry_run:
+            try:
+                client.images.remove(image.id, force=True)
+            except docker.errors.APIError:
+                pass  # Image might be in use
+        reclaimed["images"] += 1
+
+    # 3. Remove unused volumes
+    unused_volumes = client.volumes.list(filters={"dangling": True})
+    for volume in unused_volumes:
+        print(f"  Volume: {volume.name}")
+        if not dry_run:
+            try:
+                volume.remove(force=True)
+            except docker.errors.APIError:
+                pass
+        reclaimed["volumes"] += 1
+
+    # 4. Remove unused networks (skip default ones)
+    default_networks = {"bridge", "host", "none"}
+    for network in client.networks.list():
+        if network.name not in default_networks:
+            if not network.attrs.get("Containers"):
+                print(f"  Network: {network.name}")
+                if not dry_run:
+                    try:
+                        network.remove()
+                    except docker.errors.APIError:
+                        pass
+                reclaimed["networks"] += 1
+
+    mode = "DRY RUN" if dry_run else "CLEANED"
+    print(f"\n{mode}: {reclaimed['containers']} containers, "
+          f"{reclaimed['images']} images, {reclaimed['volumes']} volumes, "
+          f"{reclaimed['networks']} networks")
+
+    return reclaimed
+
+
+# Preview what would be cleaned
+# full_cleanup(dry_run=True)
+
+# Actually clean up
+# full_cleanup()
+
+# Clean only a specific project
+# full_cleanup(project_label="project=myapp")
+```
+
+<Exercise number={1} title="Container Lifecycle Script">
+
+Write a Python script that manages a container through its full lifecycle: pull the image, run the container, execute a command inside it, read the logs, then stop and remove it.
+
+```python
+#!/usr/bin/env python3
+"""Container lifecycle management exercise."""
+
+import docker
+from docker.errors import NotFound, APIError, ImageNotFound
+import time
+
+client = docker.from_env()
+
+CONTAINER_NAME = "lifecycle-demo"
+IMAGE = "alpine:latest"
+
+
+def pull_image(image_name):
+    """Pull an image, handling the case where it already exists."""
+    print(f"[1] Pulling image: {image_name}")
+    try:
+        image = client.images.pull(image_name)
+        print(f"    Pulled: {image.tags}")
+        return image
+    except APIError as e:
+        print(f"    Failed to pull: {e}")
+        return None
+
+
+def run_container(image_name, name):
+    """Run a container, cleaning up any existing one with the same name."""
+    print(f"\n[2] Starting container: {name}")
+
+    # Clean up existing container if present
+    try:
+        existing = client.containers.get(name)
+        print(f"    Found existing container ({existing.status}), removing...")
+        existing.remove(force=True)
+    except NotFound:
+        pass
+
+    container = client.containers.run(
+        image_name,
+        name=name,
+        detach=True,
+        command="sh -c 'echo Container started; for i in 1 2 3 4 5; do echo Tick $i; sleep 1; done; echo Done'",
+        labels={"exercise": "lifecycle-demo"},
+    )
+    print(f"    Started: {container.short_id}")
+    return container
+
+
+def exec_in_container(container):
+    """Execute a command inside the running container."""
+    print(f"\n[3] Executing command in {container.name}")
+    exit_code, output = container.exec_run("cat /etc/os-release")
+    print(f"    Exit code: {exit_code}")
+    for line in output.decode("utf-8").strip().split("\n"):
+        print(f"    {line}")
+
+
+def read_logs(container, follow_seconds=3):
+    """Read container logs."""
+    print(f"\n[4] Reading logs from {container.name}")
+    # Wait a moment for the container to produce output
+    time.sleep(follow_seconds)
+    logs = container.logs(timestamps=True).decode("utf-8")
+    for line in logs.strip().split("\n"):
+        print(f"    {line}")
+
+
+def stop_and_remove(container):
+    """Stop and remove a container."""
+    print(f"\n[5] Stopping container: {container.name}")
+    container.stop(timeout=10)
+    container.reload()
+    print(f"    Status: {container.status}")
+
+    print(f"\n[6] Removing container: {container.name}")
+    container.remove()
+    print(f"    Removed successfully")
+
+    # Verify it is gone
+    try:
+        client.containers.get(container.name)
+        print("    ERROR: Container still exists!")
+    except NotFound:
+        print("    Verified: container no longer exists")
+
+
+def main():
+    print("=" * 50)
+    print("  Container Lifecycle Demo")
+    print("=" * 50)
+
+    image = pull_image(IMAGE)
+    if not image:
+        return
+
+    container = run_container(IMAGE, CONTAINER_NAME)
+
+    # Give the container a moment to start
+    time.sleep(1)
+
+    exec_in_container(container)
+    read_logs(container, follow_seconds=5)
+    stop_and_remove(container)
+
+    print("\n" + "=" * 50)
+    print("  Lifecycle complete!")
+    print("=" * 50)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</Exercise>
+
+<Exercise number={2} title="Multi-Container Network Setup">
+
+Write a script that creates a network, launches two containers on it, verifies they can communicate, then tears everything down.
+
+```python
+#!/usr/bin/env python3
+"""Multi-container networking exercise."""
+
+import docker
+from docker.errors import NotFound, APIError
+import time
+
+client = docker.from_env()
+
+PROJECT = "net-exercise"
+NETWORK_NAME = f"{PROJECT}-network"
+
+
+def setup_network():
+    """Create a Docker network for the exercise."""
+    print("[1] Setting up network")
+    try:
+        network = client.networks.get(NETWORK_NAME)
+        print(f"    Network already exists: {network.name}")
+    except NotFound:
+        network = client.networks.create(
+            NETWORK_NAME,
+            driver="bridge",
+            labels={"project": PROJECT},
+        )
+        print(f"    Created network: {network.name} ({network.short_id})")
+    return network
+
+
+def launch_containers():
+    """Launch a server and client container on the network."""
+    print("\n[2] Launching containers")
+
+    containers = {}
+
+    # Launch a simple HTTP server
+    for name in [f"{PROJECT}-server", f"{PROJECT}-client"]:
+        try:
+            existing = client.containers.get(name)
+            existing.remove(force=True)
+        except NotFound:
+            pass
+
+    # Server: runs a simple HTTP listener
+    server = client.containers.run(
+        "python:3.11-alpine",
+        name=f"{PROJECT}-server",
+        detach=True,
+        network=NETWORK_NAME,
+        command="python -m http.server 8000",
+        labels={"project": PROJECT, "role": "server"},
+    )
+    containers["server"] = server
+    print(f"    Server: {server.name} ({server.short_id})")
+
+    # Client: stays alive for us to exec into
+    client_container = client.containers.run(
+        "python:3.11-alpine",
+        name=f"{PROJECT}-client",
+        detach=True,
+        network=NETWORK_NAME,
+        command="sleep 120",
+        labels={"project": PROJECT, "role": "client"},
+    )
+    containers["client"] = client_container
+    print(f"    Client: {client_container.name} ({client_container.short_id})")
+
+    return containers
+
+
+def test_connectivity(containers):
+    """Test that the client can reach the server over the network."""
+    print("\n[3] Testing network connectivity")
+
+    # Wait for the server to start
+    time.sleep(2)
+
+    # From the client, try to reach the server by container name
+    server_name = f"{PROJECT}-server"
+    exit_code, output = containers["client"].exec_run(
+        f"python -c \"import urllib.request; print(urllib.request.urlopen('http://{server_name}:8000').status)\""
+    )
+
+    result = output.decode("utf-8").strip()
+    if exit_code == 0 and "200" in result:
+        print(f"    SUCCESS: Client reached server (HTTP {result})")
+    else:
+        print(f"    FAILED: exit_code={exit_code}, output={result}")
+
+    # Also test DNS resolution
+    exit_code, output = containers["client"].exec_run(
+        f"python -c \"import socket; print(socket.gethostbyname('{server_name}'))\""
+    )
+    if exit_code == 0:
+        ip = output.decode("utf-8").strip()
+        print(f"    DNS resolution: {server_name} -> {ip}")
+
+
+def inspect_network():
+    """Show network details."""
+    print("\n[4] Network inspection")
+    network = client.networks.get(NETWORK_NAME)
+    network.reload()
+
+    for cid, info in network.attrs["Containers"].items():
+        print(f"    {info['Name']:30s}  {info['IPv4Address']}")
+
+
+def teardown():
+    """Remove all containers and the network."""
+    print("\n[5] Tearing down")
+
+    # Remove containers
+    containers = client.containers.list(
+        all=True, filters={"label": f"project={PROJECT}"}
+    )
+    for c in containers:
+        c.remove(force=True)
+        print(f"    Removed container: {c.name}")
+
+    # Remove network
+    try:
+        network = client.networks.get(NETWORK_NAME)
+        network.remove()
+        print(f"    Removed network: {NETWORK_NAME}")
+    except NotFound:
+        pass
+
+
+def main():
+    print("=" * 50)
+    print("  Multi-Container Network Exercise")
+    print("=" * 50)
+
+    try:
+        setup_network()
+        containers = launch_containers()
+        test_connectivity(containers)
+        inspect_network()
+    finally:
+        teardown()
+
+    print("\n" + "=" * 50)
+    print("  Exercise complete!")
+    print("=" * 50)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</Exercise>
+
+<MiniProject title="Docker Environment Manager">
+
+Build a complete Docker environment manager that handles development environment lifecycle: start, stop, status, cleanup, and health checking.
+
+```python
+#!/usr/bin/env python3
+"""
+Docker Environment Manager
+Manages complete development environments with multiple containers,
+networks, and volumes. Supports start, stop, status, cleanup, and
+health checking.
+"""
+
+import docker
+from docker.errors import NotFound, APIError, ImageNotFound
+import time
+import sys
+import json
+
+client = docker.from_env()
+
+# --- Environment Configuration ---
+
+PROJECT = "devenv"
+
+SERVICES = {
+    "postgres": {
+        "image": "postgres:15-alpine",
+        "ports": {"5432/tcp": 5432},
+        "environment": {
+            "POSTGRES_USER": "dev",
+            "POSTGRES_PASSWORD": "devpass",
+            "POSTGRES_DB": "appdb",
+        },
+        "volumes": {f"{PROJECT}-pgdata": {"bind": "/var/lib/postgresql/data", "mode": "rw"}},
+        "healthcheck": {
+            "test": "pg_isready -U dev",
+            "interval": 5,
+            "timeout": 3,
+            "retries": 5,
+        },
+    },
+    "redis": {
+        "image": "redis:7-alpine",
+        "ports": {"6379/tcp": 6379},
+        "healthcheck": {
+            "test": "redis-cli ping",
+            "interval": 5,
+            "timeout": 3,
+            "retries": 3,
+        },
+    },
+    "nginx": {
+        "image": "nginx:alpine",
+        "ports": {"80/tcp": 8080},
+        "environment": {
+            "UPSTREAM_DB": f"{PROJECT}-postgres:5432",
+            "UPSTREAM_CACHE": f"{PROJECT}-redis:6379",
+        },
+    },
+}
+
+
+# --- Helper Functions ---
+
+def log(level, message):
+    """Simple logger."""
+    timestamp = time.strftime("%H:%M:%S")
+    print(f"[{timestamp}] [{level:5s}] {message}")
+
+
+def get_container(service_name):
+    """Get a container by service name, or None if not found."""
+    try:
+        return client.containers.get(f"{PROJECT}-{service_name}")
+    except NotFound:
+        return None
+
+
+def ensure_network():
+    """Create the project network if it does not exist."""
+    network_name = f"{PROJECT}-network"
+    try:
+        return client.networks.get(network_name)
+    except NotFound:
+        network = client.networks.create(
+            network_name,
+            driver="bridge",
+            labels={"project": PROJECT},
+        )
+        log("INFO", f"Created network: {network_name}")
+        return network
+
+
+def ensure_image(image_name):
+    """Pull an image if not present locally."""
+    try:
+        client.images.get(image_name)
+    except ImageNotFound:
+        log("INFO", f"Pulling image: {image_name}")
+        client.images.pull(image_name)
+        log("INFO", f"Pulled: {image_name}")
+
+
+# --- Core Commands ---
+
+def cmd_start():
+    """Start the development environment."""
+    log("INFO", "=" * 50)
+    log("INFO", "Starting development environment")
+    log("INFO", "=" * 50)
+
+    network = ensure_network()
+    started = 0
+    errors = 0
+
+    for service_name, config in SERVICES.items():
+        container_name = f"{PROJECT}-{service_name}"
+        log("INFO", f"Starting {service_name}...")
+
+        # Check if already running
+        existing = get_container(service_name)
+        if existing and existing.status == "running":
+            log("INFO", f"  Already running: {container_name}")
+            started += 1
+            continue
+
+        # Remove stopped container if exists
+        if existing:
+            existing.remove(force=True)
+
+        # Pull image if needed
+        ensure_image(config["image"])
+
+        # Build run kwargs
+        run_kwargs = {
+            "name": container_name,
+            "detach": True,
+            "network": f"{PROJECT}-network",
+            "labels": {"project": PROJECT, "service": service_name},
+        }
+
+        if "ports" in config:
+            run_kwargs["ports"] = config["ports"]
+        if "environment" in config:
+            run_kwargs["environment"] = config["environment"]
+        if "volumes" in config:
+            run_kwargs["volumes"] = config["volumes"]
+
+        try:
+            container = client.containers.run(config["image"], **run_kwargs)
+            log("INFO", f"  Started: {container_name} ({container.short_id})")
+            started += 1
+        except APIError as e:
+            log("ERROR", f"  Failed to start {container_name}: {e}")
+            errors += 1
+
+    # Wait for health checks
+    log("INFO", "")
+    log("INFO", "Waiting for services to be ready...")
+    time.sleep(3)
+    cmd_health()
+
+    log("INFO", "")
+    log("INFO", f"Environment ready: {started} services started, {errors} errors")
+
+
+def cmd_stop():
+    """Stop the development environment."""
+    log("INFO", "Stopping development environment")
+
+    containers = client.containers.list(
+        all=True, filters={"label": f"project={PROJECT}"}
+    )
+
+    if not containers:
+        log("INFO", "No containers to stop")
+        return
+
+    for container in containers:
+        if container.status == "running":
+            log("INFO", f"  Stopping {container.name}...")
+            container.stop(timeout=10)
+            log("INFO", f"  Stopped: {container.name}")
+        else:
+            log("INFO", f"  Already stopped: {container.name}")
+
+
+def cmd_status():
+    """Show the status of all environment services."""
+    containers = client.containers.list(
+        all=True, filters={"label": f"project={PROJECT}"}
+    )
+
+    print(f"\n{'SERVICE':20s} {'STATUS':15s} {'IMAGE':25s} {'PORTS'}")
+    print("-" * 85)
+
+    if not containers:
+        print("  No containers found for this environment.")
+        print(f"  Run 'start' to create the environment.\n")
+        return
+
+    for container in sorted(containers, key=lambda c: c.name):
+        service = container.labels.get("service", "unknown")
+        image_name = container.image.tags[0] if container.image.tags else "N/A"
+
+        # Format port mappings
+        port_list = []
+        for container_port, host_bindings in (container.ports or {}).items():
+            if host_bindings:
+                for binding in host_bindings:
+                    port_list.append(f"{binding['HostPort']}->{container_port}")
+        ports_str = ", ".join(port_list) if port_list else "-"
+
+        print(f"{service:20s} {container.status:15s} {image_name:25s} {ports_str}")
+
+    # Show network info
+    try:
+        network = client.networks.get(f"{PROJECT}-network")
+        network.reload()
+        print(f"\nNetwork: {network.name} ({len(network.attrs.get('Containers', {}))} containers)")
+    except NotFound:
+        print("\nNetwork: not created")
+
+    # Show volume info
+    volumes = client.volumes.list(filters={"label": f"project={PROJECT}"})
+    if volumes:
+        print("Volumes:")
+        for v in volumes:
+            print(f"  {v.name}")
+    print()
+
+
+def cmd_health():
+    """Run health checks on all services."""
+    print(f"\n{'SERVICE':20s} {'STATUS':12s} {'CHECK RESULT'}")
+    print("-" * 65)
+
+    for service_name, config in SERVICES.items():
+        container = get_container(service_name)
+
+        if not container:
+            print(f"{service_name:20s} {'NOT FOUND':12s} Container does not exist")
+            continue
+
+        container.reload()
+
+        if container.status != "running":
+            print(f"{service_name:20s} {'DOWN':12s} Container status: {container.status}")
+            continue
+
+        healthcheck = config.get("healthcheck")
+        if healthcheck:
+            # Execute the health check command inside the container
+            try:
+                exit_code, output = container.exec_run(healthcheck["test"])
+                result = output.decode("utf-8").strip()
+                if exit_code == 0:
+                    print(f"{service_name:20s} {'HEALTHY':12s} {result or 'OK'}")
+                else:
+                    print(f"{service_name:20s} {'UNHEALTHY':12s} Exit {exit_code}: {result}")
+            except APIError as e:
+                print(f"{service_name:20s} {'ERROR':12s} {e}")
+        else:
+            # No healthcheck defined — just verify it is running
+            print(f"{service_name:20s} {'RUNNING':12s} No healthcheck defined")
+
+    print()
+
+
+def cmd_cleanup():
+    """Remove all containers, volumes, and networks for this environment."""
+    log("INFO", "Cleaning up environment")
+
+    # Stop and remove containers
+    containers = client.containers.list(
+        all=True, filters={"label": f"project={PROJECT}"}
+    )
+    for container in containers:
+        log("INFO", f"  Removing container: {container.name}")
+        container.remove(force=True, v=True)
+
+    # Remove volumes
+    volumes = [v for v in client.volumes.list() if v.name.startswith(f"{PROJECT}-")]
+    for volume in volumes:
+        log("INFO", f"  Removing volume: {volume.name}")
+        try:
+            volume.remove(force=True)
+        except APIError:
+            log("WARN", f"  Could not remove volume {volume.name} (may be in use)")
+
+    # Remove network
+    try:
+        network = client.networks.get(f"{PROJECT}-network")
+        network.remove()
+        log("INFO", f"  Removed network: {PROJECT}-network")
+    except NotFound:
+        pass
+
+    log("INFO", "Cleanup complete")
+
+
+def cmd_logs(service_name, lines=50):
+    """Show recent logs for a service."""
+    container = get_container(service_name)
+    if not container:
+        print(f"Container not found: {PROJECT}-{service_name}")
+        return
+
+    print(f"--- Logs from {container.name} (last {lines} lines) ---")
+    logs = container.logs(tail=lines, timestamps=True).decode("utf-8")
+    print(logs)
+
+
+# --- CLI Entry Point ---
+
+def main():
+    commands = {
+        "start": cmd_start,
+        "stop": cmd_stop,
+        "status": cmd_status,
+        "health": cmd_health,
+        "cleanup": cmd_cleanup,
+    }
+
+    if len(sys.argv) < 2 or sys.argv[1] not in commands:
+        print("Docker Environment Manager")
+        print(f"\nUsage: {sys.argv[0]} <command>")
+        print(f"\nCommands:")
+        for name, func in commands.items():
+            print(f"  {name:12s}  {func.__doc__}")
+        print(f"  {'logs':12s}  Show logs for a service (e.g., logs postgres)")
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    if command == "logs":
+        service = sys.argv[2] if len(sys.argv) > 2 else "nginx"
+        cmd_logs(service)
+    else:
+        commands[command]()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `docker.from_env()` connects using the same configuration as the Docker CLI — use it everywhere
+- The SDK provides full container lifecycle management: run, stop, restart, remove, logs, exec
+- Always handle `NotFound` and `APIError` — containers and images may not exist when you expect them
+- Label everything with a project name so you can filter and clean up resources by project
+- Use `container.remove(force=True)` when you need to remove a running container without stopping first
+- Stream logs with `container.logs(stream=True, follow=True)` for real-time monitoring
+- Docker Compose logic can be replicated in Python for dynamic, programmable environment management
+- Cleanup automation (removing stopped containers, dangling images, unused volumes) saves disk and prevents port conflicts
+- Health checks verify that containers are not just running but actually ready to serve
+
+## What's Next
+
+You can now control Docker programmatically — building, running, and managing containers from Python. In **Kubernetes Python Client**, you will take the next step: managing containers at scale with Kubernetes, listing pods, creating deployments, and watching cluster events from Python.

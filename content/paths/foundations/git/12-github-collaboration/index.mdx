@@ -1,0 +1,1860 @@
+---
+title: "GitHub Collaboration"
+description: "Turn Git into a team sport. Master GitHub features — issues, discussions, project boards, and the workflows that make teams productive."
+order: 12
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 11-remote-repositories
+objectives:
+  - Use GitHub issues for task tracking
+  - Understand GitHub project workflows
+  - Configure repository settings for team collaboration
+  - Use GitHub Actions basics
+tags:
+  - git
+  - github
+  - collaboration
+  - workflow
+---
+
+<Callout type="story" title="The Story">
+You join a team of 10 developers. Everyone's pushing to the same repo. Features are being built, bugs are being reported, releases are being tagged. Without a collaboration workflow, it's chaos. GitHub is not just a place to store code — it is where coordination happens. Issues track work, project boards visualize progress, and branch protection prevents disasters. The difference between a team that ships reliably and one that constantly breaks things is not talent — it is process. GitHub gives you the tools; you just need to know how to use them.
+</Callout>
+
+## GitHub vs Git
+
+Git is the version control tool. GitHub is a platform built on top of Git that adds collaboration features.
+
+```
+Git (the tool):              GitHub (the platform):
+  - Commits                    - Issues
+  - Branches                   - Pull Requests
+  - Merges                     - Project Boards
+  - Tags                       - Actions (CI/CD)
+  - Remotes                    - Branch Protection
+  - History                    - Teams & Permissions
+                               - Releases
+                               - Discussions
+                               - Code Search
+```
+
+You can use Git without GitHub (with GitLab, Bitbucket, or self-hosted servers). But GitHub is the most widely used platform, and understanding its features is essential for modern DevOps.
+
+## Creating a Repository on GitHub
+
+### From the Web UI
+
+```
+1. Go to github.com → "New Repository"
+2. Fill in:
+   - Repository name: my-project
+   - Description: A brief description
+   - Public or Private
+   - Initialize with README (optional)
+   - Add .gitignore (choose a template)
+   - Choose a license
+3. Click "Create repository"
+```
+
+### From the Command Line with GitHub CLI
+
+```bash
+# Install GitHub CLI (gh)
+# macOS: brew install gh
+# Ubuntu: apt install gh
+# Or: https://cli.github.com
+
+# Authenticate
+gh auth login
+
+# Create a new repository
+gh repo create my-project --public --description "My awesome project"
+
+# Create and clone in one step
+gh repo create my-project --public --clone
+
+# Create from an existing local repo
+cd existing-project
+gh repo create --source . --public --push
+```
+
+## Essential Repository Files
+
+Every well-maintained repository has these files in its root:
+
+### README.md
+
+```markdown
+# Project Name
+
+Brief description of what the project does.
+
+## Installation
+
+Instructions to install and set up the project.
+
+## Usage
+
+How to use the project with examples.
+
+## Contributing
+
+Link to CONTRIBUTING.md or brief contribution guidelines.
+
+## License
+
+MIT License — see LICENSE file for details.
+```
+
+### .gitignore
+
+```bash
+# Node.js
+node_modules/
+dist/
+.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+*.log
+```
+
+### LICENSE
+
+```
+MIT License
+
+Copyright (c) 2025 Your Name
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software...
+```
+
+### CONTRIBUTING.md
+
+```markdown
+# Contributing to Project Name
+
+## How to Contribute
+
+1. Fork the repository
+2. Create a feature branch (`git switch -c feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Code Style
+
+- Use consistent indentation (2 spaces)
+- Write meaningful commit messages
+- Add tests for new features
+
+## Reporting Bugs
+
+Open an issue with:
+- Steps to reproduce
+- Expected behavior
+- Actual behavior
+- Environment details (OS, version, etc.)
+```
+
+## GitHub Issues
+
+Issues are the primary way to track work in a GitHub repository — bugs, features, tasks, and questions.
+
+### Creating Issues
+
+```bash
+# Create an issue with GitHub CLI
+gh issue create --title "Fix login timeout" --body "Users are getting logged out after 5 minutes. Should be 30 minutes."
+
+# Create with labels and assignee
+gh issue create \
+  --title "Add dark mode support" \
+  --body "Users have requested dark mode. See design spec in #42." \
+  --label "enhancement" \
+  --label "ui" \
+  --assignee "@me"
+
+# Create with a milestone
+gh issue create \
+  --title "Update dependencies" \
+  --body "Several packages have security updates available." \
+  --label "maintenance" \
+  --milestone "v2.0"
+
+# List open issues
+gh issue list
+
+# List issues with filters
+gh issue list --label "bug" --assignee "@me"
+
+# View a specific issue
+gh issue view 42
+```
+
+### Issue Templates
+
+Create `.github/ISSUE_TEMPLATE/` to standardize issue creation:
+
+```yaml
+# .github/ISSUE_TEMPLATE/bug_report.yml
+name: Bug Report
+description: Report a bug to help us improve
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of the bug
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      value: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+```
+
+```yaml
+# .github/ISSUE_TEMPLATE/feature_request.yml
+name: Feature Request
+description: Suggest a new feature
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How should this feature work?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches did you consider?
+```
+
+### Linking Commits to Issues
+
+Reference issues in commit messages to create links. Use special keywords to automatically close issues:
+
+```bash
+# Reference an issue (creates a link but doesn't close it)
+git commit -m "Increase session timeout — see #42"
+
+# Close an issue automatically when the commit reaches the default branch
+git commit -m "Fix login timeout — Fixes #42"
+git commit -m "Resolve session expiry — Closes #42"
+git commit -m "Handle token refresh — Resolves #42"
+
+# Reference multiple issues
+git commit -m "Update auth module — Fixes #42, Closes #43"
+```
+
+<Callout type="tip" title="Issue References Work Everywhere">
+You can reference issues in commit messages, PR descriptions, comments, and even other issues. The format `#42` always creates a clickable link. The keywords `Fixes`, `Closes`, and `Resolves` (case-insensitive) only auto-close when the commit lands on the default branch (usually via a merged PR).
+</Callout>
+
+## Project Boards
+
+GitHub Projects provide Kanban-style boards for tracking work across issues and PRs.
+
+### Setting Up a Project Board
+
+```bash
+# Create a project with GitHub CLI (uses Projects v2)
+gh project create --title "Sprint 1" --owner "@me"
+
+# List projects
+gh project list
+
+# Add an issue to a project
+gh project item-add 1 --owner "@me" --url "https://github.com/org/repo/issues/42"
+```
+
+### Typical Board Layout
+
+```
+┌──────────────┬──────────────┬──────────────┬──────────────┐
+│   Backlog    │   To Do      │  In Progress │    Done      │
+├──────────────┼──────────────┼──────────────┼──────────────┤
+│ #15 Add API  │ #42 Fix      │ #38 Add      │ #33 Update   │
+│    caching   │    login     │    dark mode │    deps      │
+│              │    timeout   │              │              │
+│ #16 Update   │ #43 Add      │ #39 Improve  │ #34 Fix      │
+│    docs      │    logging   │    search    │    typos     │
+│              │              │              │              │
+│ #17 Refactor │              │              │ #35 Add      │
+│    auth      │              │              │    tests     │
+└──────────────┴──────────────┴──────────────┴──────────────┘
+```
+
+### Automation Rules
+
+Projects can automatically move items based on events:
+
+```
+Auto-move rules:
+  - When issue is assigned → move to "To Do"
+  - When PR is opened → move to "In Progress"
+  - When PR is merged → move to "Done"
+  - When issue is closed → move to "Done"
+```
+
+## Repository Settings
+
+### Branch Protection Rules
+
+Branch protection prevents direct pushes and enforces code quality on important branches:
+
+```bash
+# View branch protection (GitHub CLI)
+gh api repos/{owner}/{repo}/branches/main/protection
+
+# Common protection rules for "main":
+# 1. Require pull request reviews before merging
+#    - Required approving reviews: 1 (or 2 for critical repos)
+#    - Dismiss stale reviews when new commits are pushed
+#    - Require review from code owners
+#
+# 2. Require status checks to pass before merging
+#    - Required checks: CI/CD pipeline, linting, tests
+#    - Require branches to be up to date before merging
+#
+# 3. Require conversation resolution before merging
+#
+# 4. Restrict who can push to the branch
+#    - Only allow maintainers to push directly
+#
+# 5. Do not allow force pushes
+#
+# 6. Do not allow deletions
+```
+
+```
+Without branch protection:
+  Developer → git push origin main → Main branch updated
+  (No review, no tests, no safety net)
+
+With branch protection:
+  Developer → Create PR → Reviews ✓ → CI passes ✓ → Merge
+  (Every change is reviewed and tested)
+```
+
+<Callout type="warning" title="Set Up Protection Early">
+Many teams add branch protection only after someone accidentally pushes broken code to main. Do not wait for a disaster. Set up protection rules when you create the repository. At minimum: require one PR review and require status checks to pass.
+</Callout>
+
+### Teams and Permissions
+
+```
+Permission Levels:
+  Read    — View code, create issues, comment
+  Triage  — Manage issues and PRs (labels, assignees)
+  Write   — Push to non-protected branches, merge PRs
+  Maintain — Manage repo settings (no destructive actions)
+  Admin   — Full control (delete repo, manage access)
+
+Team Structure Example:
+  @org/developers    → Write access
+  @org/leads         → Maintain access
+  @org/devops        → Admin access
+  @org/contractors   → Read access
+```
+
+### CODEOWNERS
+
+The `CODEOWNERS` file automatically assigns reviewers based on file paths:
+
+```bash
+# .github/CODEOWNERS
+
+# Default reviewers for everything
+*                   @org/leads
+
+# Frontend team owns UI code
+src/components/     @org/frontend-team
+src/styles/         @org/frontend-team
+
+# Backend team owns API code
+src/api/            @org/backend-team
+src/models/         @org/backend-team
+
+# DevOps owns infrastructure
+.github/            @org/devops
+Dockerfile          @org/devops
+docker-compose.yml  @org/devops
+terraform/          @org/devops
+
+# Security team must review auth changes
+src/auth/           @org/security-team
+```
+
+## GitHub Actions Basics
+
+GitHub Actions is GitHub's built-in CI/CD platform. It runs automated workflows triggered by events.
+
+### Basic Workflow File
+
+```yaml
+# .github/workflows/ci.yml
+name: CI Pipeline
+
+# When to run
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# What to run
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check out the code
+      - uses: actions/checkout@v4
+
+      # Set up the runtime
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Install dependencies
+      - run: npm ci
+
+      # Run linting
+      - run: npm run lint
+
+      # Run tests
+      - run: npm test
+
+      # Run build
+      - run: npm run build
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm audit --audit-level=high
+```
+
+### Common Workflow Triggers
+
+```yaml
+on:
+  # Push to specific branches
+  push:
+    branches: [main, develop]
+
+  # Pull requests targeting specific branches
+  pull_request:
+    branches: [main]
+
+  # Scheduled runs (cron syntax)
+  schedule:
+    - cron: '0 0 * * 1'   # Every Monday at midnight
+
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy environment'
+        required: true
+        default: 'staging'
+
+  # When a release is published
+  release:
+    types: [published]
+```
+
+<Callout type="tip" title="Start Simple with CI">
+Your first GitHub Actions workflow should just run your tests on every PR. That alone catches most bugs before they reach main. Add linting, security scanning, and deployment workflows as your project matures. A 10-line workflow that runs `npm test` is better than no automation at all.
+</Callout>
+
+## Releases and Tags
+
+Releases combine Git tags with release notes and downloadable assets.
+
+```bash
+# Create a tag
+git tag -a v1.0.0 -m "Release version 1.0.0"
+git push origin v1.0.0
+
+# Create a release with GitHub CLI
+gh release create v1.0.0 \
+  --title "v1.0.0 — Initial Release" \
+  --notes "## What's New
+- Feature A
+- Feature B
+
+## Bug Fixes
+- Fixed issue #42
+- Fixed issue #43"
+
+# Create a release with auto-generated notes
+gh release create v1.1.0 --generate-notes
+
+# Upload assets to a release
+gh release upload v1.0.0 dist/app-linux dist/app-macos dist/app-windows
+
+# List releases
+gh release list
+
+# Download release assets
+gh release download v1.0.0
+```
+
+## GitHub CLI (gh) Essentials
+
+The GitHub CLI brings GitHub features to your terminal:
+
+```bash
+# Repository operations
+gh repo clone owner/repo        # Clone a repo
+gh repo view                    # View repo details
+gh repo fork                    # Fork the current repo
+
+# Issue operations
+gh issue create                 # Create an issue (interactive)
+gh issue list                   # List open issues
+gh issue view 42                # View issue #42
+gh issue close 42               # Close issue #42
+gh issue comment 42 -b "Fixed in v1.1"  # Add a comment
+
+# Pull request operations
+gh pr create                    # Create a PR (interactive)
+gh pr list                      # List open PRs
+gh pr view 15                   # View PR #15
+gh pr checkout 15               # Check out a PR locally
+gh pr merge 15 --squash         # Squash-merge PR #15
+gh pr review 15 --approve       # Approve a PR
+
+# Workflow operations
+gh run list                     # List recent workflow runs
+gh run view 12345               # View a specific run
+gh run watch 12345              # Watch a run in real-time
+
+# General
+gh api repos/{owner}/{repo}     # Make arbitrary API calls
+gh status                       # See notifications and assigned issues
+```
+
+<Exercise number={1} title="Issue-Driven Development">
+
+```bash
+# Simulate an issue-driven development workflow
+# (Using local Git to demonstrate the commit-issue linking patterns)
+
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# === Set up a project ===
+cat > app.py << 'EOF'
+class TaskManager:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, title):
+        self.tasks.append({"title": title, "done": False})
+
+    def list_tasks(self):
+        for i, task in enumerate(self.tasks):
+            status = "[x]" if task["done"] else "[ ]"
+            print(f"  {i+1}. {status} {task['title']}")
+EOF
+
+cat > README.md << 'EOF'
+# Task Manager
+A simple task management application.
+EOF
+
+git add . && git commit -q -m "Initial project setup"
+echo "=== Project initialized ==="
+echo ""
+
+# === Simulate Issue #1: Add task completion feature ===
+echo "=== Simulated Issue #1: Add task completion feature ==="
+echo "  Labels: enhancement, core"
+echo "  Assignee: you"
+echo ""
+
+git switch -c feature/complete-task -q
+
+cat > app.py << 'EOF'
+class TaskManager:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, title):
+        task = {"title": title, "done": False}
+        self.tasks.append(task)
+        return len(self.tasks)  # return task number
+
+    def complete_task(self, task_number):
+        if 1 <= task_number <= len(self.tasks):
+            self.tasks[task_number - 1]["done"] = True
+            return True
+        return False
+
+    def list_tasks(self):
+        for i, task in enumerate(self.tasks):
+            status = "[x]" if task["done"] else "[ ]"
+            print(f"  {i+1}. {status} {task['title']}")
+
+    def get_stats(self):
+        total = len(self.tasks)
+        done = sum(1 for t in self.tasks if t["done"])
+        return {"total": total, "done": done, "remaining": total - done}
+EOF
+
+# Reference issue in commit message
+git add . && git commit -q -m "Add task completion feature — Fixes #1
+
+Implemented complete_task() method that marks a task as done by number.
+Also added get_stats() for tracking progress.
+
+Fixes #1"
+
+echo "Commit references issue #1:"
+git log --oneline -1
+echo ""
+
+# === Simulate Issue #2: Bug — tasks not validated ===
+echo "=== Simulated Issue #2: Bug — no input validation ==="
+echo "  Labels: bug, priority-high"
+echo ""
+
+git switch main -q
+git merge feature/complete-task -m "Merge feature: task completion (Closes #1)" -q
+
+git switch -c fix/input-validation -q
+
+cat > app.py << 'EOF'
+class TaskManager:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, title):
+        if not title or not title.strip():
+            raise ValueError("Task title cannot be empty")
+        task = {"title": title.strip(), "done": False}
+        self.tasks.append(task)
+        return len(self.tasks)
+
+    def complete_task(self, task_number):
+        if not isinstance(task_number, int):
+            raise TypeError("Task number must be an integer")
+        if task_number < 1 or task_number > len(self.tasks):
+            raise IndexError(f"Task {task_number} does not exist (1-{len(self.tasks)})")
+        self.tasks[task_number - 1]["done"] = True
+        return True
+
+    def list_tasks(self):
+        if not self.tasks:
+            print("  No tasks yet.")
+            return
+        for i, task in enumerate(self.tasks):
+            status = "[x]" if task["done"] else "[ ]"
+            print(f"  {i+1}. {status} {task['title']}")
+
+    def get_stats(self):
+        total = len(self.tasks)
+        done = sum(1 for t in self.tasks if t["done"])
+        return {"total": total, "done": done, "remaining": total - done}
+EOF
+
+git add . && git commit -q -m "Add input validation to TaskManager — Fixes #2
+
+- Validate task title is not empty/whitespace
+- Validate task_number is an integer and in range
+- Show helpful message when task list is empty
+- Raise descriptive errors for invalid input
+
+Closes #2"
+
+echo "Commit references issue #2:"
+git log --oneline -1
+echo ""
+
+# === Simulate Issue #3: Feature request — task priorities ===
+echo "=== Simulated Issue #3: Feature — add task priorities ==="
+echo "  Labels: enhancement"
+echo "  Milestone: v2.0"
+echo ""
+
+git switch main -q
+git merge fix/input-validation -m "Merge fix: input validation (Closes #2)" -q
+
+git switch -c feature/priorities -q
+
+cat > app.py << 'EOF'
+class TaskManager:
+    PRIORITIES = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, title, priority="medium"):
+        if not title or not title.strip():
+            raise ValueError("Task title cannot be empty")
+        if priority not in self.PRIORITIES:
+            raise ValueError(f"Priority must be one of: {list(self.PRIORITIES.keys())}")
+        task = {
+            "title": title.strip(),
+            "done": False,
+            "priority": priority
+        }
+        self.tasks.append(task)
+        return len(self.tasks)
+
+    def complete_task(self, task_number):
+        if not isinstance(task_number, int):
+            raise TypeError("Task number must be an integer")
+        if task_number < 1 or task_number > len(self.tasks):
+            raise IndexError(f"Task {task_number} does not exist (1-{len(self.tasks)})")
+        self.tasks[task_number - 1]["done"] = True
+        return True
+
+    def list_tasks(self, sort_by_priority=False):
+        if not self.tasks:
+            print("  No tasks yet.")
+            return
+        tasks = list(enumerate(self.tasks))
+        if sort_by_priority:
+            tasks.sort(key=lambda x: self.PRIORITIES.get(x[1]["priority"], 0), reverse=True)
+        for i, task in tasks:
+            status = "[x]" if task["done"] else "[ ]"
+            prio = task["priority"].upper()
+            print(f"  {i+1}. {status} [{prio}] {task['title']}")
+
+    def get_stats(self):
+        total = len(self.tasks)
+        done = sum(1 for t in self.tasks if t["done"])
+        by_priority = {}
+        for task in self.tasks:
+            p = task["priority"]
+            by_priority[p] = by_priority.get(p, 0) + 1
+        return {
+            "total": total,
+            "done": done,
+            "remaining": total - done,
+            "by_priority": by_priority
+        }
+EOF
+
+# Multiple commits referencing the same issue
+git add . && git commit -q -m "Add priority field to tasks — see #3
+
+Tasks now accept a priority parameter: low, medium, high, critical.
+Default priority is medium."
+
+echo "First commit on feature/priorities:"
+git log --oneline -1
+
+# Add a test file
+cat > test_app.py << 'EOF'
+from app import TaskManager
+
+def test_priorities():
+    tm = TaskManager()
+    tm.add_task("Low priority task", "low")
+    tm.add_task("Critical bug", "critical")
+    tm.add_task("Normal task")  # defaults to medium
+
+    stats = tm.get_stats()
+    assert stats["total"] == 3
+    assert stats["by_priority"]["low"] == 1
+    assert stats["by_priority"]["critical"] == 1
+    assert stats["by_priority"]["medium"] == 1
+    print("All priority tests passed!")
+
+test_priorities()
+EOF
+
+git add . && git commit -q -m "Add tests for task priorities — Closes #3
+
+All priority levels tested: low, medium, high, critical.
+Default priority behavior verified."
+
+echo "Second commit on feature/priorities:"
+git log --oneline -1
+echo ""
+
+# Merge to main
+git switch main -q
+git merge feature/priorities -m "Merge feature: task priorities (Closes #3)" -q
+
+# === Show the full history with issue references ===
+echo ""
+echo "=== Full commit history with issue references ==="
+git log --oneline --graph --all
+echo ""
+echo "=== Commit messages referencing issues ==="
+echo ""
+git log --format="  %h %s" | head -10
+echo ""
+echo "=== How this looks on GitHub ==="
+echo ""
+echo "  Issue #1 (Add task completion):    CLOSED by commit $(git log --format='%h' --grep='Fixes #1' | head -1)"
+echo "  Issue #2 (Input validation bug):   CLOSED by commit $(git log --format='%h' --grep='Fixes #2' | head -1)"
+echo "  Issue #3 (Task priorities):        CLOSED by commit $(git log --format='%h' --grep='Closes #3' | head -1)"
+echo ""
+echo "  Each issue on GitHub would show:"
+echo "    - The linked commits"
+echo "    - The PR that merged the fix"
+echo "    - The 'Closed by' reference"
+echo "    - A timeline of all activity"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Branch Protection">
+
+```bash
+# Simulate a branch protection workflow locally
+# Demonstrates the patterns that branch protection enforces
+
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# === Set up the project ===
+cat > server.js << 'EOF'
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', version: '1.0.0' });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ healthy: true });
+});
+
+module.exports = app;
+EOF
+
+cat > test.sh << 'TESTEOF'
+#!/bin/bash
+# Simulated test suite
+echo "Running tests..."
+echo "  ✓ GET / returns status ok"
+echo "  ✓ GET /health returns healthy"
+
+# Check for common mistakes
+if grep -q "console.log" server.js 2>/dev/null; then
+    echo "  ✗ FAIL: console.log found in production code"
+    exit 1
+fi
+
+if grep -q "TODO" server.js 2>/dev/null; then
+    echo "  ✗ FAIL: TODO found in code"
+    exit 1
+fi
+
+echo "All tests passed!"
+exit 0
+TESTEOF
+chmod +x test.sh
+
+cat > lint.sh << 'LINTEOF'
+#!/bin/bash
+# Simulated linter
+echo "Running linter..."
+ERRORS=0
+
+# Check for trailing whitespace
+if grep -Pq '\s+$' server.js 2>/dev/null; then
+    echo "  ✗ Trailing whitespace found"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# Check for semicolons (enforcing style)
+MISSING=$(grep -c '[^;{]$' server.js 2>/dev/null | grep -v '^0$' || true)
+if [ -n "$MISSING" ]; then
+    echo "  ⚠ Some lines may be missing semicolons"
+fi
+
+if [ "$ERRORS" -gt 0 ]; then
+    echo "Linting failed with $ERRORS error(s)"
+    exit 1
+fi
+
+echo "Linting passed!"
+exit 0
+LINTEOF
+chmod +x lint.sh
+
+git add . && git commit -q -m "Initial project with server, tests, and linter"
+
+echo "=== Project set up with test suite and linter ==="
+echo ""
+
+# === Simulate what branch protection enforces ===
+echo "=== Branch Protection Rules (simulated) ==="
+echo ""
+echo "  Rule 1: No direct pushes to main"
+echo "  Rule 2: PRs require passing tests (test.sh)"
+echo "  Rule 3: PRs require passing linter (lint.sh)"
+echo "  Rule 4: PRs require at least 1 review approval"
+echo ""
+
+# === Scenario 1: Good PR that passes all checks ===
+echo "=========================================="
+echo "  Scenario 1: Good PR (passes everything)"
+echo "=========================================="
+echo ""
+
+git switch -c feature/add-users -q
+
+cat > server.js << 'EOF'
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', version: '1.1.0' });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ healthy: true });
+});
+
+app.get('/users', (req, res) => {
+    res.json({ users: [], count: 0 });
+});
+
+module.exports = app;
+EOF
+
+git add . && git commit -q -m "Add /users endpoint"
+
+echo "--- Running CI checks (simulating GitHub Actions) ---"
+echo ""
+./test.sh
+echo ""
+./lint.sh
+echo ""
+echo "--- Simulating code review ---"
+echo "  Reviewer @alice: 'Looks good! Clean endpoint addition.'"
+echo "  Review status: APPROVED ✓"
+echo ""
+echo "--- All checks passed! PR can be merged ---"
+
+git switch main -q
+git merge feature/add-users -m "Merge PR #1: Add /users endpoint" -q
+echo ""
+echo "PR merged to main successfully."
+echo ""
+
+# === Scenario 2: Bad PR that fails checks ===
+echo "=========================================="
+echo "  Scenario 2: Bad PR (fails CI checks)"
+echo "=========================================="
+echo ""
+
+git switch -c feature/quick-debug -q
+
+cat > server.js << 'EOF'
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => {
+    console.log("DEBUG: request received");
+    res.json({ status: 'ok', version: '1.1.0' });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ healthy: true });
+});
+
+app.get('/users', (req, res) => {
+    // TODO: implement database query
+    res.json({ users: [], count: 0 });
+});
+
+module.exports = app;
+EOF
+
+git add . && git commit -q -m "Quick debug logging"
+
+echo "--- Running CI checks ---"
+echo ""
+./test.sh 2>&1 || true
+echo ""
+echo "--- CI FAILED! Branch protection blocks this PR ---"
+echo ""
+echo "  GitHub would show:"
+echo "  ✗ Tests — Failed"
+echo "  ⊘ Merge blocked — required status checks have not passed"
+echo ""
+
+echo "--- Developer fixes the issues ---"
+
+cat > server.js << 'EOF'
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', version: '1.1.0' });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ healthy: true });
+});
+
+app.get('/users', (req, res) => {
+    res.json({ users: [], count: 0 });
+});
+
+module.exports = app;
+EOF
+
+git add . && git commit -q -m "Remove debug logging and TODO"
+
+echo "--- Re-running CI checks ---"
+echo ""
+./test.sh
+echo ""
+./lint.sh
+echo ""
+echo "--- All checks pass now! PR can proceed to review ---"
+echo ""
+
+git switch main -q
+git merge feature/quick-debug -m "Merge PR #2: Clean version after CI fix" -q
+
+# === Scenario 3: Demonstrating required reviews ===
+echo "=========================================="
+echo "  Scenario 3: Simulating the review process"
+echo "=========================================="
+echo ""
+
+git switch -c feature/add-metrics -q
+
+cat > server.js << 'EOF'
+const express = require('express');
+const app = express();
+
+let requestCount = 0;
+
+app.use((req, res, next) => {
+    requestCount++;
+    next();
+});
+
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', version: '1.2.0' });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ healthy: true });
+});
+
+app.get('/users', (req, res) => {
+    res.json({ users: [], count: 0 });
+});
+
+app.get('/metrics', (req, res) => {
+    res.json({ requestCount: requestCount });
+});
+
+module.exports = app;
+EOF
+
+git add . && git commit -q -m "Add request counting middleware and /metrics endpoint"
+
+echo "--- CI checks pass ---"
+./test.sh > /dev/null 2>&1 && echo "  ✓ Tests passed"
+./lint.sh > /dev/null 2>&1 && echo "  ✓ Linting passed"
+echo ""
+
+echo "--- Review process ---"
+echo "  PR #3: 'Add request metrics'"
+echo ""
+echo "  @bob comments on line 5:"
+echo "    'This requestCount variable will reset when the server restarts."
+echo "     Should we persist it or is in-memory OK for now?'"
+echo ""
+echo "  @you respond:"
+echo "    'Good catch! For now in-memory is fine — we will add Redis"
+echo "     persistence in issue #10.'"
+echo ""
+echo "  @bob: 'Makes sense. Consider adding a comment noting that.'"
+echo "  Review status: CHANGES REQUESTED"
+echo ""
+
+# Push a fix based on review feedback
+cat > server.js << 'EOF'
+const express = require('express');
+const app = express();
+
+// In-memory request counter (resets on restart)
+// Persistence will be added in issue #10
+let requestCount = 0;
+
+app.use((req, res, next) => {
+    requestCount++;
+    next();
+});
+
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', version: '1.2.0' });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ healthy: true });
+});
+
+app.get('/users', (req, res) => {
+    res.json({ users: [], count: 0 });
+});
+
+app.get('/metrics', (req, res) => {
+    res.json({ requestCount: requestCount });
+});
+
+module.exports = app;
+EOF
+
+git add . && git commit -q -m "Add comment about in-memory counter — see #10"
+
+echo "  New commit pushed addressing feedback."
+echo "  @bob re-reviews: 'LGTM!'"
+echo "  Review status: APPROVED ✓"
+echo ""
+
+git switch main -q
+git merge feature/add-metrics -m "Merge PR #3: Add request metrics" -q
+
+echo "=== Final state of main ==="
+git log --oneline -8
+
+echo ""
+echo "=== Branch protection summary ==="
+echo ""
+echo "  PRs merged:  3"
+echo "  PRs blocked: 1 (fixed and re-run)"
+echo "  Reviews:     All PRs reviewed before merge"
+echo "  CI checks:   All PRs passed tests and linting"
+echo ""
+echo "  Without branch protection, the debug console.log and TODO"
+echo "  would have gone straight to production!"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="GitHub Project Setup">
+
+```bash
+cat > ~/github-project-setup.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# GitHub Project Setup — initializes a repository with all essential files
+# Usage: ~/github-project-setup.sh <project-name> [language]
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+PROJECT_NAME="${1:-}"
+LANGUAGE="${2:-node}"
+
+if [ -z "$PROJECT_NAME" ]; then
+    echo -e "${RED}Usage: $0 <project-name> [language]${NC}"
+    echo "  Languages: node, python, go, generic"
+    echo "  Example: $0 my-awesome-api node"
+    exit 1
+fi
+
+if [ -d "$PROJECT_NAME" ]; then
+    echo -e "${RED}Error: Directory '$PROJECT_NAME' already exists${NC}"
+    exit 1
+fi
+
+echo -e "${BOLD}${BLUE}============================================${NC}"
+echo -e "${BOLD}${BLUE}  GitHub Project Setup${NC}"
+echo -e "${BOLD}${BLUE}  Project: ${PROJECT_NAME}${NC}"
+echo -e "${BOLD}${BLUE}  Language: ${LANGUAGE}${NC}"
+echo -e "${BOLD}${BLUE}============================================${NC}"
+echo ""
+
+mkdir -p "$PROJECT_NAME"
+cd "$PROJECT_NAME"
+git init -q
+
+# === README.md ===
+echo -e "${GREEN}Creating README.md...${NC}"
+cat > README.md << READMEEOF
+# ${PROJECT_NAME}
+
+Brief description of the project.
+
+## Prerequisites
+
+- List prerequisites here
+
+## Installation
+
+\`\`\`bash
+# Clone the repository
+git clone https://github.com/your-org/${PROJECT_NAME}.git
+cd ${PROJECT_NAME}
+
+# Install dependencies
+# Add installation commands here
+\`\`\`
+
+## Usage
+
+\`\`\`bash
+# Add usage examples here
+\`\`\`
+
+## Development
+
+\`\`\`bash
+# Run tests
+# Add test command here
+
+# Run linter
+# Add lint command here
+\`\`\`
+
+## Contributing
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+READMEEOF
+
+# === LICENSE (MIT) ===
+echo -e "${GREEN}Creating LICENSE...${NC}"
+YEAR=$(date +%Y)
+cat > LICENSE << LICEOF
+MIT License
+
+Copyright (c) ${YEAR} Your Organization
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+LICEOF
+
+# === CONTRIBUTING.md ===
+echo -e "${GREEN}Creating CONTRIBUTING.md...${NC}"
+cat > CONTRIBUTING.md << 'CONTRIBEOF'
+# Contributing
+
+Thank you for your interest in contributing! Here's how to get started.
+
+## Getting Started
+
+1. Fork the repository
+2. Clone your fork: `git clone https://github.com/your-username/PROJECT.git`
+3. Create a feature branch: `git switch -c feature/your-feature`
+4. Make your changes
+5. Run tests: make sure all tests pass
+6. Commit your changes: `git commit -m 'Add your feature'`
+7. Push to your fork: `git push origin feature/your-feature`
+8. Open a Pull Request
+
+## Development Guidelines
+
+### Commit Messages
+
+- Use the imperative mood ("Add feature" not "Added feature")
+- Keep the first line under 72 characters
+- Reference issues when applicable ("Fix login bug — Fixes #42")
+
+### Code Style
+
+- Follow the existing code style in the project
+- Write tests for new features
+- Update documentation when changing functionality
+
+### Pull Requests
+
+- Fill out the PR template completely
+- Link related issues
+- Keep PRs focused — one feature or fix per PR
+- Respond to review feedback promptly
+
+## Reporting Bugs
+
+Please open an issue with:
+- A clear title and description
+- Steps to reproduce the behavior
+- Expected vs actual behavior
+- Environment details (OS, version, etc.)
+
+## Code of Conduct
+
+Be respectful, constructive, and professional. We are all here to build great software together.
+CONTRIBEOF
+
+# === .gitignore ===
+echo -e "${GREEN}Creating .gitignore for ${LANGUAGE}...${NC}"
+case "$LANGUAGE" in
+    node)
+        cat > .gitignore << 'IGNEOF'
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+IGNEOF
+        ;;
+    python)
+        cat > .gitignore << 'IGNEOF'
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+IGNEOF
+        ;;
+    go)
+        cat > .gitignore << 'IGNEOF'
+# Binary
+/bin/
+*.exe
+
+# Vendor (if not vendoring)
+# vendor/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage.out
+coverage.html
+
+# Build
+dist/
+IGNEOF
+        ;;
+    *)
+        cat > .gitignore << 'IGNEOF'
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+build/
+dist/
+
+# Logs
+*.log
+IGNEOF
+        ;;
+esac
+
+# === Issue Templates ===
+echo -e "${GREEN}Creating issue templates...${NC}"
+mkdir -p .github/ISSUE_TEMPLATE
+
+cat > .github/ISSUE_TEMPLATE/bug_report.yml << 'BUGEOF'
+name: Bug Report
+description: Report a bug to help us improve
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for reporting this bug! Please fill out the sections below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      value: |
+        1. Run '...'
+        2. Send request to '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Relevant environment details.
+      value: |
+        - OS:
+        - Version:
+        - Runtime:
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical (system down)
+        - High (major feature broken)
+        - Medium (feature impaired)
+        - Low (cosmetic/minor)
+    validations:
+      required: true
+BUGEOF
+
+cat > .github/ISSUE_TEMPLATE/feature_request.yml << 'FEATEOF'
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? What pain point exists?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe how this feature should work.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches have you considered?
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context, screenshots, or examples.
+FEATEOF
+
+# === PR Template ===
+echo -e "${GREEN}Creating PR template...${NC}"
+cat > .github/pull_request_template.md << 'PREOF'
+## Summary
+
+<!-- Brief description of what this PR does -->
+
+## Changes
+
+<!-- List the specific changes made -->
+-
+
+## Related Issues
+
+<!-- Link related issues: Fixes #123, Closes #456 -->
+
+## Type of Change
+
+- [ ] Bug fix (non-breaking change that fixes an issue)
+- [ ] New feature (non-breaking change that adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to change)
+- [ ] Documentation update
+- [ ] Refactoring (no functional changes)
+
+## Testing
+
+<!-- Describe how you tested your changes -->
+- [ ] Unit tests pass
+- [ ] Integration tests pass
+- [ ] Manual testing completed
+
+## Checklist
+
+- [ ] My code follows the project's style guidelines
+- [ ] I have performed a self-review of my code
+- [ ] I have commented my code where necessary
+- [ ] I have updated the documentation
+- [ ] My changes generate no new warnings
+- [ ] I have added tests that prove my fix/feature works
+PREOF
+
+# === GitHub Actions CI Workflow ===
+echo -e "${GREEN}Creating CI workflow...${NC}"
+mkdir -p .github/workflows
+
+case "$LANGUAGE" in
+    node)
+        cat > .github/workflows/ci.yml << 'CIEOF'
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint --if-present
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build --if-present
+CIEOF
+        ;;
+    python)
+        cat > .github/workflows/ci.yml << 'CIEOF'
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt || true
+
+      - name: Run linter
+        run: |
+          pip install flake8
+          flake8 . --count --show-source --statistics
+
+      - name: Run tests
+        run: pytest
+CIEOF
+        ;;
+    *)
+        cat > .github/workflows/ci.yml << 'CIEOF'
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: echo "Add your test command here"
+
+      - name: Run linter
+        run: echo "Add your lint command here"
+CIEOF
+        ;;
+esac
+
+# === CODEOWNERS ===
+echo -e "${GREEN}Creating CODEOWNERS...${NC}"
+cat > .github/CODEOWNERS << 'OWNEOF'
+# Default reviewers
+*                       @your-org/team-leads
+
+# CI/CD and infrastructure
+.github/                @your-org/devops
+Dockerfile              @your-org/devops
+docker-compose*.yml     @your-org/devops
+
+# Documentation
+*.md                    @your-org/docs-team
+OWNEOF
+
+# === Initial commit ===
+echo -e "${GREEN}Creating initial commit...${NC}"
+git add .
+git commit -q -m "Initialize project with GitHub collaboration files
+
+- README.md with project overview
+- LICENSE (MIT)
+- CONTRIBUTING.md with guidelines
+- .gitignore for ${LANGUAGE}
+- Issue templates (bug report, feature request)
+- PR template with checklist
+- CI workflow for GitHub Actions
+- CODEOWNERS file"
+
+echo ""
+echo -e "${BOLD}${GREEN}============================================${NC}"
+echo -e "${BOLD}${GREEN}  Project '${PROJECT_NAME}' initialized!${NC}"
+echo -e "${BOLD}${GREEN}============================================${NC}"
+echo ""
+echo -e "${BOLD}Files created:${NC}"
+find . -not -path './.git/*' -not -path './.git' -type f | sort | while read -r f; do
+    echo "  $f"
+done
+echo ""
+echo -e "${BOLD}Git log:${NC}"
+git log --oneline
+echo ""
+echo -e "${BOLD}Next steps:${NC}"
+echo "  1. cd ${PROJECT_NAME}"
+echo "  2. Edit README.md with your project details"
+echo "  3. Create your repo on GitHub:"
+echo "     gh repo create ${PROJECT_NAME} --public --source . --push"
+echo "  4. Set up branch protection:"
+echo "     Settings → Branches → Add rule for 'main'"
+echo "  5. Start coding!"
+
+SCRIPT
+
+chmod +x ~/github-project-setup.sh
+
+# === Demonstrate the script ===
+echo "=== Running GitHub Project Setup ==="
+echo ""
+
+cd /tmp
+rm -rf demo-project 2>/dev/null
+
+~/github-project-setup.sh demo-project node
+
+echo ""
+echo "=== Verifying project structure ==="
+cd /tmp/demo-project
+echo ""
+echo "--- README.md (first 10 lines) ---"
+head -10 README.md
+echo ""
+echo "--- CI Workflow ---"
+cat .github/workflows/ci.yml
+echo ""
+echo "--- PR Template ---"
+cat .github/pull_request_template.md
+
+# Clean up
+cd / && rm -rf /tmp/demo-project
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- GitHub adds collaboration features on top of Git: issues, PRs, project boards, Actions, and access controls
+- Every repository should have README.md, LICENSE, CONTRIBUTING.md, .gitignore, and issue/PR templates
+- Issues are the primary tracking mechanism — link commits with `Fixes #N` to auto-close issues when merged
+- Branch protection rules prevent direct pushes to main and require PR reviews and passing CI checks
+- CODEOWNERS automatically assigns reviewers based on which files a PR modifies
+- GitHub Actions runs automated workflows (tests, linting, builds) on push and PR events
+- Use labels, milestones, and project boards to organize work and visualize progress
+- The GitHub CLI (`gh`) lets you create repos, issues, PRs, and manage workflows from the terminal
+- Releases combine Git tags with release notes and downloadable assets for distribution
+- Start with simple protection rules and CI — even basic test automation prevents most production issues
+
+## What's Next
+
+GitHub gives you the platform, but the pull request is where collaboration actually happens. In **Pull Requests and Code Review**, you'll learn to create effective PRs, review code professionally, and choose the right merge strategy — the skills that separate junior developers from senior ones.

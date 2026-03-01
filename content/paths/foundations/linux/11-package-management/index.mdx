@@ -1,0 +1,427 @@
+---
+title: "Package Management"
+description: "Install, update, and manage software on Linux with apt, yum, and dnf. Understand repositories, dependencies, and package management best practices."
+order: 11
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 10-special-permissions
+objectives:
+  - Install, update, and remove packages with apt and yum/dnf
+  - Manage software repositories
+  - Understand package dependencies and conflicts
+  - Query package information and verify installations
+tags:
+  - linux
+  - packages
+  - apt
+  - yum
+  - dnf
+  - administration
+---
+
+<Callout type="story" title="The Story">
+You're setting up a new server and need to install Nginx, Node.js 20, and PostgreSQL 16. But the default repositories only have Node.js 12 and PostgreSQL 14. You need to add third-party repositories, pin specific versions, and ensure nothing breaks during updates. Welcome to package management — the skill that separates "install and pray" from "install and control."
+</Callout>
+
+## How Package Management Works
+
+Linux distributions use package managers to install, update, and remove software. A package is a compressed archive containing the program, its files, and metadata about dependencies.
+
+```
+User runs: apt install nginx
+     ↓
+Package manager checks: What version? What dependencies?
+     ↓
+Downloads from repository: nginx_1.24.0-1_amd64.deb
+     ↓
+Resolves dependencies: downloads libpcre3, libssl3, etc.
+     ↓
+Installs files to correct locations: /usr/sbin/nginx, /etc/nginx/...
+     ↓
+Runs post-install scripts: creates nginx user, enables service
+```
+
+### Two Main Families
+
+| Family | Distros | Package Format | Low-Level Tool | High-Level Tool |
+|---|---|---|---|---|
+| Debian | Ubuntu, Debian, Mint | `.deb` | `dpkg` | `apt` |
+| Red Hat | RHEL, CentOS, Fedora, Rocky | `.rpm` | `rpm` | `yum` / `dnf` |
+
+## Debian/Ubuntu: `apt`
+
+### Installing Packages
+
+```bash
+# Update package index (always do this first)
+sudo apt update
+
+# Install a package
+sudo apt install nginx
+
+# Install multiple packages
+sudo apt install nginx curl wget git
+
+# Install a specific version
+sudo apt install nginx=1.24.0-1ubuntu1
+
+# Install without prompting
+sudo apt install -y nginx
+
+# Install from a .deb file
+sudo dpkg -i package-file.deb
+sudo apt install -f    # fix missing dependencies
+```
+
+### Updating Packages
+
+```bash
+# Update package index
+sudo apt update
+
+# Upgrade all packages (safe — won't remove anything)
+sudo apt upgrade
+
+# Full upgrade (may remove packages to resolve conflicts)
+sudo apt full-upgrade
+
+# Upgrade a specific package
+sudo apt install --only-upgrade nginx
+
+# See what would be upgraded
+apt list --upgradable
+```
+
+### Removing Packages
+
+```bash
+# Remove a package (keeps config files)
+sudo apt remove nginx
+
+# Remove package AND config files
+sudo apt purge nginx
+
+# Remove unused dependencies
+sudo apt autoremove
+
+# Clean package cache
+sudo apt clean        # remove all cached packages
+sudo apt autoclean    # remove only old cached packages
+```
+
+### Searching and Information
+
+```bash
+# Search for a package
+apt search "web server"
+
+# Show package details
+apt show nginx
+
+# List installed packages
+apt list --installed
+
+# List installed packages matching a pattern
+apt list --installed | grep nginx
+
+# Check which package owns a file
+dpkg -S /usr/sbin/nginx
+
+# List files installed by a package
+dpkg -L nginx
+```
+
+## RHEL/CentOS: `yum` and `dnf`
+
+`dnf` is the modern replacement for `yum`. On RHEL 8+ and Fedora, `dnf` is the default. The syntax is nearly identical.
+
+### Installing Packages
+
+```bash
+# Install a package
+sudo dnf install nginx
+
+# Install a specific version
+sudo dnf install nginx-1.24.0
+
+# Install from a local RPM
+sudo dnf install ./package-file.rpm
+
+# Install a package group
+sudo dnf groupinstall "Development Tools"
+```
+
+### Updating and Removing
+
+```bash
+# Check for updates
+sudo dnf check-update
+
+# Update all packages
+sudo dnf upgrade
+
+# Update a specific package
+sudo dnf upgrade nginx
+
+# Remove a package
+sudo dnf remove nginx
+
+# Clean cache
+sudo dnf clean all
+
+# Remove unused dependencies
+sudo dnf autoremove
+```
+
+### Searching and Information
+
+```bash
+# Search
+dnf search "web server"
+
+# Show details
+dnf info nginx
+
+# List installed
+dnf list installed
+
+# Which package provides a file
+dnf provides /usr/sbin/nginx
+
+# List files in a package
+rpm -ql nginx
+```
+
+## Managing Repositories
+
+### Adding Repositories (Debian/Ubuntu)
+
+```bash
+# List current repositories
+cat /etc/apt/sources.list
+ls /etc/apt/sources.list.d/
+
+# Add a PPA (Personal Package Archive)
+sudo add-apt-repository ppa:ondrej/php
+sudo apt update
+
+# Add a custom repository (e.g., Node.js 20)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install nodejs
+
+# Add a repository manually
+echo "deb https://packages.example.com/apt stable main" | \
+    sudo tee /etc/apt/sources.list.d/example.list
+
+# Add the repository's GPG key
+curl -fsSL https://packages.example.com/gpg-key.asc | \
+    sudo gpg --dearmor -o /usr/share/keyrings/example.gpg
+
+# Remove a repository
+sudo rm /etc/apt/sources.list.d/example.list
+sudo apt update
+```
+
+### Adding Repositories (RHEL/CentOS)
+
+```bash
+# List repositories
+dnf repolist
+
+# Add EPEL (Extra Packages for Enterprise Linux)
+sudo dnf install epel-release
+
+# Add a custom repo
+sudo dnf config-manager --add-repo https://packages.example.com/repo.repo
+
+# Enable/disable a repository
+sudo dnf config-manager --enable repo-name
+sudo dnf config-manager --disable repo-name
+```
+
+<Exercise number={1} title="Package Management Practice">
+
+```bash
+# 1. Update your package index
+sudo apt update
+
+# 2. Search for a package
+apt search tree
+
+# 3. Show package info before installing
+apt show tree
+
+# 4. Install a package
+sudo apt install -y tree
+
+# 5. Verify the installation
+which tree
+tree --version
+dpkg -L tree | head -10
+
+# 6. Check which package a file belongs to
+dpkg -S $(which tree)
+
+# 7. List all installed packages and count them
+dpkg --list | grep "^ii" | wc -l
+echo "packages installed"
+
+# 8. Check for upgradable packages
+apt list --upgradable 2>/dev/null | head -10
+
+# 9. Clean up cache
+sudo apt clean
+du -sh /var/cache/apt/archives/
+
+# 10. Remove the package
+sudo apt remove -y tree
+which tree    # should return nothing
+```
+
+</Exercise>
+
+## Version Pinning
+
+Prevent specific packages from being upgraded automatically:
+
+### Debian/Ubuntu
+
+```bash
+# Pin a package to its current version
+sudo apt-mark hold nginx
+# Output: nginx set on hold.
+
+# List held packages
+apt-mark showhold
+
+# Unhold to allow updates again
+sudo apt-mark unhold nginx
+```
+
+### RHEL/CentOS
+
+```bash
+# Install the versionlock plugin
+sudo dnf install dnf-plugin-versionlock
+
+# Lock a package version
+sudo dnf versionlock add nginx
+
+# List locked packages
+dnf versionlock list
+
+# Remove the lock
+sudo dnf versionlock delete nginx
+```
+
+<Exercise number={2} title="Repository Management">
+
+```bash
+# 1. View your current sources
+cat /etc/apt/sources.list
+ls -la /etc/apt/sources.list.d/
+
+# 2. Check where packages come from
+apt policy nginx
+
+# 3. Check installed package version vs available
+apt list nginx -a 2>/dev/null
+
+# 4. Simulate an install (see what would happen)
+apt install --simulate nginx
+
+# 5. View package dependency tree
+apt depends nginx
+
+# 6. View reverse dependencies (what depends on a package)
+apt rdepends --installed openssl 2>/dev/null | head -20
+```
+
+</Exercise>
+
+<MiniProject title="Server Setup Script">
+
+Create a script that sets up a new server with required packages:
+
+```bash
+cat > ~/server-setup.sh << 'SCRIPT'
+#!/bin/bash
+# Server Setup Script — install essential packages for a DevOps workstation
+
+set -euo pipefail
+
+echo "=== Server Setup Script ==="
+echo "Date: $(date)"
+echo ""
+
+# Update package index
+echo "[1/5] Updating package index..."
+sudo apt update -qq
+
+# Essential tools
+echo "[2/5] Installing essential tools..."
+sudo apt install -y -qq \
+    curl \
+    wget \
+    git \
+    vim \
+    htop \
+    tree \
+    jq \
+    unzip \
+    net-tools \
+    dnsutils \
+    traceroute
+
+# Development tools
+echo "[3/5] Installing development tools..."
+sudo apt install -y -qq \
+    build-essential \
+    python3 \
+    python3-pip \
+    python3-venv
+
+# Verify installations
+echo "[4/5] Verifying installations..."
+TOOLS="curl wget git vim htop tree jq python3"
+for tool in $TOOLS; do
+    if command -v "$tool" &>/dev/null; then
+        VERSION=$($tool --version 2>&1 | head -1)
+        printf "  ✓ %-10s %s\n" "$tool" "$VERSION"
+    else
+        printf "  ✗ %-10s NOT FOUND\n" "$tool"
+    fi
+done
+
+# System info
+echo ""
+echo "[5/5] System summary:"
+echo "  OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 | tr -d '"')"
+echo "  Kernel: $(uname -r)"
+echo "  Packages: $(dpkg --list | grep "^ii" | wc -l) installed"
+echo "  Disk: $(df -h / | awk 'NR==2 {print $4}') free on /"
+
+echo ""
+echo "=== Setup Complete ==="
+SCRIPT
+
+chmod +x ~/server-setup.sh
+echo "Created ~/server-setup.sh"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Always run `apt update` before installing packages
+- `apt install -y` for unattended installs; `apt remove` keeps configs, `apt purge` removes everything
+- Use version pinning (`apt-mark hold`) for critical packages in production
+- Add third-party repositories carefully — they can override system packages
+- `dpkg -S /path/to/file` tells you which package owns a file
+- Clean the cache periodically with `apt clean` to reclaim disk space
+- Automate server setup with scripts listing all required packages
+
+## What's Next
+
+Packages install programs, but programs need to run as processes. In **Process Management**, you'll learn how Linux manages running programs — how to monitor, control, and kill processes when things go wrong.

@@ -1,0 +1,1110 @@
+---
+title: "Docker Swarm Fundamentals"
+description: "Learn Docker's built-in container orchestration system. Initialize a swarm cluster, manage manager and worker nodes, understand Raft consensus for high availability, configure overlay networking with the routing mesh, and secure your cluster with mutual TLS and automatic certificate rotation."
+order: 9
+xpReward: 45
+estimatedMinutes: 50
+prerequisites:
+  - 08-performance-tuning
+objectives:
+  - Understand what Docker Swarm provides and when to choose it over Kubernetes
+  - Initialize a swarm cluster and join manager and worker nodes
+  - Explain Raft consensus and quorum requirements for high availability
+  - Manage nodes with join, leave, promote, demote, and drain operations
+  - Configure overlay networking, the routing mesh, and service discovery
+  - Secure a swarm with mutual TLS and automatic certificate rotation
+tags:
+  - docker
+  - swarm
+  - orchestration
+  - clustering
+  - raft
+  - overlay-network
+  - tls
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your company runs a three-server infrastructure for an internal tool used by 200 employees. The CTO wants high availability — if one server dies, the application should keep running. The DevOps team evaluates Kubernetes, but the setup requires etcd clusters, control planes, worker nodes, ingress controllers, cert-manager, and a week of configuration for a simple three-node cluster. Someone suggests Docker Swarm. Thirty minutes later, you have a highly available cluster with automatic failover, built-in load balancing, TLS encryption, and service discovery. No YAML manifests, no Helm charts, no kubectl. Today you learn how Docker Swarm turns a group of Docker hosts into a self-healing cluster with a single command.
+</Callout>
+
+## What Is Docker Swarm?
+
+Docker Swarm is Docker's native clustering and orchestration system. It is built directly into the Docker Engine — no additional software to install. When you enable Swarm mode, your Docker hosts form a cluster that can deploy and manage services across multiple machines.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                       Docker Swarm Cluster                       │
+│                                                                  │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────┐ │
+│  │  Manager Node 1   │  │  Manager Node 2   │  │  Manager Node 3│ │
+│  │  (Leader)         │  │  (Reachable)      │  │  (Reachable)   │ │
+│  │                   │  │                   │  │                │ │
+│  │  ┌─────────────┐  │  │  ┌─────────────┐  │  │  ┌──────────┐ │ │
+│  │  │ Raft Store  │  │  │  │ Raft Store  │  │  │  │Raft Store│ │ │
+│  │  │ (consensus) │◄─┼──┼──│ (replicated)│◄─┼──┼──│(replica) │ │ │
+│  │  └─────────────┘  │  │  └─────────────┘  │  │  └──────────┘ │ │
+│  │                   │  │                   │  │                │ │
+│  │  ┌─────────────┐  │  │  ┌─────────────┐  │  │  ┌──────────┐ │ │
+│  │  │ Scheduler   │  │  │  │ Task         │  │  │  │ Task     │ │ │
+│  │  │ Dispatcher  │  │  │  │ container-1  │  │  │  │container │ │ │
+│  │  └─────────────┘  │  │  └─────────────┘  │  │  └──────────┘ │ │
+│  │                   │  │                   │  │                │ │
+│  │  ┌─────────────┐  │  │  ┌─────────────┐  │  │  ┌──────────┐ │ │
+│  │  │ Task         │  │  │  │ Task         │  │  │  │ Task     │ │ │
+│  │  │ container-2  │  │  │  │ container-3  │  │  │  │container │ │ │
+│  │  └─────────────┘  │  │  └─────────────┘  │  │  └──────────┘ │ │
+│  └──────────────────┘  └──────────────────┘  └────────────────┘ │
+│                                                                  │
+│  ┌──────────────────┐  ┌──────────────────┐                     │
+│  │  Worker Node 1    │  │  Worker Node 2    │                     │
+│  │                   │  │                   │                     │
+│  │  ┌─────────────┐  │  │  ┌─────────────┐  │                     │
+│  │  │ Task         │  │  │  │ Task         │  │                     │
+│  │  │ container-4  │  │  │  │ container-5  │  │                     │
+│  │  └─────────────┘  │  │  └─────────────┘  │                     │
+│  │                   │  │                   │                     │
+│  │  ┌─────────────┐  │  │  ┌─────────────┐  │                     │
+│  │  │ Task         │  │  │  │ Task         │  │                     │
+│  │  │ container-6  │  │  │  │ container-7  │  │                     │
+│  │  └─────────────┘  │  │  └─────────────┘  │                     │
+│  └──────────────────┘  └──────────────────┘                     │
+│                                                                  │
+│  Overlay Network: encrypted, spanning all nodes                  │
+│  Routing Mesh: any node can receive traffic for any service      │
+│  Mutual TLS: all communication between nodes is encrypted        │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Swarm vs Kubernetes
+
+| Feature | Docker Swarm | Kubernetes |
+|---------|-------------|------------|
+| **Setup complexity** | Single command: `docker swarm init` | Complex: etcd, API server, scheduler, etc. |
+| **Learning curve** | Low — uses Docker CLI | High — new concepts, kubectl, YAML manifests |
+| **Scale** | Hundreds of nodes | Thousands of nodes |
+| **Ecosystem** | Docker native | Massive (Helm, operators, CRDs, etc.) |
+| **Auto-scaling** | Manual or scripted | Built-in HPA/VPA |
+| **Service mesh** | Basic routing mesh | Istio, Linkerd, etc. |
+| **Storage** | Docker volumes | CSI drivers, PVs, PVCs |
+| **Health checks** | Container health checks | Liveness, readiness, startup probes |
+| **Configuration** | Docker Compose files | YAML manifests, Helm charts |
+| **Community** | Smaller | Very large |
+
+<Callout type="info" title="When to Choose Swarm">
+Choose Docker Swarm when you need simple orchestration for a small-to-medium deployment (3-20 nodes), when your team already knows Docker, when you want to reuse Docker Compose files, or when setup time matters more than ecosystem breadth. Choose Kubernetes when you need auto-scaling, service mesh, custom resources, or you are running at very large scale. Many teams start with Swarm and migrate to Kubernetes only when they outgrow it.
+</Callout>
+
+## Initializing a Swarm
+
+### Creating the First Manager
+
+```bash
+# Initialize the swarm on the first node
+docker swarm init --advertise-addr 192.168.1.10
+# Swarm initialized: current node (abc123def456) is now a manager.
+#
+# To add a worker to this swarm, run the following command:
+#
+#     docker swarm join --token SWMTKN-1-abc123...xyz789 192.168.1.10:2377
+#
+# To add a manager to this swarm, run 'docker swarm join-token manager'
+# and follow the instructions.
+
+# The swarm is now active
+docker info | grep -A 5 "Swarm"
+# Swarm: active
+#  NodeID: abc123def456
+#  Is Manager: true
+#  ClusterID: cluster-id-here
+#  Managers: 1
+#  Nodes: 1
+
+# Check node status
+docker node ls
+# ID                            HOSTNAME   STATUS   AVAILABILITY   MANAGER STATUS   ENGINE VERSION
+# abc123def456 *                manager1   Ready    Active         Leader           27.0.3
+```
+
+### Join Tokens
+
+Swarm uses two types of join tokens — one for workers and one for managers. These tokens authenticate nodes joining the cluster.
+
+```bash
+# View the worker join token
+docker swarm join-token worker
+# To add a worker to this swarm, run the following command:
+#     docker swarm join --token SWMTKN-1-worker-token 192.168.1.10:2377
+
+# View the manager join token
+docker swarm join-token manager
+# To add a manager to this swarm, run the following command:
+#     docker swarm join --token SWMTKN-1-manager-token 192.168.1.10:2377
+
+# Rotate tokens (if compromised)
+docker swarm join-token --rotate worker
+# Successfully rotated worker join token.
+# (Old tokens are immediately invalidated)
+
+docker swarm join-token --rotate manager
+# Successfully rotated manager join token.
+
+# The join token format:
+# SWMTKN-1-<cluster-hash>-<role-hash>
+# ├──────┘ └─────────────┘ └─────────┘
+# │        │               └── Role-specific hash (worker or manager)
+# │        └── Cluster identity hash
+# └── Swarm token prefix and version
+```
+
+### Adding Nodes
+
+```bash
+# On Worker Node 1 (192.168.1.11):
+docker swarm join --token SWMTKN-1-worker-token 192.168.1.10:2377
+# This node joined a swarm as a worker.
+
+# On Worker Node 2 (192.168.1.12):
+docker swarm join --token SWMTKN-1-worker-token 192.168.1.10:2377
+# This node joined a swarm as a worker.
+
+# On Manager Node 2 (192.168.1.13):
+docker swarm join --token SWMTKN-1-manager-token 192.168.1.10:2377
+# This node joined a swarm as a manager.
+
+# On Manager Node 3 (192.168.1.14):
+docker swarm join --token SWMTKN-1-manager-token 192.168.1.10:2377
+# This node joined a swarm as a manager.
+
+# Verify the cluster (run on any manager)
+docker node ls
+# ID                   HOSTNAME    STATUS   AVAILABILITY   MANAGER STATUS   ENGINE
+# abc123 *             manager1    Ready    Active         Leader           27.0.3
+# def456               manager2    Ready    Active         Reachable        27.0.3
+# ghi789               manager3    Ready    Active         Reachable        27.0.3
+# jkl012               worker1     Ready    Active                          27.0.3
+# mno345               worker2     Ready    Active                          27.0.3
+```
+
+<Callout type="warning" title="Ports Required for Swarm Communication">
+Swarm requires these ports to be open between all nodes:
+- **TCP 2377** — Cluster management communication (managers only)
+- **TCP/UDP 7946** — Node discovery and gossip protocol (all nodes)
+- **UDP 4789** — VXLAN overlay network traffic (all nodes)
+
+If these ports are blocked by a firewall, nodes cannot join the swarm or communicate. Open them before initializing the swarm.
+</Callout>
+
+## Manager and Worker Nodes
+
+### Roles and Responsibilities
+
+```
+┌────────────────────────────────────────────────────────┐
+│                    Manager Nodes                        │
+│                                                        │
+│  Responsibilities:                                     │
+│  ├── Maintain cluster state (Raft consensus)           │
+│  ├── Schedule tasks to nodes                           │
+│  ├── Serve the Swarm API                               │
+│  ├── Assign IP addresses to tasks                      │
+│  ├── Manage overlay networks                           │
+│  ├── Issue and rotate TLS certificates                 │
+│  └── Can also run tasks (unless drained)               │
+│                                                        │
+│  Manager Status:                                       │
+│  ├── Leader    — actively manages the swarm            │
+│  ├── Reachable — can become leader if current fails    │
+│  └── Unreachable — lost connectivity                   │
+└────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────┐
+│                    Worker Nodes                         │
+│                                                        │
+│  Responsibilities:                                     │
+│  ├── Execute tasks (containers) assigned by managers   │
+│  ├── Report task status back to managers               │
+│  └── Participate in overlay networking                 │
+│                                                        │
+│  Workers:                                              │
+│  ├── Cannot manage the swarm                           │
+│  ├── Cannot view or modify cluster state               │
+│  ├── Cannot run docker node/service commands           │
+│  └── Can be promoted to managers                       │
+└────────────────────────────────────────────────────────┘
+```
+
+### Raft Consensus
+
+Swarm uses the Raft consensus algorithm to maintain a consistent cluster state across all manager nodes. Raft requires a majority (quorum) of managers to agree before any change is committed.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                  Raft Consensus Quorum                    │
+│                                                          │
+│  Managers    Quorum    Tolerated Failures                │
+│  ─────────  ────────  ──────────────────                 │
+│     1          1          0  (no HA)                     │
+│     2          2          0  (no benefit over 1)         │
+│     3          2          1  ← minimum for HA            │
+│     5          3          2  ← recommended               │
+│     7          4          3  ← maximum recommended       │
+│                                                          │
+│  Formula: Quorum = (N / 2) + 1                           │
+│           Failures = N - Quorum = (N - 1) / 2            │
+│                                                          │
+│  IMPORTANT: Always use an ODD number of managers!        │
+│  Even numbers provide no additional fault tolerance       │
+│  over odd-1. (4 managers tolerate 1 failure, same as 3)  │
+└──────────────────────────────────────────────────────────┘
+```
+
+```bash
+# Example: What happens when a manager fails?
+
+# 3-manager cluster: quorum = 2
+# If 1 manager dies: 2 remaining > quorum. Cluster works.
+# If 2 managers die: 1 remaining < quorum. Cluster is READ-ONLY.
+#   Existing tasks keep running but no new scheduling occurs.
+
+# 5-manager cluster: quorum = 3
+# If 1 manager dies: 4 remaining > quorum. Cluster works.
+# If 2 managers die: 3 remaining = quorum. Cluster works.
+# If 3 managers die: 2 remaining < quorum. Cluster is READ-ONLY.
+
+# Check Raft status
+docker node ls --format "table {{.Hostname}}\t{{.ManagerStatus}}\t{{.Status}}"
+# HOSTNAME    MANAGER STATUS   STATUS
+# manager1    Leader           Ready
+# manager2    Reachable        Ready
+# manager3    Reachable        Ready
+# worker1                      Ready
+# worker2                      Ready
+```
+
+<Callout type="tip" title="Spread Managers Across Failure Domains">
+Place manager nodes in different availability zones or racks. If all three managers are on the same physical host or in the same data center, a single hardware failure or network outage will take down the entire control plane. With 3 managers across 3 availability zones, you can lose an entire zone and the swarm continues operating.
+</Callout>
+
+## Node Management
+
+### Promoting and Demoting Nodes
+
+```bash
+# Promote a worker to manager
+docker node promote worker1
+# Node worker1 promoted to a manager in the swarm.
+
+docker node ls
+# worker1 now shows "Reachable" in MANAGER STATUS
+
+# Demote a manager to worker
+docker node demote manager3
+# Manager manager3 demoted in the swarm.
+
+docker node ls
+# manager3 no longer shows a MANAGER STATUS
+
+# You can also use docker node update:
+docker node update --role manager worker2
+docker node update --role worker manager2
+```
+
+### Draining Nodes for Maintenance
+
+```bash
+# Drain a node — all tasks are moved to other nodes
+docker node update --availability drain worker1
+# worker1 availability set to "drain"
+
+# Tasks on worker1 are rescheduled to other available nodes
+docker node ps worker1
+# NAME                IMAGE          NODE      DESIRED STATE   CURRENT STATE
+# webapp.3            nginx:alpine   worker1   Shutdown        Shutdown 5 seconds ago
+
+# The task is restarted on another node automatically
+docker service ps webapp
+# NAME              IMAGE          NODE      DESIRED STATE   CURRENT STATE
+# webapp.3          nginx:alpine   worker2   Running         Running 3 seconds ago
+# \_webapp.3        nginx:alpine   worker1   Shutdown        Shutdown 8 seconds ago
+
+# Pause a node — no new tasks, existing tasks keep running
+docker node update --availability pause worker2
+
+# Bring a node back to active
+docker node update --availability active worker1
+# New tasks can now be scheduled on worker1 again
+
+# Note: drained tasks are NOT automatically moved back.
+# Rebalancing requires: docker service update --force <service>
+```
+
+### Removing Nodes
+
+```bash
+# Remove a worker from the swarm (run on the worker node)
+docker swarm leave
+# Node left the swarm.
+
+# Remove a manager from the swarm (requires --force)
+docker swarm leave --force
+# Node left the swarm.
+
+# Remove a node record from the swarm (run on a manager)
+docker node rm worker1
+# worker1
+
+# If the node is still running, force remove it
+docker node rm --force worker1
+```
+
+### Node Labels for Placement
+
+```bash
+# Add labels to nodes for placement constraints
+docker node update --label-add env=production manager1
+docker node update --label-add env=production manager2
+docker node update --label-add env=staging worker1
+docker node update --label-add datacenter=us-east worker1
+docker node update --label-add datacenter=us-west worker2
+docker node update --label-add disk=ssd manager1
+docker node update --label-add disk=hdd worker2
+
+# View node labels
+docker node inspect worker1 --format '{{json .Spec.Labels}}' | jq .
+# {
+#   "datacenter": "us-east",
+#   "disk": "ssd",
+#   "env": "staging"
+# }
+
+# Use labels with service placement (covered in the next lesson)
+docker service create \
+  --name production-api \
+  --constraint 'node.labels.env == production' \
+  --constraint 'node.labels.disk == ssd' \
+  nginx:alpine
+```
+
+## Swarm Networking
+
+### Overlay Networks
+
+Overlay networks span across all nodes in the swarm, allowing containers on different physical hosts to communicate as if they were on the same network.
+
+```bash
+# Create an overlay network
+docker network create \
+  --driver overlay \
+  --subnet 10.10.0.0/24 \
+  --attachable \
+  app-network
+
+# The --attachable flag allows standalone containers to join
+# (not just swarm services)
+
+# List overlay networks
+docker network ls --filter driver=overlay
+# NETWORK ID     NAME            DRIVER    SCOPE
+# abc123         ingress         overlay   swarm
+# def456         app-network     overlay   swarm
+
+# Inspect the overlay network
+docker network inspect app-network --format '{{json .IPAM}}' | jq .
+# {
+#   "Config": [
+#     {
+#       "Subnet": "10.10.0.0/24",
+#       "Gateway": "10.10.0.1"
+#     }
+#   ]
+# }
+```
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Overlay Network                            │
+│                                                              │
+│  Node 1 (192.168.1.10)          Node 2 (192.168.1.11)       │
+│  ┌──────────────────────┐       ┌──────────────────────┐    │
+│  │  Container A          │       │  Container B          │    │
+│  │  IP: 10.10.0.2        │       │  IP: 10.10.0.3        │    │
+│  │  ┌──────────────────┐ │       │  ┌──────────────────┐ │    │
+│  │  │  eth0: 10.10.0.2 │ │       │  │  eth0: 10.10.0.3 │ │    │
+│  │  └────────┬─────────┘ │       │  └────────┬─────────┘ │    │
+│  └───────────┼───────────┘       └───────────┼───────────┘    │
+│              │                               │                │
+│  ┌───────────┼───────────┐       ┌───────────┼───────────┐    │
+│  │  VXLAN    │  Tunnel   │       │  VXLAN    │  Tunnel   │    │
+│  │  ┌────────┴─────────┐ │       │  ┌────────┴─────────┐ │    │
+│  │  │ VTEP (UDP 4789)  │◄┼───────┼─>│ VTEP (UDP 4789)  │ │    │
+│  │  └──────────────────┘ │       │  └──────────────────┘ │    │
+│  └───────────────────────┘       └───────────────────────┘    │
+│                                                              │
+│  Container A can reach Container B at 10.10.0.3 even         │
+│  though they are on different physical hosts.                 │
+│  Traffic is encapsulated in VXLAN packets (UDP 4789).         │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### The Ingress Routing Mesh
+
+The routing mesh is a built-in load balancer that makes every node in the swarm listen on published service ports. Any node can receive traffic for any service, even if that node is not running a task for that service.
+
+```bash
+# Create a service with a published port
+docker service create \
+  --name webapp \
+  --publish 80:80 \
+  --replicas 3 \
+  nginx:alpine
+
+# The routing mesh makes port 80 available on ALL nodes:
+# curl http://192.168.1.10:80  → routed to any webapp replica
+# curl http://192.168.1.11:80  → routed to any webapp replica
+# curl http://192.168.1.12:80  → routed to any webapp replica
+# Even nodes that are NOT running a webapp container!
+```
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   Ingress Routing Mesh                    │
+│                                                          │
+│  Client Request → http://any-node:80                     │
+│         │                                                │
+│         ▼                                                │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │              Ingress Network (IPVS)               │    │
+│  │         Built-in Layer 4 Load Balancer             │    │
+│  │                                                    │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐        │    │
+│  │  │ Node 1   │  │ Node 2   │  │ Node 3   │        │    │
+│  │  │ :80 LISTEN│  │ :80 LISTEN│  │ :80 LISTEN│        │    │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘        │    │
+│  │       │              │              │              │    │
+│  │       └──────────────┼──────────────┘              │    │
+│  │                      │                             │    │
+│  │              IPVS Round-Robin                      │    │
+│  │                      │                             │    │
+│  │       ┌──────────────┼──────────────┐              │    │
+│  │       ▼              ▼              ▼              │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐        │    │
+│  │  │ webapp.1 │  │ webapp.2 │  │ webapp.3 │        │    │
+│  │  │ (Node 1) │  │ (Node 2) │  │ (Node 3) │        │    │
+│  │  └──────────┘  └──────────┘  └──────────┘        │    │
+│  └──────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Service Discovery
+
+Swarm provides built-in DNS-based service discovery. Every service gets a DNS entry that resolves to the service's virtual IP (VIP).
+
+```bash
+# Create two services on the same overlay network
+docker network create --driver overlay backend
+docker service create --name api --network backend --replicas 3 myapi:latest
+docker service create --name redis --network backend redis:alpine
+
+# Inside any container in the "api" service:
+# "redis" resolves to the VIP of the redis service
+# nslookup redis
+# Name:   redis
+# Address: 10.10.1.5  ← Virtual IP (load-balanced)
+
+# DNS round-robin mode (resolve to individual task IPs)
+# nslookup tasks.redis
+# Name:   tasks.redis
+# Address: 10.10.1.6
+# Address: 10.10.1.7
+# (One entry per running task)
+
+# The VIP approach (default) is preferred because it uses
+# IPVS for connection-level load balancing. DNS round-robin
+# suffers from client-side caching of DNS responses.
+
+# You can force DNS round-robin mode:
+docker service create \
+  --name redis-rr \
+  --network backend \
+  --endpoint-mode dnsrr \
+  redis:alpine
+```
+
+## Swarm Security
+
+### Mutual TLS
+
+Docker Swarm automatically encrypts all communication between nodes using mutual TLS. Each node gets a certificate, and both sides verify each other's identity before communicating.
+
+```bash
+# View the current TLS configuration
+docker info --format '{{json .Swarm.Cluster}}' | jq '{
+  ID: .ID,
+  RootRotationInProgress: .RootRotationInProgress,
+  TLSInfo: .TLSInfo
+}'
+
+# View a node's TLS certificate
+docker node inspect self --format '{{json .Description.TLSInfo}}' | jq .
+# {
+#   "TrustRoot": "-----BEGIN CERTIFICATE-----\n...",
+#   "CertIssuerSubject": "...",
+#   "CertIssuerPublicKey": "..."
+# }
+
+# The certificate includes:
+# - Node ID
+# - Role (manager or worker)
+# - Organization (swarm cluster ID)
+# - Expiry time (default: 90 days)
+```
+
+### Certificate Rotation
+
+```bash
+# Check the current certificate rotation interval
+docker swarm inspect --format '{{.Spec.CAConfig.NodeCertExpiry}}'
+# 2160h0m0s  (90 days)
+
+# Change the rotation interval (e.g., every 24 hours for high security)
+docker swarm update --cert-expiry 24h
+# Swarm updated.
+
+# Rotate the root CA certificate (regenerate all node certificates)
+docker swarm ca --rotate
+# desired root digest: sha256:abc123...
+# rotated TLS certificates:
+#   manager1: 10.10.0.2:2377 [OK]
+#   manager2: 10.10.0.3:2377 [OK]
+#   worker1:  10.10.0.4:2377 [OK]
+#   worker2:  10.10.0.5:2377 [OK]
+
+# Use an external CA
+docker swarm init --external-ca \
+  protocol=cfssl,url=https://ca.example.com
+```
+
+<Callout type="info" title="Swarm Encryption Is Automatic">
+Unlike Kubernetes, which requires you to configure TLS certificates manually or use tools like cert-manager, Docker Swarm handles all TLS setup automatically. When a node joins the swarm, it receives a certificate from the manager's CA. Certificates are automatically rotated before they expire. All control plane traffic (Raft consensus, task assignments, status updates) is encrypted by default. You do not need to configure anything.
+</Callout>
+
+### Encrypting Data Plane Traffic
+
+```bash
+# By default, overlay network data traffic is NOT encrypted
+# (control plane traffic IS encrypted)
+
+# Create an encrypted overlay network
+docker network create \
+  --driver overlay \
+  --opt encrypted \
+  secure-network
+
+# All traffic between containers on this network is now encrypted
+# using IPsec (ESP) in transport mode.
+
+# Note: encryption adds ~10-15% CPU overhead for packet encryption
+# Use only for sensitive data that crosses physical network boundaries
+```
+
+### Locking the Swarm (Autolock)
+
+```bash
+# Enable autolock — requires an unlock key to restart managers
+docker swarm update --autolock=true
+# Swarm updated.
+# To unlock a swarm manager after it restarts, run the
+# `docker swarm unlock` command and provide the following key:
+#
+#     SWMKEY-1-abc123def456ghi789jkl012mno345pqr678stu901vwx234
+
+# Save this key securely! Without it, restarted managers cannot
+# rejoin the cluster and their Raft data is inaccessible.
+
+# View the current unlock key
+docker swarm unlock-key
+# SWMKEY-1-abc123...
+
+# Rotate the unlock key
+docker swarm unlock-key --rotate
+# Successfully rotated manager unlock key.
+
+# After a manager restarts with autolock enabled:
+sudo systemctl restart docker
+docker swarm unlock
+# Please enter unlock key: SWMKEY-1-abc123...
+# Swarm unlocked.
+```
+
+<Callout type="warning" title="Store the Unlock Key Securely">
+If autolock is enabled and you lose the unlock key, restarted manager nodes cannot decrypt their Raft data and rejoin the cluster. Store the key in a secrets manager (HashiCorp Vault, AWS Secrets Manager, etc.), not in a text file on the same server. Rotate the key periodically with `docker swarm unlock-key --rotate`.
+</Callout>
+
+<Exercise title="Set Up a Docker Swarm Cluster" difficulty="intermediate" xpReward={35} estimatedMinutes={20}>
+
+Initialize a Docker Swarm cluster, explore node management commands, and verify the cluster is functioning correctly. Since you may be working on a single machine, you will simulate a multi-node swarm using Docker-in-Docker.
+
+**Objectives:**
+- Initialize a swarm and examine the cluster state
+- Understand join tokens for workers and managers
+- Practice node management: listing, inspecting, labeling, and draining
+- Verify the overlay network and routing mesh are configured
+
+**Hints:**
+- Use `docker swarm init` to start the swarm on your current node
+- Use `docker node ls` to see all nodes in the cluster
+- Add labels with `docker node update --label-add key=value node-name`
+- Use `docker network ls --filter driver=overlay` to see overlay networks
+- Use `docker info` to see swarm status
+
+**Validation Criteria:**
+- Swarm is initialized and the node shows as a manager and leader
+- Join tokens for both workers and managers can be retrieved
+- Node labels are applied and visible in `docker node inspect`
+- The ingress overlay network is automatically created
+- Swarm-related information appears in `docker info`
+
+<CollapsibleSolution>
+
+```bash
+# ─── Step 1: Initialize the Swarm ───
+echo "=== Step 1: Initialize Swarm ==="
+docker swarm init 2>/dev/null || echo "Swarm already initialized"
+
+echo ""
+echo "=== Step 2: Verify Swarm Status ==="
+docker info 2>/dev/null | grep -A 8 "Swarm:"
+
+echo ""
+echo "=== Step 3: List Nodes ==="
+docker node ls
+
+echo ""
+echo "=== Step 4: Inspect This Node ==="
+NODE_ID=$(docker node ls --format '{{.ID}}' | head -1)
+echo "Node ID: $NODE_ID"
+
+docker node inspect $NODE_ID --format '
+  Hostname:       {{.Description.Hostname}}
+  Role:           {{.Spec.Role}}
+  Availability:   {{.Spec.Availability}}
+  Manager Status: {{.ManagerStatus.Leader}}
+  Engine Version: {{.Description.Engine.EngineVersion}}
+  Platform:       {{.Description.Platform.OS}} {{.Description.Platform.Architecture}}'
+
+echo ""
+echo "=== Step 5: Retrieve Join Tokens ==="
+echo "Worker join command:"
+docker swarm join-token worker 2>/dev/null | grep "docker swarm join"
+
+echo ""
+echo "Manager join command:"
+docker swarm join-token manager 2>/dev/null | grep "docker swarm join"
+
+echo ""
+echo "=== Step 6: Add Labels to Node ==="
+docker node update --label-add env=development $NODE_ID
+docker node update --label-add datacenter=local $NODE_ID
+docker node update --label-add disk=ssd $NODE_ID
+
+echo "Labels:"
+docker node inspect $NODE_ID --format '{{json .Spec.Labels}}' | jq .
+
+echo ""
+echo "=== Step 7: Check Overlay Networks ==="
+docker network ls --filter driver=overlay
+echo ""
+echo "Ingress network details:"
+docker network inspect ingress --format '
+  Name:    {{.Name}}
+  Driver:  {{.Driver}}
+  Scope:   {{.Scope}}
+  Subnet:  {{range .IPAM.Config}}{{.Subnet}}{{end}}'
+
+echo ""
+echo "=== Step 8: Check TLS Configuration ==="
+docker info 2>/dev/null | grep -A 3 "CA Configuration"
+docker swarm inspect --format '{{.Spec.CAConfig.NodeCertExpiry}}'
+
+echo ""
+echo "=== Step 9: Test Drain and Active ==="
+echo "Setting node to drain..."
+docker node update --availability drain $NODE_ID
+docker node ls
+
+echo ""
+echo "Setting node back to active..."
+docker node update --availability active $NODE_ID
+docker node ls
+
+echo ""
+echo "=== Swarm Cluster Setup Complete ==="
+echo ""
+echo "Summary:"
+echo "  Swarm ID:    $(docker info --format '{{.Swarm.Cluster.ID}}' 2>/dev/null)"
+echo "  Node ID:     $NODE_ID"
+echo "  Managers:    $(docker info --format '{{.Swarm.Managers}}' 2>/dev/null)"
+echo "  Nodes:       $(docker info --format '{{.Swarm.Nodes}}' 2>/dev/null)"
+echo "  Node Labels: $(docker node inspect $NODE_ID --format '{{json .Spec.Labels}}')"
+```
+
+This exercise walks through the complete lifecycle of initializing a swarm, inspecting its state, managing node metadata, and verifying that the overlay network and TLS infrastructure are automatically configured. In a production environment, you would run the join command on additional machines to add workers and managers.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise title="Explore Swarm Node Management" difficulty="intermediate" xpReward={30} estimatedMinutes={20}>
+
+Practice advanced node management operations including labeling, availability changes, and service placement constraints.
+
+**Objectives:**
+- Apply and remove labels on swarm nodes
+- Change node availability between active, pause, and drain
+- Create a service with placement constraints based on labels
+- Verify that services are scheduled according to constraints
+
+**Hints:**
+- Use `docker node update --label-add` to add labels
+- Use `docker node update --label-rm` to remove labels
+- Use `docker service create --constraint` for placement rules
+- Constraints use the format `node.labels.key == value`
+- Use `docker service ps` to see where tasks are placed
+
+**Validation Criteria:**
+- Labels are correctly applied to nodes
+- A service with constraints is created and tasks are placed correctly
+- Changing availability to drain reschedules tasks
+- Labels can be removed and the node reverts to unlabeled state
+
+<CollapsibleSolution>
+
+```bash
+# ─── Setup: Ensure swarm is active ───
+docker swarm init 2>/dev/null || true
+NODE_ID=$(docker node ls --format '{{.ID}}' -q | head -1)
+HOSTNAME=$(docker node inspect $NODE_ID --format '{{.Description.Hostname}}')
+
+echo "=== Working with node: $HOSTNAME ($NODE_ID) ==="
+echo ""
+
+# ─── Step 1: Label Management ───
+echo "=== Step 1: Add Labels ==="
+docker node update --label-add tier=frontend $NODE_ID
+docker node update --label-add region=us-east $NODE_ID
+docker node update --label-add ssd=true $NODE_ID
+
+echo "Current labels:"
+docker node inspect $NODE_ID --format '{{range $k, $v := .Spec.Labels}}  {{$k}} = {{$v}}{{"\n"}}{{end}}'
+
+echo ""
+echo "=== Step 2: Create Service with Constraints ==="
+docker service create \
+  --name frontend-app \
+  --constraint 'node.labels.tier == frontend' \
+  --replicas 2 \
+  --publish 8080:80 \
+  nginx:alpine
+
+sleep 3
+
+echo "Service tasks:"
+docker service ps frontend-app --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}"
+
+echo ""
+echo "=== Step 3: Create Service with Non-matching Constraint ==="
+docker service create \
+  --name backend-app \
+  --constraint 'node.labels.tier == backend' \
+  --replicas 2 \
+  nginx:alpine
+
+sleep 5
+
+echo "Backend tasks (should be pending — no matching nodes):"
+docker service ps backend-app --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}" 2>/dev/null || \
+  echo "  No tasks running (expected — no nodes match constraint)"
+
+echo ""
+echo "=== Step 4: Add Label to Fix Constraint ==="
+docker node update --label-add tier=backend $NODE_ID
+sleep 3
+echo "Backend tasks (should now be running):"
+docker service ps backend-app --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}"
+
+echo ""
+echo "=== Step 5: Remove Labels ==="
+docker node update --label-rm tier $NODE_ID
+docker node update --label-rm region $NODE_ID
+docker node update --label-rm ssd $NODE_ID
+
+echo "Labels after removal:"
+docker node inspect $NODE_ID --format '{{json .Spec.Labels}}'
+
+echo ""
+echo "=== Cleanup ==="
+docker service rm frontend-app backend-app 2>/dev/null
+echo "Services removed."
+```
+
+This exercise demonstrates how node labels serve as metadata for service placement. When no nodes match a service's constraints, tasks remain pending indefinitely. Adding the matching label causes tasks to be immediately scheduled. Removing labels does not automatically reschedule running tasks — they continue running until the next scheduling event (scale, update, or node failure).
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Production-Ready Swarm Cluster">
+
+Set up a production-ready Docker Swarm cluster with proper node configuration, security hardening, overlay networking, and a monitoring service to verify the cluster is healthy.
+
+Your cluster must include:
+
+1. An initialized swarm with labeled nodes
+2. An encrypted overlay network for application traffic
+3. TLS certificate rotation configured for short intervals
+4. A monitoring service that reports cluster health
+5. A cluster health check script
+
+```bash
+mkdir -p ~/swarm-production/scripts
+
+# ═══════════════════════════════════════════
+# Initialize and Configure the Swarm
+# ═══════════════════════════════════════════
+echo "=== Initializing Production Swarm ==="
+
+# Initialize (or reinitialize)
+docker swarm leave --force 2>/dev/null || true
+docker swarm init --advertise-addr $(hostname -I | awk '{print $1}') 2>/dev/null
+
+NODE_ID=$(docker node ls -q | head -1)
+
+# ─── Configure TLS ───
+echo ""
+echo "=== Configuring TLS ==="
+# Set certificate rotation to 48 hours (production-appropriate)
+docker swarm update --cert-expiry 48h
+echo "Certificate expiry set to 48h"
+
+# Verify TLS configuration
+docker swarm inspect --format 'Cert Expiry: {{.Spec.CAConfig.NodeCertExpiry}}'
+
+# ─── Label the Node ───
+echo ""
+echo "=== Labeling Node ==="
+docker node update --label-add env=production $NODE_ID
+docker node update --label-add tier=all $NODE_ID
+docker node update --label-add region=primary $NODE_ID
+docker node update --label-add monitoring=true $NODE_ID
+
+echo "Node labels:"
+docker node inspect $NODE_ID --format '{{range $k, $v := .Spec.Labels}}  {{$k}}={{$v}}{{"\n"}}{{end}}'
+
+# ─── Create Networks ───
+echo ""
+echo "=== Creating Overlay Networks ==="
+
+# Encrypted network for sensitive traffic
+docker network create \
+  --driver overlay \
+  --opt encrypted \
+  --subnet 10.20.0.0/24 \
+  --attachable \
+  app-secure 2>/dev/null || echo "app-secure already exists"
+
+# Unencrypted network for non-sensitive traffic
+docker network create \
+  --driver overlay \
+  --subnet 10.30.0.0/24 \
+  --attachable \
+  app-internal 2>/dev/null || echo "app-internal already exists"
+
+echo "Overlay networks:"
+docker network ls --filter driver=overlay --format "table {{.Name}}\t{{.Driver}}\t{{.Scope}}"
+
+# ─── Deploy Monitoring Service ───
+echo ""
+echo "=== Deploying Cluster Monitor ==="
+
+docker service create \
+  --name cluster-monitor \
+  --mode global \
+  --network app-internal \
+  --constraint 'node.labels.monitoring == true' \
+  --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock,readonly \
+  --publish 9090:8080 \
+  --limit-cpu 0.25 \
+  --limit-memory 128M \
+  --restart-condition on-failure \
+  --restart-max-attempts 3 \
+  --update-delay 30s \
+  --update-parallelism 1 \
+  gcr.io/cadvisor/cadvisor:latest 2>/dev/null || \
+  echo "Monitor service already exists"
+
+sleep 5
+
+echo "Monitor service status:"
+docker service ps cluster-monitor --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}"
+
+# ═══════════════════════════════════════════
+# Cluster Health Check Script
+# ═══════════════════════════════════════════
+cat > ~/swarm-production/scripts/cluster-health.sh << 'HEALTHEOF'
+#!/bin/bash
+set -euo pipefail
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║          Swarm Cluster Health Report                     ║"
+echo "║          $(date '+%Y-%m-%d %H:%M:%S')                    ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+PASS=0
+FAIL=0
+WARN=0
+
+check() {
+  case $1 in
+    PASS) PASS=$((PASS+1)); echo "  [PASS] $2" ;;
+    FAIL) FAIL=$((FAIL+1)); echo "  [FAIL] $2" ;;
+    WARN) WARN=$((WARN+1)); echo "  [WARN] $2" ;;
+  esac
+}
+
+# Check 1: Swarm is active
+SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
+if [ "$SWARM_STATUS" = "active" ]; then
+  check PASS "Swarm is active"
+else
+  check FAIL "Swarm is not active (status: $SWARM_STATUS)"
+fi
+
+# Check 2: This node is a manager
+IS_MANAGER=$(docker info --format '{{.Swarm.ControlAvailable}}' 2>/dev/null)
+if [ "$IS_MANAGER" = "true" ]; then
+  check PASS "This node is a manager"
+else
+  check WARN "This node is not a manager"
+fi
+
+# Check 3: Node count
+TOTAL_NODES=$(docker info --format '{{.Swarm.Nodes}}' 2>/dev/null || echo 0)
+TOTAL_MANAGERS=$(docker info --format '{{.Swarm.Managers}}' 2>/dev/null || echo 0)
+echo ""
+echo "  Cluster: $TOTAL_NODES nodes, $TOTAL_MANAGERS managers"
+
+# Check 4: Manager count (should be odd for HA)
+if [ "$TOTAL_MANAGERS" -gt 0 ]; then
+  if [ $((TOTAL_MANAGERS % 2)) -eq 1 ]; then
+    check PASS "Odd number of managers ($TOTAL_MANAGERS) — correct for Raft"
+  else
+    check WARN "Even number of managers ($TOTAL_MANAGERS) — use odd numbers"
+  fi
+fi
+
+# Check 5: All nodes are Ready
+echo ""
+echo "  Node Status:"
+docker node ls --format "    {{.Hostname}}: {{.Status}} ({{.Availability}}) {{.ManagerStatus}}"
+
+DOWN_NODES=$(docker node ls --format '{{.Status}}' | grep -c -v "Ready" || true)
+if [ "$DOWN_NODES" -eq 0 ]; then
+  check PASS "All nodes are Ready"
+else
+  check FAIL "$DOWN_NODES node(s) not in Ready state"
+fi
+
+# Check 6: Certificate expiry
+CERT_EXPIRY=$(docker swarm inspect --format '{{.Spec.CAConfig.NodeCertExpiry}}' 2>/dev/null)
+echo ""
+echo "  Certificate rotation: $CERT_EXPIRY"
+if [ -n "$CERT_EXPIRY" ]; then
+  check PASS "Certificate rotation configured: $CERT_EXPIRY"
+else
+  check WARN "Certificate rotation not configured"
+fi
+
+# Check 7: Overlay networks
+echo ""
+echo "  Overlay Networks:"
+docker network ls --filter driver=overlay --format "    {{.Name}} ({{.Scope}})"
+
+OVERLAY_COUNT=$(docker network ls --filter driver=overlay -q | wc -l)
+if [ "$OVERLAY_COUNT" -gt 1 ]; then
+  check PASS "$OVERLAY_COUNT overlay networks configured"
+else
+  check WARN "Only default overlay networks"
+fi
+
+# Check 8: Running services
+echo ""
+echo "  Services:"
+SERVICE_COUNT=$(docker service ls -q 2>/dev/null | wc -l)
+docker service ls --format "    {{.Name}}: {{.Replicas}} replicas ({{.Image}})" 2>/dev/null
+
+if [ "$SERVICE_COUNT" -gt 0 ]; then
+  # Check for any service with 0 running replicas
+  UNHEALTHY=$(docker service ls --format '{{.Replicas}}' 2>/dev/null | grep "0/" | wc -l || true)
+  if [ "$UNHEALTHY" -gt 0 ]; then
+    check FAIL "$UNHEALTHY service(s) have 0 running replicas"
+  else
+    check PASS "All $SERVICE_COUNT services have running replicas"
+  fi
+fi
+
+# Summary
+echo ""
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║  Summary: PASS=$PASS  FAIL=$FAIL  WARN=$WARN            ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+
+if [ "$FAIL" -gt 0 ]; then
+  echo "  Cluster has critical issues. Investigate FAILed checks."
+  exit 1
+fi
+HEALTHEOF
+
+chmod +x ~/swarm-production/scripts/cluster-health.sh
+
+# ═══════════════════════════════════════════
+# Run the health check
+# ═══════════════════════════════════════════
+echo ""
+echo "=== Running Cluster Health Check ==="
+bash ~/swarm-production/scripts/cluster-health.sh
+
+echo ""
+echo "=== Cluster Information ==="
+echo "Swarm ID:         $(docker info --format '{{.Swarm.Cluster.ID}}' 2>/dev/null)"
+echo "Node ID:          $(docker info --format '{{.Swarm.NodeID}}' 2>/dev/null)"
+echo "Manager Addresses:"
+docker info --format '{{range .Swarm.RemoteManagers}}  {{.Addr}}{{"\n"}}{{end}}' 2>/dev/null
+
+echo ""
+echo "Join Commands:"
+echo "  Worker:"
+docker swarm join-token worker 2>/dev/null | grep "docker swarm join" | sed 's/^/    /'
+echo "  Manager:"
+docker swarm join-token manager 2>/dev/null | grep "docker swarm join" | sed 's/^/    /'
+```
+
+This mini project creates a production-ready swarm cluster with security hardening (short TLS rotation, encrypted overlay networks), node labeling for placement control, a global monitoring service (cAdvisor), and a comprehensive health check script that verifies all critical cluster components. The health check validates swarm status, node availability, manager quorum, certificate rotation, overlay networks, and service health. This script can be run as a cron job or integrated into your monitoring system.
+
+</MiniProject>
+
+## Key Takeaways
+
+- **Docker Swarm** is Docker's built-in orchestration system — it requires no additional software and can be initialized with a single `docker swarm init` command
+- **Choose Swarm** for small-to-medium deployments (3-20 nodes) where simplicity matters; choose Kubernetes for large-scale deployments requiring auto-scaling, service mesh, and a rich ecosystem
+- **Manager nodes** maintain cluster state via Raft consensus, schedule tasks, and manage certificates; **worker nodes** execute tasks and report status
+- **Raft consensus** requires a quorum (majority) of managers to be available; use **odd numbers** of managers (3 or 5); 3 managers tolerate 1 failure, 5 managers tolerate 2
+- **Join tokens** authenticate new nodes — rotate them with `docker swarm join-token --rotate` if compromised; there are separate tokens for workers and managers
+- **Node management** includes promoting workers to managers, draining nodes for maintenance (tasks are rescheduled), and labeling nodes for placement constraints
+- **Overlay networks** span all swarm nodes using VXLAN encapsulation; add `--opt encrypted` for data plane encryption (IPsec)
+- **The routing mesh** (ingress network) makes published service ports available on every node, automatically routing traffic to healthy task containers via IPVS
+- **Service discovery** is built-in: services are accessible by name via Docker's internal DNS; VIP-based load balancing is the default and preferred mode
+- **Mutual TLS** is automatic: all control plane traffic between nodes is encrypted; certificates are automatically issued and rotated; use autolock (`--autolock`) to protect Raft data at rest
+
+## What's Next
+
+In the next lesson, **Swarm Services and Stacks**, you will learn how to deploy and manage applications on your swarm cluster. You will create replicated and global services, configure rolling updates with rollback, use placement constraints and resource reservations, deploy multi-service stacks from Compose files, and manage secrets and configs for secure application configuration.

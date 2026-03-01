@@ -1,0 +1,228 @@
+---
+title: "The Boot Process"
+description: "Follow the journey from pressing the power button to a fully running Linux system. Understanding the boot process is critical for debugging servers that refuse to start."
+order: 3
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 02-linux-architecture
+objectives:
+  - Trace the five stages of the Linux boot process
+  - Explain the role of BIOS/UEFI, GRUB, and the init system
+  - Use systemd to inspect boot targets and services
+  - Debug common boot failures
+tags:
+  - linux
+  - boot
+  - systemd
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+It's 2 AM and your production server just went down. The ops team tries to restart it, but it hangs during boot. No one can figure out where it's stuck. Understanding the boot process — every stage from BIOS to login prompt — is what separates an engineer who panics from one who calmly identifies that a corrupted `/etc/fstab` entry is blocking the filesystem mount.
+</Callout>
+
+## The Five Stages of Boot
+
+When you power on a Linux machine, five stages execute in sequence:
+
+```
+Power On → BIOS/UEFI → Bootloader → Kernel → Init System → Login
+  (1)        (2)          (3)         (4)         (5)
+```
+
+### Stage 1: BIOS/UEFI (Firmware)
+
+The first thing that runs is firmware — software burned into the motherboard:
+
+- **BIOS** (Basic Input/Output System) — Legacy firmware, simple interface
+- **UEFI** (Unified Extensible Firmware Interface) — Modern replacement, faster, supports Secure Boot
+
+The firmware performs a **POST** (Power-On Self-Test): checking CPU, RAM, and storage are functional. Then it looks for a boot device in its configured boot order.
+
+### Stage 2: Bootloader (GRUB)
+
+The bootloader loads the Linux kernel from disk into memory. **GRUB** (GRand Unified Bootloader) is the most common:
+
+```
+                    GNU GRUB  version 2.06
+
+ ┌────────────────────────────────────────────────┐
+ │ Ubuntu                                         │
+ │ Ubuntu, with Linux 5.15.0-89-generic           │
+ │ Ubuntu, with Linux 5.15.0-89-generic (recovery)│
+ └────────────────────────────────────────────────┘
+```
+
+GRUB's configuration lives at `/boot/grub/grub.cfg`. It tells GRUB where the kernel is and what parameters to pass.
+
+### Stage 3: Kernel Initialization
+
+The kernel takes over from GRUB:
+
+1. Decompresses itself into memory
+2. Initializes hardware (CPU, memory controller, drivers)
+3. Mounts the root filesystem (specified in GRUB config)
+4. Starts the first user-space process: **PID 1**
+
+```bash
+# See kernel boot messages
+dmesg | head -30
+
+# See the kernel command line parameters
+cat /proc/cmdline
+```
+
+### Stage 4: Init System (systemd)
+
+**PID 1** — the first process — is the init system. On modern Linux, this is **systemd**:
+
+```bash
+# Verify PID 1 is systemd
+ps -p 1 -o comm=
+```
+
+systemd reads its configuration and starts services in parallel based on the **boot target** (similar to the old "runlevel" concept):
+
+| Target | Description | Old Runlevel |
+|---|---|---|
+| `poweroff.target` | Shut down | 0 |
+| `rescue.target` | Single user mode | 1 |
+| `multi-user.target` | Multi-user, no GUI | 3 |
+| `graphical.target` | Multi-user with GUI | 5 |
+| `reboot.target` | Reboot | 6 |
+
+<Callout type="info">
+Servers typically boot to `multi-user.target` (no graphical desktop needed). Desktops boot to `graphical.target`.
+</Callout>
+
+### Stage 5: Login
+
+Once all services are started, you see a login prompt — either a text console (`getty`) or a graphical display manager (GDM, LightDM).
+
+## Working with systemd
+
+systemd manages the entire boot process and all running services. Here are the essential commands:
+
+```bash
+# What target are we currently running?
+systemctl get-default
+
+# List all active services
+systemctl list-units --type=service --state=running
+
+# Check if a specific service is running
+systemctl status sshd
+
+# See how long the boot took
+systemd-analyze
+
+# See boot time breakdown by service
+systemd-analyze blame | head -10
+```
+
+<Exercise number={1} title="Inspect Your Boot Process">
+
+Run these commands to understand your system's boot process:
+
+```bash
+# What init system is running?
+ps -p 1 -o comm=
+
+# What's the default boot target?
+systemctl get-default
+
+# How long did the last boot take?
+systemd-analyze
+
+# What took the longest to start?
+systemd-analyze blame | head -5
+
+# View kernel boot messages
+dmesg | grep -i "linux version"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Explore systemd Services">
+
+Investigate the services running on your system:
+
+```bash
+# List all running services
+systemctl list-units --type=service --state=running
+
+# Check SSH service status
+systemctl status sshd 2>/dev/null || systemctl status ssh 2>/dev/null
+
+# See what services start at boot
+systemctl list-unit-files --state=enabled | head -15
+
+# See the dependency tree for multi-user target
+systemctl list-dependencies multi-user.target | head -20
+```
+
+How many services are running? Which service took the longest to start?
+
+</Exercise>
+
+## Troubleshooting Boot Problems
+
+<Callout type="danger" title="Common Boot Failures">
+When a server won't boot, check these in order:
+
+1. **Disk full** — No space for temporary files during boot
+2. **Bad /etc/fstab** — Wrong filesystem mount entries
+3. **Failed service** — A critical service fails and blocks boot
+4. **Kernel panic** — Hardware issue or corrupted kernel
+5. **Network timeout** — Waiting for DHCP or NFS mount that never responds
+</Callout>
+
+```bash
+# Check for failed services
+systemctl --failed
+
+# View logs from the last boot
+journalctl -b -p err
+
+# Check filesystem table for errors
+cat /etc/fstab
+
+# View previous boot logs
+journalctl -b -1 | tail -50
+```
+
+<MiniProject title="Boot Diagnostics Script">
+
+Create a script that performs a quick boot health check:
+
+```bash
+echo "=== BOOT DIAGNOSTICS ==="
+echo ""
+echo "Init System: $(ps -p 1 -o comm=)"
+echo "Default Target: $(systemctl get-default)"
+echo "Boot Time: $(systemd-analyze | head -1)"
+echo ""
+echo "--- Failed Services ---"
+systemctl --failed --no-pager 2>/dev/null || echo "None"
+echo ""
+echo "--- Last Boot Errors ---"
+journalctl -b -p err --no-pager 2>/dev/null | tail -10 || echo "No errors"
+echo ""
+echo "--- Top 5 Slowest Services ---"
+systemd-analyze blame 2>/dev/null | head -5 || echo "N/A"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- The boot process has five stages: firmware (BIOS/UEFI), bootloader (GRUB), kernel, init system (systemd), login
+- systemd is PID 1 on modern Linux — it starts services in parallel based on targets
+- `systemd-analyze` shows boot timing; `systemctl --failed` reveals broken services
+- Most boot problems stem from: full disks, bad fstab entries, or failed critical services
+- `dmesg` and `journalctl -b` are your best tools for boot debugging
+
+## What's Next
+
+In the next lesson, **Installing Linux**, you'll set up your own Linux environment — whether that's WSL on Windows, a virtual machine, or a cloud instance. You'll have a real system to practice on for every lesson that follows.

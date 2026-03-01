@@ -1,0 +1,713 @@
+---
+title: "Process Management in Scripts"
+description: "Control background processes, handle signals gracefully, manage PIDs, and run tasks in parallel. Write scripts that manage complex process lifecycles."
+order: 13
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 12-debugging-scripts
+objectives:
+  - Launch and manage background processes in scripts
+  - Track PIDs and wait for process completion
+  - Handle signals with trap for graceful shutdowns
+  - Manage child processes and process groups
+  - Run tasks in parallel for faster execution
+  - Use process substitution for advanced data flow
+tags:
+  - shell-scripting
+  - processes
+  - signals
+  - bash
+---
+
+<Callout type="story" title="The Story">
+Your deployment script needs to restart three microservices, but doing it sequentially takes 90 seconds. You want to restart them in parallel, wait for all of them to be healthy, and if any one fails, roll back the others. Then at 2 AM, someone hits Ctrl+C during a database migration. Without signal handling, the migration is left in a corrupted half-finished state. Process management is how you write scripts that handle the real world — concurrency, interruptions, and graceful shutdowns.
+</Callout>
+
+## Background Processes
+
+The `&` operator runs a command in the background, allowing your script to continue:
+
+```bash
+#!/bin/bash
+# Running a long task in the background
+echo "Starting backup..."
+tar czf /tmp/backup.tar.gz /var/log 2>/dev/null &
+BACKUP_PID=$!
+echo "Backup running in background (PID: $BACKUP_PID)"
+
+# Do other work while backup runs
+echo "Performing other tasks..."
+sleep 1
+
+# Wait for the backup to finish
+wait "$BACKUP_PID"
+BACKUP_EXIT=$?
+
+if [ "$BACKUP_EXIT" -eq 0 ]; then
+    echo "Backup completed successfully"
+else
+    echo "Backup failed with exit code $BACKUP_EXIT"
+fi
+```
+
+## PID Management
+
+Bash provides several special variables for process tracking:
+
+```bash
+#!/bin/bash
+echo "Script PID:        $$"    # Current script's PID
+echo "Parent PID:        $PPID" # Parent process PID
+
+# Launch a background process
+sleep 30 &
+echo "Last background PID: $!"  # PID of the most recently backgrounded process
+
+# Store PIDs for later
+WORKER_PIDS=()
+
+for i in 1 2 3; do
+    sleep 10 &
+    WORKER_PIDS+=($!)
+    echo "Started worker $i (PID: $!)"
+done
+
+echo "All worker PIDs: ${WORKER_PIDS[*]}"
+
+# Check if a specific PID is still running
+if kill -0 "${WORKER_PIDS[0]}" 2>/dev/null; then
+    echo "Worker 1 is still running"
+fi
+
+# Clean up
+for pid in "${WORKER_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null
+done
+```
+
+<Callout type="tip" title="kill -0 Does Not Kill">
+`kill -0 PID` sends no signal — it just checks whether the process exists and you have permission to signal it. It returns 0 if the process is alive, non-zero otherwise. This is the standard way to check if a background process is still running.
+</Callout>
+
+## Signal Handling with trap
+
+The `trap` command lets your script intercept signals and run cleanup code:
+
+```bash
+#!/bin/bash
+# Common signals:
+#   SIGTERM (15) — polite "please stop" (sent by kill)
+#   SIGINT  (2)  — Ctrl+C
+#   SIGHUP  (1)  — terminal closed
+#   EXIT         — pseudo-signal, fires when script exits for any reason
+
+TEMP_DIR=$(mktemp -d)
+PID_FILE="/tmp/myapp.pid"
+
+cleanup() {
+    echo ""
+    echo "Cleaning up..."
+    rm -rf "$TEMP_DIR"
+    rm -f "$PID_FILE"
+    echo "Cleanup complete"
+}
+
+# trap cleanup on EXIT — runs no matter how the script ends
+trap cleanup EXIT
+
+# trap specific signals for graceful shutdown
+shutdown() {
+    echo ""
+    echo "Received shutdown signal, finishing current work..."
+    # Set a flag so the main loop can exit gracefully
+    SHUTDOWN=1
+}
+
+trap shutdown SIGTERM SIGINT
+
+echo "$$" > "$PID_FILE"
+echo "Running (PID: $$). Press Ctrl+C to stop."
+echo "Temp dir: $TEMP_DIR"
+
+SHUTDOWN=0
+while [ "$SHUTDOWN" -eq 0 ]; do
+    echo "Working... ($(date '+%H:%M:%S'))"
+    # Use a short sleep so we check the flag frequently
+    sleep 2
+done
+
+echo "Graceful shutdown complete"
+# cleanup runs automatically via trap EXIT
+```
+
+### Trapping Multiple Signals
+
+```bash
+#!/bin/bash
+# Different actions for different signals
+
+trap 'echo "Caught SIGINT (Ctrl+C)"; exit 1' SIGINT
+trap 'echo "Caught SIGTERM"; exit 0' SIGTERM
+trap 'echo "Caught SIGHUP — reloading config"; reload_config' SIGHUP
+
+reload_config() {
+    echo "Reloading configuration..."
+    # Re-read config files, reset variables, etc.
+    source /etc/myapp/config 2>/dev/null || true
+}
+
+# Reset trap (restore default behavior)
+# trap - SIGINT
+
+# Ignore a signal entirely
+# trap '' SIGINT
+```
+
+## Managing Child Processes
+
+When your script spawns child processes, you are responsible for them:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+CHILD_PIDS=()
+
+# Cleanup: kill all children on exit
+cleanup() {
+    echo "Stopping all child processes..."
+    for pid in "${CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            echo "  Stopped PID $pid"
+        fi
+    done
+    wait 2>/dev/null
+    echo "All children stopped"
+}
+
+trap cleanup EXIT
+
+# Simulate three microservice watchers
+monitor_service() {
+    local service="$1"
+    while true; do
+        echo "[$(date '+%H:%M:%S')] Checking $service..."
+        sleep 3
+    done
+}
+
+for svc in nginx postgres redis; do
+    monitor_service "$svc" &
+    CHILD_PIDS+=($!)
+    echo "Started monitor for $svc (PID: $!)"
+done
+
+echo ""
+echo "All monitors running. PIDs: ${CHILD_PIDS[*]}"
+echo "Main script PID: $$"
+echo "Press Ctrl+C to stop all monitors"
+
+# Wait for any child to exit (or for a signal)
+wait
+```
+
+<Exercise number={1} title="Parallel Health Checks with PID Tracking">
+
+```bash
+cat > ~/parallel-health.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Parallel health checker — check multiple endpoints simultaneously
+
+ENDPOINTS=(
+    "localhost:22"
+    "localhost:80"
+    "localhost:443"
+    "localhost:8080"
+    "localhost:5432"
+    "localhost:6379"
+)
+
+declare -A RESULTS
+declare -A CHECK_PIDS
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# Function that checks a single endpoint
+check_endpoint() {
+    local endpoint="$1"
+    local host="${endpoint%%:*}"
+    local port="${endpoint##*:}"
+    local result_file="$2"
+
+    if timeout 2 bash -c "echo >/dev/tcp/$host/$port" 2>/dev/null; then
+        echo "UP" > "$result_file"
+    else
+        echo "DOWN" > "$result_file"
+    fi
+}
+
+echo "=== Parallel Health Check ==="
+echo "Checking ${#ENDPOINTS[@]} endpoints..."
+echo ""
+
+START_TIME=$(date +%s)
+
+# Launch all checks in parallel
+for endpoint in "${ENDPOINTS[@]}"; do
+    result_file="$TEMP_DIR/$(echo "$endpoint" | tr ':' '_')"
+    check_endpoint "$endpoint" "$result_file" &
+    CHECK_PIDS["$endpoint"]=$!
+done
+
+# Wait for all checks and collect results
+UP_COUNT=0
+DOWN_COUNT=0
+
+for endpoint in "${ENDPOINTS[@]}"; do
+    pid="${CHECK_PIDS[$endpoint]}"
+    wait "$pid" 2>/dev/null
+
+    result_file="$TEMP_DIR/$(echo "$endpoint" | tr ':' '_')"
+    if [ -f "$result_file" ]; then
+        status=$(cat "$result_file")
+    else
+        status="DOWN"
+    fi
+
+    RESULTS["$endpoint"]="$status"
+
+    if [ "$status" = "UP" ]; then
+        printf "  [UP]   %s\n" "$endpoint"
+        UP_COUNT=$((UP_COUNT + 1))
+    else
+        printf "  [DOWN] %s\n" "$endpoint"
+        DOWN_COUNT=$((DOWN_COUNT + 1))
+    fi
+done
+
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+
+echo ""
+echo "Results: $UP_COUNT up, $DOWN_COUNT down"
+echo "Completed in ${ELAPSED}s (parallel — sequential would take ~$((${#ENDPOINTS[@]} * 2))s)"
+SCRIPT
+
+chmod +x ~/parallel-health.sh
+~/parallel-health.sh
+```
+
+</Exercise>
+
+## Parallel Execution Patterns
+
+### Pattern 1: Fire-and-Wait
+
+Launch multiple tasks, wait for all of them:
+
+```bash
+#!/bin/bash
+# Deploy to multiple servers in parallel
+
+SERVERS=("web01" "web02" "web03" "api01")
+PIDS=()
+FAILURES=0
+
+deploy_to_server() {
+    local server="$1"
+    echo "[$server] Starting deployment..."
+    sleep $((RANDOM % 3 + 1))  # Simulate varying deploy times
+
+    # Simulate occasional failure
+    if [ $((RANDOM % 5)) -eq 0 ]; then
+        echo "[$server] FAILED"
+        return 1
+    fi
+
+    echo "[$server] Deployment complete"
+    return 0
+}
+
+# Launch all deployments
+for server in "${SERVERS[@]}"; do
+    deploy_to_server "$server" &
+    PIDS+=($!)
+done
+
+# Wait for each and track failures
+for i in "${!PIDS[@]}"; do
+    if ! wait "${PIDS[$i]}"; then
+        echo "Deployment to ${SERVERS[$i]} failed!"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+
+if [ "$FAILURES" -gt 0 ]; then
+    echo "WARNING: $FAILURES deployment(s) failed"
+    exit 1
+fi
+
+echo "All deployments succeeded"
+```
+
+### Pattern 2: Worker Pool
+
+Limit the number of concurrent processes:
+
+```bash
+#!/bin/bash
+# Process files with a max of N parallel workers
+
+MAX_WORKERS=4
+
+process_file() {
+    local file="$1"
+    echo "Processing: $file"
+    sleep 2  # Simulate work
+    echo "Done: $file"
+}
+
+FILES=(/etc/hostname /etc/os-release /etc/shells /etc/fstab \
+       /etc/passwd /etc/group /etc/hosts /etc/resolv.conf)
+
+RUNNING=0
+for file in "${FILES[@]}"; do
+    process_file "$file" &
+    RUNNING=$((RUNNING + 1))
+
+    # If we hit the max, wait for one to finish
+    if [ "$RUNNING" -ge "$MAX_WORKERS" ]; then
+        wait -n 2>/dev/null || true  # Wait for any one child (bash 4.3+)
+        RUNNING=$((RUNNING - 1))
+    fi
+done
+
+# Wait for remaining workers
+wait
+echo "All files processed"
+```
+
+## Process Substitution
+
+Process substitution lets you use command output as a file, enabling powerful patterns:
+
+```bash
+# Compare output of two commands (without temp files)
+diff <(ls /etc | head -20) <(ls /usr | head -20)
+
+# Process multiple streams
+paste <(cut -d: -f1 /etc/passwd) <(cut -d: -f7 /etc/passwd) | head -5
+
+# Feed command output into a while loop without subshell issues
+# (Regular pipes create a subshell, losing variable changes)
+COUNT=0
+while IFS= read -r line; do
+    COUNT=$((COUNT + 1))
+done < <(find /etc -maxdepth 1 -type f 2>/dev/null)
+echo "Found $COUNT files"  # This works! (would be 0 with a pipe)
+```
+
+<Callout type="warning" title="Pipe Subshell Trap">
+When you pipe into `while read`, the loop runs in a subshell. Variable changes inside the loop are lost when the loop ends. Process substitution `< <(command)` avoids this because the loop runs in the current shell. This is one of the most common bash gotchas.
+</Callout>
+
+<Exercise number={2} title="Graceful Service Manager">
+
+```bash
+cat > ~/svc-manager.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Graceful service manager — starts workers, handles signals, shuts down cleanly
+
+LOG_FILE="/tmp/svc-manager.log"
+WORKER_PIDS=()
+SHUTDOWN=0
+
+log() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+    echo "$msg"
+    echo "$msg" >> "$LOG_FILE"
+}
+
+# Worker function — simulates a long-running service
+worker() {
+    local name="$1"
+    local interval="$2"
+    while true; do
+        log "[$name] heartbeat"
+        sleep "$interval"
+    done
+}
+
+start_workers() {
+    log "Starting workers..."
+
+    worker "web-handler" 3 &
+    WORKER_PIDS+=($!)
+    log "Started web-handler (PID: $!)"
+
+    worker "queue-processor" 5 &
+    WORKER_PIDS+=($!)
+    log "Started queue-processor (PID: $!)"
+
+    worker "metrics-collector" 4 &
+    WORKER_PIDS+=($!)
+    log "Started metrics-collector (PID: $!)"
+}
+
+stop_workers() {
+    log "Sending SIGTERM to all workers..."
+    for pid in "${WORKER_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null
+            log "  Sent SIGTERM to PID $pid"
+        fi
+    done
+
+    # Give workers time to finish
+    log "Waiting up to 5 seconds for workers to stop..."
+    local waited=0
+    while [ "$waited" -lt 5 ]; do
+        local still_running=0
+        for pid in "${WORKER_PIDS[@]}"; do
+            kill -0 "$pid" 2>/dev/null && still_running=$((still_running + 1))
+        done
+        [ "$still_running" -eq 0 ] && break
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    # Force kill any remaining
+    for pid in "${WORKER_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null
+            log "  Force killed PID $pid"
+        fi
+    done
+
+    wait 2>/dev/null
+    log "All workers stopped"
+}
+
+handle_signal() {
+    log ""
+    log "Received shutdown signal"
+    SHUTDOWN=1
+}
+
+# Register signal handlers
+trap handle_signal SIGTERM SIGINT
+trap 'stop_workers; log "Service manager exited"; rm -f "$LOG_FILE"' EXIT
+
+# Main
+log "=== Service Manager Starting (PID: $$) ==="
+start_workers
+
+log ""
+log "All workers running. Press Ctrl+C to stop."
+log ""
+
+# Main loop — check worker health
+while [ "$SHUTDOWN" -eq 0 ]; do
+    ALIVE=0
+    for pid in "${WORKER_PIDS[@]}"; do
+        kill -0 "$pid" 2>/dev/null && ALIVE=$((ALIVE + 1))
+    done
+    log "[manager] $ALIVE/${#WORKER_PIDS[@]} workers alive"
+
+    # Exit loop if all workers died
+    [ "$ALIVE" -eq 0 ] && { log "All workers died!"; break; }
+
+    sleep 3
+done
+
+log "Service manager shutting down"
+SCRIPT
+
+chmod +x ~/svc-manager.sh
+echo "Starting service manager for 10 seconds..."
+timeout 10 ~/svc-manager.sh || true
+echo ""
+echo "Service manager demo complete"
+```
+
+</Exercise>
+
+<MiniProject title="Parallel Deployment Pipeline">
+
+```bash
+cat > ~/deploy-pipeline.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Parallel deployment pipeline
+# Runs build, test, and deploy stages with parallel tasks within each stage
+
+DEPLOY_DIR="/tmp/deploy-pipeline"
+LOG_DIR="$DEPLOY_DIR/logs"
+SERVICES=("auth-service" "api-gateway" "user-service" "notification-service")
+STAGE_PIDS=()
+FAILED=0
+
+# --- Utility functions ---
+
+log() {
+    local msg="[$(date '+%H:%M:%S')] $*"
+    echo "$msg"
+}
+
+cleanup() {
+    # Kill any remaining background processes
+    for pid in "${STAGE_PIDS[@]}"; do
+        kill "$pid" 2>/dev/null
+    done
+    wait 2>/dev/null
+    rm -rf "$DEPLOY_DIR"
+}
+
+trap cleanup EXIT
+trap 'log "Pipeline interrupted!"; exit 1' SIGINT SIGTERM
+
+# --- Stage functions ---
+
+build_service() {
+    local service="$1"
+    local log_file="$LOG_DIR/${service}-build.log"
+    log "  [BUILD] $service — starting"
+    sleep $((RANDOM % 2 + 1))  # Simulate build time
+    echo "Build artifact for $service v1.0.$(date +%s)" > "$DEPLOY_DIR/$service.tar.gz"
+    log "  [BUILD] $service — complete"
+    echo "SUCCESS" > "$log_file"
+}
+
+test_service() {
+    local service="$1"
+    local log_file="$LOG_DIR/${service}-test.log"
+    log "  [TEST]  $service — running tests"
+    sleep $((RANDOM % 2 + 1))  # Simulate test time
+    log "  [TEST]  $service — 42 tests passed"
+    echo "SUCCESS" > "$log_file"
+}
+
+deploy_service() {
+    local service="$1"
+    local log_file="$LOG_DIR/${service}-deploy.log"
+    log "  [DEPLOY] $service — deploying"
+    sleep $((RANDOM % 2 + 1))  # Simulate deploy time
+    log "  [DEPLOY] $service — live"
+    echo "SUCCESS" > "$log_file"
+}
+
+# Run a stage in parallel for all services, then wait
+run_stage() {
+    local stage_name="$1"
+    local stage_func="$2"
+    STAGE_PIDS=()
+
+    log ""
+    log "===== Stage: $stage_name ====="
+
+    for service in "${SERVICES[@]}"; do
+        "$stage_func" "$service" &
+        STAGE_PIDS+=($!)
+    done
+
+    # Wait for all tasks in this stage
+    local stage_failed=0
+    for i in "${!STAGE_PIDS[@]}"; do
+        if ! wait "${STAGE_PIDS[$i]}"; then
+            log "  FAILED: ${SERVICES[$i]}"
+            stage_failed=$((stage_failed + 1))
+        fi
+    done
+
+    if [ "$stage_failed" -gt 0 ]; then
+        log "Stage '$stage_name' had $stage_failed failure(s)"
+        return 1
+    fi
+
+    log "Stage '$stage_name' complete — all ${#SERVICES[@]} services OK"
+    return 0
+}
+
+# --- Main pipeline ---
+
+main() {
+    mkdir -p "$LOG_DIR"
+
+    log "========================================="
+    log "  Deployment Pipeline"
+    log "  Services: ${SERVICES[*]}"
+    log "========================================="
+
+    local START_TIME=$(date +%s)
+
+    # Stage 1: Build all services in parallel
+    if ! run_stage "Build" build_service; then
+        log "Pipeline FAILED at Build stage"
+        exit 1
+    fi
+
+    # Stage 2: Test all services in parallel
+    if ! run_stage "Test" test_service; then
+        log "Pipeline FAILED at Test stage"
+        exit 1
+    fi
+
+    # Stage 3: Deploy all services in parallel
+    if ! run_stage "Deploy" deploy_service; then
+        log "Pipeline FAILED at Deploy stage"
+        exit 1
+    fi
+
+    local END_TIME=$(date +%s)
+    local ELAPSED=$((END_TIME - START_TIME))
+
+    log ""
+    log "========================================="
+    log "  Pipeline SUCCEEDED"
+    log "  ${#SERVICES[@]} services deployed in ${ELAPSED}s"
+    log "  (Sequential estimate: ~$((${#SERVICES[@]} * 6))s)"
+    log "========================================="
+
+    # Show stage logs
+    log ""
+    log "Stage logs:"
+    for f in "$LOG_DIR"/*.log; do
+        local name=$(basename "$f" .log)
+        local status=$(cat "$f")
+        printf "  %-35s %s\n" "$name" "$status"
+    done
+}
+
+main "$@"
+SCRIPT
+
+chmod +x ~/deploy-pipeline.sh
+~/deploy-pipeline.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Use `&` to run commands in the background; `$!` captures the last background PID
+- `$$` is the current script's PID; use it for PID files and self-identification
+- `wait PID` blocks until a background process finishes and returns its exit code
+- `trap cleanup EXIT` ensures cleanup runs no matter how the script exits
+- `trap handler SIGTERM SIGINT` lets your script handle Ctrl+C and kill gracefully
+- Always kill child processes on exit — orphaned processes cause resource leaks
+- `kill -0 PID` checks if a process is alive without sending a signal
+- Process substitution `< <(cmd)` avoids the pipe-subshell variable trap
+- Parallel execution can dramatically speed up scripts, but adds complexity
+- Use a worker pool pattern when you need to limit concurrency
+
+## What's Next
+
+You can now manage processes, handle signals, and run tasks in parallel. In **Advanced Scripting Patterns**, you'll learn powerful bash constructs — here documents, subshells, command grouping, named pipes, and indirect references — that unlock even more expressive scripts.

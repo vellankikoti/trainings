@@ -1,0 +1,27 @@
+{
+  "id": "docker-fundamentals",
+  "title": "Docker Fundamentals",
+  "slug": "docker-fundamentals",
+  "pathSlug": "containerization",
+  "description": "Learn containerization from scratch. Build, run, and manage Docker containers. Understand images, Dockerfiles, and container lifecycle.",
+  "order": 1,
+  "estimatedHours": 55,
+  "lessonsCount": 15,
+  "lessons": [
+    { "slug": "01-the-docker-story", "title": "The Docker Story", "order": 1 },
+    { "slug": "02-containers-vs-vms", "title": "Containers vs Virtual Machines", "order": 2 },
+    { "slug": "03-docker-architecture", "title": "Docker Architecture", "order": 3 },
+    { "slug": "04-installation", "title": "Installing Docker", "order": 4 },
+    { "slug": "05-your-first-container", "title": "Your First Container", "order": 5 },
+    { "slug": "06-docker-images", "title": "Understanding Docker Images", "order": 6 },
+    { "slug": "07-writing-dockerfiles", "title": "Writing Dockerfiles", "order": 7 },
+    { "slug": "08-multi-stage-builds", "title": "Multi-Stage Builds", "order": 8 },
+    { "slug": "09-docker-volumes", "title": "Docker Volumes and Data Persistence", "order": 9 },
+    { "slug": "10-docker-networking", "title": "Docker Networking", "order": 10 },
+    { "slug": "11-docker-compose", "title": "Docker Compose", "order": 11 },
+    { "slug": "12-environment-variables", "title": "Environment Variables and Configuration", "order": 12 },
+    { "slug": "13-container-logging", "title": "Container Logging and Monitoring", "order": 13 },
+    { "slug": "14-docker-security", "title": "Docker Security Fundamentals", "order": 14 },
+    { "slug": "15-docker-in-production", "title": "Docker in Production", "order": 15 }
+  ]
+}

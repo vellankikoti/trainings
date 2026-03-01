@@ -1,0 +1,1804 @@
+---
+title: "Docker in CI/CD Pipelines"
+description: "Master Docker integration with CI/CD systems including GitHub Actions, GitLab CI, and Jenkins. Learn Docker-in-Docker vs socket mounting, multi-platform builds with buildx, image scanning with Trivy and Snyk, and CI best practices for reproducible, secure container builds."
+order: 6
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - 05-compose-advanced
+objectives:
+  - Understand Docker-in-Docker (DinD) vs Docker socket mounting and choose the right approach
+  - Build and push Docker images in GitHub Actions with buildx and layer caching
+  - Configure GitLab CI and Jenkins pipelines for Docker-based workflows
+  - Integrate image vulnerability scanning with Trivy, Snyk, and Docker Scout
+  - Build multi-platform images for linux/amd64 and linux/arm64 architectures
+  - Apply CI best practices for reproducible builds, minimal images, and efficient layer caching
+tags:
+  - docker
+  - cicd
+  - github-actions
+  - gitlab-ci
+  - jenkins
+  - buildx
+  - trivy
+  - multi-platform
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your team just shipped a critical hotfix at 11 PM on a Friday. The developer built the image on their MacBook, tagged it `latest`, and pushed it straight to production. Monday morning, the staging environment shows a completely different behavior — because the developer's local build had cached layers from an experimental branch. The image was never scanned, never tested in CI, and was built for arm64 while production runs amd64. Three incidents in one deployment, all preventable. Today you build the CI/CD pipeline that makes "it worked on my machine" impossible.
+</Callout>
+
+## Docker-in-Docker vs Socket Mounting
+
+When running Docker commands inside a CI pipeline, you face a fundamental question: how does the CI runner access a Docker daemon? There are two primary approaches, and choosing the wrong one can create security vulnerabilities or break your builds.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        CI Runner Host                                │
+│                                                                      │
+│  ┌──────────────────────────────────────┐                            │
+│  │     Option A: Docker-in-Docker       │                            │
+│  │                                      │                            │
+│  │  ┌────────────────────────────────┐  │                            │
+│  │  │   CI Job Container             │  │                            │
+│  │  │                                │  │                            │
+│  │  │  ┌──────────────────────────┐  │  │                            │
+│  │  │  │  Nested Docker Daemon    │  │  │                            │
+│  │  │  │  (dockerd inside)        │  │  │                            │
+│  │  │  │                          │  │  │                            │
+│  │  │  │  docker build ...        │  │  │                            │
+│  │  │  │  docker push ...         │  │  │                            │
+│  │  │  └──────────────────────────┘  │  │                            │
+│  │  │  --privileged required         │  │                            │
+│  │  │  Isolated layer cache          │  │                            │
+│  │  └────────────────────────────────┘  │                            │
+│  └──────────────────────────────────────┘                            │
+│                                                                      │
+│  ┌──────────────────────────────────┐  ┌──────────────────────────┐  │
+│  │   Option B: Socket Mounting      │  │   Host Docker Daemon     │  │
+│  │                                  │  │                          │  │
+│  │  ┌────────────────────────────┐  │  │  ┌────────────────────┐  │  │
+│  │  │   CI Job Container         │  │  │  │  dockerd           │  │  │
+│  │  │                            │──┼──┼─>│                    │  │  │
+│  │  │  -v /var/run/docker.sock   │  │  │  │  docker build ...  │  │  │
+│  │  │     :/var/run/docker.sock  │  │  │  │  docker push ...   │  │  │
+│  │  │                            │  │  │  │                    │  │  │
+│  │  │  Shares host daemon        │  │  │  │  Shared cache      │  │  │
+│  │  └────────────────────────────┘  │  │  └────────────────────┘  │  │
+│  └──────────────────────────────────┘  └──────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Docker-in-Docker (DinD)
+
+DinD runs a full Docker daemon inside a container. Each CI job gets its own daemon, layer cache, and network namespace.
+
+```bash
+# Running DinD manually for testing
+docker run --privileged --name dind-test -d \
+  docker:27-dind
+
+# Connect a client container to it
+docker run --rm --link dind-test:docker \
+  -e DOCKER_HOST=tcp://docker:2376 \
+  -e DOCKER_TLS_CERTDIR=/certs \
+  docker:27 \
+  docker info
+
+# In GitLab CI, DinD is a service
+# services:
+#   - docker:27-dind
+```
+
+**Advantages of DinD:**
+- Complete isolation between jobs — no shared state
+- Each job gets a clean Docker environment
+- No risk of one job affecting another's builds
+- Works well in Kubernetes-based CI runners
+
+**Disadvantages of DinD:**
+- Requires `--privileged` mode (security concern)
+- No shared layer cache between jobs — slower builds
+- Storage driver limitations (overlayfs inside overlayfs)
+- Higher resource consumption
+
+### Docker Socket Mounting
+
+Socket mounting shares the host's Docker daemon with the CI job container by mounting `/var/run/docker.sock`.
+
+```bash
+# Socket mounting example
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  docker:27 \
+  docker ps
+
+# The container can see ALL containers on the host
+# Including other CI jobs' containers
+```
+
+**Advantages of Socket Mounting:**
+- Shared layer cache — faster builds
+- Lower resource consumption
+- No `--privileged` required
+- Simpler setup
+
+**Disadvantages of Socket Mounting:**
+- CI jobs can see and manipulate other containers on the host
+- A compromised job can access the Docker daemon and escape to the host
+- Build artifacts may collide between concurrent jobs
+- Not truly isolated
+
+<Callout type="warning" title="Socket Mounting Grants Root Access">
+Mounting the Docker socket into a container is equivalent to giving that container root access on the host. Any process inside the container can run `docker run -v /:/host --privileged alpine` and access the entire host filesystem. In multi-tenant CI environments, always use DinD or a rootless alternative like Kaniko.
+</Callout>
+
+### Choosing the Right Approach
+
+| Factor | DinD | Socket Mounting |
+|--------|------|-----------------|
+| **Isolation** | Full isolation | Shared daemon |
+| **Layer cache** | Per-job (cold) | Shared (warm) |
+| **Security** | Needs `--privileged` | Grants host access |
+| **Performance** | Slower first builds | Faster with cache |
+| **Multi-tenant** | Safe | Unsafe |
+| **Complexity** | More setup | Simpler |
+| **Kubernetes** | Works well | Requires DaemonSet |
+
+### Rootless Alternatives
+
+For environments where neither DinD nor socket mounting is acceptable, consider rootless build tools:
+
+```bash
+# Kaniko — builds images without a Docker daemon
+# Used in Kubernetes-based CI (no --privileged needed)
+docker run --rm \
+  -v $(pwd):/workspace \
+  gcr.io/kaniko-project/executor:latest \
+  --dockerfile /workspace/Dockerfile \
+  --destination registry.example.com/myapp:latest \
+  --context /workspace
+
+# Buildah — OCI image builder without a daemon
+buildah bud -t myapp:latest .
+buildah push myapp:latest docker://registry.example.com/myapp:latest
+```
+
+## Building Images in GitHub Actions
+
+GitHub Actions is the most popular CI platform for open-source projects. Docker provides official actions that handle authentication, buildx setup, and caching.
+
+### Basic Docker Build Workflow
+
+```yaml
+# .github/workflows/docker-build.yml
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Step 3: Log in to the container registry
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 4: Extract metadata for tags and labels
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
+      # Step 5: Build and push
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+```
+
+### Understanding Layer Caching in CI
+
+Layer caching is the single biggest performance optimization for Docker builds in CI. Without caching, every build downloads base images and reinstalls dependencies from scratch.
+
+```
+Without Cache                          With Cache
+─────────────                          ──────────
+Step 1: FROM node:20-alpine            Step 1: FROM node:20-alpine
+  ↓ Pull 80MB base image                 ↓ CACHED (already in cache)
+  Time: 15s                              Time: 0s
+
+Step 2: COPY package*.json ./          Step 2: COPY package*.json ./
+  ↓ Copy files                           ↓ CACHED (files unchanged)
+  Time: 1s                              Time: 0s
+
+Step 3: RUN npm ci                     Step 3: RUN npm ci
+  ↓ Install all dependencies             ↓ CACHED (package.json unchanged)
+  Time: 45s                              Time: 0s
+
+Step 4: COPY . .                       Step 4: COPY . .
+  ↓ Copy source code                     ↓ Source changed, rebuild from here
+  Time: 2s                              Time: 2s
+
+Step 5: RUN npm run build             Step 5: RUN npm run build
+  ↓ Build application                   ↓ Must rebuild (cache invalidated)
+  Time: 30s                              Time: 30s
+
+Total: ~93s                            Total: ~32s
+       ^^^^^^                                 ^^^^^
+       Every single build                     Only changed layers
+```
+
+GitHub Actions supports three cache backends:
+
+```yaml
+# Option 1: GitHub Actions cache (gha) — simplest, recommended
+- name: Build with GHA cache
+  uses: docker/build-push-action@v5
+  with:
+    context: .
+    cache-from: type=gha
+    cache-to: type=gha,mode=max
+
+# Option 2: Registry cache — stores cache in your container registry
+- name: Build with registry cache
+  uses: docker/build-push-action@v5
+  with:
+    context: .
+    cache-from: type=registry,ref=ghcr.io/myorg/myapp:buildcache
+    cache-to: type=registry,ref=ghcr.io/myorg/myapp:buildcache,mode=max
+
+# Option 3: Local cache — useful for self-hosted runners
+- name: Build with local cache
+  uses: docker/build-push-action@v5
+  with:
+    context: .
+    cache-from: type=local,src=/tmp/.buildx-cache
+    cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+```
+
+<Callout type="tip" title="Use mode=max for Complete Caching">
+The `mode=max` option caches all layers from all build stages, including intermediate layers from multi-stage builds. Without it, only the final stage layers are cached. This can make a dramatic difference for multi-stage builds where the build stage has expensive dependency installation steps.
+</Callout>
+
+## GitLab CI with Docker Executor
+
+GitLab CI has first-class Docker support through its Docker executor and the DinD service container pattern.
+
+### GitLab CI Docker Build Pipeline
+
+```yaml
+# .gitlab-ci.yml
+stages:
+  - lint
+  - build
+  - scan
+  - test
+  - push
+
+variables:
+  DOCKER_HOST: tcp://docker:2376
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_TLS_VERIFY: 1
+  DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+  IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+
+# Use DinD as a service for all jobs that need Docker
+.docker_base:
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - docker info
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+
+# Lint the Dockerfile
+lint:
+  stage: lint
+  image: hadolint/hadolint:latest-alpine
+  script:
+    - hadolint Dockerfile
+  rules:
+    - changes:
+        - Dockerfile
+
+# Build the Docker image
+build:
+  extends: .docker_base
+  stage: build
+  script:
+    - docker build
+        --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        --build-arg VCS_REF=$CI_COMMIT_SHORT_SHA
+        --build-arg VERSION=$CI_COMMIT_TAG
+        -t $IMAGE_TAG
+        -t $CI_REGISTRY_IMAGE:build-$CI_PIPELINE_ID
+        .
+    - docker save $IMAGE_TAG | gzip > image.tar.gz
+  artifacts:
+    paths:
+      - image.tar.gz
+    expire_in: 1 hour
+
+# Scan the image for vulnerabilities
+scan:
+  extends: .docker_base
+  stage: scan
+  script:
+    - docker load < image.tar.gz
+    - docker run --rm
+        -v /var/run/docker.sock:/var/run/docker.sock
+        aquasec/trivy:latest image
+        --exit-code 1
+        --severity HIGH,CRITICAL
+        --no-progress
+        $IMAGE_TAG
+  allow_failure: false
+
+# Run integration tests using the built image
+test:
+  extends: .docker_base
+  stage: test
+  script:
+    - docker load < image.tar.gz
+    - docker run -d --name test-app -p 8080:8080 $IMAGE_TAG
+    - sleep 5
+    - docker run --rm --network host curlimages/curl:latest
+        curl -f http://localhost:8080/health
+    - docker logs test-app
+    - docker rm -f test-app
+
+# Push to registry on main branch only
+push:
+  extends: .docker_base
+  stage: push
+  script:
+    - docker load < image.tar.gz
+    - docker tag $IMAGE_TAG $CI_REGISTRY_IMAGE:latest
+    - docker push $IMAGE_TAG
+    - docker push $CI_REGISTRY_IMAGE:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+```
+
+<Callout type="info" title="GitLab Container Registry">
+GitLab provides a built-in container registry at `registry.gitlab.com/your-group/your-project`. Authentication uses `CI_REGISTRY_USER` and `CI_REGISTRY_PASSWORD` variables that are automatically available in CI jobs. You do not need to configure any external registry for basic workflows.
+</Callout>
+
+## Jenkins with Docker Agents
+
+Jenkins can use Docker containers as build agents, running each pipeline stage in an isolated container.
+
+### Jenkinsfile with Docker Agents
+
+```groovy
+// Jenkinsfile
+pipeline {
+    agent none
+
+    environment {
+        REGISTRY = 'registry.example.com'
+        IMAGE_NAME = 'myorg/webapp'
+        REGISTRY_CREDENTIALS = 'registry-creds'
+    }
+
+    stages {
+        stage('Lint Dockerfile') {
+            agent {
+                docker {
+                    image 'hadolint/hadolint:latest-alpine'
+                    args '--entrypoint=""'
+                }
+            }
+            steps {
+                sh 'hadolint Dockerfile'
+            }
+        }
+
+        stage('Build Image') {
+            agent any
+            steps {
+                script {
+                    def commitHash = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+
+                    docker.withRegistry(
+                        "https://${REGISTRY}",
+                        REGISTRY_CREDENTIALS
+                    ) {
+                        def image = docker.build(
+                            "${REGISTRY}/${IMAGE_NAME}:${commitHash}",
+                            "--build-arg BUILD_DATE=\$(date -u +%Y-%m-%dT%H:%M:%SZ) " +
+                            "--build-arg VCS_REF=${commitHash} " +
+                            "--no-cache ."
+                        )
+
+                        // Store for later stages
+                        env.BUILT_IMAGE = "${REGISTRY}/${IMAGE_NAME}:${commitHash}"
+                        env.COMMIT_HASH = commitHash
+                    }
+                }
+            }
+        }
+
+        stage('Security Scan') {
+            agent any
+            steps {
+                sh """
+                    docker run --rm \
+                      -v /var/run/docker.sock:/var/run/docker.sock \
+                      aquasec/trivy:latest image \
+                      --exit-code 1 \
+                      --severity CRITICAL \
+                      --no-progress \
+                      ${env.BUILT_IMAGE}
+                """
+            }
+        }
+
+        stage('Integration Test') {
+            agent any
+            steps {
+                sh """
+                    docker run -d --name test-\${BUILD_NUMBER} \
+                      -p 0:8080 ${env.BUILT_IMAGE}
+                    sleep 5
+
+                    PORT=\$(docker port test-\${BUILD_NUMBER} 8080 | cut -d: -f2)
+                    curl -f http://localhost:\${PORT}/health
+
+                    docker rm -f test-\${BUILD_NUMBER}
+                """
+            }
+        }
+
+        stage('Push') {
+            agent any
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    docker.withRegistry(
+                        "https://${REGISTRY}",
+                        REGISTRY_CREDENTIALS
+                    ) {
+                        def image = docker.image(env.BUILT_IMAGE)
+                        image.push()
+                        image.push('latest')
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker system prune -f --filter "until=24h" || true'
+        }
+        failure {
+            echo "Pipeline failed. Check the logs above."
+        }
+    }
+}
+```
+
+## Image Scanning in CI
+
+Vulnerability scanning catches known CVEs before images reach production. Multiple tools exist, each with different strengths.
+
+### Trivy — Open Source Scanner
+
+```bash
+# Run Trivy locally
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image \
+  --severity HIGH,CRITICAL \
+  --no-progress \
+  myapp:latest
+
+# Example output:
+# myapp:latest (alpine 3.19.0)
+# ==========================================
+# Total: 3 (HIGH: 2, CRITICAL: 1)
+#
+# ┌──────────────┬────────────────┬──────────┬────────────────┬──────────────────┐
+# │   Library    │ Vulnerability  │ Severity │ Installed Ver  │   Fixed Version  │
+# ├──────────────┼────────────────┼──────────┼────────────────┼──────────────────┤
+# │ libcrypto3   │ CVE-2024-0727  │ CRITICAL │ 3.1.4-r1       │ 3.1.4-r3         │
+# │ libssl3      │ CVE-2024-0727  │ HIGH     │ 3.1.4-r1       │ 3.1.4-r3         │
+# │ busybox      │ CVE-2023-42363 │ HIGH     │ 1.36.1-r2      │ 1.36.1-r7        │
+# └──────────────┴────────────────┴──────────┴────────────────┴──────────────────┘
+```
+
+### Trivy in GitHub Actions
+
+```yaml
+# .github/workflows/scan.yml
+- name: Run Trivy vulnerability scanner
+  uses: aquasecurity/trivy-action@master
+  with:
+    image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+    format: 'sarif'
+    output: 'trivy-results.sarif'
+    severity: 'CRITICAL,HIGH'
+    exit-code: '1'
+
+- name: Upload Trivy scan results to GitHub Security
+  uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: 'trivy-results.sarif'
+```
+
+### Snyk Container Scanning
+
+```yaml
+# In GitHub Actions
+- name: Run Snyk container scan
+  uses: snyk/actions/docker@master
+  env:
+    SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+  with:
+    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+    args: --severity-threshold=high --file=Dockerfile
+
+# Snyk CLI locally
+snyk container test myapp:latest --severity-threshold=high
+snyk container monitor myapp:latest  # Continuous monitoring
+```
+
+### Docker Scout
+
+```bash
+# Docker Scout is built into Docker Desktop and Docker Hub
+docker scout cves myapp:latest
+
+# Quickview — summary of vulnerabilities
+docker scout quickview myapp:latest
+
+# Compare two images
+docker scout compare --to myapp:v1.0 myapp:v1.1
+
+# In GitHub Actions
+- name: Docker Scout scan
+  uses: docker/scout-action@v1
+  with:
+    command: cves
+    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+    sarif-file: scout-results.sarif
+    exit-code: true
+    only-severities: critical,high
+```
+
+### Scanner Comparison
+
+| Feature | Trivy | Snyk | Docker Scout |
+|---------|-------|------|--------------|
+| **Cost** | Free / OSS | Free tier + paid | Free tier + paid |
+| **OS packages** | Yes | Yes | Yes |
+| **Language deps** | Yes | Yes | Yes |
+| **IaC scanning** | Yes | Yes | No |
+| **License check** | Yes | Yes | Yes |
+| **SBOM generation** | Yes | Yes | Yes |
+| **Fix suggestions** | Basic | Detailed | Detailed |
+| **CI integration** | All platforms | All platforms | GitHub, GitLab |
+| **Speed** | Fast | Medium | Fast |
+
+<Callout type="warning" title="Fail the Build on Critical CVEs">
+Always configure your scanner to fail the CI pipeline when critical vulnerabilities are found. Without an enforced gate, scan results become informational noise that developers ignore. Set `--exit-code 1` in Trivy or `--severity-threshold=critical` in Snyk to make the pipeline fail and block the deployment.
+</Callout>
+
+## Multi-Platform Builds
+
+Modern applications need to run on multiple CPU architectures. Apple Silicon Macs use arm64, while most cloud servers run amd64. Docker buildx makes it possible to build for both from a single machine.
+
+### Setting Up Buildx for Multi-Platform
+
+```bash
+# Check current buildx builders
+docker buildx ls
+# NAME/NODE    DRIVER/ENDPOINT    STATUS    BUILDKIT    PLATFORMS
+# default      docker
+#   default    default            running   v0.12.4     linux/amd64
+
+# Create a new builder with multi-platform support
+docker buildx create --name multiplatform \
+  --driver docker-container \
+  --bootstrap \
+  --use
+
+# Verify — you should see multiple platforms
+docker buildx inspect multiplatform
+# Platforms: linux/amd64, linux/arm64, linux/arm/v7, linux/arm/v6,
+#            linux/386, linux/ppc64le, linux/s390x
+
+# Build for multiple platforms and push to registry
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --tag registry.example.com/myapp:v1.0.0 \
+  --push \
+  .
+
+# Build for multiple platforms and load locally (single platform only)
+docker buildx build \
+  --platform linux/amd64 \
+  --tag myapp:v1.0.0 \
+  --load \
+  .
+```
+
+<Callout type="info" title="How Multi-Platform Builds Work">
+Under the hood, buildx uses QEMU emulation to run build steps for foreign architectures. When you build for `linux/arm64` on an `amd64` host, the `RUN` instructions in your Dockerfile are executed inside a QEMU-emulated arm64 environment. This is slower than native builds but produces genuine arm64 binaries. For performance-critical builds, you can use native arm64 build nodes instead of QEMU emulation.
+</Callout>
+
+### Multi-Platform in GitHub Actions
+
+```yaml
+# .github/workflows/multi-platform.yml
+name: Multi-Platform Build
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push multi-platform image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/myapp:${{ github.ref_name }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/myapp:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Inspect manifest
+        run: |
+          docker buildx imagetools inspect \
+            ${{ secrets.DOCKERHUB_USERNAME }}/myapp:${{ github.ref_name }}
+```
+
+### Platform-Specific Dockerfile Instructions
+
+Sometimes you need different build steps for different architectures:
+
+```dockerfile
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
+
+# These args are automatically set by buildx
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
+
+# Platform-aware dependency installation
+RUN echo "Building on $BUILDPLATFORM for $TARGETPLATFORM"
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+RUN npm run build
+
+# Production stage — uses target platform
+FROM node:20-alpine
+
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+USER appuser
+
+EXPOSE 3000
+CMD ["node", "dist/index.js"]
+```
+
+## CI Best Practices
+
+### Reproducible Builds
+
+```dockerfile
+# BAD: Non-reproducible
+FROM node:latest                    # Tag changes over time
+RUN apt-get update && apt-get install -y curl  # Versions vary
+COPY . .
+RUN npm install                     # Uses ^ ranges from package.json
+
+# GOOD: Reproducible
+FROM node:20.11.0-alpine3.19@sha256:abc123...  # Pinned digest
+RUN apk add --no-cache curl=8.5.0-r0           # Pinned version
+COPY package.json package-lock.json ./
+RUN npm ci                                      # Uses exact lockfile versions
+COPY . .
+RUN npm run build
+```
+
+### Tagging Strategy
+
+```bash
+# Use semantic versioning + commit SHA + branch
+# Never rely solely on :latest
+
+# Tag format: registry/image:v{major}.{minor}.{patch}
+# Also tag:   registry/image:{commit-sha}
+# Also tag:   registry/image:{branch-name}
+
+# Example tagging in CI:
+IMAGE=registry.example.com/myorg/webapp
+COMMIT_SHA=$(git rev-parse --short HEAD)
+VERSION=$(cat VERSION)  # or from git tag
+
+docker build \
+  -t ${IMAGE}:${VERSION} \
+  -t ${IMAGE}:${COMMIT_SHA} \
+  -t ${IMAGE}:latest \
+  .
+
+docker push ${IMAGE}:${VERSION}
+docker push ${IMAGE}:${COMMIT_SHA}
+docker push ${IMAGE}:latest
+```
+
+### Build Arguments for Metadata
+
+```dockerfile
+# Add build metadata using OCI labels
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/myorg/webapp" \
+      org.opencontainers.image.title="webapp" \
+      org.opencontainers.image.description="Production web application"
+```
+
+```bash
+# Pass build args in CI
+docker build \
+  --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+  --build-arg VCS_REF=$(git rev-parse --short HEAD) \
+  --build-arg VERSION=$(git describe --tags --always) \
+  -t myapp:latest .
+
+# Inspect labels later
+docker inspect myapp:latest --format '{{json .Config.Labels}}' | jq .
+# {
+#   "org.opencontainers.image.created": "2025-01-15T10:30:00Z",
+#   "org.opencontainers.image.revision": "a1b2c3d",
+#   "org.opencontainers.image.version": "v1.2.3"
+# }
+```
+
+### Complete Production CI Pipeline
+
+```yaml
+# .github/workflows/production.yml
+name: Production Pipeline
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Job 1: Lint the Dockerfile
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+  # Job 2: Run application tests
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+
+  # Job 3: Build, scan, and push
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:scan
+          cache-from: type=gha
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:scan
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Build and push multi-platform
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+```
+
+<Callout type="tip" title="Separate Build and Push Steps for Scanning">
+Build the image with `--load` first (single platform), run your security scan on it, and only then build and push the multi-platform version with `--push`. This avoids pushing vulnerable images to your registry. The multi-platform build reuses the cached layers from the first build, so the overhead is minimal.
+</Callout>
+
+<Exercise title="Set Up a GitHub Actions Docker Build Pipeline" difficulty="intermediate" xpReward={35} estimatedMinutes={25}>
+
+Create a complete GitHub Actions workflow that builds, scans, and pushes a Docker image with proper caching and metadata.
+
+**Objectives:**
+- Create a multi-stage Dockerfile for a Node.js application
+- Write a GitHub Actions workflow with buildx and layer caching
+- Include Trivy vulnerability scanning that blocks on critical CVEs
+- Use docker/metadata-action for proper image tagging
+- Configure multi-platform builds for amd64 and arm64
+
+**Hints:**
+- Use `docker/setup-buildx-action@v3` for buildx setup
+- Set `cache-from: type=gha` and `cache-to: type=gha,mode=max` for GitHub Actions cache
+- Build with `--load` for scanning before pushing with `--push`
+- Use `docker/setup-qemu-action@v3` for multi-platform support
+- The `docker/metadata-action@v5` automatically generates semver tags from git tags
+
+**Validation Criteria:**
+- Dockerfile uses multi-stage build with a non-root user
+- Workflow triggers on push to main and version tags
+- Buildx is configured with GHA caching
+- Trivy scan runs with exit-code 1 on CRITICAL severity
+- Multi-platform build targets linux/amd64 and linux/arm64
+- Images are only pushed on main branch, not on pull requests
+
+<CollapsibleSolution>
+
+```bash
+mkdir -p ~/cicd-demo/.github/workflows
+
+# Create a simple Node.js application
+cat > ~/cicd-demo/package.json << 'EOF'
+{
+  "name": "cicd-demo",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Tests passed\" && exit 0",
+    "build": "echo \"Build complete\""
+  }
+}
+EOF
+
+cat > ~/cicd-demo/server.js << 'EOF'
+const http = require('http');
+const server = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'healthy',
+      version: process.env.APP_VERSION || 'unknown',
+      timestamp: new Date().toISOString()
+    }));
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('CI/CD Demo Application\n');
+});
+server.listen(3000, () => console.log('Listening on port 3000'));
+EOF
+
+# Create the multi-stage Dockerfile
+cat > ~/cicd-demo/Dockerfile << 'EOF'
+# Stage 1: Build
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+# Stage 2: Production
+FROM node:20-alpine
+
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.title="cicd-demo"
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+
+COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --chown=appuser:appgroup server.js package.json ./
+
+ENV APP_VERSION=${VERSION}
+
+USER appuser
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+EXPOSE 3000
+CMD ["node", "server.js"]
+EOF
+
+# Create the GitHub Actions workflow
+cat > ~/cicd-demo/.github/workflows/docker-build.yml << 'WORKFLOW'
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm test
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
+      - name: Build for scanning (single platform)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:scan
+          cache-from: type=gha
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.version }}
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:scan
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Build and push multi-platform
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.version }}
+WORKFLOW
+
+echo "Pipeline created successfully!"
+echo ""
+echo "Structure:"
+find ~/cicd-demo -type f | sort
+```
+
+This workflow implements a complete CI pipeline: Dockerfile linting with Hadolint, application tests, a single-platform build for vulnerability scanning, Trivy scanning with SARIF upload to GitHub Security, and a multi-platform build and push with GHA layer caching. Images are only pushed on the main branch, never on pull requests.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise title="Implement a Security Scanning Pipeline" difficulty="advanced" xpReward={40} estimatedMinutes={30}>
+
+Build a comprehensive security scanning pipeline that uses multiple scanners and generates a consolidated report.
+
+**Objectives:**
+- Configure Trivy to scan for OS package vulnerabilities and application dependencies
+- Add Dockerfile linting with Hadolint as a first gate
+- Create a scan summary script that parses results from multiple scanners
+- Set up severity-based gates (block on critical, warn on high)
+
+**Hints:**
+- Trivy can output in JSON format with `--format json` for programmatic parsing
+- Hadolint can output in JSON with `--format json`
+- Use `jq` to parse JSON scanner output and create a summary
+- Consider scanning both the Dockerfile (static analysis) and the built image (runtime dependencies)
+- Use `--ignore-unfixed` in Trivy to filter out vulnerabilities with no available fix
+
+**Validation Criteria:**
+- Hadolint runs as a first gate before image build
+- Trivy scans the built image with JSON output
+- A summary script counts vulnerabilities by severity
+- Pipeline fails on CRITICAL vulnerabilities
+- Pipeline warns but continues on HIGH vulnerabilities
+- Unfixed vulnerabilities are separately reported but do not fail the build
+
+<CollapsibleSolution>
+
+```bash
+mkdir -p ~/security-scan-demo/scripts
+
+# Create a Dockerfile with intentional lint issues for demonstration
+cat > ~/security-scan-demo/Dockerfile << 'EOF'
+FROM node:20-alpine
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+
+COPY package.json ./
+RUN npm install --only=production
+
+COPY . .
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+EXPOSE 3000
+CMD ["node", "server.js"]
+EOF
+
+cat > ~/security-scan-demo/server.js << 'EOF'
+const http = require('http');
+const server = http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Security scan demo\n');
+});
+server.listen(3000);
+EOF
+
+cat > ~/security-scan-demo/package.json << 'EOF'
+{
+  "name": "security-scan-demo",
+  "version": "1.0.0",
+  "dependencies": {}
+}
+EOF
+
+# Create the comprehensive scan script
+cat > ~/security-scan-demo/scripts/scan.sh << 'SCANEOF'
+#!/bin/bash
+set -euo pipefail
+
+IMAGE="${1:-myapp:latest}"
+REPORT_DIR="./scan-reports"
+mkdir -p "$REPORT_DIR"
+
+EXIT_CODE=0
+
+echo "============================================"
+echo "  Security Scan Pipeline"
+echo "  Image: $IMAGE"
+echo "  Date:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "============================================"
+echo ""
+
+# ─── Step 1: Hadolint (Dockerfile linting) ───
+echo "--- Step 1: Dockerfile Lint (Hadolint) ---"
+if command -v hadolint &>/dev/null; then
+  hadolint --format json Dockerfile > "$REPORT_DIR/hadolint.json" 2>&1 || true
+  LINT_ISSUES=$(cat "$REPORT_DIR/hadolint.json" | jq 'length')
+  LINT_ERRORS=$(cat "$REPORT_DIR/hadolint.json" | jq '[.[] | select(.level == "error")] | length')
+  LINT_WARNINGS=$(cat "$REPORT_DIR/hadolint.json" | jq '[.[] | select(.level == "warning")] | length')
+  echo "  Issues: $LINT_ISSUES (Errors: $LINT_ERRORS, Warnings: $LINT_WARNINGS)"
+  if [ "$LINT_ERRORS" -gt 0 ]; then
+    echo "  FAIL: Dockerfile has $LINT_ERRORS errors"
+    EXIT_CODE=1
+  fi
+else
+  echo "  SKIP: hadolint not installed (install for Dockerfile linting)"
+fi
+echo ""
+
+# ─── Step 2: Trivy (Image vulnerability scan) ───
+echo "--- Step 2: Image Vulnerability Scan (Trivy) ---"
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$(pwd)/$REPORT_DIR:/reports" \
+  aquasec/trivy:latest image \
+  --format json \
+  --output /reports/trivy-full.json \
+  --no-progress \
+  "$IMAGE" 2>/dev/null || true
+
+# Parse Trivy results
+if [ -f "$REPORT_DIR/trivy-full.json" ]; then
+  CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$REPORT_DIR/trivy-full.json")
+  HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$REPORT_DIR/trivy-full.json")
+  MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "$REPORT_DIR/trivy-full.json")
+  LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "$REPORT_DIR/trivy-full.json")
+
+  echo "  Vulnerabilities found:"
+  echo "    CRITICAL: $CRITICAL"
+  echo "    HIGH:     $HIGH"
+  echo "    MEDIUM:   $MEDIUM"
+  echo "    LOW:      $LOW"
+  echo ""
+
+  if [ "$CRITICAL" -gt 0 ]; then
+    echo "  FAIL: $CRITICAL critical vulnerabilities found"
+    echo "  Critical CVEs:"
+    jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL") | "    - \(.VulnerabilityID): \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion // "no fix")"' \
+      "$REPORT_DIR/trivy-full.json"
+    EXIT_CODE=1
+  fi
+
+  if [ "$HIGH" -gt 0 ]; then
+    echo "  WARN: $HIGH high vulnerabilities found"
+  fi
+
+  # Check for unfixed vulnerabilities separately
+  UNFIXED=$(jq '[.Results[]?.Vulnerabilities[]? | select(.FixedVersion == null or .FixedVersion == "")] | length' "$REPORT_DIR/trivy-full.json")
+  echo ""
+  echo "  Unfixed vulnerabilities (no patch available): $UNFIXED"
+  echo "  (These do not fail the build)"
+else
+  echo "  ERROR: Trivy scan did not produce output"
+fi
+echo ""
+
+# ─── Summary ───
+echo "============================================"
+echo "  Scan Summary"
+echo "============================================"
+echo "  Hadolint:  ${LINT_ISSUES:-N/A} issues"
+echo "  Trivy:     C:${CRITICAL:-0} H:${HIGH:-0} M:${MEDIUM:-0} L:${LOW:-0}"
+echo "  Unfixed:   ${UNFIXED:-0}"
+echo ""
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  echo "  RESULT: FAILED — fix critical issues before deploying"
+else
+  echo "  RESULT: PASSED — image meets security requirements"
+fi
+
+echo "  Reports saved to: $REPORT_DIR/"
+echo "============================================"
+
+exit $EXIT_CODE
+SCANEOF
+
+chmod +x ~/security-scan-demo/scripts/scan.sh
+
+# Build and scan
+cd ~/security-scan-demo
+docker build -t scan-demo:latest .
+
+echo ""
+echo "Running security scan..."
+bash ./scripts/scan.sh scan-demo:latest || echo "Scan completed with findings"
+
+echo ""
+echo "Report files:"
+ls -la scan-reports/
+```
+
+This pipeline runs multiple scanners in sequence, parses their JSON output, and produces a consolidated summary. Critical vulnerabilities fail the build. High vulnerabilities generate warnings. Unfixed vulnerabilities are reported separately since you cannot remediate them by updating packages. The JSON reports can be archived as CI artifacts for audit purposes.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Complete CI/CD Pipeline with Multi-Stage Quality Gates">
+
+Build a production-grade CI/CD pipeline that takes a web application from source code to a scanned, tested, multi-platform container image ready for deployment.
+
+Your pipeline must include:
+
+1. **Dockerfile linting** with Hadolint
+2. **Application tests** before building the image
+3. **Multi-stage Docker build** with a non-root user and health check
+4. **Vulnerability scanning** with Trivy (fail on CRITICAL)
+5. **Integration testing** by running the container and hitting its health endpoint
+6. **Multi-platform build** for linux/amd64 and linux/arm64
+7. **Proper tagging** with semantic versioning, commit SHA, and branch name
+8. **Build metadata** embedded as OCI labels
+
+```bash
+mkdir -p ~/full-cicd-demo/{src,scripts,.github/workflows}
+
+# ─── Application Source ───
+cat > ~/full-cicd-demo/src/server.js << 'EOF'
+const http = require('http');
+const os = require('os');
+
+const PORT = process.env.PORT || 3000;
+const VERSION = process.env.APP_VERSION || 'dev';
+let requestCount = 0;
+
+const server = http.createServer((req, res) => {
+  requestCount++;
+  const respond = (code, body) => {
+    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body, null, 2) + '\n');
+  };
+
+  switch (req.url) {
+    case '/health':
+      respond(200, {
+        status: 'healthy',
+        version: VERSION,
+        uptime: Math.floor(process.uptime()),
+        hostname: os.hostname(),
+        platform: os.platform(),
+        arch: os.arch(),
+        pid: process.pid,
+        uid: process.getuid(),
+        memory_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
+      });
+      break;
+    case '/ready':
+      respond(200, { ready: true });
+      break;
+    case '/metrics':
+      respond(200, {
+        requests_total: requestCount,
+        uptime_seconds: Math.floor(process.uptime()),
+        memory: process.memoryUsage()
+      });
+      break;
+    default:
+      respond(200, {
+        message: 'Full CI/CD Demo',
+        version: VERSION,
+        arch: os.arch()
+      });
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(JSON.stringify({
+    event: 'server_started',
+    port: PORT,
+    version: VERSION,
+    arch: os.arch(),
+    uid: process.getuid(),
+    timestamp: new Date().toISOString()
+  }));
+});
+
+process.on('SIGTERM', () => {
+  console.log(JSON.stringify({ event: 'shutdown', signal: 'SIGTERM' }));
+  server.close(() => process.exit(0));
+});
+EOF
+
+cat > ~/full-cicd-demo/package.json << 'EOF'
+{
+  "name": "full-cicd-demo",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node -e \"console.log('All tests passed'); process.exit(0)\""
+  }
+}
+EOF
+
+# ─── Multi-stage Dockerfile ───
+cat > ~/full-cicd-demo/Dockerfile << 'EOF'
+# Stage 1: Dependencies
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
+
+# Stage 2: Production
+FROM node:20-alpine
+
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION=dev
+
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.title="full-cicd-demo" \
+      org.opencontainers.image.description="Production CI/CD demo application" \
+      org.opencontainers.image.source="https://github.com/example/full-cicd-demo"
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+
+COPY --from=deps --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --chown=appuser:appgroup package.json ./
+COPY --chown=appuser:appgroup src/ ./src/
+
+ENV APP_VERSION=${VERSION} \
+    NODE_ENV=production \
+    PORT=3000
+
+USER appuser
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+EXPOSE 3000
+
+CMD ["node", "src/server.js"]
+EOF
+
+# ─── .dockerignore ───
+cat > ~/full-cicd-demo/.dockerignore << 'EOF'
+.git
+.github
+node_modules
+scan-reports
+scripts
+*.md
+.dockerignore
+EOF
+
+# ─── Integration test script ───
+cat > ~/full-cicd-demo/scripts/integration-test.sh << 'TESTEOF'
+#!/bin/bash
+set -euo pipefail
+
+IMAGE="${1:-myapp:latest}"
+CONTAINER_NAME="integration-test-$$"
+MAX_WAIT=30
+
+echo "=== Integration Test ==="
+echo "Image: $IMAGE"
+
+# Start the container
+docker run -d --name "$CONTAINER_NAME" \
+  -p 0:3000 \
+  --memory 128m \
+  --cpus 0.5 \
+  "$IMAGE"
+
+# Get the assigned port
+PORT=$(docker port "$CONTAINER_NAME" 3000 | head -1 | cut -d: -f2)
+echo "Container started on port $PORT"
+
+# Wait for health
+echo "Waiting for container to become healthy..."
+for i in $(seq 1 $MAX_WAIT); do
+  if curl -sf "http://localhost:$PORT/health" > /dev/null 2>&1; then
+    echo "  Healthy after ${i}s"
+    break
+  fi
+  if [ "$i" -eq "$MAX_WAIT" ]; then
+    echo "  FAIL: Container did not become healthy in ${MAX_WAIT}s"
+    docker logs "$CONTAINER_NAME"
+    docker rm -f "$CONTAINER_NAME"
+    exit 1
+  fi
+  sleep 1
+done
+
+# Run tests
+PASS=0
+FAIL=0
+
+test_endpoint() {
+  local path=$1
+  local expected=$2
+  local response
+  response=$(curl -sf "http://localhost:$PORT$path" 2>/dev/null) || {
+    echo "  FAIL: $path — no response"
+    FAIL=$((FAIL+1))
+    return
+  }
+  if echo "$response" | grep -q "$expected"; then
+    echo "  PASS: $path — contains '$expected'"
+    PASS=$((PASS+1))
+  else
+    echo "  FAIL: $path — expected '$expected', got: $response"
+    FAIL=$((FAIL+1))
+  fi
+}
+
+echo ""
+echo "Running endpoint tests..."
+test_endpoint "/health" "healthy"
+test_endpoint "/ready" "true"
+test_endpoint "/metrics" "requests_total"
+test_endpoint "/" "CI/CD Demo"
+
+echo ""
+echo "Results: $PASS passed, $FAIL failed"
+
+# Check that container is running as non-root
+UID_CHECK=$(docker exec "$CONTAINER_NAME" id -u 2>/dev/null)
+if [ "$UID_CHECK" != "0" ]; then
+  echo "  PASS: Running as non-root (UID: $UID_CHECK)"
+  PASS=$((PASS+1))
+else
+  echo "  FAIL: Running as root"
+  FAIL=$((FAIL+1))
+fi
+
+# Cleanup
+docker rm -f "$CONTAINER_NAME" > /dev/null
+
+echo ""
+if [ "$FAIL" -gt 0 ]; then
+  echo "RESULT: FAILED ($FAIL failures)"
+  exit 1
+else
+  echo "RESULT: PASSED (all $PASS tests)"
+  exit 0
+fi
+TESTEOF
+
+chmod +x ~/full-cicd-demo/scripts/integration-test.sh
+
+# ─── GitHub Actions Workflow ───
+cat > ~/full-cicd-demo/.github/workflows/ci.yml << 'CIEOF'
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  lint:
+    name: Lint Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+
+  test:
+    name: Application Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm test
+
+  build-and-scan:
+    name: Build, Scan, and Test
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
+      - name: Build for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: local/scan:latest
+          cache-from: type=gha
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.version }}
+
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: local/scan:latest
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+      - name: Upload scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Integration tests
+        run: bash scripts/integration-test.sh local/scan:latest
+
+      - name: Log in to registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-platform
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.version }}
+CIEOF
+
+# ─── Run locally to verify ───
+cd ~/full-cicd-demo
+
+echo "=== Building the image ==="
+docker build \
+  --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+  --build-arg VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo "local") \
+  --build-arg VERSION=1.0.0-local \
+  -t full-cicd-demo:local .
+
+echo ""
+echo "=== Running integration tests ==="
+bash scripts/integration-test.sh full-cicd-demo:local
+
+echo ""
+echo "=== Checking image labels ==="
+docker inspect full-cicd-demo:local --format '{{json .Config.Labels}}' | jq . 2>/dev/null || \
+  docker inspect full-cicd-demo:local --format '{{json .Config.Labels}}'
+
+echo ""
+echo "=== Image size ==="
+docker images full-cicd-demo:local --format "{{.Size}}"
+
+# Cleanup
+docker rmi full-cicd-demo:local 2>/dev/null || true
+```
+
+This mini project creates a production-grade CI/CD pipeline with five quality gates: Dockerfile linting, application tests, vulnerability scanning, integration testing, and finally multi-platform build and push. Each gate must pass before the next runs. The integration test script validates endpoints, non-root execution, and container health. OCI labels embed build metadata for traceability. The entire pipeline can be run locally using the scripts or automatically in GitHub Actions.
+
+</MiniProject>
+
+## Key Takeaways
+
+- **Docker-in-Docker (DinD)** provides full isolation between CI jobs but requires `--privileged` mode and has no shared layer cache; **socket mounting** is simpler and faster but shares the host Docker daemon and grants equivalent root access
+- **Rootless alternatives** like Kaniko and Buildah build images without a Docker daemon and without `--privileged`, making them ideal for Kubernetes-based CI runners
+- **GitHub Actions** provides official Docker actions (`docker/build-push-action`, `docker/metadata-action`) that handle buildx setup, caching, tagging, and registry authentication
+- **Layer caching** (`cache-from: type=gha`, `cache-to: type=gha,mode=max`) is the single biggest performance optimization for CI Docker builds — it can reduce build times by 60-80%
+- **Vulnerability scanning** with Trivy, Snyk, or Docker Scout should run on every build, and the pipeline must fail on critical CVEs to prevent vulnerable images from reaching production
+- **Multi-platform builds** with buildx and QEMU let you build for `linux/amd64` and `linux/arm64` from a single CI runner, producing a manifest list that Docker automatically resolves
+- **Reproducible builds** require pinning base image versions (ideally by digest), using lockfiles (`npm ci` instead of `npm install`), and embedding build metadata as OCI labels
+- **Never tag images only as `:latest`** — use semantic versioning, commit SHAs, and branch names so you can always trace a running container back to its source code
+- **Separate the scan step from the push step** — build with `--load` for scanning, then build and push multi-platform only after all quality gates pass
+
+## What's Next
+
+In the next lesson, **Debugging Containers**, you will learn how to diagnose and fix problems in running and crashed containers. You will master `docker logs`, `docker exec`, `docker inspect`, and `docker diff` to understand what is happening inside a container. You will learn how to use the nicolaka/netshoot sidecar for network debugging, how to save the state of a crashed container with `docker commit`, and how to diagnose common issues like OOM kills, permission errors, and DNS resolution failures.

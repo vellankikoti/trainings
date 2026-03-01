@@ -1,0 +1,1254 @@
+---
+title: "Advanced Patterns"
+description: "Master subshells, process substitution, coprocesses, and named pipes. These advanced patterns unlock powerful data flow and concurrency in your scripts."
+order: 14
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 13-process-management
+objectives:
+  - Use subshells for isolated environments
+  - Apply process substitution for advanced piping
+  - Work with named pipes (FIFOs) for inter-process communication
+  - Use coprocesses for bidirectional communication
+  - Understand and avoid common subshell pitfalls
+tags:
+  - shell-scripting
+  - advanced
+  - patterns
+  - bash
+---
+
+<Callout type="story" title="The Story">
+You need to compare the output of two different API endpoints side by side. You could save each to a temporary file, then diff them. Or you could use process substitution: `diff <(curl api-v1/users) <(curl api-v2/users)` — no temp files, no cleanup, one elegant line. Advanced bash patterns aren't academic exercises — they solve real problems more cleanly than the alternatives.
+</Callout>
+
+## Subshells
+
+A subshell is a child copy of the current shell. Code inside parentheses `( )` runs in a subshell — an isolated environment where variable changes, directory changes, and option changes do not leak back to the parent:
+
+```bash
+#!/bin/bash
+
+# Everything inside (...) runs in a subshell
+VAR="original"
+
+(
+    VAR="modified"
+    cd /tmp
+    echo "Inside subshell: VAR=$VAR, PWD=$PWD"
+)
+
+echo "Outside subshell: VAR=$VAR, PWD=$PWD"
+# VAR is still "original" — the subshell's changes are gone
+# PWD is still the original directory — cd didn't affect us
+```
+
+This isolation is the superpower of subshells: you can change directories, modify variables, set options, and none of it bleeds into the parent.
+
+### Practical Subshell Uses
+
+```bash
+#!/bin/bash
+
+# 1. Temporary directory change
+echo "Building project..."
+(
+    cd /tmp
+    echo "build-artifact-v1.0" > build.log
+    echo "Built in: $PWD"
+)
+echo "Still in: $PWD"  # Unchanged
+
+# 2. Temporary option changes
+(
+    set -e  # Exit on error — only affects this subshell
+    false   # Exits the subshell, not the whole script
+)
+echo "Script continues — subshell error didn't kill us (exit: $?)"
+
+# 3. Grouping commands for a single redirect
+(
+    echo "=== System Report ==="
+    echo "Date:     $(date)"
+    echo "Host:     $(hostname)"
+    echo "Uptime:   $(uptime -p 2>/dev/null || uptime)"
+    echo "Kernel:   $(uname -r)"
+    echo ""
+    echo "Disk Usage:"
+    df -h / | tail -1
+    echo ""
+    echo "Memory:"
+    free -h 2>/dev/null | head -2 || cat /proc/meminfo | head -3
+) > /tmp/system-report.txt
+
+echo "Report written to /tmp/system-report.txt"
+cat /tmp/system-report.txt
+rm -f /tmp/system-report.txt
+```
+
+### Subshell vs Brace Group
+
+Braces `{ }` group commands but run them in the **current** shell — no isolation:
+
+```bash
+#!/bin/bash
+
+VAR="original"
+
+# Subshell — isolated
+( VAR="subshell"; echo "Inside (): $VAR" )
+echo "After (): $VAR"   # "original" — change was lost
+
+# Brace group — NOT isolated (runs in current shell)
+{ VAR="braces"; echo "Inside {}: $VAR"; }
+echo "After {}: $VAR"   # "braces" — the change persists!
+```
+
+| Feature | `( commands )` | `{ commands; }` |
+|---------|----------------|-----------------|
+| Execution | Subshell (child process) | Current shell |
+| Variable changes | Lost when done | Persist |
+| Directory changes | Lost when done | Persist |
+| Performance | Slower (forks) | Faster (no fork) |
+| Use case | Isolation, parallelism | Grouping for redirection |
+
+Use subshells `( )` when you need isolation. Use brace groups `{ }` when you want to group commands for redirection without the overhead of a separate process.
+
+### $BASHPID vs $$
+
+These two PID variables behave differently in subshells:
+
+```bash
+#!/bin/bash
+
+echo "Script PID (\$\$): $$"
+echo "Script BASHPID:    $BASHPID"
+
+(
+    echo "Subshell \$\$ (still parent!): $$"
+    echo "Subshell BASHPID (real PID):   $BASHPID"
+)
+
+# $$ always returns the top-level script PID, even inside subshells
+# $BASHPID returns the actual PID of the current bash process
+```
+
+<Callout type="tip" title="Detecting Subshells">
+You can check if code is running in a subshell by comparing `$$` and `$BASHPID`. If they differ, you're in a subshell. Use `$$` for PID files and log prefixes (consistent identity). Use `$BASHPID` when you need the real process ID — for debugging, or to detect subshell execution.
+</Callout>
+
+### When Subshells Are Created Implicitly
+
+Subshells are not just created by `( )`. Several common constructs also create them:
+
+```bash
+#!/bin/bash
+
+# 1. Pipes — each segment runs in a subshell
+echo "hello" | while read -r word; do
+    MY_VAR="set-in-pipe"
+done
+echo "After pipe: MY_VAR='${MY_VAR:-}'"  # Empty — lost!
+
+# 2. Command substitution — runs in a subshell
+result=$(MY_VAR="inside-subst"; echo "$MY_VAR")
+echo "Result: $result"           # "inside-subst"
+echo "MY_VAR: '${MY_VAR:-}'"    # Empty — lost!
+
+# 3. Background processes — run in a subshell
+MY_VAR="before"
+MY_VAR="background" &
+wait
+echo "After background: MY_VAR=$MY_VAR"  # "before" — lost!
+```
+
+## Process Substitution
+
+Process substitution lets you treat the output of a command as a file. The syntax `<(command)` creates a readable pseudo-file, and `>(command)` creates a writable one:
+
+```bash
+# <(command) — output of command appears as a readable file
+# >(command) — provides a writable file that feeds into command
+
+# Compare two directory listings without temp files
+diff <(ls /etc | head -20) <(ls /usr | head -20) || true
+
+# Compare sorted vs unsorted
+diff <(sort /etc/passwd) /etc/passwd || true
+```
+
+### Comparing Command Outputs
+
+This is the most common use case — diff two things that are not files:
+
+```bash
+#!/bin/bash
+
+# Compare output of two commands
+echo "=== Differences between /etc and /var ==="
+diff <(ls /etc | head -15) <(ls /var | head -15) || true
+
+echo ""
+
+# Compare environment variables between current shell and a clean one
+echo "=== Env vars only in current shell ==="
+diff \
+    <(env | cut -d= -f1 | sort) \
+    <(env -i HOME="$HOME" PATH="/usr/bin:/bin" bash -c 'env | cut -d= -f1' 2>/dev/null | sort) \
+    | grep "^< " | head -10 | sed 's/^< /  /' || true
+echo "  ... (first 10 shown)"
+```
+
+### Merging Outputs with paste
+
+```bash
+#!/bin/bash
+
+# paste merges lines side by side from multiple sources
+echo "=== Username : Shell ==="
+paste <(cut -d: -f1 /etc/passwd) <(cut -d: -f7 /etc/passwd) | head -10
+
+echo ""
+echo "=== System Info ==="
+paste \
+    <(echo "Hostname:"; echo "Kernel:"; echo "Arch:") \
+    <(hostname; uname -r; uname -m)
+```
+
+### Process Substitution Solves the Pipe Subshell Trap
+
+This is one of the most important patterns in this lesson. Pipes create subshells, which means variables set inside a piped loop are lost:
+
+```bash
+#!/bin/bash
+
+# BROKEN: Pipe creates a subshell — COUNT is lost
+COUNT=0
+echo -e "one\ntwo\nthree" | while read -r line; do
+    COUNT=$((COUNT + 1))
+done
+echo "Pipe COUNT: $COUNT"  # 0! Lost in subshell
+
+# FIXED: Process substitution — loop runs in current shell
+COUNT=0
+while read -r line; do
+    COUNT=$((COUNT + 1))
+done < <(echo -e "one\ntwo\nthree")
+echo "Process sub COUNT: $COUNT"  # 3! Preserved
+```
+
+<Callout type="warning" title="The Pipe Subshell Trap">
+This is the single most common bash pitfall. When you write `command | while read`, the `while` loop runs in a subshell. Any variables you modify inside the loop are **lost** when the loop ends. Use `while read ... done < <(command)` to keep the loop in the current shell and preserve variable changes. This applies to all variable assignments inside piped loops.
+</Callout>
+
+### Output Process Substitution
+
+The `>(command)` form provides a writable pseudo-file that feeds into a command:
+
+```bash
+#!/bin/bash
+
+# Write to stdout AND a log file simultaneously (like tee, but more flexible)
+echo "Starting deployment..." > >(tee /tmp/deploy-demo.log)
+echo "Step 1: Pull image" > >(tee -a /tmp/deploy-demo.log)
+echo "Step 2: Run migrations" > >(tee -a /tmp/deploy-demo.log)
+
+sleep 0.2  # Let background tee processes finish
+
+echo ""
+echo "Log contents:"
+cat /tmp/deploy-demo.log
+rm -f /tmp/deploy-demo.log
+```
+
+## Named Pipes (FIFOs)
+
+A named pipe (FIFO — First In, First Out) is a special file on the filesystem that acts as a communication channel between processes. Unlike anonymous pipes (`|`), named pipes persist on disk and can connect completely unrelated processes:
+
+```bash
+#!/bin/bash
+
+# Create a named pipe
+mkfifo /tmp/demo_pipe
+
+# Important behavior:
+# - Writing to a named pipe BLOCKS until something reads from it
+# - Reading from a named pipe BLOCKS until something writes to it
+
+# Writer (runs in background so it doesn't block the script)
+echo "Hello from the writer!" > /tmp/demo_pipe &
+
+# Reader (unblocks the writer)
+MESSAGE=$(cat /tmp/demo_pipe)
+echo "Received: $MESSAGE"
+
+# Always clean up
+rm -f /tmp/demo_pipe
+```
+
+### Producer-Consumer Pattern
+
+Named pipes shine for producer-consumer architectures where one process generates work and another processes it:
+
+```bash
+#!/bin/bash
+
+PIPE="/tmp/work_pipe_$$"
+mkfifo "$PIPE"
+trap 'rm -f "$PIPE"' EXIT
+
+# Producer: generates work items
+producer() {
+    for i in $(seq 1 8); do
+        echo "task:$i:$(date +%s)"
+        sleep 0.2
+    done > "$PIPE"
+    echo "[Producer] All tasks dispatched" >&2
+}
+
+# Consumer: processes work items
+consumer() {
+    local count=0
+    while IFS=: read -r type id timestamp; do
+        count=$((count + 1))
+        echo "[Consumer] Processing $type #$id (queued at $timestamp)"
+        sleep 0.1  # Simulate processing
+    done < "$PIPE"
+    echo "[Consumer] Processed $count tasks" >&2
+}
+
+echo "=== Producer-Consumer Demo ==="
+producer &
+consumer
+wait
+echo "Pipeline complete"
+```
+
+### Inter-Script Communication
+
+Named pipes let completely separate scripts talk to each other:
+
+```bash
+#!/bin/bash
+
+FIFO="/tmp/ipc_demo_$$"
+mkfifo "$FIFO"
+trap 'rm -f "$FIFO"' EXIT
+
+# Aggregator process (consumer) — runs in background
+(
+    echo "[Aggregator] Listening..."
+    TOTAL=0
+    while IFS='|' read -r source level message; do
+        [ "$source" = "QUIT" ] && break
+        TOTAL=$((TOTAL + 1))
+        printf "[Aggregator] #%-3d %-12s [%-5s] %s\n" "$TOTAL" "$source" "$level" "$message"
+    done < "$FIFO"
+    echo "[Aggregator] Received $TOTAL log entries total"
+) &
+AGG_PID=$!
+
+sleep 0.3  # Let aggregator start
+
+# Simulate multiple services writing logs to the same pipe
+for service in nginx postgres redis cron; do
+    for i in 1 2; do
+        echo "${service}|INFO|Request processed #$i" > "$FIFO"
+        sleep 0.1
+    done
+done
+
+# Tell the aggregator to shut down
+echo "QUIT||" > "$FIFO"
+
+wait "$AGG_PID"
+echo ""
+echo "Inter-script communication demo complete"
+```
+
+<Callout type="tip" title="Named Pipes vs Regular Pipes">
+Use regular pipes (`|`) when connecting two commands in the same script. Use named pipes (`mkfifo`) when connecting separate scripts or processes, when you need a persistent communication channel, or when building producer-consumer systems. Named pipes block until both reader and writer are connected, which provides natural synchronization.
+</Callout>
+
+### Multi-Writer Named Pipes
+
+Multiple processes can write to the same named pipe, but you need to be careful about atomicity:
+
+```bash
+#!/bin/bash
+
+PIPE="/tmp/multi_writer_$$"
+mkfifo "$PIPE"
+trap 'rm -f "$PIPE"' EXIT
+
+# Reader collects from all writers
+(
+    declare -A COUNTS
+    while IFS= read -r line; do
+        [ "$line" = "STOP" ] && break
+        source="${line%%:*}"
+        COUNTS["$source"]=$(( ${COUNTS["$source"]:-0} + 1 ))
+        echo "  Received: $line"
+    done < "$PIPE"
+    echo ""
+    echo "  Message counts:"
+    for src in "${!COUNTS[@]}"; do
+        echo "    $src: ${COUNTS[$src]}"
+    done
+) &
+READER_PID=$!
+
+sleep 0.2
+
+# Launch three writers simultaneously
+for writer in alpha beta gamma; do
+    (
+        for i in 1 2 3; do
+            echo "$writer:message-$i" > "$PIPE"
+            sleep 0.05
+        done
+    ) &
+done
+
+wait  # Wait for writers
+sleep 0.2
+
+echo "STOP" > "$PIPE"
+wait "$READER_PID" 2>/dev/null
+
+echo "Multi-writer demo complete"
+```
+
+## Coprocesses
+
+A coprocess starts a background process that you can both write to and read from — bidirectional communication:
+
+```bash
+#!/bin/bash
+
+# Start a coprocess with a name
+# Bash creates two file descriptors: one for input, one for output
+coproc WORKER {
+    while IFS= read -r input; do
+        [ "$input" = "quit" ] && break
+        # Process input and return output
+        echo "PROCESSED: $(echo "$input" | tr '[:lower:]' '[:upper:]')"
+    done
+}
+
+echo "Coprocess PID: $WORKER_PID"
+
+# Send data to the coprocess via its input FD
+echo "hello world" >&${WORKER[1]}
+echo "bash scripting" >&${WORKER[1]}
+echo "devops pipeline" >&${WORKER[1]}
+
+# Read responses from the coprocess via its output FD
+for i in 1 2 3; do
+    read -r result <&${WORKER[0]}
+    echo "Response $i: $result"
+done
+
+# Shut down the coprocess
+echo "quit" >&${WORKER[1]}
+wait "$WORKER_PID" 2>/dev/null
+echo "Coprocess exited cleanly"
+```
+
+### Practical Coprocess: Calculator Engine
+
+A coprocess keeps `bc` running for multiple calculations without restarting it each time:
+
+```bash
+#!/bin/bash
+
+# Use bc as a persistent calculation engine
+coproc CALC { bc -l; }
+
+calculate() {
+    local expression="$1"
+    echo "$expression" >&${CALC[1]}
+    read -r result <&${CALC[0]}
+    echo "$result"
+}
+
+echo "=== Coprocess Calculator ==="
+echo "Pi:      $(calculate "4*a(1)")"
+echo "Sqrt(2): $(calculate "sqrt(2)")"
+echo "2^10:    $(calculate "2^10")"
+echo "100/3:   $(calculate "scale=4; 100/3")"
+echo "e:       $(calculate "e(1)")"
+
+# Shut down
+echo "quit" >&${CALC[1]} 2>/dev/null
+wait "$CALC_PID" 2>/dev/null
+```
+
+<Callout type="tip" title="When to Use Coprocesses">
+Coprocesses are ideal when you need repeated interaction with a long-running process — multiple inputs and multiple outputs over time. Think persistent database connections, calculation engines, or protocol handlers. For simple one-shot command execution, `$(command)` is simpler and sufficient.
+</Callout>
+
+## Here Strings
+
+A here string (`<<<`) feeds a single string as stdin — more concise than `echo ... | command`:
+
+```bash
+#!/bin/bash
+
+# Instead of: echo "hello world" | wc -w
+wc -w <<< "hello world"
+
+# Parse a variable into fields
+LINE="john:1000:/home/john:/bin/bash"
+IFS=: read -r user uid home shell <<< "$LINE"
+echo "User: $user, UID: $uid, Home: $home, Shell: $shell"
+
+# Feed a variable to a command
+CSV_ROW="web01,10.0.1.10,running"
+cut -d, -f2 <<< "$CSV_ROW"
+
+# Convert case
+tr '[:lower:]' '[:upper:]' <<< "hello world"
+```
+
+### Here String vs Pipe vs Here Document
+
+```bash
+#!/bin/bash
+
+TEXT="hello world"
+
+# Here string — cleanest for single-string input, no subshell
+wc -w <<< "$TEXT"
+
+# Echo pipe — creates a subshell (slightly more overhead)
+echo "$TEXT" | wc -w
+
+# Here document — best for multi-line input
+wc -l << EOF
+line one
+line two
+line three
+EOF
+```
+
+## Common Pitfalls and Solutions
+
+### Pitfall 1: Variables Lost in Pipe Loops
+
+```bash
+#!/bin/bash
+
+# BROKEN — variable set inside a piped while loop is lost
+TOTAL=0
+cat /etc/passwd | while IFS=: read -r user _; do
+    TOTAL=$((TOTAL + 1))
+done
+echo "Broken: TOTAL=$TOTAL"  # 0
+
+# FIX 1: Process substitution (most common fix)
+TOTAL=0
+while IFS=: read -r user _; do
+    TOTAL=$((TOTAL + 1))
+done < <(cat /etc/passwd)
+echo "Fix 1 (process sub): TOTAL=$TOTAL"
+
+# FIX 2: Redirect from file directly (best when source is a file)
+TOTAL=0
+while IFS=: read -r user _; do
+    TOTAL=$((TOTAL + 1))
+done < /etc/passwd
+echo "Fix 2 (redirect): TOTAL=$TOTAL"
+
+# FIX 3: lastpipe option (bash 4.2+, only works with job control off)
+shopt -s lastpipe
+TOTAL=0
+cat /etc/passwd | while IFS=: read -r user _; do
+    TOTAL=$((TOTAL + 1))
+done
+echo "Fix 3 (lastpipe): TOTAL=$TOTAL"
+shopt -u lastpipe
+```
+
+### Pitfall 2: Forgetting to Clean Up Named Pipes
+
+```bash
+#!/bin/bash
+
+# BAD — if the script is interrupted, the pipe stays behind
+mkfifo /tmp/my_pipe
+# ... script does work ...
+rm -f /tmp/my_pipe  # Might never run if script crashes
+
+# GOOD — trap ensures cleanup on any exit
+PIPE="/tmp/my_pipe_$$"
+mkfifo "$PIPE"
+trap 'rm -f "$PIPE"' EXIT
+
+# Include $$ in the name to avoid collisions between script runs
+```
+
+### Pitfall 3: Deadlock with Named Pipes
+
+```bash
+#!/bin/bash
+
+# DEADLOCK — both operations block waiting for the other side
+# mkfifo /tmp/pipe
+# echo "hello" > /tmp/pipe   # Blocks because no reader
+# cat /tmp/pipe              # Never reached!
+
+# SOLUTION — put one side in the background
+PIPE="/tmp/deadlock_demo_$$"
+mkfifo "$PIPE"
+trap 'rm -f "$PIPE"' EXIT
+
+echo "hello" > "$PIPE" &    # Writer runs in background
+cat "$PIPE"                  # Reader unblocks the writer
+wait
+```
+
+### Pitfall 4: Subshell in Command Substitution
+
+```bash
+#!/bin/bash
+
+# $() runs in a subshell — variable changes don't escape
+MY_VAR="before"
+result=$(MY_VAR="during"; echo "$MY_VAR")
+echo "Result: $result"    # "during"
+echo "MY_VAR: $MY_VAR"    # "before" — not modified by $()
+
+# If you need both the output AND side effects, use a temp file
+TEMP=$(mktemp)
+trap 'rm -f "$TEMP"' EXIT
+
+some_function() {
+    echo "computed-value" > "$TEMP"
+    echo "stdout-output"
+}
+
+output=$(some_function)
+SIDE_EFFECT=$(cat "$TEMP")
+echo "Output: $output"
+echo "Side effect: $SIDE_EFFECT"
+```
+
+<Callout type="warning" title="Background Processes Cannot Modify Parent Variables">
+Background processes (`command &`) run in a subshell. They cannot modify variables in the parent shell. If you need a background process to communicate results back, use a temp file, named pipe, or file descriptor — never rely on shared variables.
+</Callout>
+
+<Exercise number={1} title="Process Substitution">
+
+```bash
+cat > ~/process-sub-exercise.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Process Substitution Exercises
+# Using diff, paste, comm, and loop patterns with <()
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+echo "=== Part A: Comparing Server Inventories ==="
+echo ""
+
+# Simulate two inventory snapshots from different time periods
+cat > "$TEMP_DIR/inventory_jan.txt" << 'EOF'
+web-01
+web-02
+api-01
+api-02
+db-01
+cache-01
+worker-01
+EOF
+
+cat > "$TEMP_DIR/inventory_mar.txt" << 'EOF'
+web-01
+web-02
+web-03
+api-01
+api-02
+api-03
+db-01
+db-02
+cache-01
+cache-02
+worker-01
+worker-02
+EOF
+
+# Use diff with process substitution to compare sorted inventories
+echo "--- diff output (< Jan only, > Mar only) ---"
+diff \
+    <(sort "$TEMP_DIR/inventory_jan.txt") \
+    <(sort "$TEMP_DIR/inventory_mar.txt") \
+    || true
+
+echo ""
+echo "--- Servers added since January (comm) ---"
+comm -13 \
+    <(sort "$TEMP_DIR/inventory_jan.txt") \
+    <(sort "$TEMP_DIR/inventory_mar.txt")
+
+echo ""
+echo "--- Servers in both snapshots (comm) ---"
+comm -12 \
+    <(sort "$TEMP_DIR/inventory_jan.txt") \
+    <(sort "$TEMP_DIR/inventory_mar.txt")
+
+echo ""
+echo "=== Part B: Merging Command Outputs with paste ==="
+echo ""
+
+# Build a process table by merging separate field extractions
+echo "PID       COMMAND              MEMORY(KB)"
+echo "--------- -------------------- ----------"
+paste \
+    <(ps -eo pid --no-headers | head -10) \
+    <(ps -eo comm --no-headers | head -10) \
+    <(ps -eo rss --no-headers | head -10) \
+    | awk '{printf "%-10s %-20s %s\n", $1, $2, $3}'
+
+echo ""
+echo "=== Part C: Avoiding the Pipe Subshell Trap ==="
+echo ""
+
+# Count files by extension in /etc — using process substitution
+# so the associative array survives the loop
+declare -A EXT_COUNT
+TOTAL_FILES=0
+
+while IFS= read -r filepath; do
+    filename=$(basename "$filepath")
+    ext="${filename##*.}"
+    if [ "$ext" = "$filename" ]; then
+        ext="(no-ext)"
+    fi
+    EXT_COUNT["$ext"]=$(( ${EXT_COUNT["$ext"]:-0} + 1 ))
+    TOTAL_FILES=$((TOTAL_FILES + 1))
+done < <(find /etc -maxdepth 1 -type f 2>/dev/null)
+
+echo "File extensions in /etc (top 10):"
+for ext in "${!EXT_COUNT[@]}"; do
+    echo "  .$ext: ${EXT_COUNT[$ext]}"
+done | sort -t: -k2 -rn | head -10
+
+echo ""
+echo "Total files scanned: $TOTAL_FILES"
+echo "(This works because we used process substitution, not a pipe)"
+
+echo ""
+echo "=== Part D: Comparing Live Command Output ==="
+echo ""
+
+# Compare which users have login shells vs no-login shells
+echo "Users with login shells NOT in the no-login group:"
+comm -23 \
+    <(awk -F: '$7 !~ /(nologin|false)/ {print $1}' /etc/passwd | sort) \
+    <(awk -F: '$7 ~ /(nologin|false)/ {print $1}' /etc/passwd | sort) \
+    | head -10
+
+echo ""
+echo "Process substitution exercises complete"
+SCRIPT
+
+chmod +x ~/process-sub-exercise.sh
+~/process-sub-exercise.sh
+```
+
+</Exercise>
+
+<Exercise number={2} title="Named Pipe Communication">
+
+```bash
+cat > ~/named-pipe-exercise.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Named Pipe Communication Exercise
+# Build a producer-consumer system with mkfifo
+
+WORK_PIPE="/tmp/work_fifo_$$"
+RESULT_PIPE="/tmp/result_fifo_$$"
+PIDS=()
+
+cleanup() {
+    for pid in "${PIDS[@]}"; do
+        kill "$pid" 2>/dev/null
+    done
+    wait 2>/dev/null
+    rm -f "$WORK_PIPE" "$RESULT_PIPE"
+}
+trap cleanup EXIT
+
+# Create named pipes
+mkfifo "$WORK_PIPE" "$RESULT_PIPE"
+
+echo "=== Part A: Basic Producer-Consumer ==="
+echo ""
+echo "Work pipe:   $WORK_PIPE"
+echo "Result pipe: $RESULT_PIPE"
+echo ""
+
+# --- Consumer ---
+# Reads tasks from work pipe, processes them, writes results to result pipe
+consumer() {
+    local task_count=0
+    while IFS='|' read -r task_id payload; do
+        [ "$task_id" = "DONE" ] && break
+        task_count=$((task_count + 1))
+
+        # Simulate processing: compute a checksum of the payload
+        local checksum
+        checksum=$(echo -n "$payload" | md5sum | cut -c1-8)
+        echo "OK|$task_id|$checksum"
+
+        sleep 0.1  # Simulate work
+    done < "$WORK_PIPE" > "$RESULT_PIPE"
+
+    # Send completion marker
+    echo "COMPLETE|$task_count|done" > "$RESULT_PIPE"
+}
+
+consumer &
+PIDS+=($!)
+echo "Consumer started (PID: ${PIDS[-1]})"
+
+# --- Result Collector ---
+# Reads processed results and displays them
+collector() {
+    echo "Results:"
+    while IFS='|' read -r status task_id detail; do
+        case "$status" in
+            OK)
+                printf "  Task %-3s [%s] checksum=%s\n" "$task_id" "$status" "$detail"
+                ;;
+            COMPLETE)
+                echo ""
+                echo "  All done: $task_id tasks processed"
+                break
+                ;;
+        esac
+    done < "$RESULT_PIPE"
+}
+
+collector &
+PIDS+=($!)
+echo "Collector started (PID: ${PIDS[-1]})"
+echo ""
+
+# --- Producer ---
+# Sends tasks into the work pipe
+TASKS=(
+    "deploy-frontend"
+    "run-migrations"
+    "flush-cache"
+    "update-config"
+    "restart-workers"
+    "run-smoke-tests"
+)
+
+echo "Sending ${#TASKS[@]} tasks..."
+{
+    for i in "${!TASKS[@]}"; do
+        task_num=$((i + 1))
+        echo "[Producer] Dispatching: ${TASKS[$i]}" >&2
+        echo "$task_num|${TASKS[$i]}"
+        sleep 0.15
+    done
+    echo "DONE|"
+} > "$WORK_PIPE"
+
+echo ""
+# Wait for consumer and collector to finish
+for pid in "${PIDS[@]}"; do
+    wait "$pid" 2>/dev/null
+done
+PIDS=()
+
+echo ""
+echo "=== Part B: Multi-Writer Aggregation ==="
+echo ""
+
+# Fresh pipe for multi-writer demo
+MULTI_PIPE="/tmp/multi_fifo_$$"
+mkfifo "$MULTI_PIPE"
+
+# Aggregator: collects log messages from multiple services
+(
+    declare -A SOURCE_COUNTS
+    TOTAL=0
+
+    while IFS='|' read -r source level message; do
+        [ "$source" = "SHUTDOWN" ] && break
+        SOURCE_COUNTS["$source"]=$(( ${SOURCE_COUNTS["$source"]:-0} + 1 ))
+        TOTAL=$((TOTAL + 1))
+        printf "  [%-8s] %-7s %s\n" "$source" "$level" "$message"
+    done < "$MULTI_PIPE"
+
+    echo ""
+    echo "  Aggregation summary: $TOTAL messages"
+    for src in "${!SOURCE_COUNTS[@]}"; do
+        echo "    $src: ${SOURCE_COUNTS[$src]} messages"
+    done
+) &
+AGG_PID=$!
+PIDS+=($AGG_PID)
+
+sleep 0.3
+
+# Simulate three services logging simultaneously
+for svc in nginx postgres redis; do
+    (
+        for i in 1 2 3; do
+            echo "$svc|INFO|Processing request batch $i" > "$MULTI_PIPE"
+            sleep 0.05
+        done
+        # One warning per service
+        echo "$svc|WARN|High latency detected" > "$MULTI_PIPE"
+    ) &
+    PIDS+=($!)
+done
+
+# Wait for all writers to finish
+for pid in "${PIDS[@]}"; do
+    [ "$pid" != "$AGG_PID" ] && wait "$pid" 2>/dev/null
+done
+sleep 0.3
+
+# Send shutdown signal
+echo "SHUTDOWN||" > "$MULTI_PIPE"
+wait "$AGG_PID" 2>/dev/null
+
+rm -f "$MULTI_PIPE"
+PIDS=()
+
+echo ""
+echo "Named pipe exercises complete"
+SCRIPT
+
+chmod +x ~/named-pipe-exercise.sh
+~/named-pipe-exercise.sh
+```
+
+</Exercise>
+
+<MiniProject title="Parallel Data Pipeline">
+
+```bash
+cat > ~/parallel-pipeline.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# Parallel Data Pipeline
+# Processes server metrics through a multi-stage pipeline using named pipes:
+#   Stage 1: Generate  → raw metrics
+#   Stage 2: Filter    → remove invalid/stopped servers
+#   Stage 3: Transform → compute health scores and alert levels
+#   Stage 4: Aggregate → produce a summary report
+#
+# Each stage runs as a separate process, connected by named pipes.
+# Data flows concurrently through all stages.
+
+PIPELINE_DIR="/tmp/pipeline_$$"
+mkdir -p "$PIPELINE_DIR"
+
+# Named pipes between stages
+PIPE_RAW="$PIPELINE_DIR/stage1_to_stage2"
+PIPE_FILTERED="$PIPELINE_DIR/stage2_to_stage3"
+PIPE_ENRICHED="$PIPELINE_DIR/stage3_to_stage4"
+
+mkfifo "$PIPE_RAW" "$PIPE_FILTERED" "$PIPE_ENRICHED"
+
+STAGE_PIDS=()
+
+cleanup() {
+    for pid in "${STAGE_PIDS[@]}"; do
+        kill "$pid" 2>/dev/null
+    done
+    wait 2>/dev/null
+    rm -rf "$PIPELINE_DIR"
+}
+trap cleanup EXIT
+
+log() {
+    echo "[$(date '+%H:%M:%S')] $*"
+}
+
+# ============================================================
+# Stage 1: Generate — produce simulated server metrics as CSV
+# ============================================================
+stage_generate() {
+    log "[Stage 1 - Generate] Starting"
+    local count=0
+
+    local servers=("web-01" "web-02" "web-03" "api-01" "api-02" "db-01" "cache-01" "worker-01")
+    local roles=("frontend" "frontend" "frontend" "backend" "backend" "database" "cache" "worker")
+
+    for round in 1 2 3; do
+        for i in "${!servers[@]}"; do
+            local server="${servers[$i]}"
+            local role="${roles[$i]}"
+            local cpu=$((RANDOM % 100))
+            local mem=$((RANDOM % 100))
+            local disk=$((RANDOM % 100))
+            local conns=$((RANDOM % 500))
+
+            # Simulate some servers being down
+            local status="running"
+            if [ $((RANDOM % 10)) -eq 0 ]; then
+                status="stopped"
+            elif [ $((RANDOM % 8)) -eq 0 ]; then
+                status="degraded"
+            fi
+
+            echo "$server,$role,$cpu,$mem,$disk,$conns,$status"
+            count=$((count + 1))
+        done
+        sleep 0.1
+    done
+
+    echo "EOF"
+    log "[Stage 1 - Generate] Produced $count records"
+}
+
+# ============================================================
+# Stage 2: Filter — validate data and remove stopped servers
+# ============================================================
+stage_filter() {
+    log "[Stage 2 - Filter] Waiting for data"
+    local accepted=0
+    local rejected=0
+
+    while IFS= read -r line; do
+        [ "$line" = "EOF" ] && break
+
+        IFS=, read -r server role cpu mem disk conns status <<< "$line"
+
+        # Validate numeric fields
+        if ! [[ "$cpu" =~ ^[0-9]+$ && "$mem" =~ ^[0-9]+$ && "$disk" =~ ^[0-9]+$ ]]; then
+            rejected=$((rejected + 1))
+            continue
+        fi
+
+        # Remove stopped servers from the pipeline
+        if [ "$status" = "stopped" ]; then
+            rejected=$((rejected + 1))
+            continue
+        fi
+
+        echo "$line"
+        accepted=$((accepted + 1))
+    done
+
+    echo "EOF"
+    log "[Stage 2 - Filter] Passed: $accepted, Dropped: $rejected"
+}
+
+# ============================================================
+# Stage 3: Transform — compute health scores and alert levels
+# ============================================================
+stage_transform() {
+    log "[Stage 3 - Transform] Waiting for data"
+    local count=0
+
+    while IFS= read -r line; do
+        [ "$line" = "EOF" ] && break
+
+        IFS=, read -r server role cpu mem disk conns status <<< "$line"
+
+        # Weighted health score: CPU 25%, Memory 25%, Disk 50%
+        local health=$(( (100 - cpu) * 25 / 100 + (100 - mem) * 25 / 100 + (100 - disk) * 50 / 100 ))
+
+        # Alert level based on thresholds
+        local alert="OK"
+        if [ "$cpu" -gt 90 ] || [ "$mem" -gt 90 ] || [ "$disk" -gt 95 ]; then
+            alert="CRITICAL"
+        elif [ "$cpu" -gt 75 ] || [ "$mem" -gt 75 ] || [ "$disk" -gt 80 ]; then
+            alert="WARNING"
+        fi
+
+        # Pass enriched record to next stage
+        echo "$server,$role,$cpu,$mem,$disk,$conns,$status,$health,$alert"
+        count=$((count + 1))
+    done
+
+    echo "EOF"
+    log "[Stage 3 - Transform] Enriched $count records"
+}
+
+# ============================================================
+# Stage 4: Aggregate — produce the final summary report
+# ============================================================
+stage_aggregate() {
+    log "[Stage 4 - Aggregate] Waiting for data"
+
+    local total=0
+    local ok_count=0
+    local warn_count=0
+    local crit_count=0
+    local total_health=0
+
+    declare -A ROLE_COUNTS
+    declare -A SERVER_WORST_ALERT
+    declare -A SERVER_HEALTH_SUM
+    declare -A SERVER_HEALTH_NUM
+
+    while IFS= read -r line; do
+        [ "$line" = "EOF" ] && break
+
+        IFS=, read -r server role cpu mem disk conns status health alert <<< "$line"
+
+        total=$((total + 1))
+        total_health=$((total_health + health))
+
+        # Count by alert level
+        case "$alert" in
+            OK)       ok_count=$((ok_count + 1)) ;;
+            WARNING)  warn_count=$((warn_count + 1)) ;;
+            CRITICAL) crit_count=$((crit_count + 1)) ;;
+        esac
+
+        # Count by role
+        ROLE_COUNTS["$role"]=$(( ${ROLE_COUNTS["$role"]:-0} + 1 ))
+
+        # Track worst alert per server
+        local current="${SERVER_WORST_ALERT[$server]:-OK}"
+        case "$alert" in
+            CRITICAL) SERVER_WORST_ALERT["$server"]="CRITICAL" ;;
+            WARNING)
+                [ "$current" != "CRITICAL" ] && SERVER_WORST_ALERT["$server"]="WARNING"
+                ;;
+        esac
+
+        # Accumulate health per server for averaging
+        SERVER_HEALTH_SUM["$server"]=$(( ${SERVER_HEALTH_SUM["$server"]:-0} + health ))
+        SERVER_HEALTH_NUM["$server"]=$(( ${SERVER_HEALTH_NUM["$server"]:-0} + 1 ))
+    done
+
+    log "[Stage 4 - Aggregate] Aggregation complete"
+
+    # Calculate average health
+    local avg_health=0
+    [ "$total" -gt 0 ] && avg_health=$((total_health / total))
+
+    # Print the report
+    echo ""
+    echo "============================================"
+    echo "  PARALLEL DATA PIPELINE REPORT"
+    echo "============================================"
+    echo ""
+    echo "  Records processed:    $total"
+    echo "  Average health score: $avg_health / 100"
+    echo ""
+    echo "  Alert breakdown:"
+    echo "    OK:       $ok_count"
+    echo "    WARNING:  $warn_count"
+    echo "    CRITICAL: $crit_count"
+    echo ""
+    echo "  Records by role:"
+    for role in $(echo "${!ROLE_COUNTS[@]}" | tr ' ' '\n' | sort); do
+        printf "    %-12s %d\n" "$role" "${ROLE_COUNTS[$role]}"
+    done
+    echo ""
+
+    # Per-server health bar chart
+    echo "  Server health averages:"
+    for server in $(echo "${!SERVER_HEALTH_SUM[@]}" | tr ' ' '\n' | sort); do
+        local sum="${SERVER_HEALTH_SUM[$server]}"
+        local num="${SERVER_HEALTH_NUM[$server]}"
+        local avg=$((sum / num))
+        local worst="${SERVER_WORST_ALERT[$server]:-OK}"
+
+        # Build a bar chart
+        local bar=""
+        local filled=$((avg / 5))
+        for ((b = 0; b < 20; b++)); do
+            if [ $b -lt $filled ]; then
+                bar="${bar}#"
+            else
+                bar="${bar}-"
+            fi
+        done
+
+        local flag=""
+        [ "$worst" = "WARNING" ] && flag=" !"
+        [ "$worst" = "CRITICAL" ] && flag=" !!"
+
+        printf "    %-12s [%s] %3d%%%s\n" "$server" "$bar" "$avg" "$flag"
+    done
+
+    echo ""
+    echo "  Legend: ! = had warnings, !! = had critical alerts"
+    echo ""
+    echo "============================================"
+}
+
+# ============================================================
+# Wire up the pipeline: consumers first, then producer
+# ============================================================
+
+log ""
+log "============================================"
+log "  Starting Parallel Data Pipeline"
+log "  4 concurrent stages connected by named pipes"
+log "============================================"
+log ""
+
+START_TIME=$(date +%s)
+
+# Start stages in reverse order (consumers must be waiting before producers write)
+stage_aggregate < "$PIPE_ENRICHED" &
+STAGE_PIDS+=($!)
+
+stage_transform < "$PIPE_FILTERED" > "$PIPE_ENRICHED" &
+STAGE_PIDS+=($!)
+
+stage_filter < "$PIPE_RAW" > "$PIPE_FILTERED" &
+STAGE_PIDS+=($!)
+
+stage_generate > "$PIPE_RAW" &
+STAGE_PIDS+=($!)
+
+# Wait for all stages to complete
+for pid in "${STAGE_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null
+done
+
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+
+log ""
+log "Pipeline completed in ${ELAPSED}s"
+log "All 4 stages ran concurrently — data streamed through named pipes"
+
+# Clear PIDs so cleanup doesn't try to kill finished processes
+STAGE_PIDS=()
+SCRIPT
+
+chmod +x ~/parallel-pipeline.sh
+~/parallel-pipeline.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Subshells `( )` provide variable and directory isolation — changes inside do not affect the parent
+- Brace groups `{ }` group commands in the current shell — changes persist
+- Process substitution `<(cmd)` treats command output as a file — perfect for `diff`, `paste`, `comm`
+- The pipe subshell trap (`cmd | while read`) loses variable changes — use `while read ... done < <(cmd)` instead
+- `$BASHPID` gives the real PID in subshells; `$$` always returns the top-level script PID
+- Named pipes (`mkfifo`) connect separate processes via the filesystem for producer-consumer patterns
+- Coprocesses (`coproc`) enable bidirectional communication with a background process
+- Here strings (`<<<`) feed a string as stdin without `echo | cmd` — cleaner and avoids a subshell
+- Always clean up named pipes with `trap 'rm -f ...' EXIT`
+- Pipes, command substitution, and background jobs all implicitly create subshells
+
+## What's Next
+
+You now have a deep toolkit of advanced bash patterns. In **Real-World Scripts**, you'll combine everything you've learned — variables, loops, functions, error handling, process management, and these advanced patterns — to build complete, production-grade DevOps scripts that solve real problems every week.

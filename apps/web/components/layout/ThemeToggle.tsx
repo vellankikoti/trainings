@@ -1,36 +1,31 @@
 "use client";
 
+import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    const stored = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia(
-      "(prefers-color-scheme: dark)",
-    ).matches;
-    const initial = stored === "dark" || (!stored && prefersDark) ? "dark" : "light";
-    setTheme(initial);
-    document.documentElement.classList.toggle("dark", initial === "dark");
-  }, []);
+  useEffect(() => setMounted(true), []);
 
-  function toggle() {
-    const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    localStorage.setItem("theme", next);
-    document.documentElement.classList.toggle("dark", next === "dark");
+  if (!mounted) {
+    return (
+      <Button variant="ghost" size="icon" aria-label="Toggle theme">
+        <div className="h-[18px] w-[18px]" />
+      </Button>
+    );
   }
 
   return (
     <Button
       variant="ghost"
       size="icon"
-      onClick={toggle}
+      onClick={() => setTheme(resolvedTheme === "light" ? "dark" : "light")}
       aria-label="Toggle theme"
     >
-      {theme === "light" ? (
+      {resolvedTheme === "light" ? (
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="18"

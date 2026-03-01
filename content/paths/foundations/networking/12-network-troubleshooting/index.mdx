@@ -1,0 +1,1131 @@
+---
+title: "Network Troubleshooting"
+description: "Debug network issues systematically. Master the tools and methodology that turn 'it's not working' into a precise diagnosis in minutes."
+order: 12
+xpReward: 150
+estimatedMinutes: 40
+prerequisites:
+  - 11-vpns-and-tunnels
+objectives:
+  - Apply a systematic troubleshooting methodology
+  - Use the right tool for each network layer
+  - Diagnose common network issues quickly
+  - Read and interpret network diagnostic output
+tags:
+  - networking
+  - troubleshooting
+  - debugging
+  - diagnostics
+---
+
+<Callout type="story" title="The Story">
+The Slack message says "the website is down." But what does "down" mean? Can you ping it? Can you resolve DNS? Can you connect on port 443? Is it returning errors? Each question tests a different layer of the network stack. Systematic troubleshooting means checking each layer methodically instead of randomly trying things. In 5 minutes, you'll know exactly which layer has the problem.
+</Callout>
+
+## The Troubleshooting Methodology
+
+The key to network troubleshooting is working through the OSI layers systematically, from the bottom up. Each layer depends on the layers below it, so if Layer 3 is broken, Layers 4-7 cannot work.
+
+```
+Bottom-Up Approach:
+
+  Layer 1-2: Physical / Data Link
+  ↓  Is the cable plugged in? Is the interface up?
+  Layer 3: Network
+  ↓  Do we have an IP? Can we ping the gateway? Is routing correct?
+  Layer 4: Transport
+  ↓  Is the port open? Can we establish a TCP connection?
+  Layer 7: Application
+     Is the service responding correctly? What errors are returned?
+
+Rule: Start at the bottom. If a lower layer fails, don't waste time
+      testing higher layers — fix the lower layer first.
+```
+
+<Callout type="tip" title="The 5-Minute Rule">
+Most network issues can be diagnosed in under 5 minutes using this bottom-up approach. The mistake junior engineers make is starting at the application layer and working down — which wastes time when the problem is a missing route or a down interface.
+</Callout>
+
+## Layer 1-2 Checks: Physical and Data Link
+
+Before checking anything else, make sure the physical connection exists and the interface is operational.
+
+```bash
+# Check interface status — is it UP?
+ip link show
+# Look for: state UP or state DOWN
+
+# Brief format — easier to scan
+ip -br link show
+# eth0    UP    52:54:00:12:34:56 <BROADCAST,MULTICAST,UP,LOWER_UP>
+# lo      UP    00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP>
+
+# Detailed interface information
+ip -d link show eth0
+
+# Check interface statistics for errors
+ip -s link show eth0
+# Look for: RX errors, TX errors, dropped packets
+
+# Check physical link details (speed, duplex, cable)
+ethtool eth0 2>/dev/null || echo "ethtool not available"
+# Look for:
+#   Speed: 1000Mb/s
+#   Duplex: Full
+#   Link detected: yes
+
+# Check for interface errors over time
+cat /proc/net/dev
+# Shows packet counts, errors, and drops per interface
+```
+
+### What to Look For
+
+```
+Problem indicators at Layer 1-2:
+  - Interface state DOWN → bring it up: sudo ip link set eth0 up
+  - Link detected: no → physical cable issue
+  - Speed/duplex mismatch → auto-negotiation problems
+  - High RX/TX errors → bad cable, failing NIC, or EMI
+  - Increasing drops → buffer overflow, driver issue
+```
+
+## Layer 3 Checks: Network
+
+If the interface is up, check IP addressing and routing.
+
+```bash
+# Check IP addresses
+ip addr show
+# Do we have an IP address?
+# Is it in the right subnet?
+
+# Check the default gateway
+ip route show
+# default via 192.168.1.1 dev eth0
+# Is there a default route?
+
+# Check the route to a specific destination
+ip route get 10.0.2.50
+# Which interface and gateway will be used?
+
+# Test basic connectivity to the gateway
+ping -c 3 -W 2 192.168.1.1
+# Can we reach our own gateway?
+
+# Test connectivity to an external IP
+ping -c 3 -W 2 8.8.8.8
+# Can we reach the internet by IP?
+# If this fails but gateway ping works → routing or firewall issue
+
+# Trace the path to a destination
+traceroute -n 8.8.8.8
+# -n = don't resolve hostnames (faster)
+# Shows each hop and latency
+# Look for: * * * (blocked hops), sudden latency spikes
+
+# MTR — combines ping and traceroute for ongoing analysis
+mtr -n --report -c 10 8.8.8.8
+# Shows packet loss and latency at each hop over 10 rounds
+```
+
+### Reading traceroute Output
+
+```bash
+traceroute -n 8.8.8.8
+# traceroute to 8.8.8.8, 30 hops max, 60 byte packets
+#  1  192.168.1.1     1.234 ms  1.102 ms  0.987 ms    ← Your gateway
+#  2  10.0.0.1        5.432 ms  5.321 ms  5.198 ms    ← ISP first hop
+#  3  * * *                                            ← Hop doesn't respond (filtered)
+#  4  72.14.233.81    12.345 ms 12.234 ms 12.123 ms   ← Google's network
+#  5  8.8.8.8          11.567 ms 11.456 ms 11.345 ms  ← Destination reached
+
+# Interpretation:
+#   * * * = ICMP blocked (normal for many routers — not necessarily a problem)
+#   Sudden latency jump = possible congestion at that hop
+#   All * * * after a point = traffic is being dropped at that hop
+```
+
+### Reading mtr Output
+
+```bash
+mtr -n --report -c 20 8.8.8.8
+# HOST:                Loss%  Snt   Last   Avg  Best  Wrst  StDev
+# 1. 192.168.1.1       0.0%   20    0.8   1.0   0.6   2.1   0.3
+# 2. 10.0.0.1          0.0%   20    5.2   5.5   4.8   8.1   0.7
+# 3. 72.14.233.81      5.0%   20   12.1  13.2  11.5  22.3   2.4  ← Some loss
+# 4. 8.8.8.8           0.0%   20   11.3  11.8  10.9  14.2   0.8
+
+# Key columns:
+#   Loss% — Packet loss at this hop (>1% is concerning)
+#   Avg   — Average round-trip time in ms
+#   StDev — Variation (high = unstable connection)
+```
+
+## Layer 4 Checks: Transport
+
+The interface is up, we have an IP, routing works. Now check whether we can establish connections to specific ports.
+
+```bash
+# Check what ports are listening locally
+ss -tlnp
+# -t = TCP, -l = listening, -n = numeric, -p = process
+# Shows: Local Address:Port, Process name
+
+# Check UDP listening ports
+ss -ulnp
+
+# Check if a specific port is listening
+ss -tlnp | grep :8080
+# If empty → service is not running or not listening on that port
+
+# Test TCP connectivity to a remote port
+nc -zv target-host 443
+# -z = scan mode (don't send data)
+# -v = verbose
+# Connection to target-host 443 port [tcp/https] succeeded!
+
+# Test multiple ports
+nc -zv target-host 80 443 8080
+
+# Test with a timeout
+nc -zv -w 3 target-host 5432
+# -w 3 = timeout after 3 seconds
+
+# Alternative: use bash built-in TCP test
+timeout 3 bash -c 'echo > /dev/tcp/target-host/443' 2>/dev/null \
+    && echo "Port 443 open" || echo "Port 443 closed"
+
+# Check established connections
+ss -tnp
+# Shows all active TCP connections with process names
+
+# Count connections by state
+ss -t state established | wc -l
+ss -t state time-wait | wc -l
+ss -t state close-wait | wc -l
+# High close-wait → application not closing connections properly
+```
+
+<Callout type="warning" title="Timeout vs Connection Refused vs Connection Reset">
+These three errors mean very different things:
+
+```
+Connection refused (ECONNREFUSED):
+  → Port is not listening. The host is UP but no service on that port.
+  → Fix: Start the service, check it's listening on the right port/interface.
+
+Connection timed out (ETIMEDOUT):
+  → No response at all. The host is DOWN, or a firewall is dropping packets.
+  → Fix: Check firewall rules, check if host is reachable, check routing.
+
+Connection reset (ECONNRESET):
+  → Connection was established then forcibly closed.
+  → Fix: Check application logs, firewall rules that reset connections, or
+    a load balancer health check failing.
+```
+</Callout>
+
+## Layer 7 Checks: Application
+
+The connection works at the transport layer. Now check the application itself.
+
+```bash
+# Test HTTP connectivity with verbose output
+curl -v http://example.com
+# Shows: DNS resolution, TCP connection, TLS handshake, HTTP request/response
+# Look for: HTTP status code, response headers, timing
+
+# Test HTTPS with certificate details
+curl -vI https://example.com 2>&1 | grep -E "(SSL|subject|expire|HTTP)"
+
+# Check just headers
+curl -I http://example.com
+# HTTP/1.1 200 OK → service is healthy
+# HTTP/1.1 502 Bad Gateway → upstream service is down
+# HTTP/1.1 503 Service Unavailable → service overloaded
+
+# Test with timing breakdown
+curl -w "\n--- Timing ---\nDNS:        %{time_namelookup}s\nConnect:    %{time_connect}s\nTLS:        %{time_appconnect}s\nFirst byte: %{time_starttransfer}s\nTotal:      %{time_total}s\nHTTP Code:  %{http_code}\n" \
+    -o /dev/null -s https://example.com
+
+# Follow redirects
+curl -L -v http://example.com
+
+# Test a specific endpoint
+curl -s http://localhost:8080/health | jq .
+# {"status": "healthy", "uptime": 12345}
+
+# Check application logs for errors
+sudo journalctl -u myapp --since "5 minutes ago" --no-pager
+tail -50 /var/log/nginx/error.log
+```
+
+## DNS Troubleshooting
+
+DNS issues are among the most common network problems. "It's always DNS" is a DevOps meme for a reason.
+
+```bash
+# Basic DNS lookup
+dig example.com
+# Look for: ANSWER SECTION, status (NOERROR vs NXDOMAIN vs SERVFAIL)
+
+# Query a specific DNS server
+dig @8.8.8.8 example.com
+# Bypasses your local DNS — useful for comparing results
+
+# Check if the problem is your DNS server
+dig @8.8.8.8 myapp.internal    # Google's DNS
+dig @1.1.1.1 myapp.internal    # Cloudflare's DNS
+dig @192.168.1.1 myapp.internal # Your local DNS
+# If only your local DNS fails → local DNS server issue
+
+# Check DNS resolution order
+cat /etc/nsswitch.conf | grep hosts
+# hosts: files dns
+# "files" = /etc/hosts first, then "dns" = DNS servers
+
+# Check DNS server configuration
+cat /etc/resolv.conf
+# nameserver 8.8.8.8
+# search example.com
+
+# Trace DNS resolution path
+dig +trace example.com
+# Shows the full resolution chain: root → TLD → authoritative
+
+# Check for DNS propagation
+dig +short example.com @ns1.example.com
+dig +short example.com @ns2.example.com
+# Both should return the same answer
+
+# Check DNS cache (systemd-resolved)
+resolvectl status 2>/dev/null || systemd-resolve --status 2>/dev/null
+resolvectl query example.com 2>/dev/null
+
+# Flush DNS cache
+sudo resolvectl flush-caches 2>/dev/null || \
+    sudo systemd-resolve --flush-caches 2>/dev/null || \
+    echo "Restart nscd or dnsmasq to flush cache"
+```
+
+### Common DNS Issues
+
+```
+NXDOMAIN (Non-Existent Domain):
+  → Domain doesn't exist. Check for typos, check if domain expired.
+
+SERVFAIL (Server Failure):
+  → DNS server can't answer. DNS server misconfigured or upstream issue.
+
+REFUSED:
+  → DNS server refuses to answer. Access control or recursion disabled.
+
+Timeout:
+  → DNS server unreachable. Check /etc/resolv.conf, network connectivity.
+
+Wrong IP returned:
+  → Stale DNS cache, wrong DNS server, or DNS hijacking.
+  → Flush cache, query authoritative NS directly.
+```
+
+## Tcpdump Basics
+
+When higher-level tools don't reveal the issue, packet capture shows exactly what is happening on the wire.
+
+```bash
+# Capture all traffic on an interface
+sudo tcpdump -i eth0
+# Extremely verbose — shows every packet
+
+# Capture with more detail but limit output
+sudo tcpdump -i eth0 -c 20 -nn
+# -c 20 = capture 20 packets then stop
+# -nn   = don't resolve hostnames or ports (faster)
+
+# Filter by host
+sudo tcpdump -i eth0 host 10.0.2.50 -nn
+# Only show packets to/from 10.0.2.50
+
+# Filter by port
+sudo tcpdump -i eth0 port 443 -nn
+# Only show HTTPS traffic
+
+# Filter by source or destination
+sudo tcpdump -i eth0 src 10.0.1.10 -nn
+sudo tcpdump -i eth0 dst port 5432 -nn
+
+# Combine filters
+sudo tcpdump -i eth0 host 10.0.2.50 and port 5432 -nn
+sudo tcpdump -i eth0 'host 10.0.2.50 and (port 80 or port 443)' -nn
+
+# Show packet contents (ASCII)
+sudo tcpdump -i eth0 port 80 -A -c 10
+# -A = print payload in ASCII (useful for HTTP)
+
+# Show packet contents (hex + ASCII)
+sudo tcpdump -i eth0 port 80 -X -c 10
+
+# Save capture to file for analysis in Wireshark
+sudo tcpdump -i eth0 -w /tmp/capture.pcap -c 1000
+# Then analyze: tcpdump -r /tmp/capture.pcap -nn
+
+# Capture only SYN packets (connection attempts)
+sudo tcpdump -i eth0 'tcp[tcpflags] & (tcp-syn) != 0' -nn
+
+# Capture only RST packets (connection resets)
+sudo tcpdump -i eth0 'tcp[tcpflags] & (tcp-rst) != 0' -nn
+```
+
+### Reading Tcpdump Output
+
+```bash
+# Example output:
+# 14:23:45.123456 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [S], seq 123456, win 65535
+# 14:23:45.124567 IP 10.0.2.50.5432 > 192.168.1.100.54321: Flags [S.], seq 789012, ack 123457
+# 14:23:45.124789 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [.], ack 789013
+
+# Breakdown:
+#   14:23:45.123456              → Timestamp
+#   IP 192.168.1.100.54321       → Source IP and port
+#   > 10.0.2.50.5432             → Destination IP and port
+#   Flags [S]                    → SYN (connection request)
+#   Flags [S.]                   → SYN-ACK (connection accepted)
+#   Flags [.]                    → ACK (connection established)
+#   Flags [R]                    → RST (connection refused/reset)
+#   Flags [F]                    → FIN (connection closing)
+#   Flags [P.]                   → PSH-ACK (data transfer)
+
+# Three-way handshake (healthy connection):
+#   [S]  → Client sends SYN
+#   [S.] → Server responds SYN-ACK
+#   [.]  → Client sends ACK — connection established
+
+# Connection refused:
+#   [S]  → Client sends SYN
+#   [R.] → Server responds RST — port not listening
+
+# Timeout (no response):
+#   [S]  → Client sends SYN
+#   [S]  → Client retransmits SYN (after timeout)
+#   [S]  → Client retransmits SYN again
+#   ...  → Eventually gives up
+```
+
+## Packet Analysis Workflow
+
+When you need to debug a specific connection issue, follow this workflow:
+
+```bash
+# Step 1: Start capturing on the server
+sudo tcpdump -i eth0 host <client-ip> and port <service-port> -nn -w /tmp/debug.pcap &
+TCPDUMP_PID=$!
+
+# Step 2: Reproduce the issue from the client
+curl -v http://server:8080/api/endpoint
+
+# Step 3: Stop the capture
+kill $TCPDUMP_PID
+
+# Step 4: Analyze the capture
+tcpdump -r /tmp/debug.pcap -nn
+
+# Step 5: Look for specific patterns
+# Are SYNs being sent? (connection attempts)
+tcpdump -r /tmp/debug.pcap 'tcp[tcpflags] & (tcp-syn) != 0' -nn
+
+# Are there RSTs? (connection refused or reset)
+tcpdump -r /tmp/debug.pcap 'tcp[tcpflags] & (tcp-rst) != 0' -nn
+
+# Are there retransmissions? (packet loss)
+tcpdump -r /tmp/debug.pcap -nn | grep -i retransmit
+```
+
+## Common Network Issues and Diagnosis
+
+```
+Issue: DNS Resolution Failure
+  Symptom: curl: Could not resolve host
+  Check:   dig example.com
+  Fix:     Check /etc/resolv.conf, try different DNS server, flush cache
+
+Issue: Firewall Blocking
+  Symptom: Connection timed out (not refused)
+  Check:   sudo iptables -L -n | grep <port>
+  Fix:     Add firewall rule, check security groups, check NACLs
+
+Issue: Route Missing
+  Symptom: Network unreachable
+  Check:   ip route get <destination>
+  Fix:     Add route: sudo ip route add <network> via <gateway>
+
+Issue: Port Not Listening
+  Symptom: Connection refused
+  Check:   ss -tlnp | grep <port>
+  Fix:     Start the service, check it binds to correct interface
+
+Issue: Certificate Expired
+  Symptom: SSL certificate problem: certificate has expired
+  Check:   openssl s_client -connect host:443 | openssl x509 -noout -dates
+  Fix:     Renew the certificate
+
+Issue: Service Bound to Wrong Interface
+  Symptom: Works on localhost, fails from remote
+  Check:   ss -tlnp | grep <port> — check Local Address
+  Fix:     Configure service to bind to 0.0.0.0 or specific interface
+
+Issue: TCP Connection Stuck in CLOSE_WAIT
+  Symptom: Many connections in CLOSE_WAIT state
+  Check:   ss -t state close-wait | wc -l
+  Fix:     Application bug — not closing sockets properly
+```
+
+## Network Performance Tools
+
+```bash
+# iperf3 — Measure bandwidth between two hosts
+# On the server:
+iperf3 -s
+# On the client:
+iperf3 -c server-ip
+# Shows: bandwidth, jitter, packet loss
+
+# mtr — Continuous traceroute with statistics
+mtr -n --report -c 100 target-host
+# Run 100 rounds and report loss/latency at each hop
+
+# Measure HTTP latency
+curl -w "DNS: %{time_namelookup}s\nTCP: %{time_connect}s\nTLS: %{time_appconnect}s\nTTFB: %{time_starttransfer}s\nTotal: %{time_total}s\n" \
+    -o /dev/null -s https://target-host
+
+# Check for packet loss
+ping -c 100 -i 0.2 target-host
+# Look at the summary: X% packet loss
+
+# Check interface throughput
+cat /proc/net/dev
+# Or use nload, iftop, bmon for real-time monitoring
+```
+
+<Exercise number={1} title="Systematic Debugging">
+
+Given symptoms, diagnose network issues at each layer:
+
+```bash
+# ============================================
+# Systematic Network Debugging Exercise
+# ============================================
+
+echo "============================================="
+echo "  Systematic Network Debugging"
+echo "============================================="
+
+# --- Layer 1-2: Physical / Data Link ---
+echo ""
+echo "=== Layer 1-2: Physical / Data Link ==="
+echo "Checking interface status..."
+
+ip -br link show
+echo ""
+
+# Check for interface errors
+echo "Interface statistics (errors/drops):"
+ip -s link show | grep -A1 -E "(RX|TX)" | head -12
+echo ""
+
+# Verdict
+IFACE_UP=$(ip -br link show | grep -c "UP")
+echo "Interfaces UP: $IFACE_UP"
+if [ "$IFACE_UP" -gt 0 ]; then
+    echo "Layer 1-2: PASS — interfaces are up"
+else
+    echo "Layer 1-2: FAIL — no interfaces up"
+    echo "STOP HERE — fix physical/link layer first"
+fi
+
+# --- Layer 3: Network ---
+echo ""
+echo "=== Layer 3: Network ==="
+echo "Checking IP configuration..."
+ip -4 addr show | grep "inet " | grep -v 127.0.0.1
+echo ""
+
+echo "Checking default route..."
+DEFAULT_GW=$(ip route | grep default | awk '{print $3}' | head -1)
+if [ -n "$DEFAULT_GW" ]; then
+    echo "Default gateway: $DEFAULT_GW"
+    echo "Pinging gateway..."
+    ping -c 2 -W 2 "$DEFAULT_GW" 2>/dev/null && echo "Gateway: REACHABLE" || echo "Gateway: UNREACHABLE"
+else
+    echo "No default gateway configured!"
+fi
+echo ""
+
+echo "Testing external connectivity (by IP)..."
+ping -c 2 -W 2 8.8.8.8 2>/dev/null && echo "External (IP): REACHABLE" || echo "External (IP): UNREACHABLE"
+echo ""
+
+echo "Layer 3: Assessment complete"
+
+# --- Layer 4: Transport ---
+echo ""
+echo "=== Layer 4: Transport ==="
+echo "Checking listening ports..."
+ss -tlnp 2>/dev/null | head -10
+echo ""
+
+echo "Testing common ports on localhost..."
+for port in 22 80 443 8080; do
+    timeout 2 bash -c "echo > /dev/tcp/127.0.0.1/$port" 2>/dev/null \
+        && echo "  Port $port: OPEN" \
+        || echo "  Port $port: CLOSED"
+done
+echo ""
+
+echo "Active connections:"
+ss -t state established 2>/dev/null | wc -l | xargs echo "  Established:"
+ss -t state time-wait 2>/dev/null | wc -l | xargs echo "  Time-wait:"
+ss -t state close-wait 2>/dev/null | wc -l | xargs echo "  Close-wait:"
+echo ""
+
+echo "Layer 4: Assessment complete"
+
+# --- Layer 7: Application ---
+echo ""
+echo "=== Layer 7: Application ==="
+echo "Testing DNS resolution..."
+if host google.com > /dev/null 2>&1; then
+    echo "  DNS resolution: WORKING"
+    host google.com 2>/dev/null | head -1
+else
+    nslookup google.com 2>/dev/null | tail -2 || echo "  DNS resolution: FAILED"
+fi
+echo ""
+
+echo "Testing HTTP connectivity..."
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://example.com 2>/dev/null)
+if [ -n "$HTTP_CODE" ] && [ "$HTTP_CODE" != "000" ]; then
+    echo "  HTTP to example.com: $HTTP_CODE"
+else
+    echo "  HTTP to example.com: FAILED (timeout or no response)"
+fi
+echo ""
+
+echo "Layer 7: Assessment complete"
+
+# --- Summary ---
+echo ""
+echo "============================================="
+echo "  Diagnostic Summary"
+echo "============================================="
+echo "  Run this for any reported issue."
+echo "  Start from the first FAIL and fix that layer."
+echo "============================================="
+```
+
+</Exercise>
+
+<Exercise number={2} title="Tcpdump Investigation">
+
+Capture and analyze packets to diagnose a connectivity issue:
+
+```bash
+# ============================================
+# Tcpdump Investigation Exercise
+# ============================================
+
+echo "============================================="
+echo "  Tcpdump Investigation Exercise"
+echo "============================================="
+
+# Since we may not have tcpdump available or root access in all environments,
+# we'll learn by analyzing sample output and building capture commands.
+
+# --- Part 1: Build the right capture command ---
+echo ""
+echo "=== Part 1: Building Capture Commands ==="
+echo ""
+echo "Scenario 1: Debug why a web app can't reach a database on 10.0.2.50:5432"
+echo "  Command: sudo tcpdump -i eth0 host 10.0.2.50 and port 5432 -nn -c 50"
+echo ""
+
+echo "Scenario 2: Capture all DNS traffic to debug resolution issues"
+echo "  Command: sudo tcpdump -i eth0 port 53 -nn -c 50"
+echo ""
+
+echo "Scenario 3: Find out who is making HTTP requests to your server"
+echo "  Command: sudo tcpdump -i eth0 dst port 80 -nn -c 100"
+echo ""
+
+echo "Scenario 4: Debug TLS handshake failures"
+echo "  Command: sudo tcpdump -i eth0 port 443 -nn -c 50 -w /tmp/tls-debug.pcap"
+echo ""
+
+echo "Scenario 5: Capture only connection attempts (SYN packets)"
+echo "  Command: sudo tcpdump -i eth0 'tcp[tcpflags] & (tcp-syn) != 0 and tcp[tcpflags] & (tcp-ack) == 0' -nn"
+echo ""
+
+# --- Part 2: Analyze sample captures ---
+echo "=== Part 2: Analyzing Packet Captures ==="
+echo ""
+
+cat << 'ANALYSIS'
+Sample capture output — diagnose the issue:
+
+Capture A: Connection Refused
+  14:23:45.001 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [S], seq 1000
+  14:23:45.002 IP 10.0.2.50.5432 > 192.168.1.100.54321: Flags [R.], seq 0, ack 1001
+
+  Diagnosis: Server responded with RST (Reset).
+  Meaning:   Port 5432 is NOT listening on 10.0.2.50.
+  Action:    Check if PostgreSQL is running: ss -tlnp | grep 5432
+
+---
+
+Capture B: Connection Timeout (firewall drop)
+  14:23:45.001 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [S], seq 1000
+  14:23:46.001 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [S], seq 1000
+  14:23:48.001 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [S], seq 1000
+
+  Diagnosis: SYN sent three times, no response at all.
+  Meaning:   Packets are being dropped — firewall or host unreachable.
+  Action:    Check firewall rules, check routing to 10.0.2.50.
+
+---
+
+Capture C: Healthy Connection
+  14:23:45.001 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [S], seq 1000
+  14:23:45.002 IP 10.0.2.50.5432 > 192.168.1.100.54321: Flags [S.], seq 2000, ack 1001
+  14:23:45.002 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [.], ack 2001
+  14:23:45.003 IP 192.168.1.100.54321 > 10.0.2.50.5432: Flags [P.], seq 1001:1100
+
+  Diagnosis: Clean three-way handshake followed by data transfer.
+  Meaning:   Connection is working. Problem is at the application layer.
+  Action:    Check application logs, HTTP responses, authentication.
+
+---
+
+Capture D: DNS Failure
+  14:23:45.001 IP 192.168.1.100.40000 > 8.8.8.8.53: UDP, length 45 (query: A myapp.internal)
+  14:23:45.050 IP 8.8.8.8.53 > 192.168.1.100.40000: UDP, length 90 (NXDOMAIN)
+
+  Diagnosis: DNS query returned NXDOMAIN.
+  Meaning:   The domain "myapp.internal" does not exist in public DNS.
+  Action:    Use internal DNS server or add to /etc/hosts.
+ANALYSIS
+
+echo ""
+
+# --- Part 3: Practical packet capture ---
+echo "=== Part 3: Practical Capture and Filter ==="
+echo ""
+
+# Demonstrate reading a capture (simulated)
+echo "Creating a simulated analysis workflow..."
+cat > /tmp/capture-workflow.sh << 'EOF'
+#!/bin/bash
+# Packet capture workflow for debugging
+
+TARGET="${1:?Usage: $0 <target-host> [port]}"
+PORT="${2:-}"
+
+echo "=== Starting packet capture workflow ==="
+
+# Step 1: Start capture
+FILTER="host $TARGET"
+[ -n "$PORT" ] && FILTER="$FILTER and port $PORT"
+
+echo "1. Start capture:"
+echo "   sudo tcpdump -i eth0 $FILTER -nn -w /tmp/debug.pcap &"
+echo ""
+
+# Step 2: Reproduce the issue
+echo "2. Reproduce the issue:"
+if [ -n "$PORT" ]; then
+    echo "   curl -v http://${TARGET}:${PORT}/"
+    echo "   # or: nc -zv $TARGET $PORT"
+fi
+echo ""
+
+# Step 3: Stop capture
+echo "3. Stop capture:"
+echo "   kill %1   # stop tcpdump"
+echo ""
+
+# Step 4: Analyze
+echo "4. Quick analysis:"
+echo "   tcpdump -r /tmp/debug.pcap -nn | head -20"
+echo ""
+echo "5. Check for SYN (connection attempts):"
+echo "   tcpdump -r /tmp/debug.pcap 'tcp[tcpflags] & (tcp-syn) != 0' -nn"
+echo ""
+echo "6. Check for RST (resets):"
+echo "   tcpdump -r /tmp/debug.pcap 'tcp[tcpflags] & (tcp-rst) != 0' -nn"
+echo ""
+echo "7. Check for retransmissions:"
+echo "   tcpdump -r /tmp/debug.pcap -nn | grep -c retransmit"
+echo ""
+echo "8. Open in Wireshark for detailed analysis:"
+echo "   wireshark /tmp/debug.pcap"
+EOF
+chmod +x /tmp/capture-workflow.sh
+bash /tmp/capture-workflow.sh "10.0.2.50" "5432"
+
+echo ""
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<MiniProject title="Network Diagnostic Tool">
+
+Build a comprehensive script that runs all diagnostic checks and produces a structured report:
+
+```bash
+cat > ~/net-diagnostic.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# ============================================
+# Comprehensive Network Diagnostic Tool
+# Usage: ./net-diagnostic.sh [target] [port]
+# ============================================
+
+TARGET="${1:-}"
+PORT="${2:-}"
+REPORT_FILE="/tmp/net-diagnostic-$(date +%Y%m%d-%H%M%S).txt"
+
+# Colors for terminal output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Counters
+PASS=0
+FAIL=0
+WARN=0
+
+# --- Logging ---
+log() {
+    echo -e "$1"
+    echo "$1" | sed 's/\x1b\[[0-9;]*m//g' >> "$REPORT_FILE"
+}
+
+pass() {
+    log "${GREEN}  [PASS]${NC} $1"
+    PASS=$((PASS + 1))
+}
+
+fail() {
+    log "${RED}  [FAIL]${NC} $1"
+    FAIL=$((FAIL + 1))
+}
+
+warn() {
+    log "${YELLOW}  [WARN]${NC} $1"
+    WARN=$((WARN + 1))
+}
+
+info() {
+    log "${BLUE}  [INFO]${NC} $1"
+}
+
+section() {
+    log ""
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "  $1"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# --- Header ---
+log "╔════════════════════════════════════════════╗"
+log "║     Network Diagnostic Report              ║"
+log "╠════════════════════════════════════════════╣"
+log "║  Date: $(date '+%Y-%m-%d %H:%M:%S')                  ║"
+log "║  Host: $(hostname)                         "
+[ -n "$TARGET" ] && log "║  Target: $TARGET                            "
+[ -n "$PORT" ] && log "║  Port: $PORT                                "
+log "╚════════════════════════════════════════════╝"
+
+# ============================================
+# Layer 1-2: Physical / Data Link
+# ============================================
+section "Layer 1-2: Physical / Data Link"
+
+# Check interfaces
+INTERFACES=$(ip -br link show 2>/dev/null)
+if [ -n "$INTERFACES" ]; then
+    UP_COUNT=$(echo "$INTERFACES" | grep -c "UP" || true)
+    DOWN_COUNT=$(echo "$INTERFACES" | grep -c "DOWN" || true)
+
+    echo "$INTERFACES" | while read -r line; do
+        iface=$(echo "$line" | awk '{print $1}')
+        state=$(echo "$line" | awk '{print $2}')
+        if [ "$state" = "UP" ]; then
+            pass "$iface is UP"
+        elif [ "$state" = "DOWN" ] && [ "$iface" != "lo" ]; then
+            fail "$iface is DOWN"
+        fi
+    done
+
+    if [ "$UP_COUNT" -gt 0 ]; then
+        pass "$UP_COUNT interface(s) active"
+    else
+        fail "No active interfaces"
+    fi
+else
+    fail "Cannot enumerate interfaces"
+fi
+
+# Check for interface errors
+for iface in $(ip -br link show | grep UP | awk '{print $1}'); do
+    ERRORS=$(ip -s link show "$iface" 2>/dev/null | grep -A1 "RX" | tail -1 | awk '{print $3}')
+    if [ -n "$ERRORS" ] && [ "$ERRORS" -gt 0 ] 2>/dev/null; then
+        warn "$iface has $ERRORS RX errors"
+    fi
+done
+
+# ============================================
+# Layer 3: Network
+# ============================================
+section "Layer 3: Network"
+
+# Check IP addresses
+IP_ADDRS=$(ip -4 addr show 2>/dev/null | grep "inet " | grep -v 127.0.0.1)
+if [ -n "$IP_ADDRS" ]; then
+    echo "$IP_ADDRS" | while read -r line; do
+        addr=$(echo "$line" | awk '{print $2}')
+        iface=$(echo "$line" | awk '{print $NF}')
+        pass "IP $addr on $iface"
+    done
+else
+    fail "No IPv4 addresses configured (excluding loopback)"
+fi
+
+# Check default gateway
+DEFAULT_GW=$(ip route 2>/dev/null | grep default | awk '{print $3}' | head -1)
+if [ -n "$DEFAULT_GW" ]; then
+    pass "Default gateway: $DEFAULT_GW"
+
+    if ping -c 2 -W 2 "$DEFAULT_GW" > /dev/null 2>&1; then
+        pass "Gateway $DEFAULT_GW is reachable"
+    else
+        fail "Gateway $DEFAULT_GW is unreachable"
+    fi
+else
+    fail "No default gateway configured"
+fi
+
+# Check external connectivity
+if ping -c 2 -W 3 8.8.8.8 > /dev/null 2>&1; then
+    pass "External connectivity (8.8.8.8): OK"
+else
+    fail "External connectivity (8.8.8.8): FAILED"
+fi
+
+# Check routing to target
+if [ -n "$TARGET" ]; then
+    ROUTE=$(ip route get "$TARGET" 2>/dev/null | head -1)
+    if [ -n "$ROUTE" ]; then
+        info "Route to $TARGET: $ROUTE"
+    else
+        fail "No route to $TARGET"
+    fi
+fi
+
+# ============================================
+# DNS
+# ============================================
+section "DNS Resolution"
+
+# Check DNS configuration
+DNS_SERVERS=$(grep nameserver /etc/resolv.conf 2>/dev/null | awk '{print $2}')
+if [ -n "$DNS_SERVERS" ]; then
+    for ns in $DNS_SERVERS; do
+        pass "DNS server configured: $ns"
+    done
+else
+    fail "No DNS servers in /etc/resolv.conf"
+fi
+
+# Test DNS resolution
+if host google.com > /dev/null 2>&1; then
+    pass "DNS resolution working (google.com)"
+elif nslookup google.com > /dev/null 2>&1; then
+    pass "DNS resolution working (google.com via nslookup)"
+else
+    fail "DNS resolution failed for google.com"
+fi
+
+# Resolve target if it's a hostname
+if [ -n "$TARGET" ]; then
+    if echo "$TARGET" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        info "Target is an IP address, skipping DNS check"
+    else
+        if host "$TARGET" > /dev/null 2>&1; then
+            RESOLVED=$(host "$TARGET" 2>/dev/null | head -1)
+            pass "Target DNS: $RESOLVED"
+        else
+            fail "Cannot resolve target: $TARGET"
+        fi
+    fi
+fi
+
+# ============================================
+# Layer 4: Transport
+# ============================================
+section "Layer 4: Transport"
+
+# Listening ports
+LISTENING=$(ss -tlnp 2>/dev/null | tail -n +2 | wc -l)
+info "$LISTENING TCP ports listening"
+
+# Show top listening ports
+ss -tlnp 2>/dev/null | tail -n +2 | head -5 | while read -r line; do
+    port=$(echo "$line" | awk '{print $4}')
+    proc=$(echo "$line" | awk '{print $6}')
+    info "  Listening: $port ($proc)"
+done
+
+# Test target port
+if [ -n "$TARGET" ] && [ -n "$PORT" ]; then
+    log ""
+    info "Testing $TARGET:$PORT..."
+
+    if timeout 5 bash -c "echo > /dev/tcp/$TARGET/$PORT" 2>/dev/null; then
+        pass "Port $PORT on $TARGET is OPEN"
+    else
+        fail "Port $PORT on $TARGET is CLOSED or filtered"
+
+        # Determine if it's refused or timeout
+        NC_RESULT=$(nc -zv -w 3 "$TARGET" "$PORT" 2>&1 || true)
+        if echo "$NC_RESULT" | grep -qi "refused"; then
+            info "  -> Connection refused (port not listening)"
+        elif echo "$NC_RESULT" | grep -qi "timed out"; then
+            info "  -> Connection timed out (firewall or host unreachable)"
+        fi
+    fi
+fi
+
+# Check connection states
+ESTABLISHED=$(ss -t state established 2>/dev/null | wc -l)
+TIME_WAIT=$(ss -t state time-wait 2>/dev/null | wc -l)
+CLOSE_WAIT=$(ss -t state close-wait 2>/dev/null | wc -l)
+
+info "Connection states: established=$ESTABLISHED time-wait=$TIME_WAIT close-wait=$CLOSE_WAIT"
+
+if [ "$CLOSE_WAIT" -gt 50 ] 2>/dev/null; then
+    warn "High CLOSE_WAIT count ($CLOSE_WAIT) — application may not be closing connections"
+fi
+
+if [ "$TIME_WAIT" -gt 500 ] 2>/dev/null; then
+    warn "High TIME_WAIT count ($TIME_WAIT) — many recent closed connections"
+fi
+
+# ============================================
+# Layer 7: Application
+# ============================================
+section "Layer 7: Application"
+
+if [ -n "$TARGET" ]; then
+    # Test HTTP if port is 80, 443, 8080, or 3000
+    if [ -n "$PORT" ]; then
+        case "$PORT" in
+            443)
+                PROTO="https"
+                ;;
+            *)
+                PROTO="http"
+                ;;
+        esac
+
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${PROTO}://${TARGET}:${PORT}/" 2>/dev/null)
+        if [ -n "$HTTP_CODE" ] && [ "$HTTP_CODE" != "000" ]; then
+            if [ "$HTTP_CODE" -lt 400 ] 2>/dev/null; then
+                pass "HTTP response: $HTTP_CODE"
+            elif [ "$HTTP_CODE" -lt 500 ] 2>/dev/null; then
+                warn "HTTP response: $HTTP_CODE (client error)"
+            else
+                fail "HTTP response: $HTTP_CODE (server error)"
+            fi
+
+            # Timing
+            TIMING=$(curl -s -o /dev/null -w "DNS=%{time_namelookup}s Connect=%{time_connect}s TTFB=%{time_starttransfer}s Total=%{time_total}s" --max-time 5 "${PROTO}://${TARGET}:${PORT}/" 2>/dev/null)
+            info "Timing: $TIMING"
+        else
+            info "No HTTP response (may not be an HTTP service)"
+        fi
+
+        # Check TLS certificate for HTTPS
+        if [ "$PORT" = "443" ] || [ "$PROTO" = "https" ]; then
+            CERT_EXPIRY=$(echo | openssl s_client -connect "${TARGET}:${PORT}" -servername "$TARGET" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+            if [ -n "$CERT_EXPIRY" ]; then
+                EXPIRY_EPOCH=$(date -d "$CERT_EXPIRY" +%s 2>/dev/null || echo "0")
+                NOW_EPOCH=$(date +%s)
+                DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
+                if [ "$DAYS_LEFT" -lt 0 ]; then
+                    fail "TLS certificate EXPIRED ($CERT_EXPIRY)"
+                elif [ "$DAYS_LEFT" -lt 30 ]; then
+                    warn "TLS certificate expires in $DAYS_LEFT days ($CERT_EXPIRY)"
+                else
+                    pass "TLS certificate valid for $DAYS_LEFT days"
+                fi
+            fi
+        fi
+    fi
+else
+    info "No target specified — skipping application layer tests"
+    info "Usage: $0 <target> [port] for full diagnostics"
+fi
+
+# ============================================
+# Summary
+# ============================================
+section "Summary"
+
+log ""
+log "  ${GREEN}Passed:${NC}  $PASS"
+log "  ${RED}Failed:${NC}  $FAIL"
+log "  ${YELLOW}Warnings:${NC} $WARN"
+log ""
+
+if [ "$FAIL" -eq 0 ]; then
+    log "  ${GREEN}Overall: All checks passed${NC}"
+elif [ "$FAIL" -le 2 ]; then
+    log "  ${YELLOW}Overall: Minor issues detected${NC}"
+else
+    log "  ${RED}Overall: Significant issues detected${NC}"
+fi
+
+log ""
+log "  Full report saved to: $REPORT_FILE"
+log ""
+SCRIPT
+
+chmod +x ~/net-diagnostic.sh
+
+# Run the diagnostic tool
+echo "=== Running Network Diagnostic Tool ==="
+echo ""
+~/net-diagnostic.sh 127.0.0.1 22
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Troubleshoot bottom-up: physical, network, transport, application — fix the lowest failing layer first
+- `ip link show` checks interfaces, `ip addr` checks IPs, `ip route` checks routing
+- `ping` tests Layer 3, `nc -zv` tests Layer 4, `curl -v` tests Layer 7
+- Know the difference: timeout means firewall/drop, refused means port not listening, reset means forcibly closed
+- `ss -tlnp` is your best friend — it tells you what is listening and which process owns it
+- `tcpdump` is the ultimate debugging tool — it shows exactly what is on the wire
+- DNS is always worth checking — `dig` for DNS, `/etc/resolv.conf` for configuration
+- `mtr` combines ping and traceroute for ongoing path analysis with statistics
+- Always save diagnostic output — attach it to incident tickets for faster resolution
+
+## What's Next
+
+You can now diagnose any network issue systematically. But modern infrastructure lives in the cloud, where networking is virtual and managed through APIs. In **Cloud Networking Basics**, you'll learn about VPCs, subnets, security groups, and the virtual networking constructs that power AWS, GCP, and Azure.

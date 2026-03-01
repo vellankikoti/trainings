@@ -1,0 +1,860 @@
+---
+title: "Viewing History"
+description: "Navigate Git history like a detective. Master git log, git show, git blame, git bisect, and the tools that help you understand why code exists."
+order: 6
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 05-staging-and-committing
+objectives:
+  - Use git log with formatting and filtering
+  - Find when and why code changed with git blame
+  - Use git show to inspect any object
+  - Use git bisect to find bug-introducing commits
+tags:
+  - git
+  - history
+  - log
+  - blame
+  - bisect
+---
+
+<Callout type="story" title="The Story">
+A bug appeared in production. It worked fine two weeks ago. Somewhere in the 200 commits since then, someone introduced a subtle change that breaks payment processing. You need to find which commit, who made it, and why. Git history tools — log, blame, bisect — turn you from "I have no idea what happened" to "commit abc123 by Alice on Tuesday changed the timeout value" in minutes.
+</Callout>
+
+## git log — The History Explorer
+
+`git log` is your primary tool for understanding what happened in a repository. The default output is verbose, but Git's formatting options make it incredibly powerful.
+
+### Basic Usage
+
+```bash
+# Full log (commit hash, author, date, message)
+git log
+
+# Compact one-line-per-commit format
+git log --oneline
+
+# Show the last 5 commits
+git log -5
+
+# Show the last 5 commits, one line each
+git log --oneline -5
+```
+
+### Graph View
+
+Visualize branch structure with `--graph`:
+
+```bash
+# ASCII art branch graph
+git log --oneline --graph
+
+# Include all branches (not just current)
+git log --oneline --graph --all
+
+# The most useful log command — alias this as 'git lg'
+git log --oneline --graph --all --decorate
+```
+
+```
+* 2f8a4b1 (HEAD -> main) Merge branch 'feature-auth'
+|\
+| * 9c3d2e1 (feature-auth) Add rate limiting
+| * 7a1b5c3 Add login endpoint
+|/
+* 4d6e8f0 Update dependencies
+* 1a2b3c4 Initial commit
+```
+
+### Filtering by Author
+
+```bash
+# Commits by a specific author
+git log --author="Alice"
+
+# Regex works too
+git log --author="Alice\|Bob"
+
+# Combine with oneline
+git log --oneline --author="Alice"
+```
+
+### Filtering by Date
+
+```bash
+# Commits after a date
+git log --since="2025-01-01"
+git log --after="2025-01-01"
+
+# Commits before a date
+git log --until="2025-06-30"
+git log --before="2025-06-30"
+
+# Relative dates work too
+git log --since="2 weeks ago"
+git log --since="yesterday"
+git log --after="3 days ago" --before="1 day ago"
+
+# Combine with other filters
+git log --oneline --since="1 week ago" --author="Alice"
+```
+
+### Searching Commit Messages with --grep
+
+```bash
+# Find commits mentioning "timeout"
+git log --grep="timeout"
+
+# Case-insensitive search
+git log --grep="timeout" -i
+
+# Regex patterns
+git log --grep="fix\|bug" --oneline
+
+# Match all terms (AND instead of OR)
+git log --grep="auth" --grep="fix" --all-match
+```
+
+### Searching Code Changes with -S (Pickaxe)
+
+This is one of Git's most powerful features — find which commit added or removed a specific string:
+
+```bash
+# Find commits where "MAX_RETRIES" was added or removed
+git log -S "MAX_RETRIES" --oneline
+
+# With diff to see the actual change
+git log -S "MAX_RETRIES" -p
+
+# Regex version (use -G instead of -S)
+git log -G "timeout\s*=\s*[0-9]+" --oneline
+```
+
+<Callout type="tip" title="Pickaxe for Debugging">
+When a variable or function exists in code and you need to know who introduced it and why, `-S` is your best friend. `git log -S "calculateDiscount" --oneline` instantly tells you which commit added that function.
+</Callout>
+
+### Following File History (Including Renames)
+
+```bash
+# History of a specific file
+git log --oneline -- src/auth.js
+
+# Follow renames (if auth.js was renamed from login.js)
+git log --oneline --follow -- src/auth.js
+
+# Show diffs in file history
+git log -p -- src/auth.js
+
+# How many lines changed per commit
+git log --stat -- src/auth.js
+```
+
+### Custom Format
+
+Build exactly the output you want with `--format`:
+
+```bash
+# Custom format string
+git log --format="%h %an %ar %s"
+# a3f2b1c Alice 2 days ago Fix payment timeout
+
+# Common placeholders:
+#   %H  — full commit hash
+#   %h  — short commit hash
+#   %an — author name
+#   %ae — author email
+#   %ar — author date (relative)
+#   %ad — author date (format)
+#   %s  — subject
+#   %b  — body
+#   %d  — ref names (branches, tags)
+
+# Colored custom format
+git log --format="%C(yellow)%h%C(reset) %C(blue)%an%C(reset) %C(green)%ar%C(reset) %s"
+
+# Date formatting
+git log --format="%h %ad %s" --date=short
+# a3f2b1c 2025-01-15 Fix payment timeout
+
+git log --format="%h %ad %s" --date=iso
+# a3f2b1c 2025-01-15 14:32:01 +0000 Fix payment timeout
+
+# Pretty presets
+git log --pretty=short
+git log --pretty=full
+git log --pretty=fuller
+```
+
+## git show — Inspect Any Object
+
+`git show` displays a single commit, tag, tree, or blob:
+
+```bash
+# Show the latest commit (diff + metadata)
+git show
+
+# Show a specific commit
+git show abc1234
+
+# Show just the diff stats
+git show --stat abc1234
+
+# Show a file at a specific commit
+git show abc1234:src/auth.js
+
+# Show a tag
+git show v1.0.0
+
+# Show the tree (directory listing) of a commit
+git show abc1234 --format="" --name-only
+```
+
+```bash
+# Useful pattern: see a file as it existed 5 commits ago
+git show HEAD~5:src/config.js
+
+# Compare a file between two points
+git show HEAD:src/auth.js > /tmp/current.js
+git show HEAD~10:src/auth.js > /tmp/old.js
+diff /tmp/old.js /tmp/current.js
+```
+
+## git blame — Who Changed This Line?
+
+`git blame` annotates every line of a file with the commit that last modified it:
+
+```bash
+# Blame a file
+git blame src/auth.js
+```
+
+```
+a3f2b1c4 (Alice Chen  2025-01-15 14:32:01 +0000  1) function login(user, pass) {
+a3f2b1c4 (Alice Chen  2025-01-15 14:32:01 +0000  2)     const hash = hashPassword(pass);
+7d8e9f0a (Bob Smith   2025-01-20 09:15:42 +0000  3)     const timeout = 30000;
+7d8e9f0a (Bob Smith   2025-01-20 09:15:42 +0000  4)     return authenticate(user, hash, { timeout });
+a3f2b1c4 (Alice Chen  2025-01-15 14:32:01 +0000  5) }
+```
+
+Now you know Bob changed the timeout on January 20th. You can investigate:
+
+```bash
+# See the full commit that changed line 3
+git show 7d8e9f0a
+```
+
+### Blame Options
+
+```bash
+# Blame specific lines (e.g., lines 10-20)
+git blame -L 10,20 src/auth.js
+
+# Blame a line range using function name
+git blame -L :login src/auth.js
+
+# Ignore whitespace changes
+git blame -w src/auth.js
+
+# Detect lines that were moved or copied from other files
+git blame -C src/auth.js
+
+# Detect moves from any file in the same commit
+git blame -C -C src/auth.js
+
+# Detect moves from any commit
+git blame -C -C -C src/auth.js
+```
+
+<Callout type="tip" title="Blame Beyond the Last Change">
+A line might show a formatting commit as the last change, hiding the interesting commit. Use `git blame -w` to ignore whitespace, or `git log -S "the line content"` to find when the logic was truly introduced.
+</Callout>
+
+## git diff Between Commits
+
+Compare any two points in history:
+
+```bash
+# Diff between two commits
+git diff abc1234 def5678
+
+# Diff between a commit and HEAD
+git diff abc1234 HEAD
+
+# Diff between branches
+git diff main feature-auth
+
+# Two-dot: diff between commit1 and commit2 directly
+git diff main..feature-auth
+
+# Three-dot: diff since the branch diverged from main
+# (changes only on feature-auth, not changes on main)
+git diff main...feature-auth
+
+# Stat only
+git diff main..feature-auth --stat
+
+# Specific file between commits
+git diff abc1234 def5678 -- src/auth.js
+```
+
+The difference between `..` and `...` is subtle but important:
+
+```
+main:    A → B → C → D
+                  \
+feature:           E → F
+
+git diff main..feature   = diff between D and F (all differences)
+git diff main...feature  = diff between C and F (only feature's changes)
+```
+
+## git bisect — Binary Search for Bugs
+
+`git bisect` performs a binary search through commit history to find which commit introduced a bug. Instead of checking 200 commits one by one, bisect checks around 8 (log2 of 200):
+
+### Manual Bisect
+
+```bash
+# Start bisect
+git bisect start
+
+# Mark the current commit as bad (has the bug)
+git bisect bad
+
+# Mark a known-good commit (worked two weeks ago)
+git bisect good abc1234
+
+# Git checks out the middle commit. Test it.
+# If the bug is present:
+git bisect bad
+
+# If the bug is not present:
+git bisect good
+
+# Repeat until Git identifies the exact commit
+# Bisecting: 3 revisions left to test after this (roughly 2 steps)
+# ...
+# abc1234def5678 is the first bad commit
+
+# When done, return to your branch
+git bisect reset
+```
+
+### Automated Bisect
+
+If you have a test script that returns 0 (pass) or 1 (fail), bisect can run fully automated:
+
+```bash
+# Automated bisect with a test script
+git bisect start
+git bisect bad HEAD
+git bisect good abc1234
+
+# Run the test automatically for each step
+git bisect run ./test-payment.sh
+
+# Git tests each midpoint automatically and reports the bad commit
+# abc1234def5678 is the first bad commit
+
+git bisect reset
+```
+
+```bash
+# Your test script just needs to exit 0 (good) or 1 (bad)
+cat > test-payment.sh << 'EOF'
+#!/bin/bash
+# Run the payment test suite
+npm test -- --grep "payment" 2>/dev/null
+EOF
+chmod +x test-payment.sh
+```
+
+<Callout type="warning" title="Bisect with Care">
+During bisect, Git checks out commits between your good and bad marks. If your test depends on external services or database migrations, the intermediate commits might not work for unrelated reasons. Use `git bisect skip` if a commit can't be tested.
+</Callout>
+
+## git shortlog — Contributor Statistics
+
+```bash
+# Commits per author (sorted by count)
+git shortlog -sn
+
+# Include email
+git shortlog -sne
+
+# For a date range
+git shortlog -sn --since="2025-01-01"
+
+# Example output:
+#    142  Alice Chen
+#     98  Bob Smith
+#     67  Carol Davis
+#     45  Dave Wilson
+```
+
+## Practical Patterns
+
+### "When Did This Function First Appear?"
+
+```bash
+git log -S "function calculateDiscount" --oneline --reverse | head -1
+# Shows the first commit that added this function
+```
+
+### "What Changed in This File Last Week?"
+
+```bash
+git log --oneline --since="1 week ago" -- src/payments.js
+```
+
+### "Show Me Every Change to This Function"
+
+```bash
+# Using -L with function name (Git traces function boundaries)
+git log -L :calculateDiscount:src/pricing.js
+```
+
+### "Who Has Worked on This File?"
+
+```bash
+git shortlog -sn -- src/auth.js
+#   12  Alice Chen
+#    8  Bob Smith
+#    3  Carol Davis
+```
+
+### "What Was Deployed Last Friday?"
+
+```bash
+git log --oneline --since="last friday 00:00" --until="last friday 23:59"
+```
+
+<Exercise number={1} title="History Detective">
+
+Use `git log` filtering to find specific commits by date, author, and content:
+
+```bash
+# Setup: Create a repo with a rich history
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Simulate multiple developers and dates
+export GIT_COMMITTER_DATE="2025-01-10 10:00:00"
+export GIT_AUTHOR_DATE="2025-01-10 10:00:00"
+
+echo "const PORT = 3000;" > config.js
+git add config.js
+git -c user.name="Alice Chen" -c user.email="alice@example.com" \
+    commit -q -m "feat(config): add initial configuration"
+
+export GIT_COMMITTER_DATE="2025-01-12 14:30:00"
+export GIT_AUTHOR_DATE="2025-01-12 14:30:00"
+
+echo "function login(user) { return true; }" > auth.js
+git add auth.js
+git -c user.name="Bob Smith" -c user.email="bob@example.com" \
+    commit -q -m "feat(auth): add login function"
+
+export GIT_COMMITTER_DATE="2025-01-15 09:00:00"
+export GIT_AUTHOR_DATE="2025-01-15 09:00:00"
+
+echo "const MAX_RETRIES = 3;" >> config.js
+git add config.js
+git -c user.name="Alice Chen" -c user.email="alice@example.com" \
+    commit -q -m "feat(config): add retry configuration"
+
+export GIT_COMMITTER_DATE="2025-01-18 16:45:00"
+export GIT_AUTHOR_DATE="2025-01-18 16:45:00"
+
+echo "const timeout = 30000;" >> auth.js
+git add auth.js
+git -c user.name="Bob Smith" -c user.email="bob@example.com" \
+    commit -q -m "fix(auth): increase timeout to 30 seconds"
+
+export GIT_COMMITTER_DATE="2025-01-20 11:00:00"
+export GIT_AUTHOR_DATE="2025-01-20 11:00:00"
+
+cat > payments.js << 'EOF'
+function processPayment(amount) {
+    const MAX_RETRIES = 5;
+    return charge(amount);
+}
+EOF
+git add payments.js
+git -c user.name="Carol Davis" -c user.email="carol@example.com" \
+    commit -q -m "feat(payments): add payment processing"
+
+export GIT_COMMITTER_DATE="2025-01-22 08:30:00"
+export GIT_AUTHOR_DATE="2025-01-22 08:30:00"
+
+echo "// Security: validate input" >> auth.js
+git add auth.js
+git -c user.name="Alice Chen" -c user.email="alice@example.com" \
+    commit -q -m "fix(auth): add input validation comment
+
+Added security notes for code review.
+Refs: SEC-101"
+
+unset GIT_COMMITTER_DATE GIT_AUTHOR_DATE
+
+echo "=== Full History ==="
+git log --oneline --format="%h %ad %an - %s" --date=short
+echo ""
+
+# Detective work begins!
+
+echo "=== 1. Find All Commits by Alice ==="
+git log --oneline --author="Alice"
+echo ""
+
+echo "=== 2. Find Commits Between Jan 14-19 ==="
+git log --oneline --after="2025-01-14" --before="2025-01-19"
+echo ""
+
+echo "=== 3. Find Commits Mentioning 'timeout' ==="
+git log --oneline --grep="timeout"
+echo ""
+
+echo "=== 4. Find Commits That Changed 'MAX_RETRIES' (Pickaxe) ==="
+git log --oneline -S "MAX_RETRIES"
+echo ""
+
+echo "=== 5. Find All Bug Fixes ==="
+git log --oneline --grep="^fix"
+echo ""
+
+echo "=== 6. Who Contributed Most? ==="
+git shortlog -sn
+echo ""
+
+echo "=== 7. History of auth.js ==="
+git log --oneline -- auth.js
+echo ""
+
+echo "=== 8. Blame auth.js ==="
+git blame auth.js
+echo ""
+
+# Clean up
+cd / && rm -rf "$REPO"
+echo "Done! You've used log filtering, pickaxe search, blame, and shortlog."
+```
+
+</Exercise>
+
+<Exercise number={2} title="Bug Hunt with Bisect">
+
+Use `git bisect` to find a bug-introducing commit in a prepared repository:
+
+```bash
+# Setup: Create a repo where a bug is introduced at a specific commit
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Commit 1: Working calculator
+cat > calc.sh << 'EOF'
+#!/bin/bash
+# Simple calculator
+add() { echo $(( $1 + $2 )); }
+multiply() { echo $(( $1 * $2 )); }
+
+# Test
+RESULT=$(add 3 4)
+if [ "$RESULT" -eq 7 ]; then
+    exit 0  # PASS
+else
+    exit 1  # FAIL
+fi
+EOF
+chmod +x calc.sh
+git add calc.sh && git commit -q -m "feat: add calculator with tests"
+
+# Commit 2: Add comments (harmless)
+sed -i '1a # Version 2.0' calc.sh
+git add calc.sh && git commit -q -m "docs: add version comment"
+
+# Commit 3: Add subtract (harmless)
+sed -i '/^multiply/a subtract() { echo $(( $1 - $2 )); }' calc.sh
+git add calc.sh && git commit -q -m "feat: add subtract function"
+
+# Commit 4: THE BUG — breaks the add function
+sed -i 's/add() { echo $(( $1 + $2 )); }/add() { echo $(( $1 * $2 )); }/' calc.sh
+git add calc.sh && git commit -q -m "refactor: optimize add function"
+
+# Commit 5: More features (after the bug)
+echo '# Supports add, subtract, multiply' >> calc.sh
+git add calc.sh && git commit -q -m "docs: update feature list"
+
+# Commit 6: Another feature (after the bug)
+echo 'divide() { echo $(( $1 / $2 )); }' >> calc.sh
+git add calc.sh && git commit -q -m "feat: add divide function"
+
+echo "=== Full History ==="
+git log --oneline
+echo ""
+
+echo "=== Current State: Bug Present ==="
+./calc.sh && echo "PASS" || echo "FAIL (bug detected!)"
+echo ""
+
+# Save the good commit hash (first commit)
+GOOD_COMMIT=$(git log --oneline --reverse | head -1 | awk '{print $1}')
+echo "Known good commit: $GOOD_COMMIT"
+echo "Known bad commit:  HEAD"
+echo ""
+
+echo "=== Starting Bisect ==="
+git bisect start
+git bisect bad HEAD
+git bisect good "$GOOD_COMMIT"
+
+echo ""
+echo "=== Running Automated Bisect ==="
+# bisect run tests each midpoint automatically
+git bisect run ./calc.sh
+
+echo ""
+echo "=== Bisect Found the Bad Commit ==="
+echo "Let's see what that commit changed:"
+BAD_COMMIT=$(git bisect view --oneline 2>/dev/null | awk '{print $1}' || echo "")
+
+# Reset bisect
+git bisect reset
+
+echo ""
+echo "=== Verifying: The Bug-Introducing Commit ==="
+# Find the refactor commit
+REFACTOR=$(git log --oneline --grep="optimize add" | awk '{print $1}')
+echo "Commit: $REFACTOR"
+git show "$REFACTOR"
+
+echo ""
+echo "Found it! The 'optimize add function' commit changed + to *"
+echo "This is the power of git bisect — 6 commits searched in ~3 steps."
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Repository Analyzer">
+
+Create a script that generates a comprehensive report about a Git repository:
+
+```bash
+cat > ~/repo-analyzer.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# ============================================================
+# Repository Analyzer
+# Generates a report: top contributors, commit frequency,
+# most changed files, recent activity
+# ============================================================
+
+REPO="${1:-.}"
+
+if [ ! -d "$REPO/.git" ]; then
+    echo "Error: $REPO is not a git repository"
+    echo "Usage: $0 [path-to-repo]"
+    exit 1
+fi
+
+cd "$REPO"
+
+REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
+TOTAL_COMMITS=$(git rev-list --count HEAD)
+FIRST_COMMIT_DATE=$(git log --reverse --format="%ai" | head -1)
+LATEST_COMMIT_DATE=$(git log -1 --format="%ai")
+BRANCH_COUNT=$(git branch -a | wc -l)
+TAG_COUNT=$(git tag | wc -l)
+CURRENT_BRANCH=$(git branch --show-current)
+
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║              Repository Analysis Report                  ║"
+echo "╠══════════════════════════════════════════════════════════╣"
+echo "║  Repository:    $REPO_NAME"
+echo "║  Branch:        $CURRENT_BRANCH"
+echo "║  Total Commits: $TOTAL_COMMITS"
+echo "║  Branches:      $BRANCH_COUNT"
+echo "║  Tags:          $TAG_COUNT"
+echo "║  First Commit:  $FIRST_COMMIT_DATE"
+echo "║  Latest Commit: $LATEST_COMMIT_DATE"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+# ---- Top Contributors ----
+echo "━━━ Top Contributors ━━━"
+echo ""
+git shortlog -sne HEAD | head -10 | while IFS= read -r line; do
+    COUNT=$(echo "$line" | awk '{print $1}')
+    NAME=$(echo "$line" | sed 's/^[[:space:]]*[0-9]*[[:space:]]*//')
+    BAR=""
+    BAR_LEN=$(( COUNT * 30 / TOTAL_COMMITS ))
+    for ((i=0; i<BAR_LEN; i++)); do BAR+="█"; done
+    printf "  %-30s %4d commits  %s\n" "$NAME" "$COUNT" "$BAR"
+done
+echo ""
+
+# ---- Commit Activity (last 12 weeks) ----
+echo "━━━ Weekly Commit Activity (Last 12 Weeks) ━━━"
+echo ""
+MAX_WEEKLY=0
+declare -a WEEKS
+for i in $(seq 11 -1 0); do
+    START_DATE=$(date -d "$i weeks ago last monday" +%Y-%m-%d 2>/dev/null || date -v-"${i}w" -v-mon +%Y-%m-%d 2>/dev/null || echo "")
+    END_DATE=$(date -d "$((i-1)) weeks ago last monday" +%Y-%m-%d 2>/dev/null || date -v-"$((i-1))w" -v-mon +%Y-%m-%d 2>/dev/null || echo "")
+    if [ -n "$START_DATE" ] && [ -n "$END_DATE" ]; then
+        COUNT=$(git log --oneline --after="$START_DATE" --before="$END_DATE" 2>/dev/null | wc -l)
+        WEEKS[$i]=$COUNT
+        if [ "$COUNT" -gt "$MAX_WEEKLY" ]; then MAX_WEEKLY=$COUNT; fi
+    else
+        WEEKS[$i]=0
+    fi
+done
+
+for i in $(seq 11 -1 0); do
+    WEEK_LABEL=$(date -d "$i weeks ago last monday" +%m/%d 2>/dev/null || date -v-"${i}w" -v-mon +%m/%d 2>/dev/null || echo "??/??")
+    COUNT=${WEEKS[$i]:-0}
+    BAR=""
+    if [ "$MAX_WEEKLY" -gt 0 ]; then
+        BAR_LEN=$(( COUNT * 40 / MAX_WEEKLY ))
+    else
+        BAR_LEN=0
+    fi
+    for ((j=0; j<BAR_LEN; j++)); do BAR+="▓"; done
+    printf "  %s  %3d  %s\n" "$WEEK_LABEL" "$COUNT" "$BAR"
+done
+echo ""
+
+# ---- Most Changed Files (top 10) ----
+echo "━━━ Most Frequently Changed Files ━━━"
+echo ""
+git log --pretty=format: --name-only HEAD | sort | uniq -c | sort -rn | head -10 | while IFS= read -r line; do
+    COUNT=$(echo "$line" | awk '{print $1}')
+    FILE=$(echo "$line" | awk '{print $2}')
+    if [ -n "$FILE" ]; then
+        printf "  %4d changes  %s\n" "$COUNT" "$FILE"
+    fi
+done
+echo ""
+
+# ---- Recent Activity (last 7 days) ----
+echo "━━━ Recent Activity (Last 7 Days) ━━━"
+echo ""
+RECENT=$(git log --oneline --since="7 days ago" 2>/dev/null)
+if [ -n "$RECENT" ]; then
+    echo "$RECENT" | while IFS= read -r line; do
+        echo "  $line"
+    done
+else
+    echo "  (no commits in the last 7 days)"
+fi
+echo ""
+
+# ---- Commit Message Types (Conventional Commits) ----
+echo "━━━ Commit Types (Conventional Commits) ━━━"
+echo ""
+for TYPE in feat fix docs refactor test chore perf ci style build; do
+    COUNT=$(git log --oneline --grep="^${TYPE}" HEAD 2>/dev/null | wc -l)
+    if [ "$COUNT" -gt 0 ]; then
+        printf "  %-12s %4d commits\n" "$TYPE:" "$COUNT"
+    fi
+done
+OTHER=$(git log --oneline HEAD | grep -cvE "^[a-f0-9]+ (feat|fix|docs|refactor|test|chore|perf|ci|style|build)" 2>/dev/null || echo "0")
+if [ "$OTHER" -gt 0 ]; then
+    printf "  %-12s %4d commits\n" "other:" "$OTHER"
+fi
+echo ""
+
+# ---- File Types ----
+echo "━━━ File Type Distribution ━━━"
+echo ""
+git ls-files | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -10 | while IFS= read -r line; do
+    COUNT=$(echo "$line" | awk '{print $1}')
+    EXT=$(echo "$line" | awk '{print $2}')
+    printf "  .%-10s %4d files\n" "$EXT" "$COUNT"
+done
+echo ""
+
+# ---- Large Files Warning ----
+echo "━━━ Largest Tracked Files ━━━"
+echo ""
+git ls-files -z | xargs -0 ls -la 2>/dev/null | sort -k5 -rn | head -5 | while IFS= read -r line; do
+    SIZE=$(echo "$line" | awk '{print $5}')
+    FILE=$(echo "$line" | awk '{print $NF}')
+    if [ "$SIZE" -gt 1048576 ]; then
+        SIZE_HUMAN="$(( SIZE / 1048576 ))MB"
+        echo "  ⚠ $SIZE_HUMAN  $FILE"
+    elif [ "$SIZE" -gt 1024 ]; then
+        SIZE_HUMAN="$(( SIZE / 1024 ))KB"
+        echo "  $SIZE_HUMAN  $FILE"
+    else
+        echo "  ${SIZE}B   $FILE"
+    fi
+done
+echo ""
+
+echo "━━━ Report Complete ━━━"
+SCRIPT
+
+chmod +x ~/repo-analyzer.sh
+
+# Demo: create a sample repo and analyze it
+DEMO=$(mktemp -d) && cd "$DEMO" && git init -q
+
+# Create sample history
+echo "# Project" > README.md
+git add README.md && git commit -q -m "feat: initial project setup"
+
+echo "const app = express();" > index.js
+git add index.js && git commit -q -m "feat(server): add express server"
+
+echo "const db = require('./db');" > db.js
+git add db.js && git commit -q -m "feat(db): add database connection"
+
+echo "// fixed" >> index.js
+git add index.js && git commit -q -m "fix(server): resolve startup crash"
+
+echo "## API" >> README.md
+git add README.md && git commit -q -m "docs: add API section to README"
+
+echo "test('works', () => {});" > test.js
+git add test.js && git commit -q -m "test: add initial test suite"
+
+echo "PORT=3000" >> index.js
+git add index.js && git commit -q -m "feat(config): add port configuration"
+
+echo "// refactored" >> db.js
+git add db.js && git commit -q -m "refactor(db): simplify connection logic"
+
+echo ""
+echo "=== Running Repository Analyzer on Demo Repo ==="
+echo ""
+~/repo-analyzer.sh "$DEMO"
+
+# Clean up
+cd / && rm -rf "$DEMO"
+echo ""
+echo "Analyzer created at ~/repo-analyzer.sh"
+echo "Usage: ~/repo-analyzer.sh [path-to-repo]"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `git log --oneline --graph --all` is the most useful log command — alias it as `git lg`
+- Filter logs by author (`--author`), date (`--since`, `--until`), and message (`--grep`)
+- `git log -S "string"` (pickaxe) finds which commit introduced or removed a specific string
+- `git blame` shows who last modified each line — use `-w` to ignore whitespace changes
+- `git show` inspects any commit, tag, tree, or blob by its hash
+- `git diff main...feature` shows only the feature branch's changes since divergence
+- `git bisect` performs binary search to find a bug-introducing commit in O(log n) steps
+- `git shortlog -sn` gives a quick contributor leaderboard
+
+## What's Next
+
+You can now navigate history with precision. In **Branching Basics**, you'll learn to work with branches — creating, switching, merging, and understanding how branches enable parallel development and team collaboration.

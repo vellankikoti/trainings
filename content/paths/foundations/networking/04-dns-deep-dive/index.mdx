@@ -1,0 +1,1118 @@
+---
+title: "DNS Deep Dive"
+description: "The internet's phonebook — understand how domain names become IP addresses. Master DNS records, resolution, caching, and troubleshooting with dig and nslookup."
+order: 4
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - "03-ip-addressing-subnets"
+objectives:
+  - "Explain recursive DNS resolution step by step"
+  - "Know common DNS record types (A, AAAA, CNAME, MX, TXT, NS, SOA)"
+  - "Use dig and nslookup for DNS troubleshooting"
+  - "Understand DNS caching and TTL"
+  - "Configure /etc/hosts and /etc/resolv.conf"
+tags:
+  - networking
+  - dns
+  - records
+  - troubleshooting
+---
+
+<Callout type="story" title="The Story">
+Your company's website goes down. The monitoring says the server is fine. Users report "server not found." You check DNS — someone let the domain registration expire. Or maybe the CDN changed their IP and the DNS record has a 24-hour TTL. DNS issues account for a shocking percentage of "the internet is broken" incidents. Understanding DNS is not theoretical — it's the first thing you check when something doesn't connect.
+</Callout>
+
+## What DNS Does
+
+The **Domain Name System** (DNS) translates human-readable domain names into IP addresses. You type `www.google.com`, DNS returns `142.250.80.46`. Without DNS, you would have to memorize IP addresses for every website.
+
+But DNS does much more than just name-to-IP translation:
+
+- **A records** — Map names to IPv4 addresses
+- **MX records** — Tell email servers where to deliver mail
+- **TXT records** — Store verification data, SPF records, DKIM keys
+- **CNAME records** — Create aliases that point to other names
+- **SRV records** — Help services discover each other
+
+```bash
+# DNS is the first thing that happens when you visit a website:
+# 1. You type www.example.com
+# 2. DNS resolves it to 93.184.216.34
+# 3. Your browser connects to 93.184.216.34
+
+# Quick DNS lookup:
+dig +short www.google.com
+# 142.250.80.46
+
+# Without DNS, you would have to type:
+# http://142.250.80.46 instead of http://www.google.com
+```
+
+<Callout type="info" title="DNS Is a Distributed Database">
+DNS is not a single server or file. It is the largest distributed database in the world. No single entity holds all DNS records. Instead, responsibility is delegated across millions of nameservers worldwide. This distributed design makes DNS resilient — even if servers fail, the system keeps working.
+</Callout>
+
+## The DNS Hierarchy
+
+DNS is organized as a hierarchical tree, from the root down to individual hostnames:
+
+```
+                        . (Root)
+                       / | \
+                     /   |   \
+                   /     |     \
+                .com   .org   .net   .io   .uk   ...
+               / | \
+             /   |   \
+           /     |     \
+      google  example  github
+        |        |        |
+       www      www      api
+```
+
+### The Three Levels
+
+1. **Root DNS Servers** — The starting point. 13 root server clusters (labeled A through M) operated by organizations like ICANN, Verisign, and the US Army. They know where to find the TLD servers.
+
+2. **TLD (Top-Level Domain) Servers** — Handle domains like .com, .org, .net, .io. Verisign operates .com and .net. Each TLD server knows where to find the authoritative servers for domains under it.
+
+3. **Authoritative DNS Servers** — The servers that hold the actual DNS records for a domain. When you buy `example.com` from a registrar, you configure authoritative nameservers to hold your records.
+
+```bash
+# See the root servers:
+dig . NS +short
+# a.root-servers.net.
+# b.root-servers.net.
+# ... (13 total)
+
+# See the TLD servers for .com:
+dig com. NS +short
+# a.gtld-servers.net.
+# b.gtld-servers.net.
+# ... (13 total)
+
+# See the authoritative servers for a domain:
+dig example.com NS +short
+# a.iana-servers.net.
+# b.iana-servers.net.
+```
+
+## Recursive DNS Resolution
+
+When you type a domain name, your computer does not query the root servers directly. Instead, it asks a **recursive resolver** to do the work. Here is the step-by-step process:
+
+```
+Your Computer            Recursive Resolver        Root Server
+     │                         │                       │
+     ├─ "What is              │                       │
+     │   www.example.com?" ─► │                       │
+     │                         │                       │
+     │                         ├─ "Where is           │
+     │                         │   www.example.com?" ► │
+     │                         │                       │
+     │                         │  ◄─ "Ask the .com    │
+     │                         │      TLD servers" ──  │
+     │                         │
+     │                         │                    .com TLD Server
+     │                         │                       │
+     │                         ├─ "Where is           │
+     │                         │   www.example.com?" ► │
+     │                         │                       │
+     │                         │  ◄─ "Ask             │
+     │                         │      ns1.example.com" │
+     │                         │
+     │                         │                    Authoritative Server
+     │                         │                       │
+     │                         ├─ "What is            │
+     │                         │   www.example.com?" ► │
+     │                         │                       │
+     │                         │  ◄─ "93.184.216.34"   │
+     │                         │
+     │  ◄─ "93.184.216.34" ── │
+     │                         │
+```
+
+### The Full Trace
+
+```bash
+# You can watch this entire process with dig +trace:
+dig +trace www.example.com
+
+# Output (abbreviated):
+# .                   518400  IN  NS  a.root-servers.net.
+#                                     ← Step 1: Start at root
+#
+# com.                172800  IN  NS  a.gtld-servers.net.
+#                                     ← Step 2: Root says "ask .com"
+#
+# example.com.        172800  IN  NS  a.iana-servers.net.
+#                                     ← Step 3: .com says "ask iana"
+#
+# www.example.com.    86400   IN  A   93.184.216.34
+#                                     ← Step 4: Authoritative answers!
+```
+
+<Callout type="tip" title="Who Is Your Recursive Resolver?">
+Your recursive resolver is typically provided by your ISP, or you may use a public resolver like Google (8.8.8.8), Cloudflare (1.1.1.1), or Quad9 (9.9.9.9). Your computer is configured to use it via `/etc/resolv.conf`. The resolver does the hard work of walking the DNS tree so your computer only needs to ask one question.
+</Callout>
+
+## DNS Record Types
+
+DNS stores different types of records, each serving a specific purpose:
+
+### A Record (Address)
+
+Maps a domain name to an IPv4 address. This is the most common record type.
+
+```bash
+dig example.com A
+
+# ;; ANSWER SECTION:
+# example.com.         86400   IN  A   93.184.216.34
+#                      ^^^^^           ^^^^^^^^^^^^
+#                      TTL             IPv4 address
+```
+
+### AAAA Record (IPv6 Address)
+
+Maps a domain name to an IPv6 address.
+
+```bash
+dig example.com AAAA
+
+# ;; ANSWER SECTION:
+# example.com.     86400   IN  AAAA    2606:2800:220:1:248:1893:25c8:1946
+```
+
+### CNAME Record (Canonical Name)
+
+Creates an alias — one name points to another name (not directly to an IP).
+
+```bash
+dig www.github.com CNAME
+
+# ;; ANSWER SECTION:
+# www.github.com.   3600    IN  CNAME   github.com.
+#                                       ^^^^^^^^^^^
+#                                       Points to another name
+
+# CNAMEs are chained: www.github.com → github.com → (A record) → IP
+# The resolver follows the chain automatically.
+```
+
+<Callout type="warning" title="CNAME Restrictions">
+A CNAME record cannot coexist with other records for the same name. You cannot have both a CNAME and an A record for `example.com`. This is why you cannot put a CNAME on a naked domain (apex domain) — the SOA and NS records already exist there. Some DNS providers offer workarounds like ALIAS or ANAME records, but these are non-standard.
+</Callout>
+
+### MX Record (Mail Exchange)
+
+Tells email servers where to deliver mail for a domain.
+
+```bash
+dig google.com MX
+
+# ;; ANSWER SECTION:
+# google.com.   600  IN  MX  10 smtp.google.com.
+# google.com.   600  IN  MX  20 smtp2.google.com.
+# google.com.   600  IN  MX  30 smtp3.google.com.
+#                          ^^
+#                       Priority (lower = preferred)
+```
+
+### TXT Record (Text)
+
+Stores arbitrary text data. Used for email authentication (SPF, DKIM, DMARC) and domain verification.
+
+```bash
+dig google.com TXT
+
+# ;; ANSWER SECTION:
+# google.com.  300  IN  TXT  "v=spf1 include:_spf.google.com ~all"
+#                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#                             SPF record: who can send email for this domain
+
+# Domain verification (common with cloud services):
+# example.com.  300  IN  TXT  "google-site-verification=abc123..."
+# example.com.  300  IN  TXT  "MS=ms12345678"
+```
+
+### NS Record (Name Server)
+
+Specifies which servers are authoritative for a domain.
+
+```bash
+dig example.com NS
+
+# ;; ANSWER SECTION:
+# example.com.   86400   IN  NS  a.iana-servers.net.
+# example.com.   86400   IN  NS  b.iana-servers.net.
+```
+
+### SOA Record (Start of Authority)
+
+Contains administrative information about the zone: primary nameserver, admin email, serial number, and timing parameters.
+
+```bash
+dig example.com SOA
+
+# ;; ANSWER SECTION:
+# example.com.  86400  IN  SOA  ns.icann.org. noc.dns.icann.org. (
+#                                2024010100  ; Serial number
+#                                7200        ; Refresh (2 hours)
+#                                3600        ; Retry (1 hour)
+#                                1209600     ; Expire (14 days)
+#                                3600        ; Minimum TTL (1 hour)
+#                                )
+```
+
+### SRV Record (Service)
+
+Used for service discovery — specifies the host and port for a service.
+
+```bash
+dig _sip._tcp.example.com SRV
+
+# ;; ANSWER SECTION:
+# _sip._tcp.example.com.  86400  IN  SRV  10 60 5060 sipserver.example.com.
+#                                          ^^ ^^ ^^^^
+#                                     Priority Weight Port
+```
+
+### PTR Record (Pointer)
+
+Reverse DNS — maps an IP address back to a domain name.
+
+```bash
+dig -x 8.8.8.8
+
+# ;; ANSWER SECTION:
+# 8.8.8.8.in-addr.arpa.   86400   IN  PTR  dns.google.
+#                                            ^^^^^^^^^^^
+#                                            Reverse lookup result
+```
+
+### Quick Reference Table
+
+| Record | Purpose | Example |
+|---|---|---|
+| **A** | Name → IPv4 | example.com → 93.184.216.34 |
+| **AAAA** | Name → IPv6 | example.com → 2606:2800:... |
+| **CNAME** | Name → Name (alias) | www → example.com |
+| **MX** | Email routing | Priority 10 → mail.example.com |
+| **TXT** | Arbitrary text | SPF, DKIM, verification |
+| **NS** | Authoritative nameservers | ns1.example.com |
+| **SOA** | Zone authority info | Serial, refresh, admin |
+| **SRV** | Service discovery | Host, port, priority |
+| **PTR** | IP → Name (reverse) | 8.8.8.8 → dns.google |
+
+## TTL and Caching
+
+**TTL** (Time To Live) is the number of seconds a DNS record can be cached before it must be looked up again. Caching makes DNS fast but can cause problems when records change.
+
+### The Caching Chain
+
+When your browser looks up a domain, the answer is cached at multiple levels:
+
+```
+1. Browser cache       (Chrome: chrome://net-internals/#dns)
+      ↓ miss
+2. OS cache            (systemd-resolved, nscd)
+      ↓ miss
+3. Router cache        (your home router often caches DNS)
+      ↓ miss
+4. Recursive resolver  (ISP or public DNS like 8.8.8.8)
+      ↓ miss
+5. Authoritative       (the source of truth)
+```
+
+```bash
+# Check the TTL of a record:
+dig example.com A
+
+# ;; ANSWER SECTION:
+# example.com.   86400   IN  A   93.184.216.34
+#                ^^^^^
+#                TTL = 86400 seconds = 24 hours
+
+# Each subsequent query shows a decreasing TTL:
+dig example.com A +noall +answer
+# example.com.   85234   IN  A   93.184.216.34  ← ~20 min later
+
+# This means: this answer was cached, and it expires in 85234 seconds.
+```
+
+### TTL Trade-offs
+
+| Low TTL (e.g., 60s) | High TTL (e.g., 86400s) |
+|---|---|
+| Changes propagate quickly | Changes take hours to propagate |
+| More DNS queries (slower) | Fewer DNS queries (faster) |
+| Higher load on DNS servers | Lower load on DNS servers |
+| Good for dynamic records | Good for stable records |
+| Used during migrations | Used for production records |
+
+<Callout type="tip" title="TTL Strategy for Migrations">
+Before migrating a service to a new IP, lower the TTL to 60 seconds days in advance. After the old TTL expires and the low TTL is active, make the IP change. Traffic switches within minutes. After migration is confirmed, raise the TTL back to a longer value. This is standard practice for any DNS migration.
+</Callout>
+
+## DNS Tools
+
+### dig — The DNS Swiss Army Knife
+
+`dig` (Domain Information Groper) is the most powerful DNS tool. Learn it well.
+
+```bash
+# Basic query (A record by default):
+dig example.com
+
+# Query specific record types:
+dig example.com A        # IPv4 address
+dig example.com AAAA     # IPv6 address
+dig example.com MX       # Mail servers
+dig example.com TXT      # Text records
+dig example.com NS       # Nameservers
+dig example.com SOA      # Start of Authority
+dig example.com ANY      # All records (some servers refuse)
+
+# Short output (just the answer):
+dig +short example.com
+# 93.184.216.34
+
+# Trace the full resolution path:
+dig +trace example.com
+
+# Query a specific DNS server:
+dig @8.8.8.8 example.com        # Ask Google DNS
+dig @1.1.1.1 example.com        # Ask Cloudflare DNS
+dig @ns1.example.com example.com  # Ask authoritative directly
+
+# Reverse lookup (IP to name):
+dig -x 8.8.8.8
+
+# Show only the answer section:
+dig example.com +noall +answer
+
+# Check if a record exists with specific data:
+dig example.com TXT +short | grep "spf"
+```
+
+### Understanding dig Output
+
+```bash
+$ dig example.com
+
+# ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 12345
+#                                 ^^^^^^^^
+#                          NOERROR = success
+#                          NXDOMAIN = domain doesn't exist
+#                          SERVFAIL = server error
+#                          REFUSED = server refused query
+
+# ;; QUESTION SECTION:
+# ;example.com.                  IN      A
+#  ← What we asked for
+
+# ;; ANSWER SECTION:
+# example.com.     86400   IN      A       93.184.216.34
+#                   ^^^^^                   ^^^^^^^^^^^^^
+#                   TTL                     The answer
+
+# ;; AUTHORITY SECTION:
+# example.com.     86400   IN      NS      a.iana-servers.net.
+# ← Who is authoritative for this domain
+
+# ;; Query time: 23 msec
+# ;; SERVER: 127.0.0.53#53(127.0.0.53)
+#            ← Which resolver answered
+# ;; MSG SIZE  rcvd: 87
+```
+
+### nslookup and host
+
+```bash
+# nslookup — simpler but less powerful than dig:
+nslookup example.com
+nslookup -type=MX example.com
+nslookup example.com 8.8.8.8    # Use specific server
+
+# host — even simpler:
+host example.com
+host -t MX example.com
+host 93.184.216.34               # Reverse lookup
+```
+
+## Local DNS Configuration
+
+### /etc/hosts — Local Overrides
+
+The `/etc/hosts` file maps names to IP addresses locally, bypassing DNS entirely.
+
+```bash
+cat /etc/hosts
+
+# 127.0.0.1       localhost
+# 127.0.1.1       my-workstation
+# ::1             localhost ip6-localhost
+
+# You can add custom entries:
+# sudo vim /etc/hosts
+# 192.168.1.100   myapp.local
+# 10.0.0.50       db.internal
+# 127.0.0.1       ads.example.com    ← Block a domain!
+```
+
+<Callout type="tip" title="/etc/hosts in DevOps">
+`/etc/hosts` is essential for local development. Need to test your app with a domain name before DNS is configured? Add it to `/etc/hosts`. Debugging a DNS issue? Override the record in `/etc/hosts` to confirm the problem is DNS-related. Testing a migration? Point the domain to the new server's IP in `/etc/hosts` before changing public DNS.
+</Callout>
+
+### /etc/resolv.conf — Resolver Configuration
+
+This file tells your system which DNS servers to use.
+
+```bash
+cat /etc/resolv.conf
+
+# nameserver 127.0.0.53       ← Local resolver (systemd-resolved)
+# nameserver 8.8.8.8          ← Google DNS
+# nameserver 1.1.1.1          ← Cloudflare DNS
+# search example.com          ← Default search domain
+# options timeout:2 attempts:3
+```
+
+```bash
+# The "search" directive is important:
+# If you type "ping myserver", the system tries:
+#   myserver.example.com first (appends search domain)
+#   then myserver (bare name)
+
+# On many systems, resolv.conf is managed by systemd-resolved
+# or NetworkManager. Check actual resolver:
+resolvectl status 2>/dev/null || systemd-resolve --status 2>/dev/null
+```
+
+### Resolution Order: nsswitch.conf
+
+The system checks sources in the order defined in `/etc/nsswitch.conf`:
+
+```bash
+grep hosts /etc/nsswitch.conf
+
+# hosts: files dns
+#        ^^^^^  ^^^
+#        /etc/hosts first, then DNS
+
+# This is why /etc/hosts overrides DNS!
+# You can also have: files mdns4_minimal [NOTFOUND=return] dns
+```
+
+## DNS Troubleshooting
+
+Common DNS problems and how to diagnose them:
+
+### Problem: Domain Not Resolving (NXDOMAIN)
+
+```bash
+dig doesnotexist.example.com
+# status: NXDOMAIN  ← Domain does not exist in DNS
+
+# Causes:
+# - Typo in the domain name
+# - Domain registration expired
+# - DNS records not configured
+# - Authoritative server misconfigured
+
+# Steps:
+# 1. Check if the domain exists at all:
+whois example.com | grep "Expir"
+
+# 2. Check if nameservers are set:
+dig example.com NS +short
+
+# 3. Ask the authoritative server directly:
+dig @$(dig example.com NS +short | head -1) example.com A
+```
+
+### Problem: Wrong IP Address
+
+```bash
+# You get an IP but it's not the right one
+
+# Steps:
+# 1. Check what your resolver returns:
+dig example.com +short
+
+# 2. Check what the authoritative server says:
+dig @$(dig example.com NS +short | head -1) example.com +short
+
+# 3. If different, it's a caching issue. Wait for TTL to expire.
+
+# 4. Flush your local cache:
+# systemd-resolved:
+sudo resolvectl flush-caches
+
+# macOS:
+# sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
+
+# Chrome browser:
+# Visit chrome://net-internals/#dns and click "Clear host cache"
+```
+
+### Problem: Slow DNS Resolution
+
+```bash
+# Measure DNS lookup time:
+dig example.com | grep "Query time"
+# ;; Query time: 23 msec
+
+# If slow (>100ms), try different resolvers:
+dig @8.8.8.8 example.com | grep "Query time"
+dig @1.1.1.1 example.com | grep "Query time"
+
+# Check if it is a specific domain or all domains:
+dig google.com | grep "Query time"
+dig github.com | grep "Query time"
+
+# If all slow, check your resolver configuration:
+cat /etc/resolv.conf
+```
+
+### Problem: SERVFAIL
+
+```bash
+dig broken.example.com
+# status: SERVFAIL  ← Server failed to resolve
+
+# Causes:
+# - Authoritative server is down
+# - DNSSEC validation failure
+# - Nameserver misconfiguration
+
+# Bypass DNSSEC validation to test:
+dig broken.example.com +cd  # cd = checking disabled
+```
+
+## DNS in DevOps
+
+DNS plays a critical role in modern infrastructure:
+
+### Service Discovery
+
+In microservices architectures, services find each other through DNS:
+
+```bash
+# Kubernetes uses DNS for service discovery:
+# A service named "api" in namespace "production" is reachable at:
+# api.production.svc.cluster.local
+
+# Docker Compose uses DNS for container names:
+# A container named "redis" is reachable as just "redis"
+
+# CoreDNS is the default DNS server in Kubernetes:
+kubectl get pods -n kube-system | grep coredns
+```
+
+### Cloud DNS Services
+
+```bash
+# AWS Route53:
+aws route53 list-hosted-zones
+aws route53 list-resource-record-sets --hosted-zone-id Z12345
+
+# GCP Cloud DNS:
+gcloud dns managed-zones list
+gcloud dns record-sets list --zone=my-zone
+
+# These services offer features like:
+# - Health-checked routing (failover)
+# - Latency-based routing (nearest server)
+# - Weighted routing (A/B testing, canary)
+# - Geolocation routing (regional content)
+```
+
+### Internal / Split-Horizon DNS
+
+```bash
+# Split-horizon DNS returns different answers based on who's asking:
+
+# External query (from the internet):
+# app.example.com → 203.0.113.50  (public load balancer IP)
+
+# Internal query (from within the VPC):
+# app.example.com → 10.0.1.100    (private IP, skips load balancer)
+
+# This is configured in Route53 with Private Hosted Zones
+# or in CoreDNS with conditional forwarding
+```
+
+<Exercise number={1} title="DNS Investigation">
+
+Use `dig` to investigate the DNS configuration of `github.com`. Answer each question by running the appropriate command.
+
+```bash
+# 1. What IPv4 address does github.com resolve to?
+dig github.com A +short
+
+# 2. What are github.com's nameservers?
+dig github.com NS +short
+
+# 3. What are github.com's mail servers and their priorities?
+dig github.com MX +short
+
+# 4. What TXT records does github.com have?
+dig github.com TXT +short
+
+# 5. What is the TTL of github.com's A record?
+dig github.com A +noall +answer
+
+# 6. Trace the full resolution path:
+dig +trace github.com
+
+# 7. Do a reverse lookup on the IP you found in step 1:
+dig -x <ip-from-step-1>
+
+# 8. Query using a different DNS server:
+dig @1.1.1.1 github.com +short
+dig @8.8.8.8 github.com +short
+```
+
+Compare the results from different DNS servers. Are they the same? Why might they differ?
+
+<CollapsibleSolution>
+
+```bash
+# 1. IPv4 address
+$ dig github.com A +short
+20.27.177.113
+# (May return different IPs — GitHub uses multiple data centers)
+
+# 2. Nameservers
+$ dig github.com NS +short
+dns1.p08.nsone.net.
+dns2.p08.nsone.net.
+dns3.p08.nsone.net.
+dns4.p08.nsone.net.
+ns-1283.awsdns-32.org.
+ns-1707.awsdns-21.co.uk.
+ns-421.awsdns-52.com.
+ns-520.awsdns-01.net.
+# GitHub uses both NS1 and AWS Route53 for redundancy
+
+# 3. Mail servers
+$ dig github.com MX +short
+1 aspmx.l.google.com.
+5 alt1.aspmx.l.google.com.
+5 alt2.aspmx.l.google.com.
+10 alt3.aspmx.l.google.com.
+10 alt4.aspmx.l.google.com.
+# GitHub uses Google Workspace for email (Google MX servers)
+
+# 4. TXT records
+$ dig github.com TXT +short
+"v=spf1 ip4:192.30.252.0/22 include:_netblocks.google.com ..."
+"MS=ms12345678"
+"docusign=..."
+# SPF record for email authentication, Microsoft and DocuSign verification
+
+# 5. TTL
+$ dig github.com A +noall +answer
+github.com.          60    IN    A    20.27.177.113
+# TTL is 60 seconds — very low! GitHub changes IPs frequently.
+
+# 6. Trace shows: root → .com TLD → NS1/Route53 → A record
+
+# 7. Reverse lookup
+$ dig -x 20.27.177.113
+# May or may not return a PTR record (depends on Microsoft Azure config)
+
+# 8. Different resolvers may return different IPs if GitHub uses
+# GeoDNS or anycast to route users to the nearest data center.
+
+# Key takeaway: GitHub's low TTL (60s) means they can change IPs
+# very quickly — useful for incident response and load balancing.
+```
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise number={2} title="DNS Troubleshooting">
+
+You are given several DNS issues to diagnose. For each scenario, describe the problem and the commands you would use to investigate.
+
+**Scenario 1:** A user reports that `app.example.com` shows a "site can't be reached" error. The server at `10.0.1.50` is running fine.
+
+**Scenario 2:** After changing the A record for `api.example.com` from `10.0.1.100` to `10.0.2.200`, some users still reach the old IP after 2 hours.
+
+**Scenario 3:** Email to `user@example.com` is bouncing with "no mail server found."
+
+**Scenario 4:** Internal services in Kubernetes cannot resolve `redis.default.svc.cluster.local`.
+
+<CollapsibleSolution>
+
+```bash
+# ====================================
+# Scenario 1: Site can't be reached
+# ====================================
+
+# Step 1: Check if DNS resolves at all
+dig app.example.com +short
+# If empty or NXDOMAIN → DNS record doesn't exist
+
+# Step 2: Check if the A record points to the right IP
+dig app.example.com A +noall +answer
+# Should show 10.0.1.50
+
+# Step 3: Check the authoritative server
+dig app.example.com NS +short
+dig @$(dig example.com NS +short | head -1) app.example.com A +short
+
+# Step 4: Test local resolution
+cat /etc/hosts | grep app.example.com
+cat /etc/resolv.conf
+
+# Step 5: If DNS is correct, check connectivity
+ping -c 3 10.0.1.50
+curl -v http://10.0.1.50
+
+# Common fix: Add/correct the A record in your DNS provider
+
+# ====================================
+# Scenario 2: Old IP still served after 2 hours
+# ====================================
+
+# Step 1: Check the TTL of the old record
+dig api.example.com A +noall +answer
+# If TTL was 86400 (24 hours), caches won't expire for 24 hours
+
+# Step 2: Verify the authoritative server has the new record
+dig @$(dig example.com NS +short | head -1) api.example.com A +short
+# Should show 10.0.2.200
+
+# Step 3: Check different resolvers
+dig @8.8.8.8 api.example.com +short    # Google
+dig @1.1.1.1 api.example.com +short    # Cloudflare
+
+# Fix: Wait for old TTL to expire. Next time, lower the TTL
+# to 60 seconds BEFORE making the change.
+
+# ====================================
+# Scenario 3: Email bouncing
+# ====================================
+
+# Step 1: Check MX records
+dig example.com MX +short
+# If empty → no MX records configured!
+
+# Step 2: Check if there are any MX records at all
+dig example.com MX +noall +answer
+# No answer section → problem confirmed
+
+# Step 3: Check the authoritative server
+dig @$(dig example.com NS +short | head -1) example.com MX
+
+# Fix: Add MX records pointing to your mail server:
+# example.com.  3600  IN  MX  10  mail.example.com.
+# example.com.  3600  IN  MX  20  mail2.example.com.
+
+# ====================================
+# Scenario 4: Kubernetes DNS failure
+# ====================================
+
+# Step 1: Check if CoreDNS is running
+kubectl get pods -n kube-system -l k8s-app=kube-dns
+
+# Step 2: Check CoreDNS logs
+kubectl logs -n kube-system -l k8s-app=kube-dns
+
+# Step 3: Test DNS from a debug pod
+kubectl run -it --rm debug --image=busybox --restart=Never -- nslookup redis.default.svc.cluster.local
+
+# Step 4: Check the service exists
+kubectl get svc redis -n default
+
+# Step 5: Check resolv.conf inside a pod
+kubectl exec <pod-name> -- cat /etc/resolv.conf
+# Should show:
+# nameserver 10.96.0.10
+# search default.svc.cluster.local svc.cluster.local cluster.local
+
+# Common fixes:
+# - Restart CoreDNS pods
+# - Check CoreDNS ConfigMap for correct configuration
+# - Verify the service exists in the correct namespace
+```
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="DNS Health Checker">
+
+Build a script that performs a comprehensive DNS health check for any domain — checking all record types, TTLs, nameserver consistency, and response times from multiple resolvers.
+
+```bash
+#!/bin/bash
+# dns-health-check.sh — Comprehensive DNS health checker
+# Usage: ./dns-health-check.sh <domain>
+
+DOMAIN="${1}"
+
+if [ -z "$DOMAIN" ]; then
+    echo "Usage: $0 <domain>"
+    echo "Example: $0 example.com"
+    exit 1
+fi
+
+# Define resolvers to test
+RESOLVERS=("8.8.8.8" "1.1.1.1" "9.9.9.9" "208.67.222.222")
+RESOLVER_NAMES=("Google" "Cloudflare" "Quad9" "OpenDNS")
+
+PASS=0
+WARN=0
+FAIL=0
+
+# Helper: colored output
+check_pass() { echo "  [PASS] $1"; ((PASS++)); }
+check_warn() { echo "  [WARN] $1"; ((WARN++)); }
+check_fail() { echo "  [FAIL] $1"; ((FAIL++)); }
+
+echo "=============================================="
+echo "  DNS Health Check: $DOMAIN"
+echo "  Date: $(date)"
+echo "=============================================="
+
+# --- Section 1: Basic Resolution ---
+echo ""
+echo "--- A Records (IPv4) ---"
+A_RECORDS=$(dig "$DOMAIN" A +short 2>/dev/null)
+if [ -n "$A_RECORDS" ]; then
+    check_pass "A records found:"
+    echo "$A_RECORDS" | while read -r ip; do echo "         $ip"; done
+
+    # Check TTL
+    TTL=$(dig "$DOMAIN" A +noall +answer 2>/dev/null | awk '{print $2}' | head -1)
+    if [ -n "$TTL" ]; then
+        if [ "$TTL" -lt 60 ]; then
+            check_warn "A record TTL is very low: ${TTL}s (may cause high DNS query volume)"
+        elif [ "$TTL" -gt 86400 ]; then
+            check_warn "A record TTL is very high: ${TTL}s (changes will be slow to propagate)"
+        else
+            check_pass "A record TTL: ${TTL}s"
+        fi
+    fi
+else
+    check_fail "No A records found"
+fi
+
+echo ""
+echo "--- AAAA Records (IPv6) ---"
+AAAA_RECORDS=$(dig "$DOMAIN" AAAA +short 2>/dev/null)
+if [ -n "$AAAA_RECORDS" ]; then
+    check_pass "AAAA records found:"
+    echo "$AAAA_RECORDS" | while read -r ip; do echo "         $ip"; done
+else
+    check_warn "No AAAA records (no IPv6 support)"
+fi
+
+# --- Section 2: Nameservers ---
+echo ""
+echo "--- NS Records (Nameservers) ---"
+NS_RECORDS=$(dig "$DOMAIN" NS +short 2>/dev/null)
+NS_COUNT=$(echo "$NS_RECORDS" | grep -c .)
+if [ "$NS_COUNT" -ge 2 ]; then
+    check_pass "$NS_COUNT nameservers found (redundancy OK):"
+    echo "$NS_RECORDS" | while read -r ns; do echo "         $ns"; done
+elif [ "$NS_COUNT" -eq 1 ]; then
+    check_warn "Only 1 nameserver — no redundancy!"
+    echo "         $NS_RECORDS"
+else
+    check_fail "No NS records found"
+fi
+
+# Check nameserver consistency
+echo ""
+echo "--- Nameserver Consistency ---"
+if [ -n "$NS_RECORDS" ]; then
+    FIRST_ANSWER=""
+    while read -r ns; do
+        ns_clean=$(echo "$ns" | sed 's/\.$//')
+        ANSWER=$(dig "@$ns_clean" "$DOMAIN" A +short 2>/dev/null | sort | tr '\n' ',')
+        if [ -z "$FIRST_ANSWER" ]; then
+            FIRST_ANSWER="$ANSWER"
+            check_pass "$ns_clean: $ANSWER"
+        elif [ "$ANSWER" = "$FIRST_ANSWER" ]; then
+            check_pass "$ns_clean: $ANSWER (consistent)"
+        else
+            check_fail "$ns_clean: $ANSWER (INCONSISTENT with other NS!)"
+        fi
+    done <<< "$NS_RECORDS"
+fi
+
+# --- Section 3: Mail Records ---
+echo ""
+echo "--- MX Records (Mail) ---"
+MX_RECORDS=$(dig "$DOMAIN" MX +short 2>/dev/null)
+if [ -n "$MX_RECORDS" ]; then
+    check_pass "MX records found:"
+    echo "$MX_RECORDS" | sort -n | while read -r mx; do echo "         $mx"; done
+else
+    check_warn "No MX records (domain cannot receive email)"
+fi
+
+# --- Section 4: TXT Records ---
+echo ""
+echo "--- TXT Records ---"
+TXT_RECORDS=$(dig "$DOMAIN" TXT +short 2>/dev/null)
+if [ -n "$TXT_RECORDS" ]; then
+    check_pass "TXT records found:"
+    echo "$TXT_RECORDS" | while read -r txt; do echo "         $txt"; done
+
+    # Check for SPF
+    if echo "$TXT_RECORDS" | grep -q "v=spf1"; then
+        check_pass "SPF record found (email authentication)"
+    else
+        check_warn "No SPF record (email may be spoofed)"
+    fi
+else
+    check_warn "No TXT records"
+fi
+
+# --- Section 5: SOA Record ---
+echo ""
+echo "--- SOA Record ---"
+SOA=$(dig "$DOMAIN" SOA +short 2>/dev/null)
+if [ -n "$SOA" ]; then
+    check_pass "SOA record found: $SOA"
+else
+    check_fail "No SOA record"
+fi
+
+# --- Section 6: Multi-Resolver Check ---
+echo ""
+echo "--- Resolution Across Public Resolvers ---"
+for i in "${!RESOLVERS[@]}"; do
+    RESOLVER="${RESOLVERS[$i]}"
+    NAME="${RESOLVER_NAMES[$i]}"
+
+    START=$(date +%s%N)
+    RESULT=$(dig "@$RESOLVER" "$DOMAIN" A +short +time=3 2>/dev/null)
+    END=$(date +%s%N)
+    TIME=$(( (END - START) / 1000000 ))
+
+    if [ -n "$RESULT" ]; then
+        IP=$(echo "$RESULT" | head -1)
+        if [ "$TIME" -lt 100 ]; then
+            check_pass "$NAME ($RESOLVER): $IP (${TIME}ms)"
+        else
+            check_warn "$NAME ($RESOLVER): $IP (${TIME}ms — slow)"
+        fi
+    else
+        check_fail "$NAME ($RESOLVER): FAILED to resolve"
+    fi
+done
+
+# --- Section 7: DNSSEC Check ---
+echo ""
+echo "--- DNSSEC ---"
+DNSSEC=$(dig "$DOMAIN" +dnssec +short 2>/dev/null | grep -c "RRSIG")
+if [ "$DNSSEC" -gt 0 ]; then
+    check_pass "DNSSEC is enabled"
+else
+    check_warn "DNSSEC is not enabled"
+fi
+
+# --- Summary ---
+echo ""
+echo "=============================================="
+echo "  Summary"
+echo "=============================================="
+echo "  PASS: $PASS"
+echo "  WARN: $WARN"
+echo "  FAIL: $FAIL"
+echo ""
+TOTAL=$((PASS + WARN + FAIL))
+if [ "$FAIL" -eq 0 ] && [ "$WARN" -eq 0 ]; then
+    echo "  Status: HEALTHY — All checks passed"
+elif [ "$FAIL" -eq 0 ]; then
+    echo "  Status: OK — No failures, but $WARN warning(s)"
+else
+    echo "  Status: UNHEALTHY — $FAIL failure(s) detected"
+fi
+echo "=============================================="
+```
+
+Save and test:
+
+```bash
+chmod +x dns-health-check.sh
+
+# Run against well-known domains
+./dns-health-check.sh google.com
+./dns-health-check.sh github.com
+./dns-health-check.sh example.com
+
+# Run against your own domain (if you have one)
+./dns-health-check.sh yourdomain.com
+```
+
+This script automates the DNS troubleshooting workflow that every DevOps engineer performs when diagnosing connectivity issues. It checks record existence, nameserver consistency, response times from multiple resolvers, and email authentication records.
+
+</MiniProject>
+
+## Key Takeaways
+
+- DNS translates domain names to IP addresses through a hierarchical system of root servers, TLD servers, and authoritative servers
+- Recursive resolvers do the work for your computer, walking the DNS tree and caching results based on TTL values
+- Common record types serve different purposes: A (IPv4), AAAA (IPv6), CNAME (alias), MX (email), TXT (verification/authentication), NS (nameservers)
+- `dig` is the essential DNS troubleshooting tool — use `dig +short` for quick lookups, `dig +trace` to follow the resolution path, and `dig @server` to query specific resolvers
+- DNS caching at multiple levels (browser, OS, resolver) makes lookups fast but means changes propagate according to TTL — always lower TTL before making DNS changes
+
+<Quiz>
+<QuizQuestion
+  question="In what order does DNS recursive resolution proceed?"
+  options={[
+    "Authoritative → TLD → Root",
+    "Root → Authoritative → TLD",
+    "Root → TLD → Authoritative",
+    "TLD → Root → Authoritative"
+  ]}
+  answer={2}
+  explanation="Recursive resolution starts at the root servers, which direct the resolver to the TLD servers (e.g., .com), which direct to the authoritative servers that hold the actual records."
+/>
+<QuizQuestion
+  question="What DNS record type should you use to make mail.example.com an alias for mailserver.provider.com?"
+  options={[
+    "A record",
+    "MX record",
+    "CNAME record",
+    "TXT record"
+  ]}
+  answer={2}
+  explanation="A CNAME record creates an alias — it makes one name point to another name. An A record maps to an IP directly. An MX record specifies where to deliver email. A TXT record stores text data."
+/>
+<QuizQuestion
+  question="You changed a DNS A record but users still see the old IP after 30 minutes. The old TTL was 86400. What is the most likely cause?"
+  options={[
+    "The DNS server is down",
+    "The record was cached with the old 86400-second (24-hour) TTL",
+    "DNSSEC is blocking the change",
+    "The domain registration expired"
+  ]}
+  answer={1}
+  explanation="A TTL of 86400 seconds means caches will keep the old answer for up to 24 hours. The change is propagating, but resolvers that cached the old record will not check again until the TTL expires. This is why you should lower TTL before making DNS changes."
+/>
+<QuizQuestion
+  question="Which command traces the complete DNS resolution path from root to authoritative server?"
+  options={[
+    "dig example.com +short",
+    "dig example.com +trace",
+    "nslookup example.com",
+    "host example.com"
+  ]}
+  answer={1}
+  explanation="dig +trace follows the entire resolution path: root servers → TLD servers → authoritative servers. The +short flag only shows the final answer. nslookup and host show the result but not the resolution path."
+/>
+</Quiz>
+
+## What's Next?
+
+In the next lesson, **HTTP and HTTPS**, you will learn the protocol that powers the web. Now that you understand how DNS resolves a domain name to an IP address, you will see what happens after the connection is established — the HTTP request/response cycle, status codes, headers, and how TLS encryption makes it all secure. When a deployment breaks, HTTP knowledge tells you exactly where to look.

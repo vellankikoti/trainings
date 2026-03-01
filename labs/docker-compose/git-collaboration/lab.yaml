@@ -1,0 +1,107 @@
+name: git-collaboration
+title: "Git Collaboration Lab"
+description: "Practice real-world Git collaboration workflows using a simulated remote repository. Learn pushing, pulling, conflict resolution, hooks, tagging, and branching strategies."
+module: "git-collaboration"
+difficulty: intermediate
+duration: 50
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: collab-ex-1
+    title: "Clone from a bare repo, make changes, and push"
+    description: "Clone the bare repository at /git/project.git into /workspace/project. Create a file called 'README.md' with the text 'Collaboration Project', commit it with the message 'Initial commit', and push to the remote."
+    hints:
+      - "Clone: git clone /git/project.git /workspace/project"
+      - "Add content: cd /workspace/project && echo 'Collaboration Project' > README.md"
+      - "Commit and push: git add README.md && git commit -m 'Initial commit' && git push origin main"
+    validation:
+      type: command
+      command: "cd /workspace/project && git log origin/main --oneline | grep -q 'Initial commit' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: collab-ex-2
+    title: "Set up tracking branches"
+    description: "In /workspace/project, create a new branch called 'develop', push it to the remote with upstream tracking enabled, and verify the tracking relationship is set up. Then create another branch called 'staging' from main and push it with tracking as well."
+    hints:
+      - "Create and push with tracking: git checkout -b develop && git push -u origin develop"
+      - "Repeat for staging: git checkout main && git checkout -b staging && git push -u origin staging"
+      - "Verify tracking: git branch -vv"
+    validation:
+      type: command
+      command: "cd /workspace/project && git branch -vv | grep 'develop' | grep -q 'origin/develop' && git branch -vv | grep 'staging' | grep -q 'origin/staging' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: collab-ex-3
+    title: "Resolve a push rejection"
+    description: "Simulate a push rejection: first, on main in /workspace/project, use 'git commit --allow-empty -m \"Remote work\"' and push it. Then create a second clone at /workspace/project2 from the same bare repo. In project2, make a commit and push. Go back to /workspace/project, make another commit, and try to push -- it will be rejected. Resolve this by fetching, merging, and then pushing."
+    hints:
+      - "Clone again: git clone /git/project.git /workspace/project2"
+      - "In project2: cd /workspace/project2 && git commit --allow-empty -m 'Other developer work' && git push"
+      - "In project: cd /workspace/project && git commit --allow-empty -m 'My work' && git push (fails) && git pull --no-rebase && git push"
+    validation:
+      type: command
+      command: "cd /workspace/project && git log origin/main --oneline | grep -q 'My work' && git log origin/main --oneline | grep -q 'Other developer work' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: collab-ex-4
+    title: "Feature branch workflow"
+    description: "In /workspace/project, implement a feature branch workflow: create a branch called 'feature/user-profile' from main, add a file 'profile.txt' with the text 'User Profile Feature', make a commit with the message 'feat: add user profile', switch to main, merge the feature branch, and push main to the remote."
+    hints:
+      - "Create the branch: git checkout main && git checkout -b feature/user-profile"
+      - "Add and commit: echo 'User Profile Feature' > profile.txt && git add profile.txt && git commit -m 'feat: add user profile'"
+      - "Merge and push: git checkout main && git merge feature/user-profile && git push origin main"
+    validation:
+      type: command
+      command: "cd /workspace/project && git log origin/main --oneline | grep -q 'feat: add user profile' && test -f profile.txt && echo 'pass'"
+      expected_output: "pass"
+
+  - id: collab-ex-5
+    title: "Pull with rebase vs merge"
+    description: "Demonstrate the difference between pull strategies. In /workspace/project2, pull the latest main. Then make a commit in project2 and push. In /workspace/project, make a local commit on main (do not push). Now pull with rebase: 'git pull --rebase origin main'. Verify with 'git log --oneline --graph' that the history is linear (no merge commit). Push the result."
+    hints:
+      - "In project2: cd /workspace/project2 && git pull && git commit --allow-empty -m 'Upstream change' && git push"
+      - "In project: cd /workspace/project && git commit --allow-empty -m 'Local change'"
+      - "Rebase pull: git pull --rebase origin main && git push"
+    validation:
+      type: command
+      command: "cd /workspace/project && git log origin/main --oneline | grep -q 'Local change' && git log origin/main --oneline | grep -q 'Upstream change' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: collab-ex-6
+    title: "Set up a pre-commit hook"
+    description: "In /workspace/project, create a Git pre-commit hook that checks if any staged .txt file contains the word 'TODO'. If it does, the hook should print 'ERROR: TODO found in staged files' and exit with code 1, preventing the commit. Test it by trying to commit a file with 'TODO' in it (the commit should fail), then fix the file and commit successfully."
+    hints:
+      - "Create the hook file: vim .git/hooks/pre-commit"
+      - "Use: git diff --cached --name-only | grep '\\.txt$' | xargs grep -l 'TODO' to find offending files"
+      - "Make it executable: chmod +x .git/hooks/pre-commit"
+    validation:
+      type: command
+      command: "test -x /workspace/project/.git/hooks/pre-commit && grep -q 'TODO' /workspace/project/.git/hooks/pre-commit && echo 'pass'"
+      expected_output: "pass"
+
+  - id: collab-ex-7
+    title: "Create and push release tags"
+    description: "In /workspace/project on main, create an annotated tag called 'v1.0.0' with the message 'Release version 1.0.0'. Push the tag to the remote. Then make another commit, create tag 'v1.1.0' with the message 'Release version 1.1.0', and push all tags."
+    hints:
+      - "Create annotated tag: git tag -a v1.0.0 -m 'Release version 1.0.0'"
+      - "Push single tag: git push origin v1.0.0"
+      - "Push all tags at once: git push --tags"
+    validation:
+      type: command
+      command: "cd /workspace/project && git tag | grep -q 'v1.0.0' && git tag | grep -q 'v1.1.0' && git ls-remote --tags origin | grep -q 'v1.0.0' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: collab-ex-8
+    title: "Simulate and resolve a remote conflict"
+    description: "Simulate a conflict between two developers. In /workspace/project2, pull latest, then edit README.md to say 'Updated by Developer 2' and push. In /workspace/project, edit README.md to say 'Updated by Developer 1' and commit. Try to push (it will fail). Pull to get the conflict, resolve it by combining both lines so README.md contains both 'Developer 1' and 'Developer 2', then commit and push."
+    hints:
+      - "In project2: cd /workspace/project2 && git pull && echo 'Updated by Developer 2' > README.md && git add README.md && git commit -m 'Dev 2 update' && git push"
+      - "In project: echo 'Updated by Developer 1' > README.md && git add README.md && git commit -m 'Dev 1 update' && git push (fails)"
+      - "Resolve: git pull, edit README.md to keep both lines, git add README.md && git commit -m 'Merge: combine both updates' && git push"
+    validation:
+      type: command
+      command: "cd /workspace/project && git pull && grep -q 'Developer 1' README.md && grep -q 'Developer 2' README.md && echo 'pass'"
+      expected_output: "pass"

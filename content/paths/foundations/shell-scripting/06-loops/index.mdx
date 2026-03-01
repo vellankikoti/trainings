@@ -1,0 +1,341 @@
+---
+title: "Loops and Iteration"
+description: "Master bash loops with for, while, and until. Process files, generate sequences, iterate over command output, and build powerful automation loops."
+order: 6
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 05-conditionals
+objectives:
+  - Write for loops with lists, ranges, and command output
+  - Use while and until loops for conditional iteration
+  - Process files line by line
+  - Control loop flow with break and continue
+tags:
+  - shell-scripting
+  - loops
+  - iteration
+  - bash
+---
+
+<Callout type="story" title="The Story">
+You need to check if Nginx is running on 50 servers. Without loops, that's 50 SSH commands typed manually. With a for loop, it's 3 lines of code. Loops transform scripts from "do this once" to "do this for everything" — and that's where the real power of automation lives.
+</Callout>
+
+## The `for` Loop
+
+### Iterating Over a List
+
+```bash
+# List of values
+for server in web01 web02 web03 db01; do
+    echo "Checking $server..."
+done
+
+# List of files
+for file in /etc/*.conf; do
+    echo "Config: $file"
+done
+
+# From a variable
+SERVICES="nginx redis postgres"
+for svc in $SERVICES; do
+    echo "Service: $svc"
+done
+```
+
+### Ranges
+
+```bash
+# Sequence
+for i in {1..10}; do
+    echo "Number: $i"
+done
+
+# Step
+for i in {0..100..10}; do
+    echo "Percentage: $i%"
+done
+
+# C-style for loop
+for ((i=0; i<5; i++)); do
+    echo "Index: $i"
+done
+```
+
+### Iterating Over Command Output
+
+```bash
+# Process each line of command output
+for user in $(cut -d: -f1 /etc/passwd | head -5); do
+    echo "User: $user"
+done
+
+# Files found by find
+for file in $(find /var/log -name "*.log" -maxdepth 1 2>/dev/null); do
+    SIZE=$(du -h "$file" | cut -f1)
+    echo "$file: $SIZE"
+done
+```
+
+<Callout type="warning" title="Word Splitting Trap">
+Using `for item in $(command)` splits on whitespace. If filenames have spaces, they break. For files with spaces, use `while read` instead (shown below).
+</Callout>
+
+## The `while` Loop
+
+```bash
+# Count up
+COUNT=1
+while [ "$COUNT" -le 5 ]; do
+    echo "Count: $COUNT"
+    COUNT=$((COUNT + 1))
+done
+
+# Wait for a condition
+while ! curl -s http://localhost:8080/health >/dev/null 2>&1; do
+    echo "Waiting for service to start..."
+    sleep 2
+done
+echo "Service is up!"
+
+# Infinite loop (use break to exit)
+while true; do
+    read -p "Enter 'quit' to exit: " INPUT
+    [ "$INPUT" = "quit" ] && break
+    echo "You said: $INPUT"
+done
+```
+
+### Reading Files Line by Line
+
+The safe way to process files (handles spaces, special characters):
+
+```bash
+# Read file line by line
+while IFS= read -r line; do
+    echo "Line: $line"
+done < /etc/passwd
+
+# Process command output line by line
+ps aux | while IFS= read -r line; do
+    echo "$line"
+done
+
+# Read CSV fields
+while IFS=, read -r name age city; do
+    echo "$name is $age years old from $city"
+done << 'CSV'
+Alice,30,NYC
+Bob,25,London
+Charlie,35,Tokyo
+CSV
+```
+
+## The `until` Loop
+
+Runs until the condition becomes true (opposite of while):
+
+```bash
+# Count down
+COUNT=5
+until [ "$COUNT" -eq 0 ]; do
+    echo "Countdown: $COUNT"
+    COUNT=$((COUNT - 1))
+done
+echo "Go!"
+
+# Wait for a file to appear
+until [ -f /tmp/ready.flag ]; do
+    echo "Waiting for /tmp/ready.flag..."
+    sleep 1
+done
+echo "Flag found!"
+```
+
+## Loop Control
+
+### `break` — Exit the Loop
+
+```bash
+for i in {1..100}; do
+    if [ "$i" -eq 5 ]; then
+        break    # exit the loop at 5
+    fi
+    echo "$i"
+done
+```
+
+### `continue` — Skip to Next Iteration
+
+```bash
+for file in /var/log/*; do
+    # Skip directories
+    [ -d "$file" ] && continue
+
+    echo "File: $(basename "$file")"
+done
+```
+
+<Exercise number={1} title="Loop Practice">
+
+```bash
+# 1. Print multiplication table for 7
+echo "=== 7x Table ==="
+for i in {1..10}; do
+    echo "  7 x $i = $((7 * i))"
+done
+
+# 2. Count files by extension in /etc
+echo ""
+echo "=== File Extensions in /etc ==="
+find /etc -maxdepth 1 -type f 2>/dev/null | while IFS= read -r file; do
+    echo "${file##*.}"
+done | sort | uniq -c | sort -rn | head -10
+
+# 3. Check multiple services
+echo ""
+echo "=== Service Status ==="
+for svc in cron ssh nginx; do
+    if systemctl is-active "$svc" &>/dev/null; then
+        echo "  $svc: RUNNING"
+    else
+        echo "  $svc: STOPPED"
+    fi
+done
+
+# 4. Retry loop
+echo ""
+echo "=== Retry Demo ==="
+ATTEMPTS=0
+MAX_ATTEMPTS=3
+until [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; do
+    ATTEMPTS=$((ATTEMPTS + 1))
+    echo "  Attempt $ATTEMPTS of $MAX_ATTEMPTS..."
+    # Simulate 50% failure rate
+    if [ $((RANDOM % 2)) -eq 0 ]; then
+        echo "  Success!"
+        break
+    fi
+    echo "  Failed, retrying..."
+    sleep 0.5
+done
+if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+    echo "  All attempts exhausted"
+fi
+```
+
+</Exercise>
+
+<Exercise number={2} title="File Processing">
+
+```bash
+# Create sample data
+cat > /tmp/servers.csv << 'CSV'
+hostname,ip,role,status
+web01,10.0.1.10,web,active
+web02,10.0.1.11,web,active
+db01,10.0.2.10,database,active
+db02,10.0.2.11,database,maintenance
+cache01,10.0.3.10,cache,active
+monitor,10.0.4.10,monitoring,active
+CSV
+
+echo "=== Server Inventory ==="
+
+# Skip header, process each line
+tail -n +2 /tmp/servers.csv | while IFS=, read -r hostname ip role status; do
+    printf "  %-12s %-15s %-12s %s\n" "$hostname" "$ip" "$role" "$status"
+done
+
+echo ""
+echo "=== Active Servers by Role ==="
+tail -n +2 /tmp/servers.csv | while IFS=, read -r hostname ip role status; do
+    [ "$status" = "active" ] && echo "$role"
+done | sort | uniq -c | sort -rn
+
+echo ""
+echo "=== Servers in Maintenance ==="
+tail -n +2 /tmp/servers.csv | while IFS=, read -r hostname ip role status; do
+    if [ "$status" = "maintenance" ]; then
+        echo "  WARNING: $hostname ($ip) is in maintenance"
+    fi
+done
+
+rm /tmp/servers.csv
+```
+
+</Exercise>
+
+<MiniProject title="Multi-Server Health Checker">
+
+```bash
+cat > ~/multi-check.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Simulated multi-server health check
+SERVERS=(
+    "web01:10.0.1.10:80"
+    "web02:10.0.1.11:80"
+    "api01:10.0.2.10:3000"
+    "db01:10.0.3.10:5432"
+    "cache01:10.0.4.10:6379"
+)
+
+HEALTHY=0
+UNHEALTHY=0
+
+echo "=== Multi-Server Health Check ==="
+echo "Time: $(date)"
+echo ""
+
+for entry in "${SERVERS[@]}"; do
+    IFS=: read -r name ip port <<< "$entry"
+
+    # Simulate health check (random pass/fail for demo)
+    if (( RANDOM % 5 != 0 )); then
+        STATUS="HEALTHY"
+        HEALTHY=$((HEALTHY + 1))
+    else
+        STATUS="UNHEALTHY"
+        UNHEALTHY=$((UNHEALTHY + 1))
+    fi
+
+    if [ "$STATUS" = "HEALTHY" ]; then
+        printf "  %-12s %-15s :%-6s [OK]\n" "$name" "$ip" "$port"
+    else
+        printf "  %-12s %-15s :%-6s [FAIL]\n" "$name" "$ip" "$port"
+    fi
+done
+
+echo ""
+echo "Results: $HEALTHY healthy, $UNHEALTHY unhealthy out of ${#SERVERS[@]} servers"
+
+if [ "$UNHEALTHY" -gt 0 ]; then
+    echo "ACTION REQUIRED: $UNHEALTHY servers need attention"
+    exit 1
+fi
+
+exit 0
+SCRIPT
+
+chmod +x ~/multi-check.sh
+~/multi-check.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `for` loops iterate over lists, ranges, and command output
+- `while read -r line` is the safe way to process files line by line
+- `until` runs until its condition becomes true (opposite of while)
+- `break` exits a loop; `continue` skips to the next iteration
+- Avoid `for file in $(command)` with files that might have spaces
+- C-style loops `for ((i=0; i<n; i++))` work when you need counters
+- Retry loops with a counter prevent infinite waiting
+
+## What's Next
+
+Your scripts have logic and loops. Now it's time to organize them. In **Functions and Modular Scripts**, you'll learn to write reusable functions, pass parameters, return values, and structure scripts that grow without becoming unmanageable.

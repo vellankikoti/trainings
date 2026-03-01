@@ -1,0 +1,689 @@
+---
+title: "Installation and Setup"
+description: "Install Git on any platform and configure it for professional use — SSH keys, GPG signing, aliases, editor, and the settings that make daily Git work smooth."
+order: 3
+xpReward: 75
+estimatedMinutes: 25
+prerequisites:
+  - 02-how-git-works
+objectives:
+  - Install Git on Linux, Mac, and Windows
+  - Configure user identity and editor
+  - Set up SSH keys for GitHub
+  - Create useful Git aliases
+tags:
+  - git
+  - setup
+  - ssh
+  - configuration
+---
+
+<Callout type="story" title="The Story">
+You join a new company and get a fresh laptop. Before you can clone the first repo, you need Git configured properly. SSH keys for passwordless authentication, the right editor for merge messages, aliases that save hours per week. A well-configured Git setup is the difference between fighting your tools and flowing with them.
+</Callout>
+
+## Installing Git
+
+### Linux
+
+Most distributions include Git in their package manager:
+
+```bash
+# Debian / Ubuntu
+sudo apt update && sudo apt install git -y
+
+# Fedora / RHEL
+sudo dnf install git -y
+
+# Arch
+sudo pacman -S git
+
+# Verify installation
+git --version
+# git version 2.43.0
+```
+
+### macOS
+
+macOS ships with Apple's Git (Xcode Command Line Tools), but you'll want the latest version:
+
+```bash
+# Option 1: Install Xcode Command Line Tools (includes Git)
+xcode-select --install
+
+# Option 2: Install via Homebrew (recommended — always up to date)
+brew install git
+
+# Verify you're using Homebrew's Git, not Apple's
+which git
+# /opt/homebrew/bin/git  (Homebrew)
+# /usr/bin/git           (Apple — older)
+
+git --version
+```
+
+### Windows
+
+```powershell
+# Option 1: winget (Windows Package Manager)
+winget install Git.Git
+
+# Option 2: Download from https://git-scm.com/download/win
+
+# Option 3: Via Chocolatey
+choco install git
+
+# After install, open Git Bash or PowerShell
+git --version
+```
+
+<Callout type="tip" title="Windows Users">
+Install Windows Terminal and use Git Bash or WSL2 for the best experience. The default Windows Command Prompt works but lacks features like tab completion and color output that make Git much more pleasant to use.
+</Callout>
+
+## Git Config Levels
+
+Git reads configuration from three levels, each overriding the previous:
+
+```bash
+# System — applies to every user on the machine
+git config --system core.autocrlf input
+# Stored in: /etc/gitconfig
+
+# Global — applies to your user account (most common)
+git config --global user.name "Alice Chen"
+# Stored in: ~/.gitconfig or ~/.config/git/config
+
+# Local — applies to a single repository only
+git config --local user.email "alice@work-project.com"
+# Stored in: .git/config (inside the repo)
+```
+
+Local overrides global, global overrides system. This is powerful — you can use a personal email globally but a work email for specific repos.
+
+```bash
+# View all settings and where they come from
+git config --list --show-origin
+
+# View a specific setting
+git config user.email
+```
+
+## Configuring Your Identity
+
+Every commit records an author. Set this first:
+
+```bash
+# Required — Git won't let you commit without these
+git config --global user.name "Your Full Name"
+git config --global user.email "you@example.com"
+
+# Verify
+git config --global user.name
+git config --global user.email
+```
+
+<Callout type="warning" title="Email Matters">
+Use the email associated with your GitHub/GitLab account. Otherwise your commits won't be linked to your profile and won't show up in your contribution graph. If you want to keep your email private, GitHub provides a no-reply email address at Settings > Emails.
+</Callout>
+
+## Default Branch Name
+
+Git historically used "master" as the default branch. The industry has moved to "main":
+
+```bash
+git config --global init.defaultBranch main
+```
+
+This applies to new repositories created with `git init`. Existing repos keep their current default branch.
+
+## Editor Configuration
+
+Git opens an editor for commit messages, interactive rebase, and merge conflict resolution. Choose one you're comfortable with:
+
+```bash
+# VS Code (recommended for beginners — GUI with terminal integration)
+git config --global core.editor "code --wait"
+
+# Vim (fast, available everywhere)
+git config --global core.editor "vim"
+
+# Nano (simple terminal editor)
+git config --global core.editor "nano"
+
+# Sublime Text
+git config --global core.editor "subl -n -w"
+
+# Emacs
+git config --global core.editor "emacs"
+```
+
+The `--wait` flag (for VS Code and Sublime) tells Git to wait until you close the editor tab before continuing.
+
+```bash
+# Test your editor setup — this should open your editor
+git config --global --edit
+```
+
+## SSH Key Setup
+
+HTTPS authentication requires entering credentials repeatedly. SSH keys provide secure, passwordless access:
+
+```bash
+# Step 1: Generate an SSH key pair (Ed25519 is modern and secure)
+ssh-keygen -t ed25519 -C "you@example.com"
+# Press Enter for default path (~/.ssh/id_ed25519)
+# Enter a passphrase (recommended) or press Enter for none
+
+# Step 2: Start the SSH agent
+eval "$(ssh-agent -s)"
+
+# Step 3: Add your private key to the agent
+ssh-add ~/.ssh/id_ed25519
+
+# Step 4: Copy the public key
+cat ~/.ssh/id_ed25519.pub
+# Copy this entire output
+```
+
+Now add the key to GitHub:
+
+1. Go to **GitHub > Settings > SSH and GPG keys > New SSH key**
+2. Paste your public key
+3. Give it a descriptive title (e.g., "Work Laptop 2025")
+
+```bash
+# Step 5: Test the connection
+ssh -T git@github.com
+# Hi username! You've successfully authenticated, but GitHub
+# does not provide shell access.
+```
+
+### SSH Config for Multiple Accounts
+
+If you have personal and work GitHub accounts, configure SSH to use different keys:
+
+```bash
+cat > ~/.ssh/config << 'EOF'
+# Personal GitHub
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_personal
+
+# Work GitHub
+Host github-work
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_work
+EOF
+```
+
+Then clone work repos using the alias:
+
+```bash
+# Personal: uses default
+git clone git@github.com:personal/repo.git
+
+# Work: uses github-work alias
+git clone git@github-work:company/repo.git
+```
+
+## Useful Git Aliases
+
+Aliases save thousands of keystrokes. These are battle-tested favorites:
+
+```bash
+# Short status
+git config --global alias.st "status -sb"
+
+# Short checkout
+git config --global alias.co "checkout"
+
+# Short branch
+git config --global alias.br "branch"
+
+# Short commit
+git config --global alias.ci "commit"
+
+# Beautiful log graph
+git config --global alias.lg "log --oneline --graph --all --decorate"
+
+# Last commit details
+git config --global alias.last "log -1 HEAD --stat"
+
+# Unstage a file
+git config --global alias.unstage "reset HEAD --"
+
+# Show what you committed today
+git config --global alias.today "log --since=midnight --oneline --no-merges"
+
+# Diff that shows word-level changes
+git config --global alias.wdiff "diff --word-diff"
+
+# Amend last commit without editing message
+git config --global alias.amend "commit --amend --no-edit"
+```
+
+Now instead of typing `git status -sb`, you type `git st`. Over a day of heavy Git usage, this adds up significantly.
+
+```bash
+# Test your aliases
+git st         # short status
+git lg         # beautiful log
+git last       # last commit
+git today      # today's work
+```
+
+## Global .gitignore
+
+Some files should never be committed — editor configs, OS files, IDE folders. Set a global ignore:
+
+```bash
+# Create a global gitignore
+cat > ~/.gitignore_global << 'EOF'
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+
+# Dependencies (language-specific — also add to project .gitignore)
+node_modules/
+__pycache__/
+*.pyc
+EOF
+
+# Tell Git to use it
+git config --global core.excludesFile ~/.gitignore_global
+```
+
+<Callout type="tip" title="Project vs Global Gitignore">
+The global gitignore handles YOUR machine's files (OS junk, editor configs). The project `.gitignore` handles PROJECT files (build output, dependencies). Don't put editor-specific rules in project `.gitignore` — not everyone uses the same editor.
+</Callout>
+
+## Color and Display Settings
+
+Make Git's output easier to read:
+
+```bash
+# Enable color (usually on by default)
+git config --global color.ui auto
+
+# Better diff output
+git config --global diff.colorMoved zebra
+
+# Show diff stats in merge commits
+git config --global merge.stat true
+
+# Use patience diff algorithm (better diffs for large changes)
+git config --global diff.algorithm patience
+
+# Show original conflict markers in merges (helps understand intent)
+git config --global merge.conflictstyle diff3
+```
+
+## Useful Miscellaneous Settings
+
+```bash
+# Auto-correct mistyped commands (runs after 1.5 seconds)
+git config --global help.autocorrect 15
+
+# Reuse recorded resolution — Git remembers how you resolved
+# a conflict and applies the same resolution next time
+git config --global rerere.enabled true
+
+# Push the current branch by default (not all matching branches)
+git config --global push.default current
+
+# Pull with rebase instead of merge (cleaner history)
+git config --global pull.rebase true
+
+# Prune tracking branches that no longer exist on remote
+git config --global fetch.prune true
+
+# Sign commits with SSH key (Git 2.34+)
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+```
+
+## Viewing Your Configuration
+
+After all this setup, verify everything looks correct:
+
+```bash
+# View your full global config
+git config --global --list
+
+# Or open the file directly
+cat ~/.gitconfig
+
+# Sample output:
+# [user]
+#     name = Alice Chen
+#     email = alice@example.com
+# [init]
+#     defaultBranch = main
+# [core]
+#     editor = code --wait
+#     excludesFile = ~/.gitignore_global
+# [alias]
+#     st = status -sb
+#     co = checkout
+#     br = branch
+#     lg = log --oneline --graph --all --decorate
+#     last = log -1 HEAD --stat
+```
+
+<Exercise number={1} title="Configure Git">
+
+Set up a professional Git configuration from scratch:
+
+```bash
+# 1. Set your identity
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+
+# 2. Set your preferred editor
+git config --global core.editor "vim"
+
+# 3. Set the default branch name to main
+git config --global init.defaultBranch main
+
+# 4. Configure essential aliases
+git config --global alias.st "status -sb"
+git config --global alias.co "checkout"
+git config --global alias.br "branch"
+git config --global alias.ci "commit"
+git config --global alias.lg "log --oneline --graph --all --decorate"
+git config --global alias.last "log -1 HEAD --stat"
+git config --global alias.unstage "reset HEAD --"
+
+# 5. Configure pull behavior and push defaults
+git config --global pull.rebase true
+git config --global push.default current
+git config --global fetch.prune true
+
+# 6. Configure better diffs and color
+git config --global color.ui auto
+git config --global diff.algorithm patience
+git config --global merge.conflictstyle diff3
+
+# 7. Verify your configuration
+echo "=== Your Git Configuration ==="
+git config --global --list
+
+# 8. Test with a quick repo
+REPO=$(mktemp -d) && cd "$REPO" && git init
+echo "Hello" > test.txt
+git add test.txt
+git commit -m "Test commit"
+
+# Use your aliases
+git st
+git lg
+git last
+
+# Clean up
+cd / && rm -rf "$REPO"
+echo ""
+echo "Git is configured and working!"
+```
+
+</Exercise>
+
+<Exercise number={2} title="SSH Key Setup">
+
+Generate an SSH key and configure it for GitHub:
+
+```bash
+# 1. Check for existing SSH keys
+ls -la ~/.ssh/ 2>/dev/null || echo "No .ssh directory found"
+
+# 2. Generate a new Ed25519 key
+#    (In a real setup, you'd enter a passphrase)
+ssh-keygen -t ed25519 -C "your.email@example.com" -f ~/.ssh/id_ed25519_test -N ""
+echo "Key generated successfully!"
+
+# 3. View the public key
+echo ""
+echo "=== Your Public Key (add this to GitHub) ==="
+cat ~/.ssh/id_ed25519_test.pub
+
+# 4. Create an SSH config file for GitHub
+mkdir -p ~/.ssh
+cat > ~/.ssh/config_example << 'EOF'
+# GitHub (default)
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+    AddKeysToAgent yes
+
+# GitHub (work account — use a Host alias)
+Host github-work
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_work
+    AddKeysToAgent yes
+
+# GitLab
+Host gitlab.com
+    HostName gitlab.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+    AddKeysToAgent yes
+EOF
+
+echo ""
+echo "=== Example SSH Config ==="
+cat ~/.ssh/config_example
+
+# 5. Start the SSH agent and add the key
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519_test
+
+# 6. Verify the agent has your key
+ssh-add -l
+
+# 7. Test GitHub connection (will fail without adding to GitHub,
+#    but proves SSH is working)
+echo ""
+echo "To test: ssh -T git@github.com"
+echo "(You need to add the public key to GitHub first)"
+
+# 8. Clean up test key (keep your real keys!)
+rm -f ~/.ssh/id_ed25519_test ~/.ssh/id_ed25519_test.pub
+rm -f ~/.ssh/config_example
+echo ""
+echo "Test keys cleaned up."
+```
+
+</Exercise>
+
+<MiniProject title="Git Setup Script">
+
+Create an automated script that configures Git with best practices:
+
+```bash
+cat > ~/git-setup.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# ============================================================
+# Git Professional Setup Script
+# Configures Git with best-practice defaults
+# ============================================================
+
+echo "============================================"
+echo "  Git Professional Setup"
+echo "============================================"
+echo ""
+
+# ---- Identity ----
+read -p "Full name: " GIT_NAME
+read -p "Email: " GIT_EMAIL
+
+git config --global user.name "$GIT_NAME"
+git config --global user.email "$GIT_EMAIL"
+echo "[OK] Identity configured"
+
+# ---- Editor ----
+echo ""
+echo "Choose your editor:"
+echo "  1) vim"
+echo "  2) nano"
+echo "  3) code (VS Code)"
+echo "  4) emacs"
+read -p "Selection [1]: " EDITOR_CHOICE
+
+case "${EDITOR_CHOICE:-1}" in
+    1) git config --global core.editor "vim" ;;
+    2) git config --global core.editor "nano" ;;
+    3) git config --global core.editor "code --wait" ;;
+    4) git config --global core.editor "emacs" ;;
+    *) git config --global core.editor "vim" ;;
+esac
+echo "[OK] Editor configured"
+
+# ---- Default Branch ----
+git config --global init.defaultBranch main
+echo "[OK] Default branch set to 'main'"
+
+# ---- Aliases ----
+git config --global alias.st "status -sb"
+git config --global alias.co "checkout"
+git config --global alias.br "branch"
+git config --global alias.ci "commit"
+git config --global alias.lg "log --oneline --graph --all --decorate"
+git config --global alias.last "log -1 HEAD --stat"
+git config --global alias.unstage "reset HEAD --"
+git config --global alias.today "log --since=midnight --oneline --no-merges"
+git config --global alias.wdiff "diff --word-diff"
+git config --global alias.amend "commit --amend --no-edit"
+echo "[OK] Aliases configured (st, co, br, ci, lg, last, unstage, today, wdiff, amend)"
+
+# ---- Pull / Push Defaults ----
+git config --global pull.rebase true
+git config --global push.default current
+git config --global fetch.prune true
+echo "[OK] Pull/push defaults configured"
+
+# ---- Diff and Merge ----
+git config --global color.ui auto
+git config --global diff.algorithm patience
+git config --global diff.colorMoved zebra
+git config --global merge.conflictstyle diff3
+git config --global merge.stat true
+echo "[OK] Diff and merge settings configured"
+
+# ---- Quality of Life ----
+git config --global help.autocorrect 15
+git config --global rerere.enabled true
+echo "[OK] Auto-correct and rerere enabled"
+
+# ---- Global Gitignore ----
+GITIGNORE_GLOBAL="$HOME/.gitignore_global"
+cat > "$GITIGNORE_GLOBAL" << 'IGNORE'
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+
+# Common build artifacts
+*.log
+IGNORE
+
+git config --global core.excludesFile "$GITIGNORE_GLOBAL"
+echo "[OK] Global .gitignore created at $GITIGNORE_GLOBAL"
+
+# ---- SSH Key ----
+echo ""
+read -p "Generate SSH key for GitHub? [y/N]: " SETUP_SSH
+
+if [[ "${SETUP_SSH:-n}" =~ ^[Yy]$ ]]; then
+    SSH_KEY="$HOME/.ssh/id_ed25519"
+    if [ -f "$SSH_KEY" ]; then
+        echo "[SKIP] SSH key already exists at $SSH_KEY"
+    else
+        ssh-keygen -t ed25519 -C "$GIT_EMAIL" -f "$SSH_KEY" -N ""
+        eval "$(ssh-agent -s)" > /dev/null
+        ssh-add "$SSH_KEY"
+        echo "[OK] SSH key generated"
+        echo ""
+        echo "Add this public key to GitHub (Settings > SSH Keys):"
+        echo "---"
+        cat "${SSH_KEY}.pub"
+        echo "---"
+    fi
+fi
+
+# ---- Summary ----
+echo ""
+echo "============================================"
+echo "  Setup Complete!"
+echo "============================================"
+echo ""
+echo "Your configuration:"
+echo "  Name:     $(git config --global user.name)"
+echo "  Email:    $(git config --global user.email)"
+echo "  Editor:   $(git config --global core.editor)"
+echo "  Branch:   $(git config --global init.defaultBranch)"
+echo "  Rebase:   $(git config --global pull.rebase)"
+echo "  Gitignore: $(git config --global core.excludesFile)"
+echo ""
+echo "Available aliases:"
+echo "  git st      → status -sb"
+echo "  git co      → checkout"
+echo "  git br      → branch"
+echo "  git ci      → commit"
+echo "  git lg      → log --oneline --graph --all --decorate"
+echo "  git last    → last commit details"
+echo "  git unstage → unstage files"
+echo "  git today   → today's commits"
+echo ""
+echo "Config file: ~/.gitconfig"
+SCRIPT
+
+chmod +x ~/git-setup.sh
+echo "Setup script created at ~/git-setup.sh"
+echo "Run it with: ~/git-setup.sh"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Install Git via your platform's package manager (`apt`, `brew`, `winget`) for easy updates
+- Git config has three levels: system, global, local — local overrides global overrides system
+- Always set `user.name` and `user.email` before your first commit
+- SSH keys eliminate password prompts — Ed25519 is the recommended key type
+- Aliases like `st`, `co`, `br`, and `lg` save thousands of keystrokes over time
+- A global `.gitignore` keeps OS and editor files out of every repository
+- Settings like `pull.rebase`, `fetch.prune`, and `rerere.enabled` make daily Git smoother
+
+## What's Next
+
+Your Git environment is ready. In **Your First Repository**, you'll create repositories from scratch, clone existing ones, explore the `.git` directory, and learn how remotes connect your local work to the rest of the team.

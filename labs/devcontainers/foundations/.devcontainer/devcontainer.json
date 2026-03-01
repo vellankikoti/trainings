@@ -1,0 +1,26 @@
+{
+  "name": "DEVOPS ENGINEERS — Foundations",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11"
+    },
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "eamodio.gitlens",
+        "timonwong.shellcheck",
+        "foxundermoon.shell-format",
+        "ms-python.python"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postCreateCommand": "apt-get update && apt-get install -y vim curl wget net-tools iputils-ping dnsutils tree htop",
+  "remoteUser": "vscode"
+}

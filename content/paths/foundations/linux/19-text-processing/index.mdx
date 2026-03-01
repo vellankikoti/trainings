@@ -1,0 +1,445 @@
+---
+title: "Text Processing with grep, sed, awk"
+description: "Master the Linux text processing trinity: grep for searching, sed for transforming, and awk for analyzing. Build powerful data processing pipelines."
+order: 19
+xpReward: 100
+estimatedMinutes: 45
+prerequisites:
+  - 18-firewall-and-security
+objectives:
+  - Search text with grep and regular expressions
+  - Transform text with sed (stream editor)
+  - Analyze structured text with awk
+  - Build multi-stage text processing pipelines
+tags:
+  - linux
+  - text-processing
+  - grep
+  - sed
+  - awk
+  - regex
+---
+
+<Callout type="story" title="The Story">
+You have a 2GB access log file. Your boss needs answers in 10 minutes: "How many unique IPs hit the /api endpoint? What's the average response time? Which URLs are returning 500 errors?" You can't open this file in an editor. You need `grep`, `sed`, and `awk` — the text processing tools that can analyze gigabytes of data in seconds, right from the command line.
+</Callout>
+
+## The Text Processing Pipeline
+
+Linux text processing follows a pattern: **filter → transform → analyze**
+
+```
+Input → grep (filter) → sed (transform) → awk (analyze) → Output
+```
+
+Each tool reads from stdin, processes, and writes to stdout. You chain them with pipes (`|`).
+
+## grep — Search and Filter
+
+### Basic Usage
+
+```bash
+# Search for a pattern in a file
+grep "error" /var/log/syslog
+
+# Case-insensitive search
+grep -i "error" /var/log/syslog
+
+# Show line numbers
+grep -n "error" /var/log/syslog
+
+# Count matches
+grep -c "error" /var/log/syslog
+
+# Invert match (show lines that DON'T match)
+grep -v "debug" /var/log/syslog
+
+# Show context (lines before/after match)
+grep -A 3 "error" /var/log/syslog    # 3 lines after
+grep -B 2 "error" /var/log/syslog    # 2 lines before
+grep -C 2 "error" /var/log/syslog    # 2 lines before AND after
+
+# Search recursively in directories
+grep -r "TODO" ~/project/
+grep -rn "TODO" --include="*.py" ~/project/
+
+# Only show filenames
+grep -rl "TODO" ~/project/
+```
+
+### Regular Expressions with grep
+
+```bash
+# Extended regex (-E or egrep)
+grep -E "error|warning|critical" /var/log/syslog
+
+# Match lines starting with a date
+grep -E "^2024-01-15" access.log
+
+# Match lines ending with a number
+grep -E "[0-9]+$" data.txt
+
+# Match IP addresses (approximate)
+grep -E "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" access.log
+
+# Match HTTP status codes (4xx and 5xx)
+grep -E "HTTP/[0-9.]+ [45][0-9]{2}" access.log
+
+# Only output the matching part
+grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" access.log | sort -u
+```
+
+## sed — Stream Editor
+
+`sed` transforms text line by line:
+
+### Substitution (Most Common)
+
+```bash
+# Replace first occurrence on each line
+sed 's/old/new/' file.txt
+
+# Replace ALL occurrences on each line (global)
+sed 's/old/new/g' file.txt
+
+# Replace in-place (modify file directly)
+sed -i 's/old/new/g' file.txt
+
+# Replace in-place with backup
+sed -i.bak 's/old/new/g' file.txt
+
+# Case-insensitive replacement
+sed 's/error/WARNING/gi' file.txt
+```
+
+### Deletion and Insertion
+
+```bash
+# Delete lines matching a pattern
+sed '/^#/d' config.txt         # delete comment lines
+sed '/^$/d' file.txt           # delete empty lines
+
+# Delete specific line numbers
+sed '5d' file.txt              # delete line 5
+sed '10,20d' file.txt          # delete lines 10-20
+
+# Insert a line before match
+sed '/\[server\]/i\# Server Configuration' config.ini
+
+# Append a line after match
+sed '/\[server\]/a\host = 0.0.0.0' config.ini
+
+# Print only matching lines (like grep)
+sed -n '/error/p' file.txt
+
+# Print specific line range
+sed -n '10,20p' file.txt
+```
+
+### Practical sed Examples
+
+```bash
+# Remove trailing whitespace
+sed 's/[[:space:]]*$//' file.txt
+
+# Replace config value
+sed -i 's/^port=.*/port=8080/' app.conf
+
+# Comment out a line
+sed -i 's/^dangerous-setting/#&/' config.txt
+
+# Uncomment a line
+sed -i 's/^#\(wanted-setting\)/\1/' config.txt
+
+# Extract between patterns
+sed -n '/BEGIN/,/END/p' file.txt
+
+# Add prefix to every line
+sed 's/^/[LOG] /' output.txt
+
+# Multiple operations
+sed -e 's/foo/bar/g' -e 's/baz/qux/g' file.txt
+```
+
+<Exercise number={1} title="grep and sed Practice">
+
+```bash
+# Create sample data
+cat > /tmp/sample-log.txt << 'EOF'
+2024-01-15 10:00:01 INFO  Server started on port 8080
+2024-01-15 10:00:05 DEBUG Database connection pool initialized
+2024-01-15 10:01:23 INFO  Request GET /api/users 200 45ms
+2024-01-15 10:01:45 ERROR Database timeout on query: SELECT * FROM orders
+2024-01-15 10:01:46 WARN  Retrying database connection...
+2024-01-15 10:01:47 INFO  Request GET /api/users 200 120ms
+2024-01-15 10:02:01 ERROR Failed to process payment: timeout
+2024-01-15 10:02:15 INFO  Request POST /api/orders 500 5023ms
+2024-01-15 10:02:30 INFO  Request GET /health 200 2ms
+2024-01-15 10:03:00 WARN  Memory usage above 80%
+EOF
+
+# 1. Find all ERROR lines
+grep "ERROR" /tmp/sample-log.txt
+
+# 2. Find ERROR or WARN lines
+grep -E "ERROR|WARN" /tmp/sample-log.txt
+
+# 3. Count each log level
+grep -oE "(INFO|DEBUG|ERROR|WARN)" /tmp/sample-log.txt | sort | uniq -c
+
+# 4. Extract just the timestamps of errors
+grep "ERROR" /tmp/sample-log.txt | sed 's/ .*//'
+
+# 5. Remove DEBUG lines
+sed '/DEBUG/d' /tmp/sample-log.txt
+
+# 6. Replace ERROR with ALERT
+sed 's/ERROR/ALERT/g' /tmp/sample-log.txt
+
+# 7. Extract response times (numbers before 'ms')
+grep -oE "[0-9]+ms" /tmp/sample-log.txt
+
+# Clean up
+rm /tmp/sample-log.txt
+```
+
+</Exercise>
+
+## awk — Pattern Scanning and Processing
+
+`awk` processes structured text (columns). It's a full programming language:
+
+### Basic Column Extraction
+
+```bash
+# Print specific columns (space-delimited)
+awk '{print $1}' file.txt              # first column
+awk '{print $1, $3}' file.txt          # first and third columns
+awk '{print $NF}' file.txt             # last column
+
+# Custom field separator
+awk -F: '{print $1, $3}' /etc/passwd   # colon-separated
+awk -F, '{print $2}' data.csv          # comma-separated
+
+# Print with formatting
+awk '{printf "%-15s %s\n", $1, $2}' file.txt
+```
+
+### Pattern Matching
+
+```bash
+# Print lines matching a pattern
+awk '/error/' file.txt
+
+# Print specific column where pattern matches
+awk '/error/ {print $1, $NF}' file.txt
+
+# Conditional printing
+awk '$3 > 100 {print $1, $3}' data.txt    # column 3 greater than 100
+awk '$1 == "root" {print}' /etc/passwd
+```
+
+### Calculations
+
+```bash
+# Sum a column
+awk '{sum += $3} END {print "Total:", sum}' data.txt
+
+# Average
+awk '{sum += $3; count++} END {print "Average:", sum/count}' data.txt
+
+# Min and max
+awk 'NR==1 || $3 > max {max=$3} NR==1 || $3 < min {min=$3} END {print "Min:", min, "Max:", max}' data.txt
+
+# Count unique values
+awk '{count[$1]++} END {for (key in count) print count[key], key}' file.txt | sort -rn
+```
+
+### Built-in Variables
+
+| Variable | Meaning |
+|---|---|
+| `$0` | Entire line |
+| `$1, $2...` | Column 1, 2, etc. |
+| `NR` | Current line number |
+| `NF` | Number of fields in current line |
+| `$NF` | Last field |
+| `FS` | Field separator (default: whitespace) |
+| `OFS` | Output field separator |
+
+### Practical awk Examples
+
+```bash
+# Analyze /etc/passwd
+awk -F: '{print $1, $3, $7}' /etc/passwd | column -t
+
+# Find users with UID >= 1000
+awk -F: '$3 >= 1000 {print $1, $3}' /etc/passwd
+
+# Disk usage report
+df -h | awk 'NR>1 {print $5, $6}' | sort -rn
+
+# Process access logs (Apache/Nginx format)
+# Count requests by IP
+awk '{print $1}' access.log | sort | uniq -c | sort -rn | head -10
+
+# Count requests by HTTP status code
+awk '{print $9}' access.log | sort | uniq -c | sort -rn
+
+# Average response time (last column)
+awk '{sum += $NF; count++} END {printf "Avg: %.2fms\n", sum/count}' access.log
+```
+
+<Exercise number={2} title="awk Data Analysis">
+
+```bash
+# Create sample data
+cat > /tmp/server-data.txt << 'EOF'
+server1 web 4 16384 92
+server2 db 8 32768 78
+server3 web 2 8192 45
+server4 cache 4 16384 88
+server5 db 16 65536 95
+server6 web 4 16384 61
+server7 api 8 32768 73
+server8 worker 4 8192 55
+EOF
+# Columns: hostname role cpu_cores memory_mb cpu_usage_pct
+
+# 1. Print server name and CPU usage
+awk '{printf "%-10s %s%%\n", $1, $5}' /tmp/server-data.txt
+
+# 2. Find servers with CPU > 80%
+awk '$5 > 80 {print $1, $2, $5"%"}' /tmp/server-data.txt
+
+# 3. Sum total CPU cores
+awk '{sum += $3} END {print "Total cores:", sum}' /tmp/server-data.txt
+
+# 4. Average memory per role
+awk '{mem[$2] += $4; count[$2]++} END {for (r in mem) printf "%-10s Avg: %.0f MB\n", r, mem[r]/count[r]}' /tmp/server-data.txt
+
+# 5. Count servers by role
+awk '{roles[$2]++} END {for (r in roles) print roles[r], r}' /tmp/server-data.txt | sort -rn
+
+# 6. Find the server with highest CPU usage
+awk 'NR==1 || $5 > max {max=$5; name=$1} END {print "Highest CPU:", name, max"%"}' /tmp/server-data.txt
+
+# Clean up
+rm /tmp/server-data.txt
+```
+
+</Exercise>
+
+## Building Pipelines
+
+The real power comes from combining these tools:
+
+```bash
+# Pipeline: Find top 10 IPs causing 500 errors
+grep " 500 " access.log | awk '{print $1}' | sort | uniq -c | sort -rn | head -10
+
+# Pipeline: Extract and analyze response times
+grep "GET /api" access.log | awk '{print $NF}' | sed 's/ms//' | \
+    awk '{sum+=$1; count++; if($1>max) max=$1} END {printf "Avg: %.0fms, Max: %dms, Count: %d\n", sum/count, max, count}'
+
+# Pipeline: Convert CSV to formatted table
+cat data.csv | sed 's/,/\t/g' | column -t
+
+# Pipeline: Find config differences between two servers
+diff <(ssh server1 cat /etc/nginx/nginx.conf) <(ssh server2 cat /etc/nginx/nginx.conf)
+```
+
+## Other Useful Text Tools
+
+```bash
+# sort — sort lines
+sort file.txt               # alphabetical
+sort -n file.txt            # numeric
+sort -k2 -n file.txt       # sort by second column, numeric
+sort -t: -k3 -n /etc/passwd  # sort /etc/passwd by UID
+
+# uniq — remove consecutive duplicates (use after sort)
+sort file.txt | uniq        # unique lines
+sort file.txt | uniq -c     # with count
+sort file.txt | uniq -d     # only duplicates
+
+# cut — extract columns
+cut -d: -f1,3 /etc/passwd   # fields 1 and 3, colon delimiter
+cut -c1-10 file.txt         # characters 1-10
+
+# wc — word/line/character count
+wc -l file.txt              # line count
+wc -w file.txt              # word count
+
+# tr — translate characters
+echo "Hello World" | tr 'A-Z' 'a-z'    # lowercase
+echo "hello:world" | tr ':' '\n'        # replace : with newline
+cat file.txt | tr -d '\r'              # remove carriage returns
+
+# xargs — build commands from stdin
+find . -name "*.log" | xargs grep "error"
+echo "file1 file2 file3" | xargs rm
+```
+
+<MiniProject title="Log Analysis Pipeline">
+
+```bash
+cat > ~/log-pipeline.sh << 'SCRIPT'
+#!/bin/bash
+# Log Analysis Pipeline — process any log file
+
+LOG_FILE="${1:?Usage: $0 <log-file>}"
+
+if [ ! -f "$LOG_FILE" ]; then
+    echo "Error: File not found: $LOG_FILE"
+    exit 1
+fi
+
+TOTAL=$(wc -l < "$LOG_FILE")
+echo "============================================="
+echo "  Log Analysis: $(basename "$LOG_FILE")"
+echo "  Total lines: $TOTAL"
+echo "============================================="
+
+echo ""
+echo "--- Lines per Hour ---"
+awk '{print $2}' "$LOG_FILE" | cut -d: -f1 | sort | uniq -c | sort -k2
+
+echo ""
+echo "--- Top 10 Most Common Patterns ---"
+awk '{for(i=3;i<=NF;i++) words[$i]++} END {for(w in words) if(words[w]>5) print words[w], w}' "$LOG_FILE" | sort -rn | head -10
+
+echo ""
+echo "--- Error/Warning Summary ---"
+echo "  Errors:   $(grep -ci 'error' "$LOG_FILE" 2>/dev/null || echo 0)"
+echo "  Warnings: $(grep -ci 'warn' "$LOG_FILE" 2>/dev/null || echo 0)"
+echo "  Critical: $(grep -ci 'crit' "$LOG_FILE" 2>/dev/null || echo 0)"
+
+echo ""
+echo "--- First and Last Entry ---"
+echo "  First: $(head -1 "$LOG_FILE")"
+echo "  Last:  $(tail -1 "$LOG_FILE")"
+
+echo ""
+echo "============================================="
+SCRIPT
+
+chmod +x ~/log-pipeline.sh
+echo "Created ~/log-pipeline.sh"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `grep` filters lines by pattern — your first step in any log analysis
+- `sed` transforms text — substitution, deletion, insertion
+- `awk` analyzes columns — calculations, aggregations, formatted output
+- Pipes (`|`) chain tools: `grep | sed | awk | sort | uniq -c`
+- `sort | uniq -c | sort -rn` is the universal "top N" pattern
+- Use `-E` with grep for extended regex; use `-F` for literal strings (faster)
+- `sed -i` modifies files in place — always make a backup first (`sed -i.bak`)
+
+## What's Next
+
+You've mastered text processing, the final skill for interactive Linux work. In the last lesson, **Automation with Cron Jobs**, you'll learn to schedule all these tasks to run automatically — the foundation of every DevOps automation pipeline.

@@ -1,0 +1,241 @@
+---
+title: "Linux Commands Cheat Sheet"
+description: "Essential Linux commands for DevOps engineers covering file operations, user management, processes, networking, text processing, and system administration."
+---
+
+# Linux Commands Cheat Sheet
+
+## File System Navigation
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `pwd` | Print working directory | `pwd` → `/home/user/projects` |
+| `ls` | List directory contents | `ls -lah` (long format, all files, human-readable) |
+| `cd` | Change directory | `cd /var/log` or `cd ~` (home) or `cd -` (previous) |
+| `find` | Search for files by attributes | `find /var -name "*.log" -mtime -7 -type f` |
+| `locate` | Fast file search using database | `locate nginx.conf` (run `updatedb` to refresh) |
+| `tree` | Display directory structure | `tree -L 2 -d` (2 levels deep, directories only) |
+| `realpath` | Resolve symlinks to absolute path | `realpath ./relative/path` |
+
+### find Examples
+
+```bash
+find / -name "*.conf" -type f              # Find all .conf files
+find /home -user alice -size +100M         # Files owned by alice over 100MB
+find /tmp -mtime +30 -delete               # Delete files older than 30 days
+find . -perm -4000 -type f                 # Find SUID files (security audit)
+find . -name "*.log" -exec gzip {} \;      # Compress all log files
+```
+
+## File Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `cp` | Copy files/directories | `cp -r src/ dest/` (recursive) |
+| `mv` | Move or rename | `mv old.txt new.txt` |
+| `rm` | Remove files/directories | `rm -rf dir/` (recursive, force) |
+| `mkdir` | Create directories | `mkdir -p path/to/nested/dir` |
+| `touch` | Create empty file or update timestamp | `touch newfile.txt` |
+| `ln` | Create links | `ln -s /target /link` (symbolic) |
+| `chmod` | Change permissions | `chmod 755 script.sh` or `chmod u+x script.sh` |
+| `chown` | Change ownership | `chown -R user:group /path` |
+| `chgrp` | Change group ownership | `chgrp developers project/` |
+| `stat` | Detailed file information | `stat file.txt` (size, inode, permissions, timestamps) |
+
+### Permission Reference
+
+| Numeric | Symbolic | Meaning |
+|---------|----------|---------|
+| `7` | `rwx` | Read + Write + Execute |
+| `6` | `rw-` | Read + Write |
+| `5` | `r-x` | Read + Execute |
+| `4` | `r--` | Read only |
+| `0` | `---` | No access |
+
+Common patterns: `755` (executables), `644` (files), `600` (secrets), `700` (private dirs).
+
+## User Management
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `useradd` | Create a new user | `useradd -m -s /bin/bash -G docker alice` |
+| `usermod` | Modify user account | `usermod -aG sudo alice` (add to sudo group) |
+| `userdel` | Delete a user | `userdel -r alice` (remove home directory too) |
+| `passwd` | Change password | `passwd alice` or `passwd -l alice` (lock) |
+| `groupadd` | Create a group | `groupadd developers` |
+| `groups` | Show group membership | `groups alice` |
+| `id` | Display user/group IDs | `id alice` |
+| `whoami` | Show current username | `whoami` |
+| `su` | Switch user | `su - alice` (login shell) |
+| `sudo` | Execute as superuser | `sudo systemctl restart nginx` |
+| `visudo` | Safely edit /etc/sudoers | `visudo` (validates syntax before saving) |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `/etc/passwd` | User account information |
+| `/etc/shadow` | Encrypted password hashes (root only) |
+| `/etc/group` | Group definitions |
+| `/etc/sudoers` | Sudo access rules (edit with visudo) |
+
+## Process Management
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `ps` | Show processes | `ps aux` (all users, detailed) |
+| `top` / `htop` | Real-time process viewer | `top -p 1234` (specific PID) |
+| `kill` | Send signal to process | `kill -15 PID` (SIGTERM) or `kill -9 PID` (SIGKILL) |
+| `killall` | Kill by process name | `killall -9 nginx` |
+| `pkill` | Kill by pattern | `pkill -f "python app.py"` |
+| `pgrep` | Find PID by pattern | `pgrep -a nginx` |
+| `bg` / `fg` | Background / foreground jobs | `bg %1` or `fg %1` |
+| `nohup` | Run immune to hangups | `nohup ./script.sh &` |
+| `jobs` | List background jobs | `jobs -l` |
+| `nice` / `renice` | Set process priority | `nice -n 10 ./task.sh` or `renice -5 -p PID` |
+
+### Signal Reference
+
+| Signal | Number | Action | Catchable? |
+|--------|--------|--------|------------|
+| `SIGTERM` | 15 | Graceful shutdown | Yes |
+| `SIGKILL` | 9 | Immediate termination | No |
+| `SIGHUP` | 1 | Reload configuration | Yes |
+| `SIGINT` | 2 | Interrupt (Ctrl+C) | Yes |
+| `SIGSTOP` | 19 | Pause process | No |
+| `SIGCONT` | 18 | Resume process | Yes |
+
+## Systemd Service Management
+
+| Command | Description |
+|---------|-------------|
+| `systemctl start service` | Start a service |
+| `systemctl stop service` | Stop a service |
+| `systemctl restart service` | Restart a service |
+| `systemctl reload service` | Reload configuration without restart |
+| `systemctl enable --now service` | Enable at boot and start now |
+| `systemctl disable service` | Disable at boot |
+| `systemctl status service` | Show service status |
+| `systemctl list-units --type=service` | List all services |
+| `journalctl -u service -f` | Follow service logs |
+| `journalctl -u service --since "1 hour ago"` | Logs from last hour |
+
+## Package Management
+
+### Debian/Ubuntu (apt)
+
+| Command | Description |
+|---------|-------------|
+| `apt update` | Refresh package index |
+| `apt upgrade` | Upgrade all packages |
+| `apt install package` | Install a package |
+| `apt remove package` | Remove a package |
+| `apt search keyword` | Search packages |
+| `apt show package` | Show package details |
+| `dpkg -l` | List installed packages |
+
+### RHEL/CentOS/Fedora (yum/dnf)
+
+| Command | Description |
+|---------|-------------|
+| `dnf check-update` | Check for updates |
+| `dnf upgrade` | Upgrade all packages |
+| `dnf install package` | Install a package |
+| `dnf remove package` | Remove a package |
+| `dnf search keyword` | Search packages |
+| `dnf info package` | Show package details |
+| `rpm -qa` | List installed packages |
+
+## Networking Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `ip addr` | Show IP addresses | `ip addr show eth0` |
+| `ip route` | Show routing table | `ip route show` |
+| `ss` | Socket statistics | `ss -tlnp` (listening TCP with process) |
+| `ping` | Test connectivity | `ping -c 4 google.com` |
+| `curl` | Transfer data via URL | `curl -sS -o /dev/null -w "%{http_code}" URL` |
+| `wget` | Download files | `wget -q URL -O output.file` |
+| `dig` | DNS lookup | `dig example.com A +short` |
+| `nslookup` | DNS query | `nslookup example.com` |
+| `traceroute` | Trace packet route | `traceroute google.com` |
+| `netstat` | Network statistics (legacy) | `netstat -tlnp` |
+| `host` | Simple DNS lookup | `host example.com` |
+
+## Text Processing
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `grep` | Search text patterns | `grep -rn "error" /var/log/` |
+| `sed` | Stream editor | `sed -i 's/old/new/g' file.txt` |
+| `awk` | Pattern scanning | `awk '{print $1, $NF}' file.txt` |
+| `sort` | Sort lines | `sort -t: -k3 -n /etc/passwd` |
+| `uniq` | Remove duplicates | `sort file \| uniq -c` (count occurrences) |
+| `cut` | Extract columns | `cut -d: -f1,3 /etc/passwd` |
+| `tr` | Translate characters | `echo "HELLO" \| tr 'A-Z' 'a-z'` |
+| `wc` | Count lines/words/bytes | `wc -l file.txt` |
+| `head` / `tail` | First/last lines | `tail -f /var/log/syslog` (follow) |
+| `tee` | Read stdin, write to file and stdout | `cmd \| tee output.log` |
+| `xargs` | Build commands from stdin | `find . -name "*.tmp" \| xargs rm` |
+
+### Common grep Flags
+
+```bash
+grep -r "pattern" dir/     # Recursive search
+grep -i "pattern" file     # Case-insensitive
+grep -n "pattern" file     # Show line numbers
+grep -c "pattern" file     # Count matches
+grep -l "pattern" dir/*    # Files containing pattern
+grep -v "pattern" file     # Invert match (exclude)
+grep -E "regex" file       # Extended regex (egrep)
+grep -A3 -B3 "pattern"    # Show 3 lines before/after
+```
+
+## System Information
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `df` | Disk filesystem usage | `df -hT` (human-readable with type) |
+| `du` | Directory disk usage | `du -sh /var/*` \| `sort -rh` |
+| `free` | Memory usage | `free -h` (check 'available' column) |
+| `uptime` | System uptime and load | `uptime` → load avg over 1, 5, 15 min |
+| `uname` | System information | `uname -a` (all info) |
+| `lsblk` | List block devices | `lsblk -f` (with filesystem info) |
+| `mount` | Show mounted filesystems | `mount \| grep ext4` |
+| `lscpu` | CPU architecture info | `lscpu` |
+| `dmesg` | Kernel ring buffer messages | `dmesg -T \| tail -20` (human timestamps) |
+| `vmstat` | Virtual memory statistics | `vmstat 1 5` (every 1s, 5 times) |
+| `iostat` | I/O statistics | `iostat -x 1` (extended, every 1s) |
+
+## Compression and Archives
+
+| Command | Description |
+|---------|-------------|
+| `tar czf archive.tar.gz dir/` | Create gzipped archive |
+| `tar xzf archive.tar.gz` | Extract gzipped archive |
+| `tar xzf archive.tar.gz -C /dest` | Extract to specific directory |
+| `gzip file` | Compress file (replaces original) |
+| `gunzip file.gz` | Decompress file |
+| `zip -r archive.zip dir/` | Create ZIP archive |
+| `unzip archive.zip` | Extract ZIP archive |
+
+## Cron Scheduling
+
+```
+┌────────── minute (0-59)
+│ ┌──────── hour (0-23)
+│ │ ┌────── day of month (1-31)
+│ │ │ ┌──── month (1-12)
+│ │ │ │ ┌── day of week (0-7, 0 and 7 = Sunday)
+│ │ │ │ │
+* * * * * command
+```
+
+| Schedule | Meaning |
+|----------|---------|
+| `0 * * * *` | Every hour |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 2 * * *` | Daily at 2:00 AM |
+| `0 2 * * 0` | Every Sunday at 2:00 AM |
+| `0 0 1 * *` | First day of every month |
+| `@reboot` | Once at startup |

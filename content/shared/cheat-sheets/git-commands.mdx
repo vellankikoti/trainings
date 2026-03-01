@@ -1,0 +1,363 @@
+---
+title: "Git Commands Cheat Sheet"
+description: "Comprehensive Git reference covering setup, daily workflow, branching, remotes, history, undo operations, advanced techniques, and GitHub workflows."
+---
+
+# Git Commands Cheat Sheet
+
+## Setup and Configuration
+
+```bash
+# Identity
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+
+# Default branch name
+git config --global init.defaultBranch main
+
+# Editor
+git config --global core.editor "vim"
+
+# Useful aliases
+git config --global alias.st status
+git config --global alias.co checkout
+git config --global alias.br branch
+git config --global alias.lg "log --oneline --graph --all"
+
+# View all config
+git config --list --show-origin
+```
+
+### SSH Key Setup
+
+```bash
+ssh-keygen -t ed25519 -C "you@example.com"   # Generate key
+eval "$(ssh-agent -s)"                         # Start agent
+ssh-add ~/.ssh/id_ed25519                      # Add key
+cat ~/.ssh/id_ed25519.pub                      # Copy to GitHub
+ssh -T git@github.com                          # Test connection
+```
+
+### Commit Signing
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true        # Sign all commits
+```
+
+## Basic Workflow
+
+| Command | Description |
+|---------|-------------|
+| `git init` | Initialize new repository |
+| `git clone url` | Clone remote repository |
+| `git status` | Show working tree status |
+| `git add file` | Stage specific file |
+| `git add -p` | Interactively stage hunks |
+| `git commit -m "msg"` | Commit staged changes |
+| `git commit --amend` | Modify the last commit |
+| `git diff` | Show unstaged changes |
+| `git diff --staged` | Show staged changes |
+| `git diff HEAD` | Show all changes vs last commit |
+
+### The Three Areas
+
+```
+Working Directory → Staging Area (Index) → Repository (.git)
+     git add →          git commit →
+  ← git restore     ← git restore --staged
+```
+
+### .gitignore Patterns
+
+```gitignore
+*.log                # Ignore all .log files
+!important.log       # Exception: track this .log file
+/build/              # Ignore build directory at root
+**/node_modules/     # Ignore node_modules anywhere
+.env                 # Ignore environment files
+*.secret             # Ignore secret files
+```
+
+## Branching
+
+| Command | Description |
+|---------|-------------|
+| `git branch` | List local branches |
+| `git branch -a` | List all branches (local + remote) |
+| `git branch feature` | Create new branch |
+| `git switch feature` | Switch to branch |
+| `git switch -c feature` | Create and switch to branch |
+| `git branch -d feature` | Delete merged branch |
+| `git branch -D feature` | Force delete branch |
+| `git branch -m old new` | Rename branch |
+| `git merge feature` | Merge feature into current branch |
+| `git merge --no-ff feature` | Merge with merge commit (no fast-forward) |
+
+### Merge vs Rebase
+
+```bash
+# Merge: preserves branch history, creates merge commit
+git switch main
+git merge feature
+
+# Rebase: creates linear history, rewrites commits
+git switch feature
+git rebase main
+
+# Interactive rebase: edit, squash, reorder commits
+git rebase -i HEAD~3
+```
+
+### Merge Conflict Resolution
+
+```bash
+# During a conflict
+git status                        # See conflicted files
+# Edit files to resolve <<<< ==== >>>> markers
+git add resolved-file.txt         # Mark as resolved
+git merge --continue              # Complete the merge
+git merge --abort                 # Cancel the merge
+```
+
+## Remote Operations
+
+| Command | Description |
+|---------|-------------|
+| `git remote -v` | Show remote URLs |
+| `git remote add origin url` | Add remote |
+| `git remote set-url origin url` | Change remote URL |
+| `git fetch` | Download remote changes (no merge) |
+| `git pull` | Fetch and merge remote changes |
+| `git pull --rebase` | Fetch and rebase onto remote |
+| `git push` | Push commits to remote |
+| `git push -u origin feature` | Push and set upstream tracking |
+| `git push origin --delete feature` | Delete remote branch |
+| `git push --force-with-lease` | Safe force push (checks remote) |
+
+### Fetch vs Pull
+
+```bash
+# Fetch: safe, downloads changes without modifying working tree
+git fetch origin
+git log origin/main --oneline     # Inspect changes
+git merge origin/main             # Manually merge
+
+# Pull: fetch + merge in one step
+git pull origin main
+
+# Pull with rebase: cleaner history
+git pull --rebase origin main
+```
+
+## History and Inspection
+
+| Command | Description |
+|---------|-------------|
+| `git log` | Show commit history |
+| `git log --oneline --graph` | Compact graph view |
+| `git log -p -2` | Last 2 commits with diffs |
+| `git log --author="name"` | Filter by author |
+| `git log --since="2 weeks ago"` | Filter by date |
+| `git log -- path/to/file` | History of specific file |
+| `git show commit` | Show commit details |
+| `git blame file` | Show who changed each line |
+| `git shortlog -sn` | Commit count by author |
+| `git log --all --oneline --graph` | Full repository graph |
+
+### git bisect (Binary Search for Bugs)
+
+```bash
+git bisect start
+git bisect bad                    # Current commit is broken
+git bisect good v1.0              # Known good commit
+# Git checks out middle commit for you to test
+git bisect good                   # or bad, repeat
+git bisect reset                  # Return to original state
+```
+
+## Undo Operations
+
+| Scenario | Command |
+|----------|---------|
+| Discard unstaged changes | `git restore file.txt` |
+| Unstage a file | `git restore --staged file.txt` |
+| Undo last commit (keep changes staged) | `git reset --soft HEAD~1` |
+| Undo last commit (keep changes unstaged) | `git reset HEAD~1` |
+| Undo last commit (discard changes) | `git reset --hard HEAD~1` |
+| Revert a commit (safe, creates new commit) | `git revert commit-hash` |
+| Recover lost commit | `git reflog` then `git checkout commit` |
+
+### Reset Types
+
+```
+--soft:  Move HEAD          (changes stay staged)
+--mixed: Move HEAD + Index  (changes stay in working dir) [default]
+--hard:  Move HEAD + Index + Working Dir (changes GONE)
+```
+
+### Reflog (Safety Net)
+
+```bash
+git reflog                        # Show all HEAD movements
+git reflog show feature           # Show branch history
+git checkout HEAD@{3}             # Go back to 3 moves ago
+git branch recovery HEAD@{5}     # Create branch from lost commit
+```
+
+## Advanced Operations
+
+### Stash
+
+```bash
+git stash                         # Stash changes
+git stash push -m "description"   # Stash with message
+git stash list                    # List all stashes
+git stash pop                     # Apply and remove latest stash
+git stash apply stash@{2}        # Apply specific stash (keep it)
+git stash drop stash@{0}         # Remove specific stash
+git stash clear                   # Remove all stashes
+git stash -u                      # Include untracked files
+```
+
+### Cherry-Pick
+
+```bash
+git cherry-pick abc123            # Apply specific commit
+git cherry-pick abc123..def456    # Apply range of commits
+git cherry-pick --no-commit abc   # Apply changes without committing
+```
+
+### Rebase
+
+```bash
+# Standard rebase
+git rebase main                   # Replay current branch onto main
+
+# Interactive rebase (squash, edit, reorder)
+git rebase -i HEAD~5              # Edit last 5 commits
+# Commands: pick, reword, edit, squash, fixup, drop
+
+# Transplant commits
+git rebase --onto main feature bugfix
+```
+
+### Worktree (Multiple Working Directories)
+
+```bash
+git worktree add ../hotfix hotfix-branch   # New worktree
+git worktree list                           # List worktrees
+git worktree remove ../hotfix              # Remove worktree
+```
+
+### Submodules
+
+```bash
+git submodule add url path        # Add submodule
+git submodule update --init       # Initialize after clone
+git submodule update --remote     # Update to latest
+```
+
+### Tags
+
+```bash
+git tag v1.0.0                    # Lightweight tag
+git tag -a v1.0.0 -m "Release"   # Annotated tag
+git push origin v1.0.0            # Push specific tag
+git push origin --tags            # Push all tags
+git tag -d v1.0.0                 # Delete local tag
+```
+
+## GitHub Workflows
+
+### Pull Request Workflow
+
+```bash
+# 1. Create feature branch
+git switch -c feature/add-auth
+
+# 2. Make changes and commit
+git add .
+git commit -m "feat: add authentication module"
+
+# 3. Push to your fork/remote
+git push -u origin feature/add-auth
+
+# 4. Create PR (using GitHub CLI)
+gh pr create --title "Add auth module" --body "Description"
+
+# 5. After PR review, update if needed
+git add .
+git commit -m "fix: address review feedback"
+git push
+
+# 6. After merge, clean up
+git switch main
+git pull
+git branch -d feature/add-auth
+```
+
+### Fork and Sync
+
+```bash
+# Add upstream remote
+git remote add upstream https://github.com/org/repo.git
+
+# Sync fork with upstream
+git fetch upstream
+git switch main
+git merge upstream/main
+git push origin main
+```
+
+### GitHub CLI (gh)
+
+```bash
+gh repo clone owner/repo          # Clone repository
+gh pr create                      # Create pull request
+gh pr list                        # List open PRs
+gh pr checkout 123                # Check out PR locally
+gh pr merge 123 --squash          # Squash merge PR
+gh issue create                   # Create issue
+gh issue list --label bug         # List bug issues
+gh run list                       # List workflow runs
+gh run view 12345                 # View specific run
+```
+
+### GitHub Actions (Workflow Basics)
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm test
+```
+
+## Quick Reference: Common Scenarios
+
+| Scenario | Commands |
+|----------|----------|
+| Start new feature | `git switch -c feature/name` |
+| Save work in progress | `git stash push -m "WIP: feature"` |
+| Undo a public commit | `git revert <hash>` |
+| Squash last 3 commits | `git rebase -i HEAD~3` (squash) |
+| Find who broke a line | `git blame file.txt` |
+| Find which commit broke things | `git bisect start` |
+| Recover deleted branch | `git reflog` → `git branch name hash` |
+| Remove file from tracking | `git rm --cached file` |
+| See what will be pushed | `git log origin/main..HEAD` |
+| Clean untracked files | `git clean -fd` (preview: `-fdn`) |

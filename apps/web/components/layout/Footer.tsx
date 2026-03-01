@@ -42,7 +42,7 @@ export function Footer() {
             </p>
           </div>
           {FOOTER_LINKS.map((section) => (
-            <div key={section.title}>
+            <nav key={section.title} aria-label={`${section.title} links`}>
               <h3 className="font-semibold">{section.title}</h3>
               <ul className="mt-3 space-y-2">
                 {section.links.map((link) => (
@@ -59,7 +59,7 @@ export function Footer() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </nav>
           ))}
         </div>
         <div className="mt-8 border-t pt-8 text-center text-sm text-muted-foreground">

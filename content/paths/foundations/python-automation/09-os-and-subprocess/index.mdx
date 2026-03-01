@@ -1,0 +1,804 @@
+---
+title: "OS and Subprocess"
+description: "Run system commands from Python. Master subprocess for shell commands, os for environment variables, and the patterns that bridge Python scripts with Linux tools."
+order: 9
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 08-working-with-json-yaml
+objectives:
+  - Use the os module for environment variables and filesystem operations
+  - Run shell commands safely with subprocess.run
+  - Capture and process command output in Python
+  - Handle timeouts, errors, and streaming output
+  - Combine Python logic with Linux CLI tools
+tags:
+  - python
+  - subprocess
+  - os
+  - system
+---
+
+<Callout type="story" title="The Story">
+Your deployment script needs to check disk space, read a database password from an environment variable, run a Docker build, stream the build output in real time, verify the image was created, then tag and push it to a registry. Some of this is pure Python. Some of it requires running shell commands. The art is knowing which tool to use when, and bridging them safely. The `os` and `subprocess` modules are how Python talks to your operating system.
+</Callout>
+
+## The os Module
+
+The `os` module provides direct access to operating system features — environment variables, filesystem operations, and process information.
+
+### Environment Variables
+
+Environment variables are how you pass configuration to scripts in every DevOps environment — CI/CD, containers, cloud functions:
+
+```python
+import os
+
+# Read an environment variable (returns None if not set)
+db_host = os.environ.get("DB_HOST")
+db_port = os.environ.get("DB_PORT", "5432")  # Default value
+
+# Read with getenv (identical to environ.get)
+api_key = os.getenv("API_KEY")
+
+# Check if a variable exists
+if "CI" in os.environ:
+    print("Running in CI/CD pipeline")
+
+# Read a required variable (raises KeyError if missing)
+try:
+    secret = os.environ["DATABASE_PASSWORD"]
+except KeyError:
+    print("ERROR: DATABASE_PASSWORD not set")
+    exit(1)
+```
+
+### Setting Environment Variables
+
+```python
+import os
+
+# Set for the current process and its children
+os.environ["APP_ENV"] = "staging"
+os.environ["LOG_LEVEL"] = "DEBUG"
+
+# Remove a variable
+if "TEMP_TOKEN" in os.environ:
+    del os.environ["TEMP_TOKEN"]
+
+# Print all environment variables
+for key, value in sorted(os.environ.items()):
+    # Don't print secrets in production!
+    if "SECRET" in key or "PASSWORD" in key or "KEY" in key:
+        print(f"{key}=****")
+    else:
+        print(f"{key}={value}")
+```
+
+### Using python-dotenv for .env Files
+
+```python
+# pip install python-dotenv
+from dotenv import load_dotenv
+import os
+
+# Load .env file into environment
+load_dotenv()  # Loads from .env in current directory
+# load_dotenv("/path/to/custom/.env")
+
+# Now read them normally
+db_host = os.getenv("DB_HOST")
+db_pass = os.getenv("DB_PASSWORD")
+print(f"Connecting to {db_host}")
+```
+
+<Callout type="tip" title="Never Commit .env Files">
+Add `.env` to your `.gitignore`. Store a `.env.example` with placeholder values so teammates know which variables are needed. In production, use your platform's secrets manager instead.
+</Callout>
+
+### Filesystem Operations with os and os.path
+
+```python
+import os
+
+# Current working directory
+cwd = os.getcwd()
+print(f"Working directory: {cwd}")
+
+# List directory contents
+files = os.listdir("/etc/nginx/conf.d")
+for f in files:
+    print(f"  {f}")
+
+# Create directories
+os.makedirs("/tmp/deploy/artifacts", exist_ok=True)
+
+# Path manipulation
+config_path = os.path.join("/etc", "myapp", "config.yaml")
+print(config_path)  # /etc/myapp/config.yaml
+
+print(os.path.basename(config_path))   # config.yaml
+print(os.path.dirname(config_path))    # /etc/myapp
+print(os.path.exists(config_path))     # True or False
+print(os.path.isfile(config_path))     # True if it's a file
+print(os.path.isdir("/etc/myapp"))     # True if it's a directory
+print(os.path.getsize("/var/log/syslog"))  # File size in bytes
+
+# Walk a directory tree
+for root, dirs, files in os.walk("/etc/nginx"):
+    for filename in files:
+        full_path = os.path.join(root, filename)
+        print(full_path)
+```
+
+### The platform Module
+
+Detect the system your script is running on:
+
+```python
+import platform
+
+print(platform.system())     # Linux, Darwin, Windows
+print(platform.release())    # 5.15.0-88-generic
+print(platform.machine())    # x86_64, aarch64
+print(platform.node())       # hostname
+print(platform.python_version())  # 3.11.5
+
+# Conditional logic based on platform
+if platform.system() == "Linux":
+    config_dir = "/etc/myapp"
+elif platform.system() == "Darwin":
+    config_dir = os.path.expanduser("~/Library/myapp")
+else:
+    config_dir = "C:\\ProgramData\\myapp"
+```
+
+## subprocess.run — Running Commands
+
+`subprocess.run()` is the modern way to execute shell commands from Python. It replaced the older `os.system()` and `subprocess.call()` functions.
+
+### Basic Command Execution
+
+```python
+import subprocess
+
+# Run a command and wait for it to finish
+result = subprocess.run(["ls", "-la", "/tmp"])
+print(f"Return code: {result.returncode}")
+
+# Capture the output
+result = subprocess.run(
+    ["df", "-h"],
+    capture_output=True,
+    text=True
+)
+print(result.stdout)
+
+# Check if command succeeded
+result = subprocess.run(
+    ["systemctl", "is-active", "nginx"],
+    capture_output=True,
+    text=True
+)
+if result.returncode == 0:
+    print(f"nginx is {result.stdout.strip()}")
+else:
+    print("nginx is not running")
+```
+
+### Error Handling with check=True
+
+```python
+import subprocess
+
+# Raises CalledProcessError if command fails
+try:
+    result = subprocess.run(
+        ["docker", "build", "-t", "myapp:latest", "."],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    print("Build succeeded!")
+    print(result.stdout)
+except subprocess.CalledProcessError as e:
+    print(f"Build failed with code {e.returncode}")
+    print(f"Error output: {e.stderr}")
+```
+
+### Timeouts
+
+Always set timeouts for commands that might hang:
+
+```python
+import subprocess
+
+try:
+    result = subprocess.run(
+        ["ping", "-c", "4", "10.0.0.1"],
+        capture_output=True,
+        text=True,
+        timeout=10  # seconds
+    )
+    print(result.stdout)
+except subprocess.TimeoutExpired:
+    print("Command timed out — host may be unreachable")
+```
+
+### Safe Command Parsing with shlex
+
+```python
+import subprocess
+import shlex
+
+# BAD: Passing a string with shell=True is dangerous
+# subprocess.run("ls -la /tmp; rm -rf /", shell=True)  # DON'T DO THIS
+
+# GOOD: Use a list of arguments
+subprocess.run(["ls", "-la", "/tmp"])
+
+# GOOD: Parse a command string safely with shlex
+cmd = "docker run --rm -v /data:/data myapp:latest --config /data/app.yaml"
+args = shlex.split(cmd)
+print(args)
+# ['docker', 'run', '--rm', '-v', '/data:/data', 'myapp:latest',
+#  '--config', '/data/app.yaml']
+
+result = subprocess.run(args, capture_output=True, text=True)
+```
+
+<Callout type="warning" title="Avoid shell=True">
+Using `shell=True` passes your command through the shell, enabling shell injection attacks. If a variable contains `; rm -rf /`, it gets executed. Always pass commands as a list of arguments, and use `shlex.split()` if you need to parse a command string.
+</Callout>
+
+### Passing Environment Variables to Commands
+
+```python
+import subprocess
+import os
+
+# Pass a modified environment to the child process
+env = os.environ.copy()
+env["APP_ENV"] = "production"
+env["LOG_LEVEL"] = "WARNING"
+
+result = subprocess.run(
+    ["python3", "deploy.py"],
+    capture_output=True,
+    text=True,
+    env=env
+)
+```
+
+## subprocess.Popen — Streaming Output
+
+When you need to process output line-by-line as it arrives (build logs, long-running commands), use `Popen`:
+
+```python
+import subprocess
+
+# Stream output line by line
+process = subprocess.Popen(
+    ["docker", "build", "-t", "myapp:latest", "."],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,  # Merge stderr into stdout
+    text=True
+)
+
+for line in process.stdout:
+    line = line.strip()
+    if "error" in line.lower():
+        print(f"[ERROR] {line}")
+    elif "step" in line.lower():
+        print(f"[STEP]  {line}")
+    else:
+        print(f"        {line}")
+
+return_code = process.wait()
+print(f"\nBuild finished with code {return_code}")
+```
+
+### Running Commands with Pipe Chains
+
+```python
+import subprocess
+
+# Equivalent to: ps aux | grep python | grep -v grep
+ps = subprocess.Popen(
+    ["ps", "aux"],
+    stdout=subprocess.PIPE,
+    text=True
+)
+
+grep = subprocess.Popen(
+    ["grep", "python"],
+    stdin=ps.stdout,
+    stdout=subprocess.PIPE,
+    text=True
+)
+
+ps.stdout.close()  # Allow ps to receive SIGPIPE if grep exits
+output, _ = grep.communicate()
+
+for line in output.strip().split("\n"):
+    if line and "grep" not in line:
+        print(line)
+```
+
+## Signal Handling
+
+Catch signals to clean up gracefully when scripts are interrupted:
+
+```python
+import signal
+import sys
+import time
+
+def cleanup(signum, frame):
+    """Handle shutdown signals gracefully."""
+    sig_name = signal.Signals(signum).name
+    print(f"\nReceived {sig_name}. Cleaning up...")
+    # Close connections, remove temp files, etc.
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, cleanup)   # Ctrl+C
+signal.signal(signal.SIGTERM, cleanup)  # kill / docker stop
+
+print("Running... Press Ctrl+C to stop.")
+while True:
+    time.sleep(1)
+```
+
+## When to Use subprocess vs Native Python
+
+```python
+import os
+import shutil
+import subprocess
+
+# File operations — use Python (faster, safer, portable)
+os.makedirs("/tmp/deploy", exist_ok=True)           # NOT: mkdir -p
+shutil.copy2("app.tar.gz", "/tmp/deploy/")           # NOT: cp
+os.remove("/tmp/deploy/old.tar.gz")                   # NOT: rm
+file_size = os.path.getsize("/tmp/deploy/app.tar.gz") # NOT: stat
+
+# System commands — use subprocess (no Python equivalent)
+subprocess.run(["systemctl", "restart", "nginx"], check=True)
+subprocess.run(["docker", "build", "-t", "app:v1", "."], check=True)
+subprocess.run(["kubectl", "apply", "-f", "deploy.yaml"], check=True)
+
+# Rule of thumb:
+# - If Python has a module for it (os, shutil, json) -> use Python
+# - If it's a system tool (docker, kubectl, systemctl) -> use subprocess
+```
+
+<Exercise number={1} title="System Information Collector">
+
+Build a script that collects system information using both os and subprocess.
+
+```python
+import os
+import subprocess
+import platform
+from datetime import datetime
+
+def run_cmd(cmd, default="N/A"):
+    """Run a command and return its output, or default on failure."""
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        return result.stdout.strip() if result.returncode == 0 else default
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return default
+
+def collect_system_info():
+    """Collect comprehensive system information."""
+    info = {
+        "timestamp": datetime.now().isoformat(),
+        "hostname": platform.node(),
+        "os": platform.system(),
+        "os_release": platform.release(),
+        "architecture": platform.machine(),
+        "python_version": platform.python_version(),
+    }
+
+    # CPU info
+    info["cpu_count"] = os.cpu_count()
+    info["load_average"] = run_cmd(["uptime"])
+
+    # Memory
+    info["memory"] = run_cmd(["free", "-h"])
+
+    # Disk
+    info["disk"] = run_cmd(["df", "-h", "/"])
+
+    # Network
+    info["ip_addresses"] = run_cmd(
+        ["hostname", "-I"],
+        default=run_cmd(["hostname"])
+    )
+
+    # Key environment variables
+    info["env"] = {
+        "USER": os.getenv("USER", "unknown"),
+        "HOME": os.getenv("HOME", "unknown"),
+        "SHELL": os.getenv("SHELL", "unknown"),
+        "PATH_dirs": len(os.getenv("PATH", "").split(":")),
+    }
+
+    return info
+
+# Collect and display
+info = collect_system_info()
+print("=" * 50)
+print("  SYSTEM INFORMATION REPORT")
+print("=" * 50)
+print(f"  Hostname:     {info['hostname']}")
+print(f"  OS:           {info['os']} {info['os_release']}")
+print(f"  Architecture: {info['architecture']}")
+print(f"  Python:       {info['python_version']}")
+print(f"  CPU Count:    {info['cpu_count']}")
+print(f"  User:         {info['env']['USER']}")
+print(f"  Home:         {info['env']['HOME']}")
+print(f"  Shell:        {info['env']['SHELL']}")
+print(f"  PATH entries: {info['env']['PATH_dirs']}")
+print(f"  IPs:          {info['ip_addresses']}")
+print()
+print("--- Memory ---")
+print(info["memory"])
+print()
+print("--- Disk ---")
+print(info["disk"])
+print("=" * 50)
+```
+
+</Exercise>
+
+<Exercise number={2} title="Safe Command Runner with Logging">
+
+Build a command runner that handles errors, timeouts, and logging.
+
+```python
+import subprocess
+import shlex
+import time
+from datetime import datetime
+
+class CommandRunner:
+    """Run shell commands safely with logging and error handling."""
+
+    def __init__(self, timeout=30, dry_run=False):
+        self.timeout = timeout
+        self.dry_run = dry_run
+        self.history = []
+
+    def run(self, command, check=True, timeout=None):
+        """Run a command and return the result."""
+        if isinstance(command, str):
+            args = shlex.split(command)
+        else:
+            args = command
+
+        timeout = timeout or self.timeout
+        cmd_str = " ".join(args)
+        start_time = time.time()
+
+        entry = {
+            "command": cmd_str,
+            "timestamp": datetime.now().isoformat(),
+            "dry_run": self.dry_run,
+        }
+
+        if self.dry_run:
+            print(f"[DRY RUN] {cmd_str}")
+            entry["status"] = "skipped"
+            entry["duration"] = 0
+            self.history.append(entry)
+            return None
+
+        print(f"[RUN] {cmd_str}")
+
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=check
+            )
+            duration = time.time() - start_time
+            entry["status"] = "success"
+            entry["returncode"] = result.returncode
+            entry["duration"] = round(duration, 2)
+            entry["stdout_lines"] = len(result.stdout.strip().split("\n"))
+
+            print(f"  -> OK ({duration:.2f}s)")
+            self.history.append(entry)
+            return result
+
+        except subprocess.CalledProcessError as e:
+            duration = time.time() - start_time
+            entry["status"] = "failed"
+            entry["returncode"] = e.returncode
+            entry["duration"] = round(duration, 2)
+            entry["stderr"] = e.stderr.strip()[:200]
+
+            print(f"  -> FAILED (code {e.returncode}, {duration:.2f}s)")
+            if e.stderr:
+                print(f"     {e.stderr.strip()[:100]}")
+            self.history.append(entry)
+            raise
+
+        except subprocess.TimeoutExpired:
+            duration = time.time() - start_time
+            entry["status"] = "timeout"
+            entry["duration"] = round(duration, 2)
+
+            print(f"  -> TIMEOUT after {timeout}s")
+            self.history.append(entry)
+            raise
+
+        except FileNotFoundError:
+            entry["status"] = "not_found"
+            entry["duration"] = 0
+            print(f"  -> COMMAND NOT FOUND: {args[0]}")
+            self.history.append(entry)
+            raise
+
+    def report(self):
+        """Print a summary of all commands run."""
+        print(f"\n{'=' * 50}")
+        print(f"  Command Execution Report")
+        print(f"  Total commands: {len(self.history)}")
+        print(f"{'=' * 50}")
+
+        for i, entry in enumerate(self.history, 1):
+            status_icon = {
+                "success": "OK", "failed": "FAIL",
+                "timeout": "TIME", "skipped": "SKIP",
+                "not_found": "ERR"
+            }.get(entry["status"], "?")
+            print(
+                f"  [{status_icon:>4}] {entry['command'][:40]:<40} "
+                f"({entry['duration']}s)"
+            )
+
+        total_time = sum(e["duration"] for e in self.history)
+        successes = sum(1 for e in self.history if e["status"] == "success")
+        failures = len(self.history) - successes
+        print(f"\n  Passed: {successes}  Failed: {failures}  "
+              f"Total time: {total_time:.2f}s")
+
+# --- Demo ---
+runner = CommandRunner(timeout=10)
+
+# Run various commands
+runner.run("echo 'Hello from subprocess'")
+runner.run("uname -a")
+runner.run("date +%Y-%m-%d")
+runner.run(["ls", "-la", "/tmp"])
+
+try:
+    runner.run("ls /nonexistent/path")
+except subprocess.CalledProcessError:
+    pass  # Already logged
+
+runner.report()
+```
+
+</Exercise>
+
+<MiniProject title="System Administration Tool">
+
+Build a Python wrapper around common admin commands with better output and logging.
+
+```python
+import subprocess
+import shlex
+import os
+import json
+from datetime import datetime
+
+class SysAdmin:
+    """System administration tool wrapping common commands."""
+
+    def __init__(self):
+        self.log_entries = []
+
+    def _run(self, cmd, timeout=30):
+        """Execute a command and return parsed output."""
+        if isinstance(cmd, str):
+            cmd = shlex.split(cmd)
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            self._log("OK", " ".join(cmd))
+            return result.stdout.strip(), result.returncode
+        except subprocess.TimeoutExpired:
+            self._log("TIMEOUT", " ".join(cmd))
+            return "", -1
+        except FileNotFoundError:
+            self._log("NOT_FOUND", " ".join(cmd))
+            return "", -1
+
+    def _log(self, status, message):
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "status": status,
+            "message": message
+        }
+        self.log_entries.append(entry)
+
+    def disk_usage(self):
+        """Show disk usage with visual bars."""
+        output, rc = self._run("df -h --output=target,size,used,avail,pcent")
+        if rc != 0:
+            # Fallback for systems without --output
+            output, rc = self._run("df -h")
+
+        print("=== Disk Usage ===")
+        lines = output.strip().split("\n")
+        if not lines:
+            print("  No data available")
+            return
+
+        print(f"  {lines[0]}")
+        for line in lines[1:]:
+            parts = line.split()
+            if len(parts) >= 5:
+                pct_str = parts[-1].replace("%", "")
+                try:
+                    pct = int(pct_str)
+                    bar_len = pct // 5
+                    bar = "#" * bar_len + "-" * (20 - bar_len)
+                    status = "CRITICAL" if pct > 90 else "WARNING" if pct > 80 else "OK"
+                    print(f"  {line}")
+                    print(f"    [{bar}] {status}")
+                except ValueError:
+                    print(f"  {line}")
+        print()
+
+    def memory_usage(self):
+        """Show memory usage."""
+        output, rc = self._run("free -h")
+        if rc != 0:
+            print("  free command not available")
+            return
+
+        print("=== Memory Usage ===")
+        for line in output.split("\n"):
+            print(f"  {line}")
+        print()
+
+    def top_processes(self, count=10):
+        """Show top processes by CPU and memory."""
+        print(f"=== Top {count} Processes by CPU ===")
+        output, _ = self._run(
+            f"ps aux --sort=-%cpu"
+        )
+        lines = output.split("\n")
+        header = lines[0] if lines else ""
+        print(f"  {header}")
+        for line in lines[1:count + 1]:
+            print(f"  {line}")
+        print()
+
+    def network_connections(self):
+        """Show network listening ports."""
+        print("=== Listening Ports ===")
+        output, rc = self._run("ss -tlnp")
+        if rc != 0:
+            output, rc = self._run("netstat -tlnp")
+
+        if output:
+            for line in output.split("\n")[:15]:
+                print(f"  {line}")
+        else:
+            print("  No network info available")
+        print()
+
+    def service_status(self, services):
+        """Check the status of a list of services."""
+        print("=== Service Status ===")
+        for svc in services:
+            output, rc = self._run(f"systemctl is-active {svc}")
+            status = output.strip() if rc == 0 else "not found"
+            marker = "[  UP  ]" if status == "active" else "[DOWN]"
+            print(f"  {marker} {svc}: {status}")
+        print()
+
+    def recent_logins(self, count=10):
+        """Show recent login activity."""
+        print(f"=== Recent Logins (last {count}) ===")
+        output, _ = self._run(f"last -n {count}")
+        if output:
+            for line in output.split("\n"):
+                if line.strip():
+                    print(f"  {line}")
+        print()
+
+    def uptime_info(self):
+        """Show system uptime."""
+        print("=== System Uptime ===")
+        output, _ = self._run("uptime")
+        if output:
+            print(f"  {output}")
+
+        output, _ = self._run("uname -a")
+        if output:
+            print(f"  {output}")
+        print()
+
+    def find_large_files(self, path="/var/log", min_size="100M", count=10):
+        """Find large files in a directory."""
+        print(f"=== Large Files in {path} (>{min_size}) ===")
+        output, _ = self._run(
+            f"find {path} -type f -size +{min_size} "
+            f"-exec ls -lh {{}} + 2>/dev/null"
+        )
+        if output:
+            lines = output.strip().split("\n")
+            for line in sorted(lines, reverse=True)[:count]:
+                print(f"  {line}")
+        else:
+            print(f"  No files larger than {min_size}")
+        print()
+
+    def full_report(self):
+        """Run a full system health report."""
+        print("=" * 60)
+        print(f"  SYSTEM HEALTH REPORT")
+        print(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Hostname:  {os.uname().nodename}")
+        print("=" * 60)
+        print()
+
+        self.uptime_info()
+        self.disk_usage()
+        self.memory_usage()
+        self.top_processes(5)
+        self.network_connections()
+        self.recent_logins(5)
+
+        # Summary
+        print("=" * 60)
+        print(f"  Report complete. {len(self.log_entries)} commands executed.")
+        errors = sum(
+            1 for e in self.log_entries if e["status"] != "OK"
+        )
+        if errors:
+            print(f"  {errors} command(s) had issues.")
+        print("=" * 60)
+
+
+# --- Run the report ---
+admin = SysAdmin()
+admin.full_report()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Use `os.environ.get()` with defaults for environment variables — never hardcode credentials
+- `subprocess.run()` with a list of arguments is the safe way to execute commands
+- Never use `shell=True` unless absolutely necessary — it opens shell injection vulnerabilities
+- Use `shlex.split()` to safely parse command strings into argument lists
+- Set `timeout` on every `subprocess.run()` call to prevent hangs
+- Use `subprocess.Popen` when you need to stream output line by line
+- Prefer native Python (`os`, `shutil`) for file operations; use `subprocess` for system tools
+- Register signal handlers for graceful shutdown in long-running scripts
+
+## What's Next
+
+Your scripts can now run system commands and read the environment. But most modern infrastructure is managed through APIs, not local commands. In **HTTP Requests and APIs**, you'll learn to interact with REST APIs — the interface to GitHub, cloud providers, monitoring tools, and everything else in the DevOps ecosystem.

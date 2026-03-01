@@ -1,0 +1,1335 @@
+---
+title: "Docker Networking"
+description: "Master Docker networking: bridge, host, and overlay networks. Learn DNS resolution, port mapping, container-to-container communication, and network isolation for secure multi-container applications."
+order: 10
+xpReward: 45
+estimatedMinutes: 55
+prerequisites:
+  - 09-docker-volumes
+objectives:
+  - Understand Docker's default bridge network and its limitations
+  - Create custom bridge networks with built-in DNS resolution
+  - Use port mapping to expose container services to the host
+  - Connect and disconnect containers from networks at runtime
+  - Implement network isolation to secure multi-container architectures
+  - Choose the right network driver for different deployment scenarios
+tags:
+  - docker
+  - networking
+  - bridge
+  - dns
+  - port-mapping
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your team is building a microservices application: a Node.js API, a PostgreSQL database, and a Redis cache. In development, you ran all three on localhost with different ports. In Docker, you try the same approach — but `localhost` inside a container means the container itself, not the host machine. The API can't reach the database. You hardcode IP addresses, but they change every time containers restart. "There has to be a better way," you say. There is. Docker networking gives every container a stable hostname, automatic DNS resolution, and isolated virtual networks. By the end of this lesson, your containers will find each other by name, communicate securely, and be invisible to services that shouldn't reach them.
+</Callout>
+
+## How Docker Networking Works
+
+When Docker is installed, it creates a virtual networking layer on your host. Each container gets its own network interface, IP address, and can be connected to one or more Docker networks. Containers on the same network can communicate; containers on different networks are isolated.
+
+```
+Docker Networking Overview:
+
+  ┌───────────────────────────────────────────────────────────────┐
+  │                         Docker Host                            │
+  │                                                                │
+  │  ┌──────────────────────────────────────────────────────────┐  │
+  │  │                    docker0 (bridge)                       │  │
+  │  │                    172.17.0.1                             │  │
+  │  │                                                          │  │
+  │  │  ┌──────────┐    ┌──────────┐    ┌──────────┐           │  │
+  │  │  │ Container│    │ Container│    │ Container│           │  │
+  │  │  │    A     │    │    B     │    │    C     │           │  │
+  │  │  │172.17.0.2│    │172.17.0.3│    │172.17.0.4│           │  │
+  │  │  └──────────┘    └──────────┘    └──────────┘           │  │
+  │  └──────────────────────────────────────────────────────────┘  │
+  │                                                                │
+  │  ┌──────────────────────────┐                                  │
+  │  │   Custom Network "app"  │    Not connected to bridge →     │
+  │  │   172.18.0.0/16         │    isolated from A, B, C         │
+  │  │                          │                                  │
+  │  │  ┌──────────┐  ┌──────────┐                                │
+  │  │  │   API    │  │   DB    │                                  │
+  │  │  │172.18.0.2│  │172.18.0.3│                                │
+  │  │  └──────────┘  └──────────┘                                │
+  │  └──────────────────────────┘                                  │
+  │                                                                │
+  └───────────────────────────────────────────────────────────────┘
+```
+
+## Network Drivers
+
+Docker supports several network drivers, each designed for different use cases:
+
+### Network Driver Comparison
+
+| Driver | Description | Use Case | Container-to-Container | DNS Resolution |
+|---|---|---|---|---|
+| **bridge** | Default. Private network on the host | Single-host applications | Yes (same network) | Custom networks only |
+| **host** | Container shares host's network stack | Performance-critical apps | Via host network | N/A |
+| **none** | No networking | Isolated batch jobs | No | No |
+| **overlay** | Spans multiple Docker hosts | Docker Swarm / multi-host | Yes (across hosts) | Yes |
+| **macvlan** | Assigns a MAC address to container | Legacy apps needing L2 | Via physical network | No |
+
+<Callout type="info" title="Which Driver Should I Use?">
+- **90% of the time**: Use a **custom bridge network**. It provides DNS resolution, isolation, and works on a single host.
+- **Performance-critical**: Use **host** networking to eliminate the network address translation overhead (container uses host's IP directly).
+- **Multi-host clusters**: Use **overlay** networks with Docker Swarm or Kubernetes.
+- **Legacy integration**: Use **macvlan** when containers must appear as physical devices on the network.
+</Callout>
+
+## The Default Bridge Network
+
+Every Docker installation comes with a default bridge network called `bridge`. When you run a container without specifying a network, it connects to this default bridge.
+
+```bash
+# List Docker networks
+docker network ls
+NETWORK ID     NAME      DRIVER    SCOPE
+a1b2c3d4e5f6   bridge    bridge    local
+f6e5d4c3b2a1   host      host      local
+1a2b3c4d5e6f   none      null      local
+
+# Inspect the default bridge network
+docker network inspect bridge
+```
+
+### Default Bridge Limitations
+
+Let's see the default bridge in action — and its problems:
+
+```bash
+# Start two containers on the default bridge
+docker run -d --name container-a alpine sleep 3600
+docker run -d --name container-b alpine sleep 3600
+
+# Get their IP addresses
+docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' container-a
+# Output: 172.17.0.2
+
+docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' container-b
+# Output: 172.17.0.3
+
+# They CAN ping each other by IP
+docker exec container-a ping -c 2 172.17.0.3
+# PING 172.17.0.3: 56 data bytes
+# 64 bytes from 172.17.0.3: seq=0 ttl=64 time=0.123 ms
+
+# But they CANNOT resolve each other by name!
+docker exec container-a ping -c 2 container-b
+# ping: bad address 'container-b'
+
+docker stop container-a container-b && docker rm container-a container-b
+```
+
+<Callout type="warning" title="Default Bridge: No DNS Resolution">
+The default bridge network does **not** provide DNS resolution between containers. You must use IP addresses, which change every time containers restart. This makes the default bridge unsuitable for real applications. Always create a custom bridge network instead.
+
+```
+Default Bridge:                    Custom Bridge:
+container-a → 172.17.0.2         container-a → "container-a"
+container-b → 172.17.0.3         container-b → "container-b"
+
+IP addresses change on restart!    Names are stable forever.
+```
+</Callout>
+
+### The Legacy --link Flag
+
+You may encounter `--link` in older tutorials and Docker documentation:
+
+```bash
+# OLD WAY — deprecated, do not use
+docker run -d --name db postgres:16-alpine
+docker run -d --name app --link db:database myapp
+```
+
+The `--link` flag is deprecated. Use custom bridge networks instead — they provide the same DNS resolution without the limitations and complexity of links.
+
+## Custom Bridge Networks
+
+Custom bridge networks solve all the problems of the default bridge. They provide automatic DNS resolution, better isolation, and more control.
+
+### Creating a Custom Network
+
+```bash
+# Create a custom bridge network
+docker network create myapp-network
+
+# Create with specific subnet and gateway
+docker network create \
+  --driver bridge \
+  --subnet 172.20.0.0/16 \
+  --gateway 172.20.0.1 \
+  myapp-network-custom
+
+# Inspect the network
+docker network inspect myapp-network
+```
+
+### DNS Resolution in Custom Networks
+
+The most important feature of custom networks — containers can reach each other **by name**:
+
+```bash
+# Create a custom network
+docker network create app-net
+
+# Start containers on the custom network
+docker run -d --name api --network app-net alpine sleep 3600
+docker run -d --name database --network app-net alpine sleep 3600
+docker run -d --name cache --network app-net alpine sleep 3600
+
+# Containers can ping each other BY NAME
+docker exec api ping -c 2 database
+# PING database (172.19.0.3): 56 data bytes
+# 64 bytes from 172.19.0.3: seq=0 ttl=64 time=0.089 ms
+
+docker exec api ping -c 2 cache
+# PING cache (172.19.0.4): 56 data bytes
+# 64 bytes from 172.19.0.4: seq=0 ttl=64 time=0.092 ms
+
+docker exec database ping -c 2 api
+# PING api (172.19.0.2): 56 data bytes
+# 64 bytes from 172.19.0.2: seq=0 ttl=64 time=0.085 ms
+
+docker stop api database cache && docker rm api database cache
+docker network rm app-net
+```
+
+```
+Custom Bridge Network DNS:
+
+  ┌─────────────────────────────────────────────────────────┐
+  │              Custom Network: "app-net"                   │
+  │              Subnet: 172.19.0.0/16                       │
+  │                                                          │
+  │  ┌──────────────────────────────────────────────────┐   │
+  │  │           Docker DNS Server (127.0.0.11)          │   │
+  │  │                                                    │   │
+  │  │  api       → 172.19.0.2                           │   │
+  │  │  database  → 172.19.0.3                           │   │
+  │  │  cache     → 172.19.0.4                           │   │
+  │  └──────────────────────────────────────────────────┘   │
+  │       ▲              ▲              ▲                    │
+  │       │              │              │                    │
+  │  ┌────┴─────┐  ┌────┴─────┐  ┌────┴─────┐             │
+  │  │   api    │  │ database │  │  cache   │              │
+  │  │          │  │          │  │          │              │
+  │  │ ping     │  │ Responds │  │ Responds │              │
+  │  │ database │  │ to "db"  │  │ to       │              │
+  │  │ ──works! │  │ queries  │  │ "cache"  │              │
+  │  └──────────┘  └──────────┘  └──────────┘              │
+  │                                                          │
+  └─────────────────────────────────────────────────────────┘
+```
+
+<Callout type="tip" title="Network Aliases">
+You can give containers additional DNS names using `--network-alias`:
+
+```bash
+docker run -d --name postgres-primary \
+  --network app-net \
+  --network-alias db \
+  --network-alias database \
+  postgres:16-alpine
+
+# Now it responds to three names: postgres-primary, db, database
+docker exec api ping -c 1 db
+docker exec api ping -c 1 database
+docker exec api ping -c 1 postgres-primary
+```
+
+Network aliases are useful when multiple containers should respond to the same service name (client-side load balancing).
+</Callout>
+
+## Port Mapping Deep Dive
+
+Containers are isolated from the host network by default. To make a container's service accessible from outside Docker, you need to **map** a host port to a container port.
+
+### Port Mapping Syntax
+
+```bash
+# Basic port mapping: -p HOST_PORT:CONTAINER_PORT
+docker run -d -p 8080:80 nginx:1.25-alpine
+# Access: http://localhost:8080 → container port 80
+
+# Map to a different host port
+docker run -d -p 3000:80 nginx:1.25-alpine
+# Access: http://localhost:3000 → container port 80
+
+# Map multiple ports
+docker run -d -p 8080:80 -p 8443:443 nginx:1.25-alpine
+
+# Let Docker choose a random host port
+docker run -d -p 80 nginx:1.25-alpine
+# Docker assigns a random available port (e.g., 49153)
+
+# Publish ALL exposed ports with random host ports
+docker run -d -P nginx:1.25-alpine
+```
+
+### Binding to Specific Interfaces
+
+By default, `-p 8080:80` binds to all interfaces (`0.0.0.0`), making the service accessible from any network interface on the host. You can restrict this:
+
+```bash
+# Bind to all interfaces (default) — accessible from anywhere
+docker run -d -p 0.0.0.0:8080:80 nginx:1.25-alpine
+
+# Bind to localhost only — only accessible from the host itself
+docker run -d -p 127.0.0.1:8080:80 nginx:1.25-alpine
+
+# Bind to a specific interface IP
+docker run -d -p 192.168.1.100:8080:80 nginx:1.25-alpine
+
+# Bind to localhost with a random port
+docker run -d -p 127.0.0.1::80 nginx:1.25-alpine
+```
+
+```
+Port Mapping Options:
+
+  External Network     Host Machine (192.168.1.100)          Container
+  ─────────────────    ─────────────────────────────         ──────────
+
+  -p 8080:80          0.0.0.0:8080 ────────────────────────▶ :80
+  (all interfaces)    Anyone can reach this port               nginx
+
+  -p 127.0.0.1:8080:80   127.0.0.1:8080 ──────────────────▶ :80
+  (localhost only)        Only localhost can reach this         nginx
+
+  -p 192.168.1.100:8080:80   192.168.1.100:8080 ──────────▶ :80
+  (specific IP)              Only via this interface           nginx
+```
+
+<Callout type="warning" title="Security: Bind to Localhost for Internal Services">
+Databases and caches should never be accessible from outside the host. Always bind them to `127.0.0.1` if you need host access, or don't publish ports at all and let containers communicate over Docker networks:
+
+```bash
+# BAD — Database accessible from the entire network
+docker run -d -p 5432:5432 postgres:16-alpine
+
+# BETTER — Database only accessible from localhost
+docker run -d -p 127.0.0.1:5432:5432 postgres:16-alpine
+
+# BEST — No port mapping; only accessible from Docker network
+docker run -d --network app-net --name db postgres:16-alpine
+```
+</Callout>
+
+### Viewing Port Mappings
+
+```bash
+# Show port mappings for a running container
+docker port mycontainer
+80/tcp -> 0.0.0.0:8080
+443/tcp -> 0.0.0.0:8443
+
+# Show a specific port mapping
+docker port mycontainer 80
+0.0.0.0:8080
+
+# See ports in docker ps output
+docker ps
+CONTAINER ID  IMAGE   COMMAND  PORTS                  NAMES
+abc123def456  nginx   ...      0.0.0.0:8080->80/tcp   web
+```
+
+### UDP Port Mapping
+
+```bash
+# Map a UDP port
+docker run -d -p 5353:53/udp dns-server
+
+# Map both TCP and UDP on the same port
+docker run -d -p 8080:8080/tcp -p 8080:8080/udp myapp
+```
+
+## Host Networking
+
+With `--network host`, the container shares the host's network stack directly. There is no network isolation — the container uses the host's IP address and ports.
+
+```bash
+# Run nginx directly on the host's port 80
+docker run -d --network host --name web nginx:1.25-alpine
+
+# No port mapping needed — it's already on host port 80
+curl http://localhost:80
+
+docker stop web && docker rm web
+```
+
+```
+Bridge Network (default):               Host Network:
+┌──────────────────────────┐           ┌──────────────────────────┐
+│ Host (192.168.1.100)      │           │ Host (192.168.1.100)      │
+│                           │           │                           │
+│  ┌─────────────────────┐ │           │  Container shares host   │
+│  │ Bridge Network      │ │           │  network stack directly  │
+│  │                     │ │           │                           │
+│  │  ┌──────────────┐  │ │           │  nginx listens on        │
+│  │  │  Container   │  │ │           │  192.168.1.100:80        │
+│  │  │  172.17.0.2  │  │ │           │  (no NAT, no bridge)     │
+│  │  │  :80         │  │ │           │                           │
+│  │  └──────┬───────┘  │ │           │  Performance: ~native    │
+│  │         │ NAT      │ │           │  Isolation: none         │
+│  │         ▼          │ │           │                           │
+│  │  8080 → 80        │ │           └──────────────────────────┘
+│  └─────────────────────┘ │
+│                           │
+│  192.168.1.100:8080       │
+└──────────────────────────┘
+```
+
+<Callout type="info" title="When to Use Host Networking">
+Host networking eliminates the overhead of Docker's bridge and NAT. Use it when:
+- **Performance is critical**: Network-intensive applications (DNS servers, load balancers)
+- **Port range is large**: Applications that need many ports (e.g., SIP/VoIP using ports 10000-20000)
+- **Network debugging**: When you need to see the exact same network as the host
+
+Downsides:
+- No network isolation (less secure)
+- Port conflicts with host services
+- Only works on Linux (Docker Desktop on macOS/Windows uses a VM)
+</Callout>
+
+## None Network
+
+The `none` network disables all networking for a container. The container has only a loopback interface:
+
+```bash
+docker run --rm --network none alpine ip addr
+# 1: lo: <LOOPBACK,UP,LOWER_UP> ...
+#     inet 127.0.0.1/8 scope host lo
+# That's it — no eth0, no external connectivity
+
+docker run --rm --network none alpine ping -c 1 8.8.8.8
+# ping: sendto: Network is unreachable
+```
+
+Use `none` for containers that process data without needing network access — batch jobs, data transformation, or security-sensitive computation.
+
+## Network Inspection and Debugging
+
+### Inspecting Networks
+
+```bash
+# List all networks
+docker network ls
+NETWORK ID     NAME          DRIVER    SCOPE
+a1b2c3d4e5f6   bridge        bridge    local
+7g8h9i0j1k2l   app-net       bridge    local
+f6e5d4c3b2a1   host          host      local
+1a2b3c4d5e6f   none          null      local
+
+# Detailed inspection of a network
+docker network inspect app-net
+[
+    {
+        "Name": "app-net",
+        "Id": "7g8h9i0j1k2l...",
+        "Scope": "local",
+        "Driver": "bridge",
+        "IPAM": {
+            "Config": [
+                {
+                    "Subnet": "172.19.0.0/16",
+                    "Gateway": "172.19.0.1"
+                }
+            ]
+        },
+        "Containers": {
+            "abc123...": {
+                "Name": "api",
+                "IPv4Address": "172.19.0.2/16"
+            },
+            "def456...": {
+                "Name": "database",
+                "IPv4Address": "172.19.0.3/16"
+            }
+        }
+    }
+]
+```
+
+### Finding a Container's Networks and IP
+
+```bash
+# Get all network details for a container
+docker inspect -f '{{json .NetworkSettings.Networks}}' mycontainer | python3 -m json.tool
+
+# Get the IP address on a specific network
+docker inspect -f '{{.NetworkSettings.Networks.app_net.IPAddress}}' mycontainer
+
+# Quick one-liner: name, network, and IP for all running containers
+docker ps -q | xargs -I {} docker inspect -f '{{.Name}} {{range $net, $conf := .NetworkSettings.Networks}}{{$net}}:{{$conf.IPAddress}} {{end}}' {}
+```
+
+### Network Debugging from Inside a Container
+
+```bash
+# Start a debug container on the same network
+docker run -it --rm --network app-net alpine sh
+
+# Inside the container:
+# Check DNS resolution
+nslookup database
+# Server: 127.0.0.11
+# Address: 127.0.0.11:53
+# Name: database
+# Address: 172.19.0.3
+
+# Check connectivity
+ping -c 2 database
+wget -qO- http://api:3000/health
+
+# Check routes
+ip route
+# default via 172.19.0.1 dev eth0
+# 172.19.0.0/16 dev eth0 scope link
+
+# Check open ports on a service
+# (install netcat first)
+apk add --no-cache netcat-openbsd
+nc -zv database 5432
+# database (172.19.0.3:5432) open
+```
+
+<Callout type="tip" title="Network Debugging Toolkit">
+For serious network debugging, use the `nicolaka/netshoot` image. It comes pre-loaded with networking tools:
+
+```bash
+# Launch a debugging container on your network
+docker run -it --rm --network app-net nicolaka/netshoot
+
+# Now you have: dig, nslookup, ping, traceroute, curl, wget,
+# tcpdump, iperf, netstat, ss, ip, nmap, and many more
+```
+</Callout>
+
+## Connecting and Disconnecting Containers
+
+Containers can be connected to or disconnected from networks at any time, even while running. A container can be connected to multiple networks simultaneously.
+
+### Dynamic Network Management
+
+```bash
+# Create two networks
+docker network create frontend-net
+docker network create backend-net
+
+# Start a container on the frontend network
+docker run -d --name web --network frontend-net nginx:1.25-alpine
+
+# Start a database on the backend network
+docker run -d --name db --network backend-net \
+  -e POSTGRES_PASSWORD=secret postgres:16-alpine
+
+# Start an API server on the frontend network
+docker run -d --name api --network frontend-net alpine sleep 3600
+
+# Right now:
+# - web and api can talk (both on frontend-net)
+# - db is isolated on backend-net
+# - api CANNOT reach db
+
+docker exec api ping -c 1 db
+# ping: bad address 'db' — different networks!
+
+# Connect api to the backend network AS WELL
+docker network connect backend-net api
+
+# Now api is on BOTH networks and can reach both web and db
+docker exec api ping -c 1 web
+# PING web (172.20.0.2): 56 data bytes — works!
+
+docker exec api ping -c 1 db
+# PING db (172.21.0.2): 56 data bytes — works!
+
+# But web still cannot reach db (different networks)
+docker exec web ping -c 1 db
+# ping: bad address 'db'
+```
+
+```
+Multi-Network Container:
+
+  ┌─────────────────────────────┐   ┌─────────────────────────────┐
+  │       frontend-net          │   │       backend-net            │
+  │       172.20.0.0/16         │   │       172.21.0.0/16          │
+  │                             │   │                             │
+  │  ┌──────────┐  ┌──────────┐│   │┌──────────┐  ┌──────────┐  │
+  │  │   web    │  │   api    │├───┤│   api    │  │    db    │  │
+  │  │ (nginx)  │  │ (node)   ││   ││ (node)   │  │ (postgres)│  │
+  │  │172.20.0.2│  │172.20.0.3││   ││172.21.0.3│  │172.21.0.2│  │
+  │  └──────────┘  └──────────┘│   │└──────────┘  └──────────┘  │
+  │                             │   │                             │
+  │  web ←→ api  ✓              │   │  api ←→ db  ✓              │
+  │  web ←→ db   ✗              │   │  web ←→ db  ✗              │
+  └─────────────────────────────┘   └─────────────────────────────┘
+
+  The api container has TWO network interfaces:
+    eth0: 172.20.0.3 (frontend-net)
+    eth1: 172.21.0.3 (backend-net)
+```
+
+### Disconnecting from a Network
+
+```bash
+# Remove api from the frontend network
+docker network disconnect frontend-net api
+
+# Now api can only reach db, not web
+docker exec api ping -c 1 db
+# works
+
+docker exec api ping -c 1 web
+# ping: bad address 'web' — no longer connected
+
+# Clean up
+docker stop web api db && docker rm web api db
+docker network rm frontend-net backend-net
+```
+
+## Container-to-Container Communication Patterns
+
+### Pattern 1: Application with Database
+
+The most common pattern — an application connecting to a database over a custom network:
+
+```bash
+# Create the application network
+docker network create app-stack
+
+# Start PostgreSQL
+docker run -d \
+  --name db \
+  --network app-stack \
+  -e POSTGRES_PASSWORD=dbpass \
+  -e POSTGRES_DB=myapp \
+  postgres:16-alpine
+
+sleep 5
+
+# Start the application — connect to "db" by name
+docker run -d \
+  --name api \
+  --network app-stack \
+  -p 3000:3000 \
+  -e DATABASE_URL=postgres://postgres:dbpass@db:5432/myapp \
+  node:20-slim \
+  sh -c 'echo "Connected to DB at: $DATABASE_URL" && sleep 3600'
+
+# The application uses "db" as the hostname — Docker resolves it
+docker exec api sh -c 'echo $DATABASE_URL'
+# Output: postgres://postgres:dbpass@db:5432/myapp
+
+docker stop api db && docker rm api db
+docker network rm app-stack
+```
+
+### Pattern 2: Full Stack with Reverse Proxy
+
+```bash
+# Create the network
+docker network create fullstack
+
+# Start the database
+docker run -d --name db --network fullstack \
+  -e POSTGRES_PASSWORD=secret \
+  postgres:16-alpine
+
+# Start the API
+docker run -d --name api --network fullstack \
+  -e DB_HOST=db \
+  alpine sleep 3600
+
+# Start the frontend (nginx as reverse proxy)
+docker run -d --name proxy --network fullstack \
+  -p 80:80 \
+  nginx:1.25-alpine
+
+# Traffic flow:
+# Browser → localhost:80 → proxy → api → db
+# Only the proxy has a published port!
+
+docker stop proxy api db && docker rm proxy api db
+docker network rm fullstack
+```
+
+### Pattern 3: Microservices Communication
+
+```bash
+docker network create microservices
+
+# User service
+docker run -d --name user-service --network microservices alpine sleep 3600
+
+# Order service
+docker run -d --name order-service --network microservices alpine sleep 3600
+
+# Payment service
+docker run -d --name payment-service --network microservices alpine sleep 3600
+
+# API gateway — the only service with a published port
+docker run -d --name gateway --network microservices -p 8080:8080 alpine sleep 3600
+
+# All services can reach each other by name
+docker exec gateway ping -c 1 user-service
+docker exec gateway ping -c 1 order-service
+docker exec order-service ping -c 1 payment-service
+
+docker stop gateway user-service order-service payment-service
+docker rm gateway user-service order-service payment-service
+docker network rm microservices
+```
+
+```
+Microservices Network Topology:
+
+  External Traffic
+       │
+       ▼ :8080
+  ┌─────────┐
+  │ Gateway │ ◄── Only public-facing container
+  └────┬────┘
+       │ Docker Network: "microservices"
+  ┌────┴──────────────────────────────────────┐
+  │                                            │
+  ▼              ▼               ▼             │
+┌──────────┐ ┌──────────┐ ┌──────────────┐    │
+│  user-   │ │  order-  │ │  payment-    │    │
+│  service │ │  service │ │  service     │    │
+└──────────┘ └─────┬────┘ └──────────────┘    │
+                   │                           │
+                   ▼                           │
+              ┌──────────┐                     │
+              │ payment- │ ◄── Internal only   │
+              │ service  │                     │
+              └──────────┘                     │
+  ────────────────────────────────────────────┘
+```
+
+## Network Isolation and Security
+
+Network isolation is one of Docker's most powerful security features. Containers on different networks cannot communicate unless explicitly connected.
+
+### Isolating Frontend from Database
+
+```bash
+# Create separate networks for each tier
+docker network create public-net    # Frontend-facing
+docker network create private-net   # Database-facing
+
+# Database: only on private network (never exposed)
+docker run -d --name db \
+  --network private-net \
+  -e POSTGRES_PASSWORD=secret \
+  postgres:16-alpine
+
+# API: bridge between public and private
+docker run -d --name api \
+  --network private-net \
+  alpine sleep 3600
+docker network connect public-net api
+
+# Frontend: only on public network
+docker run -d --name frontend \
+  --network public-net \
+  -p 80:80 \
+  nginx:1.25-alpine
+
+# Test isolation:
+# frontend → api  (same public-net)  ✓
+docker exec frontend ping -c 1 api
+
+# api → db  (same private-net)  ✓
+docker exec api ping -c 1 db
+
+# frontend → db  (different networks)  ✗
+docker exec frontend ping -c 1 db
+# ping: bad address 'db'  — BLOCKED! Database is safe.
+
+docker stop frontend api db && docker rm frontend api db
+docker network rm public-net private-net
+```
+
+```
+Network Isolation Architecture:
+
+  Internet
+     │
+     ▼
+  ┌──────────────────────────────────────────────────────┐
+  │                   public-net                          │
+  │                                                      │
+  │  ┌──────────┐            ┌──────────┐               │
+  │  │ frontend │────────────│   api    │               │
+  │  │ (nginx)  │  Can talk  │ (node)   │               │
+  │  │ :80      │            │ :3000    │               │
+  │  └──────────┘            └────┬─────┘               │
+  │                               │                      │
+  └───────────────────────────────┼──────────────────────┘
+                                  │ api is on BOTH networks
+  ┌───────────────────────────────┼──────────────────────┐
+  │                   private-net │                       │
+  │                               │                      │
+  │                          ┌────┴─────┐               │
+  │                          │   api    │               │
+  │                          │ (node)   │               │
+  │                          └────┬─────┘               │
+  │                               │                      │
+  │                          ┌────┴─────┐               │
+  │                          │    db    │               │
+  │                          │ (postgres)│               │
+  │                          │ :5432    │               │
+  │                          └──────────┘               │
+  │                                                      │
+  │  frontend CANNOT reach db — network isolation!       │
+  └──────────────────────────────────────────────────────┘
+```
+
+<Callout type="warning" title="Don't Rely on Port Mapping for Security">
+Not publishing a port (`-p`) does not provide real isolation. Containers on the same Docker network can still reach each other on any port. True isolation requires placing containers on **separate networks**.
+
+```bash
+# These two containers are on the default bridge:
+docker run -d --name db postgres:16-alpine  # No -p flag
+docker run -d --name attacker alpine sleep 3600
+
+# The attacker CAN still reach the database on port 5432!
+docker exec attacker nc -zv 172.17.0.2 5432
+# 172.17.0.2 (172.17.0.2:5432) open
+
+# Solution: put them on different networks
+```
+</Callout>
+
+### Internal Networks
+
+Docker supports `internal` networks where containers can communicate with each other but have **no access to the external internet**:
+
+```bash
+# Create an internal network
+docker network create --internal restricted-net
+
+# Container on internal network cannot reach the internet
+docker run --rm --network restricted-net alpine ping -c 1 8.8.8.8
+# ping: sendto: Network is unreachable
+
+# But containers on the same internal network can still talk to each other
+docker run -d --name svc-a --network restricted-net alpine sleep 3600
+docker run -d --name svc-b --network restricted-net alpine sleep 3600
+
+docker exec svc-a ping -c 1 svc-b
+# PING svc-b (172.22.0.3): 56 data bytes
+# 64 bytes from 172.22.0.3: seq=0 ttl=64 time=0.089 ms
+
+docker stop svc-a svc-b && docker rm svc-a svc-b
+docker network rm restricted-net
+```
+
+<Callout type="tip" title="Internal Networks for Sensitive Workloads">
+Use `--internal` for networks that carry sensitive data (database traffic, inter-service secrets). Containers on internal networks can communicate with each other but cannot make outbound internet requests — preventing data exfiltration if a container is compromised.
+</Callout>
+
+## Network Cleanup
+
+```bash
+# Remove a specific network (must have no connected containers)
+docker network rm myapp-network
+
+# Remove all unused networks
+docker network prune
+WARNING! This will remove all custom networks not used by at least one container.
+Are you sure you want to continue? [y/N] y
+Deleted Networks:
+app-net
+test-network
+
+# Prune with filter
+docker network prune --filter "until=24h"
+
+# List networks to verify cleanup
+docker network ls
+```
+
+## Network Troubleshooting Checklist
+
+When containers can't communicate, work through this checklist:
+
+```
+Container Communication Troubleshooting:
+
+  1. Are they on the same network?
+     └─ docker inspect container-a | grep -A 5 Networks
+     └─ docker inspect container-b | grep -A 5 Networks
+
+  2. Is DNS working? (custom network only)
+     └─ docker exec container-a nslookup container-b
+     └─ If "bad address" → they're on the default bridge (no DNS)
+
+  3. Is the service actually running?
+     └─ docker exec container-b ss -tlnp
+     └─ docker exec container-b netstat -tlnp
+
+  4. Is the port correct?
+     └─ docker exec container-a nc -zv container-b PORT
+
+  5. Is a firewall blocking traffic?
+     └─ Check iptables rules on the host
+     └─ docker exec container-a wget -qO- http://container-b:PORT
+
+  6. Is the service binding to 0.0.0.0?
+     └─ Services binding to 127.0.0.1 inside a container are
+        only reachable from within that container
+     └─ Fix: bind to 0.0.0.0 (e.g., --bind 0.0.0.0:5000)
+```
+
+<Callout type="warning" title="The Localhost Trap">
+Inside a container, `localhost` (127.0.0.1) refers to the container itself — not the Docker host, not other containers. This is the most common networking mistake:
+
+```bash
+# WRONG — "localhost" is the container itself
+DATABASE_URL=postgres://user:pass@localhost:5432/mydb
+
+# RIGHT — use the container name as hostname
+DATABASE_URL=postgres://user:pass@db:5432/mydb
+```
+
+If your app connects to `localhost:5432` inside a container, it's trying to connect to a database running inside the same container — which doesn't exist.
+</Callout>
+
+<Exercise title="Multi-Container Application Networking" difficulty="beginner" xpReward={35} estimatedMinutes={20}
+  objectives={["Create a custom bridge network for a multi-container application", "Connect a web application to a database using container names", "Verify DNS resolution works between containers"]}
+  hints={["Use docker network create to make a custom bridge network", "Start all containers with --network to place them on the same network", "Use container names in connection strings instead of IP addresses", "Remember that PostgreSQL needs a few seconds to initialize"]}
+  validationCriteria={[
+    "Create a custom bridge network called 'exercise-app-net'",
+    "Start a PostgreSQL container named 'exercise-db' on the network with a password and database configured",
+    "Start an Alpine container named 'exercise-app' on the same network",
+    "From exercise-app, verify DNS resolution works: nslookup exercise-db should return an IP address",
+    "From exercise-app, verify connectivity: ping exercise-db should succeed",
+    "From exercise-app, verify the database port is reachable: use nc -zv exercise-db 5432",
+    "Verify that a container NOT on the network cannot reach exercise-db",
+    "Clean up all containers and the network"
+  ]}
+>
+
+Build a multi-container application where a web application communicates with a database using Docker's built-in DNS resolution.
+
+**Step 1: Create the network**
+
+```bash
+docker network create exercise-app-net
+
+# Verify the network was created
+docker network ls --filter name=exercise-app-net
+```
+
+**Step 2: Start the database**
+
+```bash
+docker run -d \
+  --name exercise-db \
+  --network exercise-app-net \
+  -e POSTGRES_PASSWORD=exercisepass \
+  -e POSTGRES_DB=exercisedb \
+  -e POSTGRES_USER=exerciseuser \
+  postgres:16-alpine
+
+# Wait for PostgreSQL to initialize
+sleep 8
+```
+
+**Step 3: Start the application container**
+
+```bash
+docker run -d \
+  --name exercise-app \
+  --network exercise-app-net \
+  alpine sleep 3600
+```
+
+**Step 4: Test DNS resolution and connectivity**
+
+```bash
+# DNS resolution — should return the database container's IP
+docker exec exercise-app nslookup exercise-db
+# Server:    127.0.0.11
+# Address:   127.0.0.11:53
+# Name:      exercise-db
+# Address:   172.X.0.2
+
+# Ping by name — should succeed
+docker exec exercise-app ping -c 3 exercise-db
+
+# Test the database port — should be open
+docker exec exercise-app sh -c 'apk add --no-cache netcat-openbsd > /dev/null 2>&1 && nc -zv exercise-db 5432'
+# exercise-db (172.X.0.2:5432) open
+```
+
+**Step 5: Verify isolation from outside the network**
+
+```bash
+# Start a container NOT on exercise-app-net
+docker run --rm alpine ping -c 1 exercise-db
+# ping: bad address 'exercise-db'
+# Cannot reach it — isolation works!
+```
+
+**Step 6: Inspect the network**
+
+```bash
+docker network inspect exercise-app-net
+# Shows both containers with their IP addresses
+```
+
+**Step 7: Clean up**
+
+```bash
+docker stop exercise-app exercise-db
+docker rm exercise-app exercise-db
+docker network rm exercise-app-net
+```
+
+</Exercise>
+
+<Exercise title="Network Isolation Between Tiers" difficulty="intermediate" xpReward={40} estimatedMinutes={20}
+  objectives={["Implement network isolation between frontend and backend tiers", "Use multiple networks to control which containers can communicate", "Prove that network isolation prevents unauthorized access"]}
+  hints={["Create two separate networks: one for the frontend tier and one for the backend tier", "The API container needs to be on BOTH networks — use docker network connect", "The frontend should NOT be able to reach the database directly", "Use ping or nc to verify both connectivity and isolation"]}
+  validationCriteria={[
+    "Create two networks: 'exercise-frontend-net' and 'exercise-backend-net'",
+    "Start a PostgreSQL container named 'tier-db' on exercise-backend-net only",
+    "Start an API container named 'tier-api' on exercise-backend-net initially",
+    "Connect 'tier-api' to exercise-frontend-net as well using docker network connect",
+    "Start a frontend container named 'tier-frontend' on exercise-frontend-net only",
+    "Verify tier-frontend can ping tier-api (both on frontend-net) — should succeed",
+    "Verify tier-api can ping tier-db (both on backend-net) — should succeed",
+    "Verify tier-frontend CANNOT ping tier-db (different networks) — should fail",
+    "Use docker network inspect on both networks to show the container topology",
+    "Clean up all containers and networks"
+  ]}
+>
+
+Implement a three-tier architecture with proper network isolation. The frontend can talk to the API, the API can talk to the database, but the frontend cannot directly reach the database.
+
+**Step 1: Create the networks**
+
+```bash
+docker network create exercise-frontend-net
+docker network create exercise-backend-net
+
+docker network ls --filter name=exercise
+```
+
+**Step 2: Start the database (backend only)**
+
+```bash
+docker run -d \
+  --name tier-db \
+  --network exercise-backend-net \
+  -e POSTGRES_PASSWORD=tierpass \
+  postgres:16-alpine
+
+sleep 5
+```
+
+**Step 3: Start the API (initially on backend, then add to frontend)**
+
+```bash
+# Start on the backend network
+docker run -d \
+  --name tier-api \
+  --network exercise-backend-net \
+  alpine sleep 3600
+
+# Add to the frontend network as well
+docker network connect exercise-frontend-net tier-api
+
+# Verify the API is on both networks
+docker inspect tier-api -f '{{range $net, $conf := .NetworkSettings.Networks}}{{$net}}: {{$conf.IPAddress}}  {{end}}'
+# exercise-backend-net: 172.X.0.3  exercise-frontend-net: 172.Y.0.2
+```
+
+**Step 4: Start the frontend (frontend only)**
+
+```bash
+docker run -d \
+  --name tier-frontend \
+  --network exercise-frontend-net \
+  alpine sleep 3600
+```
+
+**Step 5: Verify connectivity and isolation**
+
+```bash
+# Frontend → API: should work (both on frontend-net)
+docker exec tier-frontend ping -c 2 tier-api
+# 64 bytes from 172.Y.0.2: seq=0 ttl=64 time=0.089 ms  ✓
+
+# API → Database: should work (both on backend-net)
+docker exec tier-api ping -c 2 tier-db
+# 64 bytes from 172.X.0.2: seq=0 ttl=64 time=0.091 ms  ✓
+
+# Frontend → Database: should FAIL (different networks)
+docker exec tier-frontend ping -c 2 tier-db
+# ping: bad address 'tier-db'  ✗  ← ISOLATION WORKS!
+
+echo "Network isolation verified!"
+```
+
+**Step 6: Inspect the network topology**
+
+```bash
+echo "=== Frontend Network ==="
+docker network inspect exercise-frontend-net \
+  -f '{{range .Containers}}{{.Name}}: {{.IPv4Address}}  {{end}}'
+
+echo "=== Backend Network ==="
+docker network inspect exercise-backend-net \
+  -f '{{range .Containers}}{{.Name}}: {{.IPv4Address}}  {{end}}'
+```
+
+**Step 7: Clean up**
+
+```bash
+docker stop tier-frontend tier-api tier-db
+docker rm tier-frontend tier-api tier-db
+docker network rm exercise-frontend-net exercise-backend-net
+```
+
+</Exercise>
+
+<MiniProject title="Secure Multi-Service Application Network" difficulty="advanced" xpReward={50} estimatedMinutes={30}
+  objectives={["Design and implement a production-like network topology with multiple isolated networks", "Deploy a multi-service application with proper network segmentation", "Implement both port publishing and inter-container communication"]}
+  hints={["Plan your network topology on paper first — which services need to communicate?", "Only the reverse proxy should have published ports", "Use --internal for the database network to prevent any internet access", "Test every connection path: verify both allowed AND blocked connections"]}
+  validationCriteria={[
+    "Create three networks: 'proxy-net' (public), 'app-net' (internal), 'data-net' (internal, no internet access)",
+    "Deploy an nginx reverse proxy on proxy-net with port 80 published",
+    "Deploy an API service connected to both proxy-net and app-net",
+    "Deploy a worker service connected to both app-net and data-net",
+    "Deploy a PostgreSQL database on data-net only (internal, no internet)",
+    "Deploy a Redis cache on data-net only (internal, no internet)",
+    "Verify: proxy can reach API (proxy-net), API can reach worker (app-net), worker can reach db and redis (data-net)",
+    "Verify: proxy CANNOT reach db or redis directly (network isolation)",
+    "Verify: db and redis CANNOT reach the internet (internal network)",
+    "Verify: only port 80 is published to the host — no database or cache ports exposed",
+    "Clean up all containers and networks"
+  ]}
+>
+
+Design and deploy a production-like multi-service application with proper network segmentation, where each tier is isolated and only authorized communication paths exist.
+
+**Step 1: Plan the network topology**
+
+```
+Network Topology:
+
+  Internet
+     │
+     ▼ :80 (only published port)
+  ┌─────────────────────────────────────────────┐
+  │              proxy-net (public)               │
+  │                                               │
+  │  ┌───────┐              ┌───────┐            │
+  │  │ nginx │──────────────│  api  │            │
+  │  │ proxy │   can talk   │       │            │
+  │  └───────┘              └───┬───┘            │
+  └─────────────────────────────┼────────────────┘
+                                │
+  ┌─────────────────────────────┼────────────────┐
+  │              app-net (internal)               │
+  │                                               │
+  │                         ┌───┴───┐            │
+  │                         │  api  │            │
+  │                         │       │            │
+  │                         └───┬───┘            │
+  │                             │                 │
+  │                         ┌───┴───┐            │
+  │                         │worker │            │
+  │                         │       │            │
+  │                         └───┬───┘            │
+  └─────────────────────────────┼────────────────┘
+                                │
+  ┌─────────────────────────────┼────────────────┐
+  │        data-net (internal, no internet)       │
+  │                                               │
+  │  ┌───────┐  ┌───────┐  ┌───┴───┐            │
+  │  │  db   │  │ redis │  │worker │            │
+  │  │(pg)   │  │       │  │       │            │
+  │  └───────┘  └───────┘  └───────┘            │
+  └───────────────────────────────────────────────┘
+```
+
+**Step 2: Create the networks**
+
+```bash
+# Public network for the reverse proxy
+docker network create proxy-net
+
+# Internal network for application services
+docker network create --internal app-net
+
+# Internal network for data stores (no internet access)
+docker network create --internal data-net
+
+docker network ls --filter name="-net"
+```
+
+**Step 3: Deploy the data tier**
+
+```bash
+# PostgreSQL — data-net only, no internet, no published ports
+docker run -d \
+  --name project-db \
+  --network data-net \
+  -e POSTGRES_PASSWORD=dbsecret \
+  -e POSTGRES_DB=appdb \
+  postgres:16-alpine
+
+# Redis — data-net only, no internet, no published ports
+docker run -d \
+  --name project-redis \
+  --network data-net \
+  redis:7-alpine
+
+sleep 5
+```
+
+**Step 4: Deploy the application tier**
+
+```bash
+# Worker — connected to both app-net and data-net
+docker run -d \
+  --name project-worker \
+  --network data-net \
+  alpine sh -c '
+    echo "Worker started. Connected to data tier."
+    while true; do sleep 3600; done
+  '
+docker network connect app-net project-worker
+
+# API — connected to both proxy-net and app-net
+docker run -d \
+  --name project-api \
+  --network app-net \
+  alpine sh -c '
+    echo "API started. Connected to app and proxy tiers."
+    while true; do sleep 3600; done
+  '
+docker network connect proxy-net project-api
+```
+
+**Step 5: Deploy the proxy tier**
+
+```bash
+# Nginx reverse proxy — proxy-net only, with published port
+docker run -d \
+  --name project-proxy \
+  --network proxy-net \
+  -p 80:80 \
+  nginx:1.25-alpine
+```
+
+**Step 6: Verify allowed communication paths**
+
+```bash
+echo "=== Testing ALLOWED paths ==="
+
+# Proxy → API (proxy-net) ✓
+echo -n "proxy → api: "
+docker exec project-proxy ping -c 1 -W 2 project-api > /dev/null 2>&1 && echo "PASS ✓" || echo "FAIL ✗"
+
+# API → Worker (app-net) ✓
+echo -n "api → worker: "
+docker exec project-api ping -c 1 -W 2 project-worker > /dev/null 2>&1 && echo "PASS ✓" || echo "FAIL ✗"
+
+# Worker → DB (data-net) ✓
+echo -n "worker → db: "
+docker exec project-worker ping -c 1 -W 2 project-db > /dev/null 2>&1 && echo "PASS ✓" || echo "FAIL ✗"
+
+# Worker → Redis (data-net) ✓
+echo -n "worker → redis: "
+docker exec project-worker ping -c 1 -W 2 project-redis > /dev/null 2>&1 && echo "PASS ✓" || echo "FAIL ✗"
+```
+
+**Step 7: Verify blocked communication paths**
+
+```bash
+echo ""
+echo "=== Testing BLOCKED paths ==="
+
+# Proxy → DB (different networks) ✗
+echo -n "proxy → db: "
+docker exec project-proxy ping -c 1 -W 2 project-db > /dev/null 2>&1 && echo "FAIL ✗ (should be blocked)" || echo "BLOCKED ✓"
+
+# Proxy → Redis (different networks) ✗
+echo -n "proxy → redis: "
+docker exec project-proxy ping -c 1 -W 2 project-redis > /dev/null 2>&1 && echo "FAIL ✗ (should be blocked)" || echo "BLOCKED ✓"
+
+# API → DB (API not on data-net) ✗
+echo -n "api → db: "
+docker exec project-api ping -c 1 -W 2 project-db > /dev/null 2>&1 && echo "FAIL ✗ (should be blocked)" || echo "BLOCKED ✓"
+
+# DB → Internet (internal network) ✗
+echo -n "db → internet: "
+docker exec project-db ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1 && echo "FAIL ✗ (should be blocked)" || echo "BLOCKED ✓"
+
+# Redis → Internet (internal network) ✗
+echo -n "redis → internet: "
+docker exec project-redis ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1 && echo "FAIL ✗ (should be blocked)" || echo "BLOCKED ✓"
+```
+
+**Step 8: Verify only port 80 is published**
+
+```bash
+echo ""
+echo "=== Published Ports ==="
+docker ps --format "table {{.Names}}\t{{.Ports}}"
+# Only project-proxy should show 0.0.0.0:80->80/tcp
+# All other containers should show no ports
+```
+
+**Step 9: Inspect the complete topology**
+
+```bash
+echo ""
+echo "=== Network Topology ==="
+for net in proxy-net app-net data-net; do
+  echo ""
+  echo "--- $net ---"
+  docker network inspect $net -f '{{range .Containers}}  {{.Name}}: {{.IPv4Address}}{{"\n"}}{{end}}'
+done
+```
+
+**Step 10: Clean up**
+
+```bash
+docker stop project-proxy project-api project-worker project-db project-redis
+docker rm project-proxy project-api project-worker project-db project-redis
+docker network rm proxy-net app-net data-net
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Docker creates a **default bridge network** automatically, but it lacks DNS resolution — always create custom bridge networks
+- **Custom bridge networks** provide automatic DNS resolution: containers reach each other by name (e.g., `ping database`)
+- **Port mapping** (`-p 8080:80`) exposes container services to the host — bind to `127.0.0.1` for internal services
+- Containers can be connected to **multiple networks** simultaneously, enabling them to bridge different tiers
+- **Network isolation** is automatic: containers on different networks cannot communicate unless explicitly connected
+- Use `docker network connect` and `docker network disconnect` to manage network membership at runtime
+- **Host networking** (`--network host`) eliminates NAT overhead but provides no isolation — use for performance-critical services
+- **Internal networks** (`--internal`) prevent containers from reaching the internet — ideal for database networks
+- Inside a container, `localhost` means the container itself — use container names to reach other services
+- The container's service must bind to `0.0.0.0` (not `127.0.0.1`) to be reachable from other containers
+- Use `docker network inspect` and debugging containers (`nicolaka/netshoot`) to troubleshoot connectivity issues
+
+## What's Next
+
+You can now persist data with volumes and connect containers with networks — but managing multiple `docker run` commands with volumes, networks, environment variables, and port mappings is becoming complex. In **Docker Compose**, you'll learn to define your entire multi-container application in a single YAML file and manage it with one command.

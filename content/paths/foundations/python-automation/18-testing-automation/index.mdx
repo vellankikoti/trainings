@@ -1,0 +1,1558 @@
+---
+title: "Testing Automation Scripts"
+description: "Test your automation before it hits production. Master pytest for unit testing, mocking for external services, and the testing patterns that prevent 3AM pages."
+order: 18
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 17-click-cli-tools
+objectives:
+  - Write and run tests with pytest
+  - Use fixtures for test setup and teardown
+  - Mock external services with unittest.mock
+  - Test file operations, CLI tools, and HTTP calls
+  - Measure code coverage and organize test suites
+tags:
+  - python
+  - testing
+  - pytest
+  - quality
+---
+
+<Callout type="story" title="The Story">
+Your deployment script has been running fine for months. Then someone changes the config format, and the script silently deploys the wrong version to production at 2 AM. The rollback takes an hour. The postmortem conclusion: "We should have tested the script." DevOps automation is code, and code that runs in production without tests is a liability. You add a test suite, and the next config change gets caught in CI before it ever touches a server.
+</Callout>
+
+## pytest Basics
+
+pytest is the standard testing framework for Python. It discovers tests automatically, uses plain `assert` statements, and provides powerful fixtures for setup and teardown.
+
+```python
+# pip install pytest
+
+# tests/test_basics.py
+
+def test_addition():
+    """The simplest possible test."""
+    assert 1 + 1 == 2
+
+
+def test_string_operations():
+    """Test string methods."""
+    hostname = "  web-server-01.prod  "
+    assert hostname.strip() == "web-server-01.prod"
+    assert hostname.strip().split(".")[0] == "web-server-01"
+
+
+def test_list_operations():
+    """Test list filtering."""
+    servers = ["web-01", "web-02", "db-01", "cache-01"]
+    web_servers = [s for s in servers if s.startswith("web-")]
+    assert len(web_servers) == 2
+    assert "web-01" in web_servers
+    assert "db-01" not in web_servers
+```
+
+```bash
+# Run tests
+pytest                          # Discover and run all tests
+pytest tests/test_basics.py     # Run a specific file
+pytest -v                       # Verbose output (show each test name)
+pytest -x                       # Stop on first failure
+pytest -k "test_string"         # Run tests matching a pattern
+pytest --tb=short               # Shorter tracebacks on failure
+```
+
+### Testing DevOps Utility Functions
+
+```python
+# devops_utils.py — the code we are testing
+
+import re
+from pathlib import Path
+
+
+def parse_server_name(name):
+    """Parse a server name like 'web-01.prod' into components."""
+    match = re.match(r"^(\w+)-(\d+)\.(\w+)$", name)
+    if not match:
+        raise ValueError(f"Invalid server name format: {name}")
+    return {
+        "role": match.group(1),
+        "number": int(match.group(2)),
+        "environment": match.group(3),
+    }
+
+
+def format_bytes(size_bytes):
+    """Convert bytes to human-readable format."""
+    if size_bytes < 0:
+        raise ValueError("Size cannot be negative")
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} PB"
+
+
+def validate_config(config):
+    """Validate a deployment configuration dict."""
+    required_keys = ["app_name", "image", "replicas"]
+    errors = []
+    for key in required_keys:
+        if key not in config:
+            errors.append(f"Missing required key: {key}")
+
+    if "replicas" in config:
+        if not isinstance(config["replicas"], int) or config["replicas"] < 1:
+            errors.append("replicas must be a positive integer")
+
+    if "image" in config and ":" not in config["image"]:
+        errors.append("image must include a tag (e.g., nginx:1.25)")
+
+    return errors
+```
+
+```python
+# tests/test_devops_utils.py
+
+import pytest
+from devops_utils import parse_server_name, format_bytes, validate_config
+
+
+class TestParseServerName:
+    """Tests for parse_server_name."""
+
+    def test_valid_name(self):
+        result = parse_server_name("web-01.prod")
+        assert result == {"role": "web", "number": 1, "environment": "prod"}
+
+    def test_different_roles(self):
+        assert parse_server_name("db-05.staging")["role"] == "db"
+        assert parse_server_name("cache-12.dev")["role"] == "cache"
+
+    def test_high_numbers(self):
+        result = parse_server_name("api-99.prod")
+        assert result["number"] == 99
+
+    def test_invalid_format_raises(self):
+        with pytest.raises(ValueError, match="Invalid server name"):
+            parse_server_name("invalid")
+
+    def test_missing_environment_raises(self):
+        with pytest.raises(ValueError):
+            parse_server_name("web-01")
+
+    def test_empty_string_raises(self):
+        with pytest.raises(ValueError):
+            parse_server_name("")
+
+
+class TestFormatBytes:
+    """Tests for format_bytes."""
+
+    def test_bytes(self):
+        assert format_bytes(500) == "500.0 B"
+
+    def test_kilobytes(self):
+        assert format_bytes(1024) == "1.0 KB"
+
+    def test_megabytes(self):
+        assert format_bytes(1024 * 1024) == "1.0 MB"
+
+    def test_gigabytes(self):
+        assert format_bytes(1024 ** 3) == "1.0 GB"
+
+    def test_zero(self):
+        assert format_bytes(0) == "0.0 B"
+
+    def test_negative_raises(self):
+        with pytest.raises(ValueError, match="negative"):
+            format_bytes(-1)
+
+
+class TestValidateConfig:
+    """Tests for validate_config."""
+
+    def test_valid_config(self):
+        config = {"app_name": "web", "image": "nginx:1.25", "replicas": 3}
+        errors = validate_config(config)
+        assert errors == []
+
+    def test_missing_keys(self):
+        errors = validate_config({})
+        assert len(errors) == 3
+        assert any("app_name" in e for e in errors)
+
+    def test_invalid_replicas(self):
+        config = {"app_name": "web", "image": "nginx:1.25", "replicas": -1}
+        errors = validate_config(config)
+        assert any("replicas" in e for e in errors)
+
+    def test_image_without_tag(self):
+        config = {"app_name": "web", "image": "nginx", "replicas": 1}
+        errors = validate_config(config)
+        assert any("tag" in e for e in errors)
+```
+
+## Fixtures
+
+Fixtures provide setup and teardown for tests. They replace the need for setUp/tearDown methods and are much more flexible.
+
+```python
+# tests/conftest.py — shared fixtures available to all test files
+
+import pytest
+import json
+import tempfile
+from pathlib import Path
+
+
+@pytest.fixture
+def sample_config():
+    """Provide a valid sample configuration dict."""
+    return {
+        "app_name": "web-api",
+        "image": "myapp:v1.2.3",
+        "replicas": 3,
+        "environment": "production",
+        "port": 8080,
+    }
+
+
+@pytest.fixture
+def config_file(tmp_path, sample_config):
+    """Create a temporary config file and return its path."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(sample_config, indent=2))
+    return config_path
+
+
+@pytest.fixture
+def server_inventory():
+    """Provide a test server inventory."""
+    return {
+        "web-01": {"ip": "10.0.1.10", "env": "prod", "status": "running"},
+        "web-02": {"ip": "10.0.1.11", "env": "prod", "status": "running"},
+        "db-01": {"ip": "10.0.2.10", "env": "prod", "status": "stopped"},
+    }
+
+
+@pytest.fixture(scope="session")
+def expensive_resource():
+    """A fixture that is created once per test session (not per test)."""
+    # Expensive setup — database connection, API client, etc.
+    resource = {"connection": "established", "created_at": "session_start"}
+    yield resource
+    # Teardown happens after all tests complete
+    # resource.close()
+
+
+@pytest.fixture(autouse=True)
+def reset_environment(monkeypatch):
+    """Automatically reset environment for every test."""
+    monkeypatch.delenv("PRODUCTION", raising=False)
+    monkeypatch.setenv("TESTING", "true")
+```
+
+```python
+# tests/test_with_fixtures.py
+
+import json
+
+def test_config_has_required_keys(sample_config):
+    """Fixture is injected by matching the parameter name."""
+    assert "app_name" in sample_config
+    assert "image" in sample_config
+    assert "replicas" in sample_config
+
+
+def test_config_file_exists(config_file):
+    """The config_file fixture creates a real file."""
+    assert config_file.exists()
+    data = json.loads(config_file.read_text())
+    assert data["app_name"] == "web-api"
+
+
+def test_server_inventory_has_servers(server_inventory):
+    assert len(server_inventory) == 3
+    assert "web-01" in server_inventory
+
+
+def test_running_servers(server_inventory):
+    running = {k: v for k, v in server_inventory.items() if v["status"] == "running"}
+    assert len(running) == 2
+```
+
+<Callout type="tip" title="conftest.py Is Powerful">
+Fixtures in `conftest.py` are automatically available to all tests in the same directory and below. You do not need to import them. Use `conftest.py` for shared fixtures (database connections, API clients, sample data), and keep test-specific fixtures in the test file itself. Scoped fixtures (`scope="session"` or `scope="module"`) avoid redundant setup for expensive resources.
+</Callout>
+
+## Parametrize — Test Many Inputs
+
+`@pytest.mark.parametrize` runs the same test with different inputs. This is perfect for testing edge cases without writing repetitive test functions.
+
+```python
+import pytest
+from devops_utils import parse_server_name, format_bytes
+
+
+@pytest.mark.parametrize("name,expected_role,expected_env", [
+    ("web-01.prod", "web", "prod"),
+    ("db-05.staging", "db", "staging"),
+    ("cache-12.dev", "cache", "dev"),
+    ("api-99.test", "api", "test"),
+])
+def test_parse_server_name_valid(name, expected_role, expected_env):
+    result = parse_server_name(name)
+    assert result["role"] == expected_role
+    assert result["environment"] == expected_env
+
+
+@pytest.mark.parametrize("invalid_name", [
+    "",
+    "invalid",
+    "web-01",
+    "web.prod",
+    "-01.prod",
+    "web-abc.prod",
+])
+def test_parse_server_name_invalid(invalid_name):
+    with pytest.raises(ValueError):
+        parse_server_name(invalid_name)
+
+
+@pytest.mark.parametrize("size_bytes,expected", [
+    (0, "0.0 B"),
+    (100, "100.0 B"),
+    (1024, "1.0 KB"),
+    (1536, "1.5 KB"),
+    (1048576, "1.0 MB"),
+    (1073741824, "1.0 GB"),
+    (1099511627776, "1.0 TB"),
+])
+def test_format_bytes(size_bytes, expected):
+    assert format_bytes(size_bytes) == expected
+
+
+# Parametrize with IDs for better test output
+@pytest.mark.parametrize("config,expected_valid", [
+    pytest.param(
+        {"app_name": "web", "image": "nginx:1.25", "replicas": 3},
+        True,
+        id="valid-full-config",
+    ),
+    pytest.param(
+        {"app_name": "web", "image": "nginx", "replicas": 3},
+        False,
+        id="missing-image-tag",
+    ),
+    pytest.param(
+        {},
+        False,
+        id="empty-config",
+    ),
+    pytest.param(
+        {"app_name": "web", "image": "nginx:1.25", "replicas": 0},
+        False,
+        id="zero-replicas",
+    ),
+], ids=None)
+def test_validate_config_parametrized(config, expected_valid):
+    from devops_utils import validate_config
+    errors = validate_config(config)
+    assert (len(errors) == 0) == expected_valid
+```
+
+## Mocking External Services
+
+Automation scripts call APIs, run commands, read files, and talk to databases. In tests, you mock these dependencies so tests run fast, reliably, and without needing real services.
+
+### Mocking HTTP Requests
+
+```python
+# deployment_client.py — code that makes HTTP calls
+
+import requests
+
+
+class DeploymentClient:
+    def __init__(self, base_url):
+        self.base_url = base_url
+
+    def get_status(self, app_name):
+        """Get deployment status from the API."""
+        response = requests.get(f"{self.base_url}/api/apps/{app_name}/status")
+        response.raise_for_status()
+        return response.json()
+
+    def trigger_deploy(self, app_name, image):
+        """Trigger a deployment via API."""
+        response = requests.post(
+            f"{self.base_url}/api/apps/{app_name}/deploy",
+            json={"image": image},
+        )
+        response.raise_for_status()
+        return response.json()
+```
+
+```python
+# tests/test_deployment_client.py
+
+from unittest.mock import patch, MagicMock
+import pytest
+from deployment_client import DeploymentClient
+
+
+class TestDeploymentClient:
+
+    @pytest.fixture
+    def client(self):
+        return DeploymentClient("https://deploy.example.com")
+
+    @patch("deployment_client.requests.get")
+    def test_get_status_success(self, mock_get, client):
+        """Mock the HTTP GET call."""
+        # Configure the mock to return a fake response
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "app": "web-api",
+            "status": "running",
+            "replicas": 3,
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        # Call the method
+        result = client.get_status("web-api")
+
+        # Verify the result
+        assert result["status"] == "running"
+        assert result["replicas"] == 3
+
+        # Verify the correct URL was called
+        mock_get.assert_called_once_with(
+            "https://deploy.example.com/api/apps/web-api/status"
+        )
+
+    @patch("deployment_client.requests.get")
+    def test_get_status_not_found(self, mock_get, client):
+        """Test handling of 404 response."""
+        import requests
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = requests.HTTPError("404 Not Found")
+        mock_get.return_value = mock_response
+
+        with pytest.raises(requests.HTTPError):
+            client.get_status("nonexistent-app")
+
+    @patch("deployment_client.requests.post")
+    def test_trigger_deploy(self, mock_post, client):
+        """Mock the HTTP POST call."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "deployment_id": "deploy-123",
+            "status": "in_progress",
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        result = client.trigger_deploy("web-api", "myapp:v2.0.0")
+
+        assert result["deployment_id"] == "deploy-123"
+        mock_post.assert_called_once_with(
+            "https://deploy.example.com/api/apps/web-api/deploy",
+            json={"image": "myapp:v2.0.0"},
+        )
+```
+
+### Mocking subprocess
+
+```python
+# system_checker.py
+
+import subprocess
+
+
+def check_disk_usage(path="/"):
+    """Get disk usage percentage for a path."""
+    result = subprocess.run(
+        ["df", "-h", path],
+        capture_output=True, text=True, check=True,
+    )
+    lines = result.stdout.strip().split("\n")
+    if len(lines) < 2:
+        raise RuntimeError("Unexpected df output")
+    parts = lines[1].split()
+    usage_pct = int(parts[4].rstrip("%"))
+    return usage_pct
+
+
+def check_service_status(service_name):
+    """Check if a systemd service is active."""
+    result = subprocess.run(
+        ["systemctl", "is-active", service_name],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() == "active"
+```
+
+```python
+# tests/test_system_checker.py
+
+from unittest.mock import patch, MagicMock
+import subprocess
+import pytest
+from system_checker import check_disk_usage, check_service_status
+
+
+class TestCheckDiskUsage:
+
+    @patch("system_checker.subprocess.run")
+    def test_normal_usage(self, mock_run):
+        mock_run.return_value = MagicMock(
+            stdout="Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda1        50G   20G   28G  42% /\n",
+            returncode=0,
+        )
+        assert check_disk_usage("/") == 42
+
+    @patch("system_checker.subprocess.run")
+    def test_high_usage(self, mock_run):
+        mock_run.return_value = MagicMock(
+            stdout="Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda1        50G   47G    1G  95% /\n",
+            returncode=0,
+        )
+        assert check_disk_usage("/") == 95
+
+    @patch("system_checker.subprocess.run")
+    def test_command_failure(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, "df")
+        with pytest.raises(subprocess.CalledProcessError):
+            check_disk_usage("/nonexistent")
+
+
+class TestCheckServiceStatus:
+
+    @patch("system_checker.subprocess.run")
+    def test_active_service(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="active\n", returncode=0)
+        assert check_service_status("nginx") is True
+
+    @patch("system_checker.subprocess.run")
+    def test_inactive_service(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="inactive\n", returncode=3)
+        assert check_service_status("nginx") is False
+
+    @patch("system_checker.subprocess.run")
+    def test_unknown_service(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="unknown\n", returncode=4)
+        assert check_service_status("nonexistent") is False
+```
+
+<Callout type="warning" title="Mock at the Right Level">
+Always mock where the function is *used*, not where it is *defined*. If `deployment_client.py` imports `requests`, you mock `deployment_client.requests.get`, not `requests.get`. This is the most common mocking mistake, and it causes tests to pass while the mock does nothing.
+</Callout>
+
+## Testing File Operations
+
+pytest provides `tmp_path` for safe file operations in tests:
+
+```python
+# config_manager.py
+
+import json
+from pathlib import Path
+
+
+class ConfigManager:
+    def __init__(self, config_path):
+        self.path = Path(config_path)
+
+    def load(self):
+        if not self.path.exists():
+            return {}
+        return json.loads(self.path.read_text())
+
+    def save(self, data):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(data, indent=2))
+
+    def get(self, key, default=None):
+        data = self.load()
+        return data.get(key, default)
+
+    def set(self, key, value):
+        data = self.load()
+        data[key] = value
+        self.save(data)
+```
+
+```python
+# tests/test_config_manager.py
+
+import pytest
+import json
+from config_manager import ConfigManager
+
+
+class TestConfigManager:
+
+    @pytest.fixture
+    def manager(self, tmp_path):
+        """Create a ConfigManager with a temp directory."""
+        return ConfigManager(tmp_path / "config.json")
+
+    def test_load_empty(self, manager):
+        """Loading a non-existent file returns empty dict."""
+        assert manager.load() == {}
+
+    def test_save_and_load(self, manager):
+        data = {"app_name": "web", "port": 8080}
+        manager.save(data)
+        loaded = manager.load()
+        assert loaded == data
+
+    def test_get_existing_key(self, manager):
+        manager.save({"database_url": "postgres://localhost/db"})
+        assert manager.get("database_url") == "postgres://localhost/db"
+
+    def test_get_missing_key_returns_default(self, manager):
+        assert manager.get("missing", "default_value") == "default_value"
+
+    def test_set_creates_new_key(self, manager):
+        manager.set("new_key", "new_value")
+        assert manager.get("new_key") == "new_value"
+
+    def test_set_updates_existing_key(self, manager):
+        manager.set("key", "old")
+        manager.set("key", "new")
+        assert manager.get("key") == "new"
+
+    def test_nested_directory_creation(self, tmp_path):
+        """Config in a nested directory should create parent dirs."""
+        deep_path = tmp_path / "a" / "b" / "c" / "config.json"
+        manager = ConfigManager(deep_path)
+        manager.save({"test": True})
+        assert deep_path.exists()
+
+    def test_file_content_is_valid_json(self, manager):
+        manager.save({"key": "value"})
+        raw = manager.path.read_text()
+        parsed = json.loads(raw)
+        assert parsed == {"key": "value"}
+```
+
+## Testing CLI Tools
+
+Click's `CliRunner` lets you test CLI commands without spawning subprocesses:
+
+```python
+# tests/test_cli.py
+
+import pytest
+from click.testing import CliRunner
+
+# Assuming your CLI is defined in cli.py
+# from cli import cli
+
+
+@pytest.fixture
+def runner():
+    return CliRunner()
+
+
+def test_help_output(runner):
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "Usage" in result.output
+
+
+def test_server_list(runner):
+    result = runner.invoke(cli, ["server", "list"])
+    assert result.exit_code == 0
+    assert "web-01" in result.output
+
+
+def test_server_list_filtered(runner):
+    result = runner.invoke(cli, ["server", "list", "--env", "prod"])
+    assert result.exit_code == 0
+    # Should not contain staging servers
+    assert "staging" not in result.output
+
+
+def test_deploy_dry_run(runner):
+    result = runner.invoke(cli, [
+        "deploy", "app", "web",
+        "--image", "nginx:latest",
+        "--dry-run",
+    ])
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.output
+
+
+def test_deploy_missing_image(runner):
+    result = runner.invoke(cli, ["deploy", "app", "web"])
+    assert result.exit_code != 0
+    assert "Missing" in result.output or "required" in result.output.lower()
+
+
+def test_config_set_and_get(runner):
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["config", "set", "key", "value"])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, ["config", "get", "key"])
+        assert result.exit_code == 0
+        assert "value" in result.output
+
+
+def test_verbose_flag(runner):
+    result = runner.invoke(cli, ["-v", "server", "list"])
+    assert result.exit_code == 0
+```
+
+## Testing with Environment Variables
+
+Use `monkeypatch` to safely set and unset environment variables in tests:
+
+```python
+# tests/test_environment.py
+
+import os
+
+
+def get_database_url():
+    """Get database URL from environment."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise EnvironmentError("DATABASE_URL is not set")
+    return url
+
+
+def is_production():
+    """Check if running in production."""
+    return os.environ.get("ENV", "development") == "production"
+
+
+# Tests using monkeypatch
+
+def test_database_url(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgres://test:5432/testdb")
+    assert get_database_url() == "postgres://test:5432/testdb"
+
+
+def test_database_url_missing(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    import pytest
+    with pytest.raises(EnvironmentError):
+        get_database_url()
+
+
+def test_production_check(monkeypatch):
+    monkeypatch.setenv("ENV", "production")
+    assert is_production() is True
+
+
+def test_not_production(monkeypatch):
+    monkeypatch.setenv("ENV", "development")
+    assert is_production() is False
+
+
+def test_default_not_production(monkeypatch):
+    monkeypatch.delenv("ENV", raising=False)
+    assert is_production() is False
+```
+
+## Code Coverage
+
+Coverage tells you which lines of your code are actually tested:
+
+```bash
+# pip install pytest-cov
+
+# Run with coverage report
+pytest --cov=devops_utils --cov-report=term-missing
+
+# HTML report (detailed, browsable)
+pytest --cov=devops_utils --cov-report=html
+# Open htmlcov/index.html in a browser
+
+# Fail if coverage drops below threshold
+pytest --cov=devops_utils --cov-fail-under=80
+```
+
+```
+# Example output:
+Name                  Stmts   Miss  Cover   Missing
+----------------------------------------------------
+devops_utils.py          45      3    93%    72-74
+deployment_client.py     28      2    93%    45-46
+config_manager.py        22      0   100%
+----------------------------------------------------
+TOTAL                    95      5    95%
+```
+
+## Test Organization
+
+A well-organized test suite separates unit tests (fast, no dependencies) from integration tests (slower, may need real services):
+
+```
+project/
+  src/
+    devops_utils.py
+    deployment_client.py
+    config_manager.py
+    cli.py
+  tests/
+    conftest.py              # Shared fixtures
+    unit/
+      test_devops_utils.py   # Pure logic tests
+      test_config_manager.py # File operation tests (tmp_path)
+    integration/
+      test_deployment.py     # Tests that hit real APIs (mark with @pytest.mark.integration)
+      test_cli.py            # CLI tests with CliRunner
+    fixtures/
+      sample_config.json     # Test data files
+      inventory.yaml
+```
+
+```python
+# tests/conftest.py
+
+import pytest
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-integration",
+        action="store_true",
+        default=False,
+        help="Run integration tests",
+    )
+
+def pytest_collection_modifyitems(config, items):
+    if not config.getoption("--run-integration"):
+        skip = pytest.mark.skip(reason="Need --run-integration to run")
+        for item in items:
+            if "integration" in item.keywords:
+                item.add_marker(skip)
+```
+
+```python
+# tests/integration/test_deployment.py
+
+import pytest
+
+@pytest.mark.integration
+def test_real_api_connection():
+    """Only runs with pytest --run-integration."""
+    # This test actually talks to a real service
+    pass
+```
+
+## CI Integration
+
+Add pytest to your CI pipeline so tests run on every commit:
+
+```yaml
+# .github/workflows/test.yml
+name: Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: pytest --cov=src --cov-report=xml --cov-fail-under=80 -v
+      - uses: codecov/codecov-action@v3
+        with:
+          file: coverage.xml
+```
+
+<Exercise number={1} title="Testing a Server Health Checker">
+
+Write tests for a server health checking module using mocking for external calls.
+
+```python
+# health_checker.py — the module to test
+
+import requests
+import subprocess
+import socket
+
+
+def check_http_health(url, timeout=5):
+    """Check if an HTTP endpoint is healthy."""
+    try:
+        response = requests.get(url, timeout=timeout)
+        return {
+            "url": url,
+            "healthy": 200 <= response.status_code < 400,
+            "status_code": response.status_code,
+            "response_time_ms": response.elapsed.total_seconds() * 1000,
+        }
+    except requests.ConnectionError:
+        return {"url": url, "healthy": False, "error": "connection_refused"}
+    except requests.Timeout:
+        return {"url": url, "healthy": False, "error": "timeout"}
+
+
+def check_port(host, port, timeout=3):
+    """Check if a TCP port is open."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except socket.error:
+        return False
+
+
+def check_dns(hostname):
+    """Check if a hostname resolves."""
+    try:
+        ip = socket.gethostbyname(hostname)
+        return {"hostname": hostname, "resolved": True, "ip": ip}
+    except socket.gaierror:
+        return {"hostname": hostname, "resolved": False, "ip": None}
+```
+
+```python
+# tests/test_health_checker.py
+
+import pytest
+from unittest.mock import patch, MagicMock
+import requests
+import socket
+from health_checker import check_http_health, check_port, check_dns
+
+
+class TestCheckHttpHealth:
+
+    @patch("health_checker.requests.get")
+    def test_healthy_endpoint(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.elapsed.total_seconds.return_value = 0.05
+        mock_get.return_value = mock_response
+
+        result = check_http_health("https://example.com/health")
+
+        assert result["healthy"] is True
+        assert result["status_code"] == 200
+        assert result["response_time_ms"] == 50.0
+        mock_get.assert_called_once_with("https://example.com/health", timeout=5)
+
+    @patch("health_checker.requests.get")
+    def test_server_error(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.elapsed.total_seconds.return_value = 0.1
+        mock_get.return_value = mock_response
+
+        result = check_http_health("https://example.com/health")
+
+        assert result["healthy"] is False
+        assert result["status_code"] == 500
+
+    @patch("health_checker.requests.get")
+    def test_connection_refused(self, mock_get):
+        mock_get.side_effect = requests.ConnectionError("Connection refused")
+
+        result = check_http_health("https://unreachable.example.com")
+
+        assert result["healthy"] is False
+        assert result["error"] == "connection_refused"
+
+    @patch("health_checker.requests.get")
+    def test_timeout(self, mock_get):
+        mock_get.side_effect = requests.Timeout("Request timed out")
+
+        result = check_http_health("https://slow.example.com", timeout=1)
+
+        assert result["healthy"] is False
+        assert result["error"] == "timeout"
+
+    @pytest.mark.parametrize("status_code,expected_healthy", [
+        (200, True),
+        (201, True),
+        (301, True),
+        (399, True),
+        (400, False),
+        (404, False),
+        (500, False),
+        (503, False),
+    ])
+    @patch("health_checker.requests.get")
+    def test_status_code_ranges(self, mock_get, status_code, expected_healthy):
+        mock_response = MagicMock()
+        mock_response.status_code = status_code
+        mock_response.elapsed.total_seconds.return_value = 0.01
+        mock_get.return_value = mock_response
+
+        result = check_http_health("https://example.com")
+        assert result["healthy"] is expected_healthy
+
+
+class TestCheckPort:
+
+    @patch("health_checker.socket.socket")
+    def test_open_port(self, mock_socket_class):
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 0
+        mock_socket_class.return_value = mock_sock
+
+        assert check_port("localhost", 80) is True
+        mock_sock.connect_ex.assert_called_once_with(("localhost", 80))
+        mock_sock.close.assert_called_once()
+
+    @patch("health_checker.socket.socket")
+    def test_closed_port(self, mock_socket_class):
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 111  # Connection refused
+        mock_socket_class.return_value = mock_sock
+
+        assert check_port("localhost", 9999) is False
+
+    @patch("health_checker.socket.socket")
+    def test_socket_error(self, mock_socket_class):
+        mock_socket_class.side_effect = socket.error("Network error")
+
+        assert check_port("unreachable", 80) is False
+
+
+class TestCheckDns:
+
+    @patch("health_checker.socket.gethostbyname")
+    def test_resolved(self, mock_resolve):
+        mock_resolve.return_value = "93.184.216.34"
+
+        result = check_dns("example.com")
+
+        assert result["resolved"] is True
+        assert result["ip"] == "93.184.216.34"
+
+    @patch("health_checker.socket.gethostbyname")
+    def test_not_resolved(self, mock_resolve):
+        mock_resolve.side_effect = socket.gaierror("Name resolution failed")
+
+        result = check_dns("nonexistent.invalid")
+
+        assert result["resolved"] is False
+        assert result["ip"] is None
+```
+
+</Exercise>
+
+<Exercise number={2} title="Testing with Fixtures and Parametrize">
+
+Write a comprehensive test suite for a log parser module using fixtures and parametrize.
+
+```python
+# log_parser.py — the module to test
+
+import re
+from datetime import datetime
+from collections import Counter
+
+
+def parse_log_line(line):
+    """Parse a standard log line into components."""
+    pattern = r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] \[(\w+)\]\s+(.+)$'
+    match = re.match(pattern, line.strip())
+    if not match:
+        return None
+    return {
+        "timestamp": datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S"),
+        "level": match.group(2).upper(),
+        "message": match.group(3),
+    }
+
+
+def parse_log_file(filepath):
+    """Parse an entire log file, returning structured entries."""
+    entries = []
+    errors = 0
+    with open(filepath) as f:
+        for line_num, line in enumerate(f, 1):
+            if not line.strip():
+                continue
+            parsed = parse_log_line(line)
+            if parsed:
+                parsed["line_number"] = line_num
+                entries.append(parsed)
+            else:
+                errors += 1
+    return {"entries": entries, "total": len(entries), "parse_errors": errors}
+
+
+def summarize_logs(entries):
+    """Generate a summary from parsed log entries."""
+    if not entries:
+        return {"total": 0, "levels": {}, "error_messages": []}
+
+    level_counts = Counter(e["level"] for e in entries)
+    error_messages = [
+        e["message"] for e in entries if e["level"] in ("ERROR", "CRITICAL")
+    ]
+
+    return {
+        "total": len(entries),
+        "levels": dict(level_counts),
+        "error_messages": error_messages,
+    }
+```
+
+```python
+# tests/test_log_parser.py
+
+import pytest
+from datetime import datetime
+from log_parser import parse_log_line, parse_log_file, summarize_logs
+
+
+# --- Fixtures ---
+
+@pytest.fixture
+def sample_log_lines():
+    """Provide a list of sample log lines."""
+    return [
+        "[2024-01-15 10:30:00] [INFO] Application started successfully",
+        "[2024-01-15 10:30:05] [DEBUG] Loading configuration from /etc/app/config.yaml",
+        "[2024-01-15 10:31:00] [WARNING] High memory usage detected: 85%",
+        "[2024-01-15 10:32:00] [ERROR] Database connection failed: timeout after 30s",
+        "[2024-01-15 10:33:00] [INFO] Retry successful, database connected",
+        "[2024-01-15 10:35:00] [CRITICAL] Disk space below 5%, shutting down",
+    ]
+
+
+@pytest.fixture
+def sample_log_file(tmp_path, sample_log_lines):
+    """Create a temporary log file."""
+    log_file = tmp_path / "app.log"
+    content = "\n".join(sample_log_lines) + "\n"
+    log_file.write_text(content)
+    return log_file
+
+
+@pytest.fixture
+def parsed_entries(sample_log_lines):
+    """Provide already-parsed log entries."""
+    return [parse_log_line(line) for line in sample_log_lines if parse_log_line(line)]
+
+
+# --- Tests for parse_log_line ---
+
+class TestParseLogLine:
+
+    def test_info_line(self):
+        result = parse_log_line("[2024-01-15 10:30:00] [INFO] Server started")
+        assert result is not None
+        assert result["level"] == "INFO"
+        assert result["message"] == "Server started"
+        assert result["timestamp"] == datetime(2024, 1, 15, 10, 30, 0)
+
+    @pytest.mark.parametrize("level", ["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"])
+    def test_all_log_levels(self, level):
+        line = f"[2024-01-15 12:00:00] [{level}] Test message"
+        result = parse_log_line(line)
+        assert result is not None
+        assert result["level"] == level
+
+    def test_lowercase_level_normalized(self):
+        result = parse_log_line("[2024-01-15 12:00:00] [info] Test")
+        assert result is not None
+        assert result["level"] == "INFO"
+
+    @pytest.mark.parametrize("invalid_line", [
+        "",
+        "not a log line",
+        "INFO some message",
+        "[2024-01-15] [INFO] missing time",
+        "[invalid-date 00:00:00] [INFO] bad date",
+    ])
+    def test_invalid_lines(self, invalid_line):
+        assert parse_log_line(invalid_line) is None
+
+    def test_message_with_special_characters(self):
+        line = "[2024-01-15 10:00:00] [ERROR] Failed: connection to db-01:5432 (timeout=30s)"
+        result = parse_log_line(line)
+        assert result is not None
+        assert "db-01:5432" in result["message"]
+
+    def test_whitespace_handling(self):
+        line = "  [2024-01-15 10:00:00] [INFO] Trimmed  \n"
+        result = parse_log_line(line)
+        assert result is not None
+
+
+# --- Tests for parse_log_file ---
+
+class TestParseLogFile:
+
+    def test_parse_complete_file(self, sample_log_file):
+        result = parse_log_file(sample_log_file)
+        assert result["total"] == 6
+        assert result["parse_errors"] == 0
+
+    def test_parse_file_with_errors(self, tmp_path):
+        log_file = tmp_path / "mixed.log"
+        log_file.write_text(
+            "[2024-01-15 10:00:00] [INFO] Good line\n"
+            "this is not a valid log line\n"
+            "[2024-01-15 10:01:00] [ERROR] Another good line\n"
+        )
+        result = parse_log_file(log_file)
+        assert result["total"] == 2
+        assert result["parse_errors"] == 1
+
+    def test_empty_file(self, tmp_path):
+        log_file = tmp_path / "empty.log"
+        log_file.write_text("")
+        result = parse_log_file(log_file)
+        assert result["total"] == 0
+
+    def test_line_numbers_tracked(self, sample_log_file):
+        result = parse_log_file(sample_log_file)
+        assert result["entries"][0]["line_number"] == 1
+        assert result["entries"][-1]["line_number"] == 6
+
+
+# --- Tests for summarize_logs ---
+
+class TestSummarizeLogs:
+
+    def test_summary_counts(self, parsed_entries):
+        summary = summarize_logs(parsed_entries)
+        assert summary["total"] == 6
+        assert summary["levels"]["INFO"] == 2
+        assert summary["levels"]["ERROR"] == 1
+        assert summary["levels"]["CRITICAL"] == 1
+
+    def test_error_messages_extracted(self, parsed_entries):
+        summary = summarize_logs(parsed_entries)
+        assert len(summary["error_messages"]) == 2  # ERROR + CRITICAL
+        assert any("Database" in msg for msg in summary["error_messages"])
+
+    def test_empty_entries(self):
+        summary = summarize_logs([])
+        assert summary["total"] == 0
+        assert summary["levels"] == {}
+        assert summary["error_messages"] == []
+```
+
+</Exercise>
+
+<MiniProject title="Test Suite for Automation Library">
+
+Build a complete test suite for a DevOps utility library covering unit tests, file operations, CLI commands, and mocked external calls.
+
+```python
+# devops_lib.py — the library to test
+
+import json
+import os
+import subprocess
+import requests
+from pathlib import Path
+from datetime import datetime
+
+
+class ServerInventory:
+    """Manages a JSON-based server inventory."""
+
+    def __init__(self, inventory_path):
+        self.path = Path(inventory_path)
+
+    def load(self):
+        if not self.path.exists():
+            return {}
+        return json.loads(self.path.read_text())
+
+    def save(self, inventory):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(inventory, indent=2))
+
+    def add_server(self, name, ip, role, env="dev"):
+        inventory = self.load()
+        if name in inventory:
+            raise ValueError(f"Server already exists: {name}")
+        inventory[name] = {"ip": ip, "role": role, "env": env, "added": datetime.now().isoformat()}
+        self.save(inventory)
+
+    def remove_server(self, name):
+        inventory = self.load()
+        if name not in inventory:
+            raise KeyError(f"Server not found: {name}")
+        del inventory[name]
+        self.save(inventory)
+
+    def get_servers(self, role=None, env=None):
+        inventory = self.load()
+        return {
+            name: info for name, info in inventory.items()
+            if (role is None or info.get("role") == role)
+            and (env is None or info.get("env") == env)
+        }
+
+
+class HealthChecker:
+    """Checks health of services."""
+
+    def __init__(self, timeout=5):
+        self.timeout = timeout
+
+    def check_http(self, url):
+        try:
+            resp = requests.get(url, timeout=self.timeout)
+            return {"url": url, "status": resp.status_code, "healthy": resp.ok}
+        except requests.RequestException as e:
+            return {"url": url, "status": 0, "healthy": False, "error": str(e)}
+
+    def check_command(self, command):
+        try:
+            result = subprocess.run(
+                command, shell=True,
+                capture_output=True, text=True, timeout=self.timeout,
+            )
+            return {"command": command, "exit_code": result.returncode, "healthy": result.returncode == 0}
+        except subprocess.TimeoutExpired:
+            return {"command": command, "exit_code": -1, "healthy": False, "error": "timeout"}
+
+
+def get_app_config():
+    """Load app config from environment variables."""
+    required = ["APP_NAME", "APP_ENV", "DATABASE_URL"]
+    config = {}
+    missing = []
+    for key in required:
+        value = os.environ.get(key)
+        if value:
+            config[key] = value
+        else:
+            missing.append(key)
+    if missing:
+        raise EnvironmentError(f"Missing required env vars: {', '.join(missing)}")
+    return config
+```
+
+```python
+# tests/conftest.py
+
+import pytest
+import json
+
+
+@pytest.fixture
+def inventory_path(tmp_path):
+    return tmp_path / "inventory.json"
+
+
+@pytest.fixture
+def inventory(inventory_path):
+    from devops_lib import ServerInventory
+    return ServerInventory(inventory_path)
+
+
+@pytest.fixture
+def populated_inventory(inventory):
+    inventory.add_server("web-01", "10.0.1.10", "web", "prod")
+    inventory.add_server("web-02", "10.0.1.11", "web", "prod")
+    inventory.add_server("db-01", "10.0.2.10", "database", "prod")
+    inventory.add_server("web-staging", "10.1.1.10", "web", "staging")
+    return inventory
+
+
+@pytest.fixture
+def health_checker():
+    from devops_lib import HealthChecker
+    return HealthChecker(timeout=3)
+```
+
+```python
+# tests/test_server_inventory.py
+
+import pytest
+import json
+from devops_lib import ServerInventory
+
+
+class TestServerInventory:
+
+    def test_empty_inventory(self, inventory):
+        assert inventory.load() == {}
+
+    def test_add_server(self, inventory):
+        inventory.add_server("web-01", "10.0.1.10", "web", "prod")
+        data = inventory.load()
+        assert "web-01" in data
+        assert data["web-01"]["ip"] == "10.0.1.10"
+        assert data["web-01"]["role"] == "web"
+        assert data["web-01"]["env"] == "prod"
+
+    def test_add_duplicate_raises(self, inventory):
+        inventory.add_server("web-01", "10.0.1.10", "web")
+        with pytest.raises(ValueError, match="already exists"):
+            inventory.add_server("web-01", "10.0.1.11", "web")
+
+    def test_remove_server(self, inventory):
+        inventory.add_server("web-01", "10.0.1.10", "web")
+        inventory.remove_server("web-01")
+        assert "web-01" not in inventory.load()
+
+    def test_remove_nonexistent_raises(self, inventory):
+        with pytest.raises(KeyError, match="not found"):
+            inventory.remove_server("ghost")
+
+    def test_filter_by_role(self, populated_inventory):
+        web_servers = populated_inventory.get_servers(role="web")
+        assert len(web_servers) == 3  # web-01, web-02, web-staging
+        assert all(v["role"] == "web" for v in web_servers.values())
+
+    def test_filter_by_env(self, populated_inventory):
+        prod_servers = populated_inventory.get_servers(env="prod")
+        assert len(prod_servers) == 3
+        assert all(v["env"] == "prod" for v in prod_servers.values())
+
+    def test_filter_by_role_and_env(self, populated_inventory):
+        result = populated_inventory.get_servers(role="web", env="prod")
+        assert len(result) == 2
+        assert "web-01" in result
+        assert "web-02" in result
+
+    def test_default_env_is_dev(self, inventory):
+        inventory.add_server("test-01", "10.0.0.1", "test")
+        data = inventory.load()
+        assert data["test-01"]["env"] == "dev"
+
+    def test_persistence(self, inventory_path):
+        inv1 = ServerInventory(inventory_path)
+        inv1.add_server("web-01", "10.0.1.10", "web")
+
+        inv2 = ServerInventory(inventory_path)
+        data = inv2.load()
+        assert "web-01" in data
+
+    def test_file_is_valid_json(self, inventory, inventory_path):
+        inventory.add_server("web-01", "10.0.1.10", "web")
+        raw = inventory_path.read_text()
+        parsed = json.loads(raw)
+        assert isinstance(parsed, dict)
+
+
+class TestHealthChecker:
+
+    @pytest.fixture
+    def checker(self):
+        from devops_lib import HealthChecker
+        return HealthChecker(timeout=3)
+
+    @pytest.mark.parametrize("status_code,expected_healthy", [
+        (200, True),
+        (201, True),
+        (204, True),
+        (301, True),
+        (400, False),
+        (404, False),
+        (500, False),
+    ])
+    def test_http_status_codes(self, checker, status_code, expected_healthy):
+        from unittest.mock import patch, MagicMock
+        with patch("devops_lib.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = status_code
+            mock_resp.ok = status_code < 400
+            mock_get.return_value = mock_resp
+
+            result = checker.check_http("https://example.com")
+            assert result["healthy"] is expected_healthy
+            assert result["status"] == status_code
+
+    def test_http_connection_error(self, checker):
+        from unittest.mock import patch
+        import requests
+        with patch("devops_lib.requests.get", side_effect=requests.ConnectionError("refused")):
+            result = checker.check_http("https://down.example.com")
+            assert result["healthy"] is False
+            assert "error" in result
+
+    def test_check_command_success(self, checker):
+        from unittest.mock import patch, MagicMock
+        with patch("devops_lib.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = checker.check_command("echo ok")
+            assert result["healthy"] is True
+            assert result["exit_code"] == 0
+
+    def test_check_command_failure(self, checker):
+        from unittest.mock import patch, MagicMock
+        with patch("devops_lib.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+            result = checker.check_command("false")
+            assert result["healthy"] is False
+
+    def test_check_command_timeout(self, checker):
+        from unittest.mock import patch
+        import subprocess
+        with patch("devops_lib.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 3)):
+            result = checker.check_command("sleep 100")
+            assert result["healthy"] is False
+            assert result["error"] == "timeout"
+
+
+class TestGetAppConfig:
+
+    def test_valid_config(self, monkeypatch):
+        monkeypatch.setenv("APP_NAME", "web-api")
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("DATABASE_URL", "postgres://localhost/db")
+
+        from devops_lib import get_app_config
+        config = get_app_config()
+
+        assert config["APP_NAME"] == "web-api"
+        assert config["APP_ENV"] == "production"
+        assert config["DATABASE_URL"] == "postgres://localhost/db"
+
+    def test_missing_vars_raises(self, monkeypatch):
+        monkeypatch.delenv("APP_NAME", raising=False)
+        monkeypatch.delenv("APP_ENV", raising=False)
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+
+        from devops_lib import get_app_config
+        with pytest.raises(EnvironmentError, match="Missing required"):
+            get_app_config()
+
+    def test_partial_config_shows_missing(self, monkeypatch):
+        monkeypatch.setenv("APP_NAME", "web")
+        monkeypatch.delenv("APP_ENV", raising=False)
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+
+        from devops_lib import get_app_config
+        with pytest.raises(EnvironmentError, match="APP_ENV"):
+            get_app_config()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- pytest discovers tests automatically: files named `test_*.py`, functions named `test_*`, classes named `Test*`
+- Use `assert` statements directly — pytest provides detailed failure messages with no extra syntax
+- Fixtures (`@pytest.fixture`) replace setup/teardown and are injected by parameter name
+- `@pytest.mark.parametrize` tests many inputs without duplicate functions — ideal for edge cases
+- Mock at the import site: `@patch("mymodule.requests.get")`, not `@patch("requests.get")`
+- `MagicMock` simulates any object: set `return_value` for what it returns, `side_effect` for exceptions
+- `tmp_path` fixture creates an isolated temporary directory for file operation tests — no cleanup needed
+- `monkeypatch` safely sets/unsets environment variables — changes are automatically reverted after each test
+- Coverage (`--cov-fail-under=80`) enforces minimum test coverage in CI pipelines
+- Separate unit tests (fast, mocked) from integration tests (slow, real services) with markers
+
+## What's Next
+
+You now know how to test your automation before it hits production. In **Monitoring and Alerting Scripts**, you will build Python scripts that watch your systems, collect metrics, check health, and alert when things go wrong — the scripts that catch problems before users do.

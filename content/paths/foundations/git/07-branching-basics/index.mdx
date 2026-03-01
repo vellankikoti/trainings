@@ -1,0 +1,701 @@
+---
+title: "Branching Basics"
+description: "Master Git branching — create, switch, list, and delete branches. Understand how branches enable parallel development without chaos."
+order: 7
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 06-viewing-history
+objectives:
+  - Create and switch branches
+  - List and delete branches
+  - Understand tracking branches
+  - Follow branching naming conventions
+tags:
+  - git
+  - branches
+  - workflow
+---
+
+<Callout type="story" title="The Story">
+Three developers need to work simultaneously: one on a payment feature, one on a UI redesign, one on a critical bug fix. Without branches, they'd overwrite each other's work constantly. Every time Alice saves her payment code, it breaks Bob's UI changes, which conflicts with Carol's bug fix. It's chaos. With branches, each developer works in complete isolation — their own copy of the codebase that doesn't interfere with anyone else. When they're ready, Git merges their changes together. Branching is what makes Git collaboration possible, and it's what separates teams that ship daily from teams that ship quarterly.
+</Callout>
+
+## What Is a Branch?
+
+A branch is a lightweight, movable pointer to a commit. When you create a branch, Git doesn't copy any files — it just creates a new pointer. This is why branching in Git is nearly instant, even on massive repositories.
+
+```
+main ──── C1 ──── C2 ──── C3
+                           │
+                           └── feature (new branch, same commit)
+```
+
+When you commit on a branch, only that branch's pointer moves forward:
+
+```
+main ──── C1 ──── C2 ──── C3
+                           │
+                           └── C4 ──── C5 (feature moves forward)
+```
+
+Main stays exactly where it was. Feature has new commits that main doesn't know about. This is the power of branches.
+
+## Creating Branches
+
+### git branch — Create a Branch
+
+```bash
+# Create a new branch (stays on current branch)
+git branch feature-payment
+
+# Verify it was created
+git branch
+#   feature-payment
+# * main              ← asterisk shows current branch
+```
+
+### git switch — The Modern Way to Switch
+
+```bash
+# Switch to an existing branch
+git switch feature-payment
+
+# Create AND switch in one command (-c flag)
+git switch -c feature-ui-redesign
+
+# Switch back to main
+git switch main
+```
+
+<Callout type="tip" title="switch vs checkout">
+`git switch` was introduced in Git 2.23 as a clearer alternative to `git checkout`. While `checkout` does many things (switch branches, restore files, create branches), `switch` does one thing well: switch branches. Use `switch` for new workflows, but know `checkout` because you'll see it everywhere in documentation and scripts.
+</Callout>
+
+### git checkout — The Legacy Way
+
+```bash
+# Switch to a branch (legacy)
+git checkout feature-payment
+
+# Create and switch (-b flag, equivalent to switch -c)
+git checkout -b bugfix-login-crash
+
+# These two are equivalent:
+git switch -c new-branch
+git checkout -b new-branch
+```
+
+## Listing Branches
+
+```bash
+# List local branches
+git branch
+#   bugfix-login-crash
+#   feature-payment
+# * main
+
+# List local branches with last commit info
+git branch -v
+#   bugfix-login-crash a3f2b1c Fix null pointer in login
+#   feature-payment    8d4e2a1 Add Stripe integration
+# * main               1b3c5d7 Release v2.1.0
+
+# List all branches (local + remote)
+git branch -a
+#   bugfix-login-crash
+#   feature-payment
+# * main
+#   remotes/origin/main
+#   remotes/origin/feature-payment
+#   remotes/origin/staging
+
+# List only remote branches
+git branch -r
+#   origin/main
+#   origin/feature-payment
+#   origin/staging
+
+# List branches that contain a specific commit
+git branch --contains a3f2b1c
+
+# List branches merged into current branch
+git branch --merged
+
+# List branches NOT merged into current branch
+git branch --no-merged
+```
+
+## Deleting Branches
+
+```bash
+# Delete a branch (safe — only works if fully merged)
+git branch -d feature-payment
+# Deleted branch feature-payment (was 8d4e2a1).
+
+# Force delete (use when branch has unmerged changes)
+git branch -D experimental-feature
+# Deleted branch experimental-feature (was c5d6e7f).
+```
+
+<Callout type="warning" title="Force Delete Means Unmerged Work">
+`git branch -D` deletes the branch even if its commits haven't been merged anywhere. Those commits become "orphaned" and will eventually be garbage collected. If you accidentally force-delete, the reflog can save you (covered in lesson 10), but it's better to be sure before using `-D`.
+</Callout>
+
+## HEAD and Branches
+
+HEAD is a special pointer that tells Git which branch (or commit) you're currently on:
+
+```bash
+# See where HEAD points
+cat .git/HEAD
+# ref: refs/heads/main    ← HEAD points to main branch
+
+git switch feature-payment
+cat .git/HEAD
+# ref: refs/heads/feature-payment    ← HEAD moved
+
+# HEAD follows the branch pointer when you commit
+git commit -m "Add payment validation"
+# HEAD → feature-payment → new commit
+```
+
+### Detached HEAD State
+
+If you checkout a specific commit (not a branch), you enter "detached HEAD" state:
+
+```bash
+# Checkout a specific commit
+git checkout a3f2b1c
+# You are in 'detached HEAD' state...
+
+# HEAD now points directly to a commit, not a branch
+cat .git/HEAD
+# a3f2b1c4e5d6f7a8b9c0d1e2f3a4b5c6d7e8f9a0
+
+# Any commits you make here are "orphaned" — no branch points to them
+# To save your work, create a branch:
+git switch -c rescue-branch
+```
+
+<Callout type="warning" title="Detached HEAD Is Not Dangerous">
+Detached HEAD sounds scary, but it's just Git telling you "you're not on a branch." It's useful for inspecting old commits. Just remember: if you make commits in detached HEAD state, create a branch before switching away or those commits become hard to find.
+</Callout>
+
+## Branch Naming Conventions
+
+Professional teams use prefixes to organize branches:
+
+```bash
+# Features — new functionality
+feature/user-authentication
+feature/payment-gateway
+feature/dark-mode
+
+# Bug fixes — fixing existing issues
+bugfix/login-timeout
+bugfix/cart-total-rounding
+
+# Hotfixes — urgent production fixes
+hotfix/security-patch
+hotfix/database-connection-leak
+
+# Releases — preparing a release
+release/v2.1.0
+release/2024-q1
+
+# Chores — maintenance tasks
+chore/update-dependencies
+chore/refactor-tests
+```
+
+```bash
+# Create a properly named branch
+git switch -c feature/payment-gateway
+
+# Some teams include ticket numbers
+git switch -c feature/JIRA-1234-payment-gateway
+git switch -c bugfix/GH-456-login-crash
+```
+
+<Callout type="tip" title="Branch Naming Rules">
+Branch names cannot contain spaces, tildes (~), carets (^), colons (:), backslashes, or two consecutive dots (..). Use hyphens or underscores to separate words. Keep names lowercase for consistency. Avoid extremely long names — they clutter the output of `git branch`.
+</Callout>
+
+## Tracking Branches
+
+A tracking branch links a local branch to a remote branch, enabling `git pull` and `git push` without specifying the remote:
+
+```bash
+# Set upstream when pushing for the first time
+git push -u origin feature/payment-gateway
+# or equivalently:
+git push --set-upstream-to origin feature/payment-gateway
+
+# Now these work without arguments:
+git pull    # pulls from origin/feature/payment-gateway
+git push    # pushes to origin/feature/payment-gateway
+
+# See tracking information
+git branch -vv
+# * feature/payment-gateway a3f2b1c [origin/feature/payment-gateway] Add Stripe
+#   main                    1b3c5d7 [origin/main] Release v2.1.0
+
+# Set tracking on an existing branch
+git branch --set-upstream-to=origin/main main
+
+# Remove tracking
+git branch --unset-upstream
+```
+
+## Stashing Work Before Switching
+
+What if you're in the middle of work and need to switch branches? Git won't let you switch if you have uncommitted changes that conflict with the target branch. Enter `git stash`:
+
+```bash
+# Save your work-in-progress
+git stash
+# Saved working directory and index state WIP on feature: a3f2b1c Add Stripe
+
+# Your working directory is now clean
+git status
+# On branch feature/payment-gateway
+# nothing to commit, working tree clean
+
+# Switch branches freely
+git switch main
+
+# Do whatever you need on main...
+git switch feature/payment-gateway
+
+# Restore your stashed work
+git stash pop
+# Changes restored to working directory
+```
+
+### Stash Management
+
+```bash
+# Stash with a descriptive message
+git stash push -m "WIP: payment validation halfway done"
+
+# List all stashes
+git stash list
+# stash@{0}: On feature: WIP: payment validation halfway done
+# stash@{1}: On main: Quick experiment with caching
+# stash@{2}: On bugfix: Debug logging for auth issue
+
+# Apply a specific stash (keeps it in the stash list)
+git stash apply stash@{1}
+
+# Pop a specific stash (applies and removes from list)
+git stash pop stash@{2}
+
+# View what's in a stash
+git stash show stash@{0}
+# src/payment.js | 15 +++++++++++----
+# src/validate.js |  8 ++++++--
+
+# View the full diff of a stash
+git stash show -p stash@{0}
+
+# Drop a stash without applying
+git stash drop stash@{1}
+
+# Clear all stashes
+git stash clear
+```
+
+<Callout type="tip" title="Stash Includes Staged Changes">
+By default, `git stash` saves both staged and unstaged tracked changes. To also stash untracked files, use `git stash -u`. To include ignored files too, use `git stash -a`. To stash only staged changes, use `git stash push --staged` (Git 2.35+).
+</Callout>
+
+## Practical Branch Workflows
+
+### Feature Branch Workflow
+
+```bash
+# 1. Start from an up-to-date main
+git switch main
+git pull origin main
+
+# 2. Create your feature branch
+git switch -c feature/user-notifications
+
+# 3. Work on your feature (multiple commits)
+echo "notification system v1" > notifications.js
+git add notifications.js
+git commit -m "Add basic notification structure"
+
+echo "email notifications" > email-notify.js
+git add email-notify.js
+git commit -m "Add email notification support"
+
+# 4. Push your branch to remote
+git push -u origin feature/user-notifications
+
+# 5. When done, merge back to main (usually via pull request)
+```
+
+### Quick Context Switch
+
+```bash
+# You're working on a feature...
+git switch feature/payment-gateway
+# ... editing files ...
+
+# Urgent bug report comes in!
+git stash push -m "WIP: payment validation"
+git switch -c hotfix/security-patch main
+
+# Fix the bug
+echo "patched" > security-fix.js
+git add security-fix.js
+git commit -m "Fix XSS vulnerability in user input"
+git push -u origin hotfix/security-patch
+
+# Go back to your feature
+git switch feature/payment-gateway
+git stash pop
+# Right where you left off
+```
+
+<Exercise number={1} title="Branch Workflow">
+
+```bash
+# Create a test repository
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Set up initial commit on main
+echo "# My Project" > README.md
+git add README.md
+git commit -q -m "Initial commit"
+
+# === Task 1: Create feature branches ===
+echo "--- Creating branches ---"
+git switch -c feature/login
+echo "function login() { return true; }" > auth.js
+git add auth.js
+git commit -q -m "Add login function"
+
+git switch -c feature/dashboard main
+echo "function renderDashboard() { }" > dashboard.js
+git add dashboard.js
+git commit -q -m "Add dashboard component"
+
+git switch -c bugfix/header-alignment main
+echo "header { text-align: center; }" > fix.css
+git add fix.css
+git commit -q -m "Fix header alignment"
+
+# === Task 2: List all branches ===
+echo ""
+echo "--- All branches ---"
+git branch -v
+
+# === Task 3: Verify isolation ===
+echo ""
+echo "--- Verifying branch isolation ---"
+git switch feature/login
+echo "Files on feature/login:"
+ls *.js *.css 2>/dev/null || echo "  (no js/css files)"
+
+git switch feature/dashboard
+echo "Files on feature/dashboard:"
+ls *.js *.css 2>/dev/null || echo "  (no js/css files)"
+
+git switch bugfix/header-alignment
+echo "Files on bugfix/header-alignment:"
+ls *.js *.css 2>/dev/null || echo "  (no js/css files)"
+
+git switch main
+echo "Files on main:"
+ls *.js *.css 2>/dev/null || echo "  (no js/css files)"
+
+# === Task 4: View the branch graph ===
+echo ""
+echo "--- Branch graph ---"
+git log --all --oneline --graph --decorate
+
+# === Task 5: Delete a merged branch ===
+echo ""
+echo "--- Cleaning up ---"
+git merge --no-ff bugfix/header-alignment -m "Merge bugfix/header-alignment"
+git branch -d bugfix/header-alignment
+echo "Remaining branches:"
+git branch
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Stash and Switch">
+
+```bash
+# Create a test repository
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Set up a base project
+echo "version 1.0" > config.txt
+echo "base code" > app.js
+git add . && git commit -q -m "Initial project setup"
+
+# Create a feature branch and start working
+git switch -c feature/new-api
+echo "// API endpoint for users" > api.js
+echo "version 1.1-dev" > config.txt
+git add api.js
+# Note: config.txt is modified but NOT staged
+
+echo "=== Current status (work in progress) ==="
+git status
+
+# === Task 1: Stash everything to handle an urgent bug ===
+echo ""
+echo "--- Stashing work ---"
+git stash push -m "WIP: new API endpoint - halfway done"
+echo "After stash:"
+git status
+echo "Working directory is clean!"
+
+# === Task 2: Switch to main and fix the bug ===
+git switch main
+git switch -c hotfix/critical-fix
+echo "FIXED" > emergency-patch.txt
+git add emergency-patch.txt
+git commit -q -m "Apply emergency patch"
+echo ""
+echo "--- Emergency fix committed ---"
+git log --oneline -1
+
+# Merge hotfix into main
+git switch main
+git merge --no-ff hotfix/critical-fix -m "Merge hotfix/critical-fix"
+
+# === Task 3: Return to feature and restore stash ===
+git switch feature/new-api
+echo ""
+echo "--- Before restoring stash ---"
+git status
+echo ""
+echo "--- Stash list ---"
+git stash list
+
+echo ""
+echo "--- Restoring stashed work ---"
+git stash pop
+echo ""
+echo "After restore:"
+git status
+echo ""
+echo "api.js content:"
+cat api.js
+echo "config.txt content:"
+cat config.txt
+
+# === Task 4: Explore stash management ===
+echo ""
+echo "--- Stash management demo ---"
+
+# Create multiple stashes
+echo "experiment 1" > exp1.txt
+git stash push -m "Experiment 1"
+
+echo "experiment 2" > exp2.txt
+git stash push -m "Experiment 2"
+
+echo "experiment 3" > exp3.txt
+git stash push -m "Experiment 3"
+
+echo "All stashes:"
+git stash list
+
+echo ""
+echo "Contents of stash@{1} (Experiment 2):"
+git stash show stash@{1}
+
+# Drop a specific stash
+git stash drop stash@{1}
+echo ""
+echo "After dropping stash@{1}:"
+git stash list
+
+# Clear remaining stashes
+git stash clear
+echo ""
+echo "After clearing all stashes:"
+git stash list || echo "(stash is empty)"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Branch Manager Script">
+
+```bash
+cat > ~/branch-manager.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Branch Manager — lists branches with details, identifies stale branches, offers cleanup
+
+REPO="${1:-.}"
+
+if [ ! -d "$REPO/.git" ]; then
+    echo "Error: $REPO is not a git repository"
+    exit 1
+fi
+
+cd "$REPO"
+
+MAIN_BRANCH="main"
+git rev-parse --verify main &>/dev/null || MAIN_BRANCH="master"
+
+echo "============================================"
+echo "  Branch Manager"
+echo "  Repository: $(basename "$(pwd)")"
+echo "============================================"
+echo ""
+
+# Section 1: All branches with details
+echo "--- Local Branches ---"
+echo ""
+printf "%-35s %-12s %-20s %s\n" "BRANCH" "STATUS" "LAST COMMIT" "MESSAGE"
+printf "%-35s %-12s %-20s %s\n" "------" "------" "-----------" "-------"
+
+while IFS= read -r branch; do
+    branch_name=$(echo "$branch" | sed 's/^[* ] //')
+    branch_name=$(echo "$branch_name" | xargs)  # trim whitespace
+
+    [ -z "$branch_name" ] && continue
+
+    # Get last commit date and message
+    last_date=$(git log -1 --format="%cr" "$branch_name" 2>/dev/null || echo "unknown")
+    last_msg=$(git log -1 --format="%s" "$branch_name" 2>/dev/null || echo "")
+    last_msg="${last_msg:0:40}"
+
+    # Check if merged into main
+    if git branch --merged "$MAIN_BRANCH" 2>/dev/null | grep -q "^\s*${branch_name}$" 2>/dev/null; then
+        status="merged"
+    else
+        status="unmerged"
+    fi
+
+    # Mark current branch
+    if echo "$branch" | grep -q '^\*'; then
+        branch_display="* $branch_name"
+    else
+        branch_display="  $branch_name"
+    fi
+
+    printf "%-35s %-12s %-20s %s\n" "$branch_display" "$status" "$last_date" "$last_msg"
+done < <(git branch 2>/dev/null)
+
+# Section 2: Stale branch detection (no commits in 30+ days)
+echo ""
+echo "--- Stale Branches (no commits in 30+ days) ---"
+echo ""
+STALE_COUNT=0
+THIRTY_DAYS_AGO=$(date -d "30 days ago" +%s 2>/dev/null || date -v-30d +%s 2>/dev/null || echo "0")
+
+while IFS= read -r branch; do
+    branch_name=$(echo "$branch" | sed 's/^[* ] //' | xargs)
+    [ -z "$branch_name" ] && continue
+    [ "$branch_name" = "$MAIN_BRANCH" ] && continue
+
+    last_epoch=$(git log -1 --format="%at" "$branch_name" 2>/dev/null || echo "0")
+
+    if [ "$last_epoch" -lt "$THIRTY_DAYS_AGO" ] 2>/dev/null; then
+        last_date=$(git log -1 --format="%ci" "$branch_name" 2>/dev/null)
+        echo "  $branch_name (last commit: $last_date)"
+        STALE_COUNT=$((STALE_COUNT + 1))
+    fi
+done < <(git branch 2>/dev/null)
+
+if [ "$STALE_COUNT" -eq 0 ]; then
+    echo "  No stale branches found."
+fi
+
+# Section 3: Merged branches ready for cleanup
+echo ""
+echo "--- Branches Merged into $MAIN_BRANCH (safe to delete) ---"
+echo ""
+CLEANUP_COUNT=0
+
+while IFS= read -r branch; do
+    branch_name=$(echo "$branch" | xargs)
+    [ -z "$branch_name" ] && continue
+    [ "$branch_name" = "$MAIN_BRANCH" ] && continue
+
+    echo "  $branch_name"
+    CLEANUP_COUNT=$((CLEANUP_COUNT + 1))
+done < <(git branch --merged "$MAIN_BRANCH" 2>/dev/null | grep -v "^\*" | grep -v "$MAIN_BRANCH")
+
+if [ "$CLEANUP_COUNT" -eq 0 ]; then
+    echo "  No merged branches to clean up."
+else
+    echo ""
+    echo "  To delete these branches:"
+    echo "  git branch --merged $MAIN_BRANCH | grep -v '$MAIN_BRANCH' | xargs git branch -d"
+fi
+
+# Section 4: Summary
+echo ""
+echo "--- Summary ---"
+TOTAL=$(git branch | wc -l | xargs)
+MERGED=$(git branch --merged "$MAIN_BRANCH" 2>/dev/null | grep -v "$MAIN_BRANCH" | wc -l | xargs)
+UNMERGED=$(git branch --no-merged "$MAIN_BRANCH" 2>/dev/null | wc -l | xargs)
+echo "  Total branches: $TOTAL"
+echo "  Merged (cleanup candidates): $MERGED"
+echo "  Unmerged (active work): $UNMERGED"
+echo "  Stale (30+ days old): $STALE_COUNT"
+SCRIPT
+
+chmod +x ~/branch-manager.sh
+
+# Test with a sample repository
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Create commits and branches to test with
+echo "init" > README.md && git add . && git commit -q -m "Initial commit"
+
+git switch -c feature/old-work &>/dev/null
+echo "old work" > old.txt && git add . && git commit -q -m "Old feature" --date="2025-01-01T00:00:00"
+
+git switch main &>/dev/null
+git switch -c feature/active-work &>/dev/null
+echo "active" > active.txt && git add . && git commit -q -m "Active feature"
+
+git switch main &>/dev/null
+git switch -c bugfix/fixed-bug &>/dev/null
+echo "fix" > fix.txt && git add . && git commit -q -m "Bug fix"
+git switch main &>/dev/null
+git merge --no-ff bugfix/fixed-bug -q -m "Merge bugfix"
+
+~/branch-manager.sh "$REPO"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Branches are lightweight pointers to commits — creating them is nearly instant
+- Use `git switch -c` (modern) or `git checkout -b` (legacy) to create and switch in one step
+- `git branch -a` lists all branches including remote-tracking branches
+- Use `-d` for safe deletion (merged only) and `-D` for force deletion (unmerged)
+- Follow naming conventions: `feature/`, `bugfix/`, `hotfix/`, `release/` prefixes
+- HEAD points to your current branch; detached HEAD means you're on a commit directly
+- Tracking branches link local branches to remote branches for easy push/pull
+- `git stash` saves work-in-progress so you can switch branches cleanly
+- Branches enable parallel development — the foundation of all Git collaboration
+
+## What's Next
+
+You know how to create branches and work in isolation. But eventually, you need to bring that work back together. In **Merging**, you'll learn how Git combines branches — fast-forward merges, three-way merges, and the strategies that keep your history clean.

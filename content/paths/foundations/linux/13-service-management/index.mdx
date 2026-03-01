@@ -1,0 +1,452 @@
+---
+title: "Service Management with systemd"
+description: "Master systemd — the init system that controls services on modern Linux. Learn systemctl, unit files, timers, and how to create your own services."
+order: 13
+xpReward: 100
+estimatedMinutes: 45
+prerequisites:
+  - 12-process-management
+objectives:
+  - Control services with systemctl start/stop/restart/enable
+  - Read and write systemd unit files
+  - Troubleshoot failed services with journalctl
+  - Create custom systemd services for your applications
+tags:
+  - linux
+  - systemd
+  - services
+  - administration
+---
+
+<Callout type="story" title="The Story">
+You've deployed a Python web application. It works when you run `python3 app.py`, but when you log out, it stops. And when the server reboots, you have to manually start it again. Your app needs to be a **service** — something that starts automatically, restarts if it crashes, and logs its output properly. That's what systemd does.
+</Callout>
+
+## What Is systemd?
+
+systemd is the init system and service manager for most modern Linux distributions. It's PID 1 — the first process that starts, and the parent of everything else.
+
+```bash
+# Verify systemd is running
+ps -p 1 -o comm
+# systemd
+
+# Check systemd version
+systemctl --version
+```
+
+## Controlling Services — `systemctl`
+
+```bash
+# Start a service
+sudo systemctl start nginx
+
+# Stop a service
+sudo systemctl stop nginx
+
+# Restart (stop + start)
+sudo systemctl restart nginx
+
+# Reload configuration without restarting
+sudo systemctl reload nginx
+
+# Reload or restart (reload if supported, otherwise restart)
+sudo systemctl reload-or-restart nginx
+
+# Check status
+systemctl status nginx
+```
+
+### Enable and Disable (Boot Behavior)
+
+```bash
+# Start service automatically on boot
+sudo systemctl enable nginx
+
+# Enable AND start immediately
+sudo systemctl enable --now nginx
+
+# Disable auto-start on boot
+sudo systemctl disable nginx
+
+# Disable AND stop immediately
+sudo systemctl disable --now nginx
+
+# Check if enabled
+systemctl is-enabled nginx
+
+# Check if active (running)
+systemctl is-active nginx
+```
+
+### Listing Services
+
+```bash
+# List all running services
+systemctl list-units --type=service --state=running
+
+# List all services (including inactive)
+systemctl list-units --type=service --all
+
+# List failed services
+systemctl list-units --state=failed
+
+# List enabled services
+systemctl list-unit-files --type=service --state=enabled
+```
+
+<Exercise number={1} title="Service Management Basics">
+
+```bash
+# 1. Check the status of cron
+systemctl status cron
+
+# 2. List all running services
+systemctl list-units --type=service --state=running | head -20
+
+# 3. Check if SSH is enabled
+systemctl is-enabled ssh 2>/dev/null || systemctl is-enabled sshd 2>/dev/null
+
+# 4. List failed services (if any)
+systemctl list-units --state=failed
+
+# 5. Show service dependencies
+systemctl list-dependencies cron
+
+# 6. View the unit file for cron
+systemctl cat cron
+
+# 7. Show all properties of a service
+systemctl show cron | head -20
+```
+
+</Exercise>
+
+## Understanding Unit Files
+
+A unit file defines how a service behaves. Unit files live in:
+- `/lib/systemd/system/` — installed by packages (don't edit these)
+- `/etc/systemd/system/` — admin customizations (your changes go here)
+- `/run/systemd/system/` — runtime units (temporary)
+
+```bash
+# View a unit file
+systemctl cat nginx
+
+# Find where a unit file lives
+systemctl show -p FragmentPath nginx
+```
+
+### Anatomy of a Unit File
+
+```ini
+[Unit]
+Description=The NGINX HTTP and reverse proxy server
+Documentation=https://nginx.org/en/docs/
+After=network-online.target remote-fs.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+PIDFile=/run/nginx.pid
+ExecStartPre=/usr/sbin/nginx -t -q
+ExecStart=/usr/sbin/nginx
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s QUIT $MAINPID
+PrivateTmp=true
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Section Breakdown
+
+**[Unit]** — Metadata and ordering:
+| Directive | Purpose |
+|---|---|
+| `Description` | Human-readable description |
+| `After` | Start after these units |
+| `Before` | Start before these units |
+| `Requires` | Hard dependency — fails if dependency fails |
+| `Wants` | Soft dependency — continues if dependency fails |
+
+**[Service]** — How to run:
+| Directive | Purpose |
+|---|---|
+| `Type` | `simple` (default), `forking`, `oneshot`, `notify` |
+| `ExecStart` | Command to start the service |
+| `ExecStop` | Command to stop (default: SIGTERM) |
+| `ExecReload` | Command to reload config |
+| `Restart` | `no`, `on-failure`, `on-abnormal`, `always` |
+| `RestartSec` | Wait time before restart |
+| `User` / `Group` | Run as this user/group |
+| `WorkingDirectory` | Working directory for the process |
+| `Environment` | Set environment variables |
+| `EnvironmentFile` | Load env vars from a file |
+
+**[Install]** — Enable behavior:
+| Directive | Purpose |
+|---|---|
+| `WantedBy` | Which target enables this service |
+| `RequiredBy` | Stronger version of WantedBy |
+
+## Creating a Custom Service
+
+### Step 1: Create Your Application
+
+```bash
+# Create a simple Python web app
+mkdir -p /opt/myapp
+cat > /opt/myapp/app.py << 'APP'
+#!/usr/bin/env python3
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json, datetime
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        response = {
+            "status": "ok",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "message": "Hello from myapp!"
+        }
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(response).encode())
+
+    def log_message(self, format, *args):
+        print(f"[{datetime.datetime.now()}] {args[0]}")
+
+server = HTTPServer(("0.0.0.0", 8080), Handler)
+print("Starting myapp on port 8080...")
+server.serve_forever()
+APP
+chmod +x /opt/myapp/app.py
+```
+
+### Step 2: Create the Unit File
+
+```bash
+sudo cat > /etc/systemd/system/myapp.service << 'UNIT'
+[Unit]
+Description=My Custom Application
+After=network.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+WorkingDirectory=/opt/myapp
+ExecStart=/usr/bin/python3 /opt/myapp/app.py
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+```
+
+### Step 3: Enable and Start
+
+```bash
+# Reload systemd to pick up new unit file
+sudo systemctl daemon-reload
+
+# Start the service
+sudo systemctl start myapp
+
+# Check status
+systemctl status myapp
+
+# Enable on boot
+sudo systemctl enable myapp
+
+# Test it
+curl http://localhost:8080
+```
+
+## Troubleshooting Failed Services
+
+```bash
+# Check status — first thing to do
+systemctl status myapp
+
+# Read the logs
+journalctl -u myapp          # all logs
+journalctl -u myapp -f       # follow (live tail)
+journalctl -u myapp --since "5 minutes ago"
+journalctl -u myapp -n 50    # last 50 lines
+
+# Common issues:
+# 1. "Main process exited, code=exited, status=1"
+#    → Check logs, likely a code error
+journalctl -u myapp -e
+
+# 2. "Failed at step EXEC"
+#    → ExecStart path is wrong or not executable
+
+# 3. "code=killed, signal=SEGV"
+#    → Application crashed (segfault)
+
+# 4. Service keeps restarting
+#    → Check Restart= setting, check StartLimitBurst
+```
+
+<Exercise number={2} title="Create a Custom Service">
+
+```bash
+# 1. Create a simple health check script
+sudo mkdir -p /opt/healthcheck
+sudo cat > /opt/healthcheck/check.sh << 'HEALTH'
+#!/bin/bash
+while true; do
+    echo "[$(date)] Health check: CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')% MEM=$(free | awk '/Mem:/ {printf "%.1f", $3/$2*100}')%"
+    sleep 30
+done
+HEALTH
+sudo chmod +x /opt/healthcheck/check.sh
+
+# 2. Create the service file
+sudo tee /etc/systemd/system/healthcheck.service > /dev/null << 'UNIT'
+[Unit]
+Description=System Health Checker
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/healthcheck/check.sh
+Restart=always
+RestartSec=10s
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# 3. Reload, start, and check
+sudo systemctl daemon-reload
+sudo systemctl start healthcheck
+systemctl status healthcheck
+
+# 4. View the logs
+journalctl -u healthcheck -n 5
+
+# 5. Stop and disable
+sudo systemctl stop healthcheck
+sudo systemctl disable healthcheck
+
+# 6. Clean up
+sudo rm /etc/systemd/system/healthcheck.service
+sudo rm -rf /opt/healthcheck
+sudo systemctl daemon-reload
+```
+
+</Exercise>
+
+## systemd Targets (Runlevels)
+
+Targets group services that should run together:
+
+| Target | Old Runlevel | Description |
+|---|---|---|
+| `poweroff.target` | 0 | Shutdown |
+| `rescue.target` | 1 | Single-user/rescue mode |
+| `multi-user.target` | 3 | Multi-user, no GUI |
+| `graphical.target` | 5 | Multi-user with GUI |
+| `reboot.target` | 6 | Reboot |
+
+```bash
+# Check current target
+systemctl get-default
+
+# Set default target (e.g., no GUI for servers)
+sudo systemctl set-default multi-user.target
+
+# Change target now (without reboot)
+sudo systemctl isolate multi-user.target
+```
+
+<MiniProject title="Application Service Setup">
+
+Create a complete service configuration for a Node.js or Python application:
+
+```bash
+cat > ~/create-service.sh << 'SCRIPT'
+#!/bin/bash
+# Create a systemd service for any application
+
+read -p "Service name: " SVC_NAME
+read -p "Description: " SVC_DESC
+read -p "ExecStart command: " SVC_EXEC
+read -p "Working directory: " SVC_DIR
+read -p "Run as user [nobody]: " SVC_USER
+SVC_USER="${SVC_USER:-nobody}"
+
+UNIT_FILE="/etc/systemd/system/${SVC_NAME}.service"
+
+sudo tee "$UNIT_FILE" > /dev/null << EOF
+[Unit]
+Description=${SVC_DESC}
+After=network.target
+
+[Service]
+Type=simple
+User=${SVC_USER}
+WorkingDirectory=${SVC_DIR}
+ExecStart=${SVC_EXEC}
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+
+echo ""
+echo "Service created: $UNIT_FILE"
+echo ""
+echo "Commands:"
+echo "  sudo systemctl start $SVC_NAME"
+echo "  sudo systemctl enable $SVC_NAME"
+echo "  sudo systemctl status $SVC_NAME"
+echo "  journalctl -u $SVC_NAME -f"
+SCRIPT
+
+chmod +x ~/create-service.sh
+echo "Created ~/create-service.sh — run to create a systemd service"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `systemctl start/stop/restart/status` manages service lifecycle
+- `systemctl enable` starts on boot; `disable` removes auto-start
+- Unit files in `/etc/systemd/system/` override package defaults
+- Always `daemon-reload` after changing unit files
+- `Restart=on-failure` with `RestartSec=5s` is the standard resilience pattern
+- `journalctl -u service-name` reads service logs
+- Security directives (`NoNewPrivileges`, `ProtectSystem`) harden services
+
+## What's Next
+
+Services are running, but how do you know if they're healthy? In **System Monitoring**, you'll learn to watch CPU, memory, disk, and network usage in real-time — the tools you'll live in during production incidents.

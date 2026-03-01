@@ -1,0 +1,679 @@
+---
+title: "Installation and Setup"
+description: "Install Python properly for DevOps work. Set up pyenv for version management, virtual environments for isolation, and pip for package management."
+order: 2
+xpReward: 75
+estimatedMinutes: 25
+prerequisites:
+  - 01-why-python-for-devops
+objectives:
+  - Install Python using pyenv for version management
+  - Create and manage virtual environments for project isolation
+  - Use pip and requirements.txt for dependency management
+  - Structure a Python automation project professionally
+tags:
+  - python
+  - installation
+  - setup
+  - pyenv
+  - venv
+---
+
+<Callout type="story" title="The Story">
+The production server runs Python 3.8. Your laptop has 3.12. The staging server has 3.9. Your deployment script works locally but fails in production because you used a 3.10 feature. You install pyenv, pin the project to 3.8, create a virtual environment, and freeze dependencies. Now everyone on the team — and every server in the pipeline — runs exactly the same Python with exactly the same packages. No more "works on my machine."
+</Callout>
+
+## Installing Python
+
+Most Linux distributions ship with Python, but the system Python is for the OS — not for your projects. Never install packages into the system Python with `sudo pip install`.
+
+### Check What's Already Installed
+
+```bash
+# Check system Python
+python3 --version
+which python3
+
+# Check if pip exists
+pip3 --version 2>/dev/null || echo "pip not installed"
+
+# NEVER do this:
+# sudo pip3 install requests  ← breaks system packages
+```
+
+<Callout type="warning" title="Do Not Use System Python">
+The system Python belongs to your OS. Installing packages into it with `sudo pip install` can break system tools like `apt` or `yum`. Always use pyenv + virtual environments for your projects.
+</Callout>
+
+### Option 1: System Package Manager (Quick Start)
+
+Good for servers where you just need Python available:
+
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install python3 python3-pip python3-venv
+
+# RHEL/CentOS/Rocky
+sudo dnf install python3 python3-pip
+
+# macOS
+brew install python@3.12
+```
+
+### Option 2: pyenv (Recommended for Development)
+
+pyenv lets you install and switch between multiple Python versions. This is the professional setup.
+
+```bash
+# Install pyenv dependencies (Ubuntu/Debian)
+sudo apt update
+sudo apt install -y build-essential libssl-dev zlib1g-dev \
+    libbz2-dev libreadline-dev libsqlite3-dev curl git \
+    libncursesw5-dev xz-utils tk-dev libxml2-dev \
+    libxmlsec1-dev libffi-dev liblzma-dev
+
+# Install pyenv
+curl https://pyenv.run | bash
+
+# Add to shell profile (~/.bashrc or ~/.zshrc)
+echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
+echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
+echo 'eval "$(pyenv init -)"' >> ~/.bashrc
+
+# Reload shell
+source ~/.bashrc
+```
+
+### Using pyenv
+
+```bash
+# List available Python versions
+pyenv install --list | grep "^  3\." | tail -10
+
+# Install specific versions
+pyenv install 3.11.9
+pyenv install 3.12.4
+
+# Set global default
+pyenv global 3.12.4
+
+# Set local version for a project directory
+cd ~/my-project
+pyenv local 3.11.9
+# This creates a .python-version file
+
+# Check current version
+pyenv version
+python --version
+
+# List installed versions
+pyenv versions
+```
+
+<Callout type="tip" title="Pin Your Project's Python Version">
+Always run `pyenv local 3.X.Y` in your project directory. This creates a `.python-version` file that everyone on the team (and CI/CD) can use to get the exact same version. Commit this file to git.
+</Callout>
+
+## Virtual Environments
+
+A virtual environment is an isolated Python installation for a specific project. Each project gets its own packages without conflicts.
+
+### Why Virtual Environments Matter
+
+```text
+Without venv:
+  Project A needs requests==2.28
+  Project B needs requests==2.31
+  → Conflict! One project breaks.
+
+With venv:
+  Project A → venv_a/ → requests==2.28
+  Project B → venv_b/ → requests==2.31
+  → Both work perfectly.
+```
+
+### Creating and Using Virtual Environments
+
+```bash
+# Create a virtual environment
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate
+
+# Your prompt changes to show the active venv
+(venv) $ which python
+/home/user/my-project/venv/bin/python
+
+(venv) $ which pip
+/home/user/my-project/venv/bin/pip
+
+# Install packages — goes into the venv, not system Python
+(venv) $ pip install requests boto3 pyyaml
+
+# Deactivate when done
+(venv) $ deactivate
+$ which python
+/home/user/.pyenv/shims/python  # Back to system/pyenv Python
+```
+
+### Virtual Environment Best Practices
+
+```bash
+# Always name your venv directory "venv" (convention)
+python3 -m venv venv
+
+# Always add venv to .gitignore
+echo "venv/" >> .gitignore
+
+# Always activate before working on a project
+source venv/bin/activate
+
+# Verify you're in the right environment
+which python
+pip list
+```
+
+## pip and Dependency Management
+
+pip is Python's package installer. Combined with `requirements.txt`, it ensures reproducible environments.
+
+### Basic pip Usage
+
+```bash
+# Activate your venv first!
+source venv/bin/activate
+
+# Install a package
+pip install requests
+
+# Install a specific version
+pip install requests==2.31.0
+
+# Install multiple packages
+pip install boto3 paramiko pyyaml
+
+# Upgrade a package
+pip install --upgrade requests
+
+# Uninstall a package
+pip uninstall requests
+
+# List installed packages
+pip list
+
+# Show package details
+pip show requests
+```
+
+### requirements.txt
+
+```bash
+# Freeze current packages to a file
+pip freeze > requirements.txt
+
+# View the file
+cat requirements.txt
+# boto3==1.34.69
+# botocore==1.34.69
+# certifi==2024.2.2
+# charset-normalizer==3.3.2
+# ...
+
+# Install from requirements.txt on another machine
+pip install -r requirements.txt
+```
+
+### Tiered Requirements Files
+
+Production DevOps projects often split requirements:
+
+```bash
+# requirements.txt — production dependencies
+requests==2.31.0
+boto3==1.34.69
+pyyaml==6.0.1
+paramiko==3.4.0
+
+# requirements-dev.txt — development/testing dependencies
+-r requirements.txt
+pytest==8.1.1
+black==24.3.0
+flake8==7.0.0
+mypy==1.9.0
+```
+
+```bash
+# Production: install only what's needed
+pip install -r requirements.txt
+
+# Development: install everything including dev tools
+pip install -r requirements-dev.txt
+```
+
+## Project Structure
+
+Organize your DevOps Python projects consistently:
+
+```text
+my-automation-project/
+├── .python-version        # pyenv version pin (3.11.9)
+├── .gitignore             # venv/, __pycache__/, .env
+├── requirements.txt       # Production dependencies
+├── requirements-dev.txt   # Dev/test dependencies
+├── README.md              # What this does and how to use it
+├── scripts/               # Standalone automation scripts
+│   ├── deploy.py
+│   ├── health_check.py
+│   └── cleanup.py
+├── lib/                   # Shared library code
+│   ├── __init__.py
+│   ├── aws_helpers.py
+│   └── notifications.py
+├── tests/                 # Test files
+│   ├── test_deploy.py
+│   └── test_helpers.py
+└── config/                # Configuration files
+    ├── prod.yml
+    └── staging.yml
+```
+
+## Shebang Lines and Executable Scripts
+
+Make your Python scripts executable from the command line:
+
+```python
+#!/usr/bin/env python3
+"""Script description — what this automation does."""
+
+import sys
+
+def main():
+    print("Running automation...")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+```bash
+# Make it executable
+chmod +x scripts/deploy.py
+
+# Run it directly
+./scripts/deploy.py
+
+# Or explicitly with python
+python scripts/deploy.py
+```
+
+<Callout type="tip" title="Use #!/usr/bin/env python3">
+Always use `#!/usr/bin/env python3` instead of `#!/usr/bin/python3`. The `env` version finds python3 wherever it's installed (pyenv, system, or custom path), making your script portable.
+</Callout>
+
+## IDE and Editor Setup
+
+### VS Code (Recommended)
+
+```bash
+# Install the Python extension
+code --install-extension ms-python.python
+
+# VS Code will auto-detect your venv and .python-version
+```
+
+Key VS Code settings for Python DevOps work:
+
+```json
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
+    "python.linting.enabled": true,
+    "python.linting.flake8Enabled": true,
+    "python.formatting.provider": "black",
+    "editor.formatOnSave": true,
+    "python.testing.pytestEnabled": true
+}
+```
+
+### Vim/Neovim
+
+```bash
+# Minimal .vimrc for Python
+# syntax on, filetype plugin indent on are usually defaults
+# Set Python-specific options:
+# autocmd FileType python setlocal expandtab shiftwidth=4 softtabstop=4
+```
+
+<Exercise number={1} title="Install Python with pyenv">
+
+Install pyenv and set up a Python version for DevOps work:
+
+```bash
+# Step 1: Install pyenv (if not already installed)
+curl https://pyenv.run | bash
+
+# Step 2: Add to your shell (add these to ~/.bashrc)
+export PYENV_ROOT="$HOME/.pyenv"
+command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init -)"
+
+# Step 3: Reload shell
+source ~/.bashrc
+
+# Step 4: Install Python 3.11
+pyenv install 3.11.9
+
+# Step 5: Set it as global default
+pyenv global 3.11.9
+
+# Step 6: Verify
+python --version    # Should show 3.11.9
+which python        # Should show pyenv path
+pip --version       # Should show pip with Python 3.11
+
+# Step 7: Create a project directory and pin the version
+mkdir -p ~/devops-scripts
+cd ~/devops-scripts
+pyenv local 3.11.9
+cat .python-version  # Should show 3.11.9
+```
+
+</Exercise>
+
+<Exercise number={2} title="Create a Virtual Environment with Dependencies">
+
+Set up a complete project environment:
+
+```bash
+# Step 1: Create project directory
+mkdir -p ~/devops-project
+cd ~/devops-project
+
+# Step 2: Pin Python version
+pyenv local 3.11.9
+
+# Step 3: Create virtual environment
+python -m venv venv
+
+# Step 4: Activate it
+source venv/bin/activate
+
+# Step 5: Verify isolation
+which python     # Should be in venv/
+which pip        # Should be in venv/
+
+# Step 6: Install DevOps packages
+pip install requests pyyaml boto3 paramiko
+
+# Step 7: Freeze dependencies
+pip freeze > requirements.txt
+cat requirements.txt
+
+# Step 8: Create .gitignore
+cat > .gitignore << 'EOF'
+venv/
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+EOF
+
+# Step 9: Create project structure
+mkdir -p scripts lib tests config
+touch lib/__init__.py
+
+# Step 10: Verify the setup
+python -c "import requests; print(f'requests {requests.__version__} installed')"
+python -c "import yaml; print(f'pyyaml installed')"
+python -c "import boto3; print(f'boto3 {boto3.__version__} installed')"
+
+# Step 11: Deactivate
+deactivate
+```
+
+</Exercise>
+
+<MiniProject title="Python Environment Setup Script">
+
+Create a script that automates the complete Python development environment setup for a new DevOps project:
+
+```python
+#!/usr/bin/env python3
+"""setup_project.py — Bootstrap a new DevOps Python project.
+
+Usage: python3 setup_project.py <project-name> [python-version]
+
+Creates a complete project structure with:
+- Virtual environment
+- .gitignore
+- requirements.txt with common DevOps packages
+- Project directory structure
+- Sample script template
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+# Default DevOps packages to install
+DEFAULT_PACKAGES = [
+    "requests",
+    "pyyaml",
+    "python-dotenv",
+]
+
+DEV_PACKAGES = [
+    "pytest",
+    "black",
+    "flake8",
+    "mypy",
+]
+
+GITIGNORE_CONTENT = """# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Testing/Linting
+.mypy_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# OS
+.DS_Store
+Thumbs.db
+"""
+
+SAMPLE_SCRIPT = '''#!/usr/bin/env python3
+"""Sample automation script — replace with your actual automation."""
+
+import argparse
+import logging
+import sys
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="Sample DevOps automation")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    logger.info("Starting automation...")
+    # Your automation logic here
+    logger.info("Automation complete.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+REQUIREMENTS_DEV = """-r requirements.txt
+pytest>=8.0.0
+black>=24.0.0
+flake8>=7.0.0
+mypy>=1.0.0
+"""
+
+
+def run_command(cmd, cwd=None):
+    """Run a shell command and return success status."""
+    result = subprocess.run(
+        cmd, shell=True, cwd=cwd,
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f"  Warning: '{cmd}' failed: {result.stderr.strip()}")
+        return False
+    return True
+
+
+def create_project(project_name, python_version=None):
+    """Create a complete DevOps Python project structure."""
+    project_path = Path.cwd() / project_name
+
+    if project_path.exists():
+        print(f"Error: Directory '{project_name}' already exists.")
+        return 1
+
+    print(f"Creating DevOps project: {project_name}")
+    print("=" * 50)
+
+    # Create directory structure
+    print("[1/7] Creating directory structure...")
+    directories = ["scripts", "lib", "tests", "config"]
+    for directory in directories:
+        (project_path / directory).mkdir(parents=True, exist_ok=True)
+
+    # Create __init__.py for lib
+    (project_path / "lib" / "__init__.py").touch()
+
+    # Pin Python version if pyenv is available
+    print("[2/7] Setting Python version...")
+    if python_version:
+        version_file = project_path / ".python-version"
+        version_file.write_text(f"{python_version}\n")
+        print(f"  Pinned to Python {python_version}")
+    else:
+        print("  No version specified — using system default")
+
+    # Create virtual environment
+    print("[3/7] Creating virtual environment...")
+    run_command(f"python3 -m venv venv", cwd=project_path)
+
+    venv_python = project_path / "venv" / "bin" / "python"
+    venv_pip = project_path / "venv" / "bin" / "pip"
+
+    # Upgrade pip
+    print("[4/7] Upgrading pip...")
+    run_command(f"{venv_pip} install --upgrade pip", cwd=project_path)
+
+    # Install packages
+    print("[5/7] Installing DevOps packages...")
+    packages = " ".join(DEFAULT_PACKAGES)
+    run_command(f"{venv_pip} install {packages}", cwd=project_path)
+
+    # Freeze requirements
+    print("[6/7] Generating requirements files...")
+    result = subprocess.run(
+        f"{venv_pip} freeze", shell=True, capture_output=True,
+        text=True, cwd=project_path
+    )
+    (project_path / "requirements.txt").write_text(result.stdout)
+    (project_path / "requirements-dev.txt").write_text(REQUIREMENTS_DEV)
+
+    # Create project files
+    print("[7/7] Creating project files...")
+    (project_path / ".gitignore").write_text(GITIGNORE_CONTENT)
+    sample_script = project_path / "scripts" / "sample.py"
+    sample_script.write_text(SAMPLE_SCRIPT)
+    sample_script.chmod(0o755)
+
+    # Initialize git
+    run_command("git init", cwd=project_path)
+    run_command("git add .", cwd=project_path)
+    run_command('git commit -m "Initial project structure"', cwd=project_path)
+
+    print()
+    print("=" * 50)
+    print(f"Project '{project_name}' created successfully!")
+    print()
+    print("Get started:")
+    print(f"  cd {project_name}")
+    print(f"  source venv/bin/activate")
+    print(f"  python scripts/sample.py")
+    print()
+    print("Project structure:")
+    for directory in sorted(project_path.rglob("*")):
+        if "venv" in str(directory) or ".git" in str(directory) or "__pycache__" in str(directory):
+            continue
+        relative = directory.relative_to(project_path)
+        depth = len(relative.parts) - 1
+        indent = "  " * depth
+        print(f"  {indent}{'/' if directory.is_dir() else ''}{directory.name}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python3 setup_project.py <project-name> [python-version]")
+        print("Example: python3 setup_project.py deploy-tools 3.11.9")
+        sys.exit(1)
+
+    name = sys.argv[1]
+    version = sys.argv[2] if len(sys.argv) > 2 else None
+    sys.exit(create_project(name, version))
+```
+
+Run it with: `python3 setup_project.py my-deploy-tools 3.11.9`
+
+This script does in 10 seconds what takes 5 minutes manually — and does it consistently every time. That's the DevOps mindset in action.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Never install packages into system Python — use pyenv and virtual environments
+- pyenv manages Python versions; venv manages project-specific packages
+- Pin your Python version with `pyenv local` and commit the `.python-version` file
+- Freeze dependencies with `pip freeze > requirements.txt` for reproducible builds
+- Structure projects consistently: scripts/, lib/, tests/, config/
+- Use `#!/usr/bin/env python3` for portable shebang lines
+- Separate production and development requirements into different files
+
+## What's Next
+
+Your Python environment is set up properly. In **Python Basics**, you'll learn the fundamentals — variables, types, strings, and operators — through DevOps-focused examples. Every concept will be taught in the context of automation scripts, not academic exercises.

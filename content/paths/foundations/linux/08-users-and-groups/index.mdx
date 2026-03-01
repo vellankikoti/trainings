@@ -1,0 +1,382 @@
+---
+title: "Users and Groups"
+description: "Understand Linux user management, groups, sudo, and the /etc/passwd and /etc/shadow files that control authentication on every Linux system."
+order: 8
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 07-file-operations
+objectives:
+  - Create, modify, and delete users and groups
+  - Understand /etc/passwd, /etc/shadow, and /etc/group
+  - Configure sudo access and the sudoers file
+  - Manage service accounts for applications
+tags:
+  - linux
+  - users
+  - groups
+  - security
+  - sudo
+---
+
+<Callout type="story" title="The Story">
+It's your second week on the job. The security team opens a ticket: "An ex-contractor's account still has SSH access to production servers." You need to audit all user accounts, disable the contractor's access, and verify no unauthorized accounts exist. This is user management in the real world — it's a security responsibility, not just administration.
+</Callout>
+
+## The Linux User Model
+
+Every process runs as a user. Every file is owned by a user. Linux uses numeric User IDs (UIDs) internally:
+
+| UID Range | Purpose |
+|---|---|
+| 0 | root (superuser) |
+| 1-999 | System/service accounts (daemons, services) |
+| 1000+ | Regular human users |
+
+```bash
+# Who am I?
+whoami
+id
+
+# Output: uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),27(sudo)
+```
+
+## Understanding `/etc/passwd`
+
+Every user account is defined in `/etc/passwd`:
+
+```bash
+cat /etc/passwd | head -5
+# root:x:0:0:root:/root:/bin/bash
+# daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+# bin:x:2:2:bin:/bin:/usr/sbin/nologin
+# ubuntu:x:1000:1000:Ubuntu User:/home/ubuntu:/bin/bash
+```
+
+Each line has 7 colon-separated fields:
+
+```
+username:password:UID:GID:comment:home_directory:shell
+```
+
+| Field | Example | Meaning |
+|---|---|---|
+| username | `ubuntu` | Login name |
+| password | `x` | `x` means password is in /etc/shadow |
+| UID | `1000` | User ID number |
+| GID | `1000` | Primary group ID |
+| comment | `Ubuntu User` | Full name or description |
+| home | `/home/ubuntu` | Home directory path |
+| shell | `/bin/bash` | Login shell (`/usr/sbin/nologin` = no login) |
+
+## Understanding `/etc/shadow`
+
+Password hashes live in `/etc/shadow` (readable only by root):
+
+```bash
+sudo cat /etc/shadow | grep ubuntu
+# ubuntu:$6$abc123...:19500:0:99999:7:::
+```
+
+Fields: `username:hash:last_changed:min_age:max_age:warn:inactive:expire:reserved`
+
+<Callout type="info">
+The `$6$` prefix means SHA-512 hashing. `$5$` = SHA-256. `!!` or `!` means the account is locked (no password set).
+</Callout>
+
+## Creating Users — `useradd`
+
+```bash
+# Create a user with defaults
+sudo useradd john
+
+# Create with all options (the proper way)
+sudo useradd -m -s /bin/bash -c "John Smith" -G sudo,docker john
+#  -m  create home directory
+#  -s  set login shell
+#  -c  set comment/full name
+#  -G  add to supplementary groups
+
+# Set the password
+sudo passwd john
+
+# Create a system account (for services)
+sudo useradd -r -s /usr/sbin/nologin -c "Nginx Service" nginx
+#  -r  system account (UID < 1000)
+#  -s /usr/sbin/nologin  prevent interactive login
+```
+
+### `adduser` vs `useradd`
+
+On Debian/Ubuntu, `adduser` is a friendlier wrapper:
+
+```bash
+# Interactive — prompts for password, name, etc.
+sudo adduser jane
+
+# Non-interactive (same as useradd)
+sudo useradd -m -s /bin/bash jane
+sudo passwd jane
+```
+
+## Modifying Users — `usermod`
+
+```bash
+# Add user to a group (append, don't replace)
+sudo usermod -aG docker john
+# CRITICAL: always use -a (append). Without it, ALL other groups are removed!
+
+# Change login shell
+sudo usermod -s /bin/zsh john
+
+# Lock an account (disable login)
+sudo usermod -L john
+
+# Unlock an account
+sudo usermod -U john
+
+# Change home directory
+sudo usermod -d /new/home -m john    # -m moves existing files
+
+# Change username
+sudo usermod -l newname oldname
+```
+
+<Callout type="warning" title="The -aG Trap">
+`usermod -G docker john` REPLACES all supplementary groups with just `docker`. Always use `-aG` to APPEND. This is one of the most common and dangerous user management mistakes.
+</Callout>
+
+## Deleting Users — `userdel`
+
+```bash
+# Remove user but keep home directory
+sudo userdel john
+
+# Remove user AND their home directory
+sudo userdel -r john
+
+# Check for leftover files owned by old UID
+sudo find / -nouser -type f 2>/dev/null
+```
+
+## Groups
+
+Groups let you manage permissions for multiple users at once:
+
+```bash
+# View groups for current user
+groups
+id
+
+# View groups for another user
+groups john
+id john
+
+# Create a group
+sudo groupadd developers
+
+# Add user to group
+sudo usermod -aG developers john
+
+# Remove user from group (on Debian/Ubuntu)
+sudo deluser john developers
+
+# Delete a group
+sudo groupdel developers
+
+# View all groups
+cat /etc/group | head -10
+```
+
+### `/etc/group` Format
+
+```bash
+cat /etc/group | grep sudo
+# sudo:x:27:ubuntu,john
+```
+
+Fields: `groupname:password:GID:members`
+
+<Exercise number={1} title="User Management">
+
+Practice user and group management:
+
+```bash
+# 1. Create a "devops" group
+sudo groupadd devops
+
+# 2. Create two users
+sudo useradd -m -s /bin/bash -c "Alice Engineer" -G devops alice
+sudo useradd -m -s /bin/bash -c "Bob Operator" -G devops bob
+
+# 3. Set passwords
+echo "alice:password123" | sudo chpasswd
+echo "bob:password123" | sudo chpasswd
+
+# 4. Verify their details
+id alice
+id bob
+grep -E "alice|bob" /etc/passwd
+
+# 5. Create a shared project directory
+sudo mkdir -p /opt/team-project
+sudo chown root:devops /opt/team-project
+sudo chmod 2775 /opt/team-project
+
+# 6. Test: switch to alice and create a file
+sudo -u alice touch /opt/team-project/alice-file.txt
+ls -la /opt/team-project/
+
+# 7. Clean up
+sudo userdel -r alice
+sudo userdel -r bob
+sudo groupdel devops
+```
+
+</Exercise>
+
+## The `sudo` System
+
+`sudo` lets regular users run commands as root (or other users):
+
+```bash
+# Run a command as root
+sudo apt update
+
+# Run as a specific user
+sudo -u postgres psql
+
+# Open a root shell
+sudo -i    # login shell (loads root's environment)
+sudo -s    # non-login shell (keeps your environment)
+
+# Check what you can run
+sudo -l
+```
+
+### The Sudoers File
+
+```bash
+# NEVER edit directly — always use visudo
+sudo visudo
+
+# Typical sudoers entries:
+# root    ALL=(ALL:ALL) ALL          # root can do anything
+# %sudo   ALL=(ALL:ALL) ALL          # sudo group members can do anything
+# deploy  ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
+#   ^       ^    ^      ^         ^
+#   user  hosts users  no password  specific command only
+```
+
+### Best Practice: Use Group-Based Sudo
+
+```bash
+# Add to /etc/sudoers.d/ instead of editing sudoers directly
+echo "%devops ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx, /usr/bin/systemctl restart app" | sudo tee /etc/sudoers.d/devops
+sudo chmod 440 /etc/sudoers.d/devops
+
+# Validate syntax
+sudo visudo -c
+```
+
+<Exercise number={2} title="Sudo Configuration">
+
+Create a limited sudo configuration:
+
+```bash
+# 1. Create a deployment user
+sudo useradd -m -s /bin/bash -c "Deploy Bot" deployer
+
+# 2. Create a sudoers rule that allows deployer to restart services
+echo "deployer ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart *" | sudo tee /etc/sudoers.d/deployer
+sudo chmod 440 /etc/sudoers.d/deployer
+
+# 3. Validate the sudoers file
+sudo visudo -c
+
+# 4. Test the rule
+sudo -u deployer sudo -l
+# Should show the systemctl restart permission
+
+# 5. Test running the allowed command
+sudo -u deployer sudo systemctl restart cron 2>/dev/null || echo "Service restart attempted"
+
+# 6. Clean up
+sudo rm /etc/sudoers.d/deployer
+sudo userdel -r deployer
+```
+
+</Exercise>
+
+<MiniProject title="User Audit Script">
+
+Create a script that audits all user accounts on the system:
+
+```bash
+cat > ~/user-audit.sh << 'SCRIPT'
+#!/bin/bash
+# User Audit Script — security review of all accounts
+
+echo "=== User Account Audit ==="
+echo "Date: $(date)"
+echo "Hostname: $(hostname)"
+echo ""
+
+echo "--- Human Users (UID >= 1000) ---"
+awk -F: '$3 >= 1000 && $3 < 65534 {printf "  %-15s UID=%-6d Shell=%-20s Home=%s\n", $1, $3, $7, $6}' /etc/passwd
+
+echo ""
+echo "--- Users with Login Shells ---"
+grep -v '/nologin\|/false' /etc/passwd | awk -F: '{printf "  %-15s Shell=%s\n", $1, $7}'
+
+echo ""
+echo "--- Accounts with No Password ---"
+sudo awk -F: '$2 == "" || $2 == "!" || $2 == "!!" {print "  " $1}' /etc/shadow 2>/dev/null
+
+echo ""
+echo "--- Users in sudo/wheel Group ---"
+getent group sudo 2>/dev/null | awk -F: '{print "  " $4}'
+getent group wheel 2>/dev/null | awk -F: '{print "  " $4}'
+
+echo ""
+echo "--- Users with UID 0 (root equivalent) ---"
+awk -F: '$3 == 0 {print "  " $1}' /etc/passwd
+
+echo ""
+echo "--- Recently Modified Users (last 30 days) ---"
+find /home -maxdepth 1 -type d -mtime -30 2>/dev/null | while read dir; do
+    echo "  $dir"
+done
+
+echo ""
+echo "--- Sudoers Rules ---"
+if [ -d /etc/sudoers.d ]; then
+    for f in /etc/sudoers.d/*; do
+        echo "  File: $f"
+        sudo cat "$f" 2>/dev/null | grep -v "^#" | grep -v "^$" | sed 's/^/    /'
+    done
+fi
+
+echo ""
+echo "=== Audit Complete ==="
+SCRIPT
+
+chmod +x ~/user-audit.sh
+~/user-audit.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Every user has a UID; root is always UID 0
+- `/etc/passwd` stores account info; `/etc/shadow` stores password hashes
+- Always use `usermod -aG` (with `-a`) to add users to groups
+- Service accounts should use `/usr/sbin/nologin` as their shell
+- Never edit `/etc/sudoers` directly — use `visudo` or drop-in files in `/etc/sudoers.d/`
+- Principle of least privilege: give users only the sudo access they need
+- Audit user accounts regularly — orphaned accounts are a security risk
+
+## What's Next
+
+Users and groups define who can access the system. But what exactly can they do with files? In **Permissions Deep Dive**, you'll master `chmod`, `chown`, `chgrp`, and the permission model that controls every file and directory on Linux.

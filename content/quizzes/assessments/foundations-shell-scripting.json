@@ -1,0 +1,813 @@
+{
+  "id": "assessment-foundations-shell-scripting",
+  "title": "Shell Scripting Foundations Assessment",
+  "description": "Comprehensive assessment covering all Shell Scripting fundamentals across 16 lessons. Pass this to earn your Shell Scripting Foundations certificate.",
+  "lessonSlug": "_assessment",
+  "moduleSlug": "shell-scripting",
+  "pathSlug": "foundations",
+  "passingScore": 80,
+  "timeLimit": 2700,
+  "isAssessment": true,
+  "xpRewards": {
+    "pass": 200,
+    "perfect": 300,
+    "retry": 50
+  },
+  "questions": [
+    {
+      "id": "a-ss-q1",
+      "type": "multiple_choice",
+      "question": "Why is shell scripting considered essential for DevOps engineers?",
+      "options": [
+        "A) It is the only programming language available on Linux",
+        "B) It automates repetitive tasks and integrates directly with the OS and CLI tools",
+        "C) It is faster than all compiled languages",
+        "D) It replaces the need for configuration management tools entirely"
+      ],
+      "correctAnswer": "B) It automates repetitive tasks and integrates directly with the OS and CLI tools",
+      "explanation": "Shell scripting is essential for DevOps because it directly interfaces with the operating system and command-line tools, making it ideal for automating repetitive system administration tasks, deployments, and infrastructure management.",
+      "difficulty": "beginner",
+      "lessonRef": "01-why-shell-scripting"
+    },
+    {
+      "id": "a-ss-q2",
+      "type": "true_false",
+      "question": "Shell scripts can only be used for simple file manipulation tasks and are not suitable for orchestrating complex workflows.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "Shell scripts are used for a wide range of tasks including complex deployments, monitoring pipelines, backup orchestration, CI/CD automation, and system provisioning. They excel at composing existing CLI tools into sophisticated workflows.",
+      "difficulty": "beginner",
+      "lessonRef": "01-why-shell-scripting"
+    },
+    {
+      "id": "a-ss-q3",
+      "type": "multiple_choice",
+      "question": "What is the purpose of the shebang line (#!/bin/bash) at the top of a script?",
+      "options": [
+        "A) It is a comment that documents the script author",
+        "B) It tells the operating system which interpreter to use to execute the script",
+        "C) It makes the script executable without chmod",
+        "D) It imports the bash standard library"
+      ],
+      "correctAnswer": "B) It tells the operating system which interpreter to use to execute the script",
+      "explanation": "The shebang (#!) on the first line tells the OS kernel which interpreter should be used to run the script when it is executed directly (e.g., ./script.sh). Without it, the system may use a default shell that might not be bash.",
+      "difficulty": "beginner",
+      "lessonRef": "02-first-script"
+    },
+    {
+      "id": "a-ss-q4",
+      "type": "multiple_choice",
+      "question": "What does 'set -euo pipefail' do when placed at the top of a bash script?",
+      "options": [
+        "A) -e exits on error, -u treats unset variables as errors, -o pipefail makes pipelines fail if any command fails",
+        "B) -e enables echo mode, -u unlocks files, -o pipefail optimizes pipe performance",
+        "C) -e enables extensions, -u enables Unicode, -o pipefail enables parallel pipes",
+        "D) -e exports all variables, -u updates the PATH, -o pipefail falls through pipe errors"
+      ],
+      "correctAnswer": "A) -e exits on error, -u treats unset variables as errors, -o pipefail makes pipelines fail if any command fails",
+      "explanation": "'set -e' causes the script to exit immediately if any command returns a non-zero status. 'set -u' treats references to unset variables as errors. 'set -o pipefail' ensures a pipeline's exit status reflects the last non-zero exit code in the pipe chain, not just the final command.",
+      "difficulty": "beginner",
+      "lessonRef": "02-first-script"
+    },
+    {
+      "id": "a-ss-q5",
+      "type": "multiple_choice",
+      "question": "What exit code does a script return by default when it completes successfully?",
+      "options": [
+        "A) 1",
+        "B) -1",
+        "C) 0",
+        "D) 255"
+      ],
+      "correctAnswer": "C) 0",
+      "explanation": "By convention, an exit code of 0 indicates success. Any non-zero exit code indicates some form of failure. If a script does not explicitly call 'exit', it returns the exit code of the last command executed.",
+      "difficulty": "beginner",
+      "lessonRef": "02-first-script"
+    },
+    {
+      "id": "a-ss-q6",
+      "type": "code_completion",
+      "question": "Complete the shebang line that uses the env command to find bash, making the script portable across systems:\n\n#!_____ bash\nset -euo pipefail",
+      "options": [
+        "A) /usr/bin/env",
+        "B) /bin/env",
+        "C) /usr/bin/",
+        "D) /usr/local/bin/env"
+      ],
+      "correctAnswer": "A) /usr/bin/env",
+      "explanation": "Using '#!/usr/bin/env bash' is more portable than '#!/bin/bash' because bash may be installed in different locations on different systems. The env command searches the PATH to find the interpreter.",
+      "difficulty": "beginner",
+      "lessonRef": "02-first-script"
+    },
+    {
+      "id": "a-ss-q7",
+      "type": "multiple_choice",
+      "question": "What is the difference between single quotes and double quotes in bash?",
+      "options": [
+        "A) There is no difference; they are interchangeable",
+        "B) Single quotes preserve literal text; double quotes allow variable expansion and command substitution",
+        "C) Double quotes preserve literal text; single quotes allow variable expansion",
+        "D) Single quotes are for strings; double quotes are for numbers"
+      ],
+      "correctAnswer": "B) Single quotes preserve literal text; double quotes allow variable expansion and command substitution",
+      "explanation": "Single quotes treat everything between them as a literal string -- no variable expansion ($var), command substitution ($(cmd)), or escape sequences are processed. Double quotes allow variable expansion and command substitution while still preventing word splitting and globbing.",
+      "difficulty": "beginner",
+      "lessonRef": "03-variables"
+    },
+    {
+      "id": "a-ss-q8",
+      "type": "code_completion",
+      "question": "What does the following parameter expansion evaluate to if the variable 'name' is unset?\n\necho \"Hello, ${name_____World}\"",
+      "options": [
+        "A) :-",
+        "B) :=",
+        "C) :+",
+        "D) :?"
+      ],
+      "correctAnswer": "A) :-",
+      "explanation": "${var:-default} returns 'default' if var is unset or empty, without assigning it. ${var:=default} assigns the default. ${var:+alternate} returns alternate only if var IS set. ${var:?error} exits with an error if var is unset.",
+      "difficulty": "beginner",
+      "lessonRef": "03-variables"
+    },
+    {
+      "id": "a-ss-q9",
+      "type": "multiple_choice",
+      "question": "Given filepath='/var/log/syslog.tar.gz', what does ${filepath%.*} evaluate to?",
+      "options": [
+        "A) /var/log/syslog",
+        "B) /var/log/syslog.tar",
+        "C) syslog.tar.gz",
+        "D) .gz"
+      ],
+      "correctAnswer": "B) /var/log/syslog.tar",
+      "explanation": "${var%pattern} removes the shortest match of pattern from the end of var. The pattern '.*' matches '.gz' (shortest match from the end), leaving '/var/log/syslog.tar'. Use '%%' for the longest match, which would give '/var/log/syslog'.",
+      "difficulty": "intermediate",
+      "lessonRef": "03-variables"
+    },
+    {
+      "id": "a-ss-q10",
+      "type": "code_completion",
+      "question": "Complete the arithmetic expression to increment the counter variable:\n\ncounter=5\n_____ counter++ ))\necho $counter  # prints 6",
+      "options": [
+        "A) ((",
+        "B) $(",
+        "C) ${",
+        "D) [["
+      ],
+      "correctAnswer": "A) ((",
+      "explanation": "The (( )) syntax is used for arithmetic evaluation in bash. Inside (( )), you can use C-style operations like ++, --, +=, -=, and standard math operators without the $ prefix on variable names.",
+      "difficulty": "beginner",
+      "lessonRef": "03-variables"
+    },
+    {
+      "id": "a-ss-q11",
+      "type": "multiple_choice",
+      "question": "In a bash script, what does $@ represent when quoted as \"$@\"?",
+      "options": [
+        "A) A single string containing all positional parameters",
+        "B) Each positional parameter as a separate quoted word",
+        "C) The name of the script",
+        "D) The number of positional parameters"
+      ],
+      "correctAnswer": "B) Each positional parameter as a separate quoted word",
+      "explanation": "\"$@\" expands each positional parameter as a separate quoted string, preserving arguments that contain spaces. This is different from \"$*\" which joins all parameters into a single string separated by the first character of IFS.",
+      "difficulty": "beginner",
+      "lessonRef": "04-user-input"
+    },
+    {
+      "id": "a-ss-q12",
+      "type": "code_completion",
+      "question": "Complete the getopts loop to handle -v (verbose) and -f (file with argument) flags:\n\nwhile getopts _____ opt; do\n  case $opt in\n    v) verbose=true ;;\n    f) file=\"$OPTARG\" ;;\n    ?) echo \"Usage: $0 [-v] [-f file]\" >&2; exit 1 ;;\n  esac\ndone",
+      "options": [
+        "A) \"vf:\"",
+        "B) \"v:f:\"",
+        "C) \"v:f\"",
+        "D) \"-v -f:\""
+      ],
+      "correctAnswer": "A) \"vf:\"",
+      "explanation": "In the getopts option string, a letter alone (v) means that flag takes no argument, while a letter followed by a colon (f:) means that flag requires an argument. So 'vf:' means -v is a boolean flag and -f expects a value.",
+      "difficulty": "intermediate",
+      "lessonRef": "04-user-input"
+    },
+    {
+      "id": "a-ss-q13",
+      "type": "multiple_choice",
+      "question": "What is the safest way to read user input into a variable including lines with backslashes?",
+      "options": [
+        "A) read input",
+        "B) read -r input",
+        "C) input=$(cat)",
+        "D) scanf input"
+      ],
+      "correctAnswer": "B) read -r input",
+      "explanation": "The -r flag prevents read from interpreting backslash as an escape character. Without -r, a backslash before a character would be treated as an escape sequence, which can corrupt input data. Always use 'read -r' for safe input handling.",
+      "difficulty": "beginner",
+      "lessonRef": "04-user-input"
+    },
+    {
+      "id": "a-ss-q14",
+      "type": "multiple_choice",
+      "question": "Which test operator checks if a file exists and is a regular file (not a directory)?",
+      "options": [
+        "A) -e",
+        "B) -d",
+        "C) -f",
+        "D) -r"
+      ],
+      "correctAnswer": "C) -f",
+      "explanation": "-f tests if the path exists AND is a regular file. -e only checks existence (could be a directory, symlink, etc.). -d checks if it is a directory. -r checks if the file is readable.",
+      "difficulty": "beginner",
+      "lessonRef": "05-conditionals"
+    },
+    {
+      "id": "a-ss-q15",
+      "type": "multiple_choice",
+      "question": "What is the difference between -z and -n test operators for strings?",
+      "options": [
+        "A) -z checks if a string is zero-length (empty); -n checks if a string is non-empty",
+        "B) -z checks if a variable is a number; -n checks if it is not a number",
+        "C) -z compresses the string; -n normalizes it",
+        "D) They are aliases for the same operation"
+      ],
+      "correctAnswer": "A) -z checks if a string is zero-length (empty); -n checks if a string is non-empty",
+      "explanation": "[ -z \"$var\" ] returns true if the string is empty (zero length). [ -n \"$var\" ] returns true if the string is not empty (non-zero length). Always quote variables in test expressions to avoid errors with empty strings.",
+      "difficulty": "beginner",
+      "lessonRef": "05-conditionals"
+    },
+    {
+      "id": "a-ss-q16",
+      "type": "code_completion",
+      "question": "Complete the case statement to match .tar.gz or .tgz files:\n\ncase \"$filename\" in\n  _____)\n    echo \"Gzipped tarball\"\n    ;;\nesac",
+      "options": [
+        "A) *.tar.gz | *.tgz",
+        "B) .tar.gz || .tgz",
+        "C) {tar.gz,tgz}",
+        "D) *.tar.gz && *.tgz"
+      ],
+      "correctAnswer": "A) *.tar.gz | *.tgz",
+      "explanation": "In a case statement, patterns are separated by the pipe character | (meaning OR). Each pattern uses glob-style matching where * matches any string. The double pipe || and && are logical operators used in conditionals, not in case patterns.",
+      "difficulty": "beginner",
+      "lessonRef": "05-conditionals"
+    },
+    {
+      "id": "a-ss-q17",
+      "type": "multiple_choice",
+      "question": "Which integer comparison operator tests if one value is greater than another inside [ ] brackets?",
+      "options": [
+        "A) >",
+        "B) -gt",
+        "C) -ge",
+        "D) -greater"
+      ],
+      "correctAnswer": "B) -gt",
+      "explanation": "Inside [ ] (test), integer comparisons use -eq, -ne, -lt, -le, -gt, -ge. The > operator inside [ ] is for string comparison (or redirection). Inside [[ ]] or (( )), you can use > for numeric comparison.",
+      "difficulty": "beginner",
+      "lessonRef": "05-conditionals"
+    },
+    {
+      "id": "a-ss-q18",
+      "type": "multiple_choice",
+      "question": "Which for loop syntax iterates over a range of numbers from 1 to 10?",
+      "options": [
+        "A) for i in {1..10}; do echo $i; done",
+        "B) for i from 1 to 10; do echo $i; done",
+        "C) for (i=1; i<=10; i++); do echo $i; done",
+        "D) for i in range(1,10); do echo $i; done"
+      ],
+      "correctAnswer": "A) for i in {1..10}; do echo $i; done",
+      "explanation": "Bash supports brace expansion {start..end} for generating sequences. The C-style for loop uses double parentheses: for ((i=1; i<=10; i++)). The other syntaxes are not valid in bash.",
+      "difficulty": "beginner",
+      "lessonRef": "06-loops"
+    },
+    {
+      "id": "a-ss-q19",
+      "type": "code_completion",
+      "question": "Complete the while loop to read a file line by line safely:\n\nwhile _____ line; do\n  echo \"$line\"\ndone < input.txt",
+      "options": [
+        "A) IFS= read -r",
+        "B) read",
+        "C) get",
+        "D) scan -r"
+      ],
+      "correctAnswer": "A) IFS= read -r",
+      "explanation": "'IFS= read -r line' is the safest way to read lines. 'IFS=' prevents leading/trailing whitespace from being stripped, and '-r' prevents backslash interpretation. This idiom preserves the exact content of each line.",
+      "difficulty": "intermediate",
+      "lessonRef": "06-loops"
+    },
+    {
+      "id": "a-ss-q20",
+      "type": "multiple_choice",
+      "question": "What is the difference between 'break' and 'continue' in a bash loop?",
+      "options": [
+        "A) They are identical and can be used interchangeably",
+        "B) 'break' exits the loop entirely; 'continue' skips to the next iteration",
+        "C) 'break' pauses the loop; 'continue' resumes it",
+        "D) 'break' exits the script; 'continue' exits the loop"
+      ],
+      "correctAnswer": "B) 'break' exits the loop entirely; 'continue' skips to the next iteration",
+      "explanation": "'break' immediately terminates the enclosing loop and continues execution after it. 'continue' skips the remaining commands in the current iteration and proceeds to the next iteration. Both accept an optional numeric argument to affect nested loops (e.g., break 2 exits two levels).",
+      "difficulty": "beginner",
+      "lessonRef": "06-loops"
+    },
+    {
+      "id": "a-ss-q21",
+      "type": "multiple_choice",
+      "question": "What does the 'local' keyword do inside a bash function?",
+      "options": [
+        "A) Makes the variable read-only",
+        "B) Restricts the variable's scope to the function and its children",
+        "C) Exports the variable to the environment",
+        "D) Makes the variable persist after the script exits"
+      ],
+      "correctAnswer": "B) Restricts the variable's scope to the function and its children",
+      "explanation": "The 'local' keyword creates a variable that is only visible within the function where it is declared (and any functions called from it). Without 'local', variables are global by default in bash, which can lead to unintended side effects.",
+      "difficulty": "intermediate",
+      "lessonRef": "07-functions"
+    },
+    {
+      "id": "a-ss-q22",
+      "type": "multiple_choice",
+      "question": "How do bash functions communicate return values?",
+      "options": [
+        "A) Only through the 'return' statement, which can return any integer or string",
+        "B) Only by echoing to stdout, which the caller captures with $(...)",
+        "C) 'return' sets the exit status (0-255); for data, use stdout capture with $(...) or a global variable",
+        "D) Functions cannot return values in bash"
+      ],
+      "correctAnswer": "C) 'return' sets the exit status (0-255); for data, use stdout capture with $(...) or a global variable",
+      "explanation": "The 'return' statement only sets the function's exit status (an integer from 0-255), accessible via $?. To return data (strings, numbers), the function should echo/printf the value, and the caller captures it with $(function_name). Alternatively, a global variable can be set.",
+      "difficulty": "intermediate",
+      "lessonRef": "07-functions"
+    },
+    {
+      "id": "a-ss-q23",
+      "type": "code_completion",
+      "question": "Complete the trap statement to ensure a temporary file is deleted when the script exits, regardless of how it exits:\n\ntmpfile=$(mktemp)\n_____ 'rm -f \"$tmpfile\"' EXIT",
+      "options": [
+        "A) trap",
+        "B) on_exit",
+        "C) finally",
+        "D) atexit"
+      ],
+      "correctAnswer": "A) trap",
+      "explanation": "The 'trap' builtin registers a command to run when the shell receives a specified signal. 'trap command EXIT' runs the command when the script exits for any reason (normal completion, error, or signal). This is the standard pattern for cleanup in shell scripts.",
+      "difficulty": "intermediate",
+      "lessonRef": "07-functions"
+    },
+    {
+      "id": "a-ss-q24",
+      "type": "multiple_choice",
+      "question": "How do you declare an indexed array and access all its elements in bash?",
+      "options": [
+        "A) declare -a arr=(one two three); echo ${arr[@]}",
+        "B) arr = [one, two, three]; echo $arr",
+        "C) array arr = {one two three}; echo arr[*]",
+        "D) declare -A arr=(one two three); echo ${arr}"
+      ],
+      "correctAnswer": "A) declare -a arr=(one two three); echo ${arr[@]}",
+      "explanation": "'declare -a' creates an indexed array (though it is optional for indexed arrays). Elements are assigned with parentheses. ${arr[@]} expands to all elements. ${arr[*]} also expands all elements but behaves differently when quoted. 'declare -A' creates an associative array.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-arrays-and-strings"
+    },
+    {
+      "id": "a-ss-q25",
+      "type": "code_completion",
+      "question": "Complete the syntax to get the number of elements in a bash array:\n\nfruits=(apple banana cherry date)\necho \"Count: _____\"",
+      "options": [
+        "A) ${#fruits[@]}",
+        "B) ${fruits.length}",
+        "C) len(${fruits[@]})",
+        "D) ${fruits.count}"
+      ],
+      "correctAnswer": "A) ${#fruits[@]}",
+      "explanation": "${#arr[@]} returns the number of elements in the array. The # prefix is the length operator in bash parameter expansion. Similarly, ${#string} returns the length of a string variable.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-arrays-and-strings"
+    },
+    {
+      "id": "a-ss-q26",
+      "type": "multiple_choice",
+      "question": "How do you declare and use an associative array in bash?",
+      "options": [
+        "A) declare -A map; map[key]=\"value\"; echo ${map[key]}",
+        "B) declare -a map; map{key}=\"value\"; echo $map{key}",
+        "C) map = {key: value}; echo $map.key",
+        "D) assoc map; map.key = value; echo map.key"
+      ],
+      "correctAnswer": "A) declare -A map; map[key]=\"value\"; echo ${map[key]}",
+      "explanation": "Associative arrays MUST be explicitly declared with 'declare -A'. They use string keys in square brackets. Access elements with ${map[key]}. To iterate keys: ${!map[@]}. Associative arrays require bash 4.0 or later.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-arrays-and-strings"
+    },
+    {
+      "id": "a-ss-q27",
+      "type": "multiple_choice",
+      "question": "What does the following string manipulation produce?\n\nstr=\"Hello, World!\"\necho \"${str:7:5}\"",
+      "options": [
+        "A) Hello",
+        "B) World",
+        "C) , Wor",
+        "D) World!"
+      ],
+      "correctAnswer": "B) World",
+      "explanation": "${str:offset:length} extracts a substring. Starting at index 7 (0-based) for 5 characters from 'Hello, World!' gives 'World'. The comma and space at positions 5 and 6 are skipped.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-arrays-and-strings"
+    },
+    {
+      "id": "a-ss-q28",
+      "type": "multiple_choice",
+      "question": "What is the recommended command for creating temporary files safely in a shell script?",
+      "options": [
+        "A) touch /tmp/myfile.$$",
+        "B) mktemp",
+        "C) echo \"\" > /tmp/tmpfile",
+        "D) tempfile=$(date +%s)"
+      ],
+      "correctAnswer": "B) mktemp",
+      "explanation": "mktemp creates a temporary file with a unique, unpredictable name and sets secure permissions (0600). Using predictable names like /tmp/myfile.$$ is vulnerable to symlink attacks (a security issue called TOCTOU). Always use mktemp and clean up with a trap.",
+      "difficulty": "intermediate",
+      "lessonRef": "09-file-operations"
+    },
+    {
+      "id": "a-ss-q29",
+      "type": "code_completion",
+      "question": "Complete the file locking command to ensure only one instance of a script runs at a time:\n\n(\n  _____ -n 200 || { echo \"Already running\"; exit 1; }\n  # critical section\n) 200>/var/lock/myscript.lock",
+      "options": [
+        "A) flock",
+        "B) lock",
+        "C) mutex",
+        "D) semaphore"
+      ],
+      "correctAnswer": "A) flock",
+      "explanation": "'flock' is the standard Linux utility for file-based locking. The -n flag makes it non-blocking (fail immediately if lock is held). The file descriptor 200 is redirected to the lock file. This pattern ensures mutual exclusion for scripts that should not run concurrently.",
+      "difficulty": "intermediate",
+      "lessonRef": "09-file-operations"
+    },
+    {
+      "id": "a-ss-q30",
+      "type": "true_false",
+      "question": "When redirecting output in bash, '2>&1' redirects standard error (fd 2) to the same destination as standard output (fd 1).",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "File descriptor 2 is stderr, and file descriptor 1 is stdout. The syntax '2>&1' duplicates fd 1 onto fd 2, sending stderr to wherever stdout is currently going. This is commonly used as 'command > file.log 2>&1' to capture both streams.",
+      "difficulty": "intermediate",
+      "lessonRef": "09-file-operations"
+    },
+    {
+      "id": "a-ss-q31",
+      "type": "multiple_choice",
+      "question": "Which grep command uses extended regular expressions to find lines containing either 'error' or 'warning' (case-insensitive)?",
+      "options": [
+        "A) grep -Ei 'error|warning' logfile",
+        "B) grep -F 'error|warning' logfile",
+        "C) grep -P 'error&&warning' logfile",
+        "D) grep -w 'error warning' logfile"
+      ],
+      "correctAnswer": "A) grep -Ei 'error|warning' logfile",
+      "explanation": "-E enables extended regex (allowing | for alternation without escaping). -i makes the search case-insensitive. -F treats the pattern as a fixed string (no regex). -w matches whole words only. -P enables Perl-compatible regex.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-text-processing"
+    },
+    {
+      "id": "a-ss-q32",
+      "type": "code_completion",
+      "question": "Complete the sed command to replace all occurrences of 'http://' with 'https://' in a file, editing it in place:\n\nsed _____ 's|http://|https://|g' config.txt",
+      "options": [
+        "A) -i",
+        "B) -e",
+        "C) -n",
+        "D) -r"
+      ],
+      "correctAnswer": "A) -i",
+      "explanation": "The -i flag (in-place) tells sed to modify the file directly instead of printing to stdout. Note: on macOS, sed -i requires a backup extension argument (e.g., sed -i '' or sed -i.bak). The | delimiter is used here to avoid escaping the / characters in URLs.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-text-processing"
+    },
+    {
+      "id": "a-ss-q33",
+      "type": "multiple_choice",
+      "question": "What does the following sed command do?\n\nsed -E 's/([0-9]{4})-([0-9]{2})-([0-9]{2})/\\3\\/\\2\\/\\1/g' dates.txt",
+      "options": [
+        "A) Removes all dates from the file",
+        "B) Converts dates from YYYY-MM-DD format to DD/MM/YYYY format",
+        "C) Validates date formats in the file",
+        "D) Sorts the dates chronologically"
+      ],
+      "correctAnswer": "B) Converts dates from YYYY-MM-DD format to DD/MM/YYYY format",
+      "explanation": "The regex captures three groups: year (\\1), month (\\2), and day (\\3). The replacement reorders them as \\3/\\2/\\1 (DD/MM/YYYY). The -E flag enables extended regex so parentheses do not need escaping. This demonstrates capture group reordering in sed.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-text-processing"
+    },
+    {
+      "id": "a-ss-q34",
+      "type": "code_completion",
+      "question": "Complete the awk command to print the sum of values in the third column of a space-delimited file:\n\nawk '{ sum += _____ } END { print sum }' data.txt",
+      "options": [
+        "A) $3",
+        "B) col[3]",
+        "C) field(3)",
+        "D) %3"
+      ],
+      "correctAnswer": "A) $3",
+      "explanation": "In awk, $N refers to the Nth field (column) of the current record. $1 is the first field, $2 is the second, and so on. $0 refers to the entire line. The END block runs after all input has been processed, making it ideal for printing accumulated totals.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-text-processing"
+    },
+    {
+      "id": "a-ss-q35",
+      "type": "multiple_choice",
+      "question": "What do exit codes 126 and 127 conventionally indicate?",
+      "options": [
+        "A) 126 = success with warnings; 127 = partial success",
+        "B) 126 = command found but not executable; 127 = command not found",
+        "C) 126 = timeout; 127 = out of memory",
+        "D) 126 = permission denied; 127 = disk full"
+      ],
+      "correctAnswer": "B) 126 = command found but not executable; 127 = command not found",
+      "explanation": "Exit code 126 means the command was found but could not be executed (e.g., missing execute permission). Exit code 127 means the command was not found at all (not in PATH). These are reserved by the shell and are useful for diagnosing script failures.",
+      "difficulty": "intermediate",
+      "lessonRef": "11-error-handling"
+    },
+    {
+      "id": "a-ss-q36",
+      "type": "true_false",
+      "question": "With 'set -e' enabled, a command that fails inside an if condition will cause the script to exit immediately.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "'set -e' does NOT trigger script exit for commands that are part of a condition test (if, while, until, ||, &&). This is by design -- you need to be able to test for failure. For example, 'if ! grep -q pattern file; then ...' works correctly even with 'set -e'.",
+      "difficulty": "intermediate",
+      "lessonRef": "11-error-handling"
+    },
+    {
+      "id": "a-ss-q37",
+      "type": "multiple_choice",
+      "question": "What is the purpose of using 'trap' with ERR signal?",
+      "options": [
+        "A) It catches syntax errors before the script runs",
+        "B) It runs a handler function whenever any command returns a non-zero exit status",
+        "C) It prevents the script from ever failing",
+        "D) It logs all commands to a file"
+      ],
+      "correctAnswer": "B) It runs a handler function whenever any command returns a non-zero exit status",
+      "explanation": "'trap handler ERR' runs the handler function whenever a command fails (non-zero exit). This is useful for logging error context (line number via $LINENO, failed command via $BASH_COMMAND). Combined with 'set -eE' (-E propagates ERR traps into functions), it provides robust error reporting.",
+      "difficulty": "intermediate",
+      "lessonRef": "11-error-handling"
+    },
+    {
+      "id": "a-ss-q38",
+      "type": "multiple_choice",
+      "question": "What does 'set -x' do and how can its output format be customized?",
+      "options": [
+        "A) Enables strict mode; cannot be customized",
+        "B) Prints each command before execution (trace mode); customize the prefix with the PS4 variable",
+        "C) Enables extended globbing; customize with GLOBIGNORE",
+        "D) Exits on error; customize the error message with ERRMSG"
+      ],
+      "correctAnswer": "B) Prints each command before execution (trace mode); customize the prefix with the PS4 variable",
+      "explanation": "'set -x' (xtrace) prints each command and its expanded arguments before execution. The PS4 variable controls the trace prefix (default is '+ '). Setting PS4='+${BASH_SOURCE}:${LINENO}: ' adds the filename and line number to each trace line, making debugging much easier.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-debugging"
+    },
+    {
+      "id": "a-ss-q39",
+      "type": "multiple_choice",
+      "question": "What is ShellCheck and what type of issues does it detect?",
+      "options": [
+        "A) A shell emulator that runs scripts in a sandbox",
+        "B) A static analysis tool that finds bugs, pitfalls, and style issues in shell scripts",
+        "C) A runtime profiler that measures script performance",
+        "D) A shell history analyzer that suggests command improvements"
+      ],
+      "correctAnswer": "B) A static analysis tool that finds bugs, pitfalls, and style issues in shell scripts",
+      "explanation": "ShellCheck is a static analysis tool that detects common shell scripting errors such as unquoted variables, useless use of cat, incorrect test syntax, and portability issues. It can be run from the command line, integrated into CI/CD pipelines, or used as an editor plugin.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-debugging"
+    },
+    {
+      "id": "a-ss-q40",
+      "type": "true_false",
+      "question": "You can selectively enable debug tracing for a portion of a script by placing 'set -x' before the section and 'set +x' after it.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "Shell options can be toggled within a script. 'set -x' turns on command tracing and 'set +x' turns it off. This is useful for debugging specific sections without flooding the output with traces from the entire script. The same pattern works with other options like 'set -e'.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-debugging"
+    },
+    {
+      "id": "a-ss-q41",
+      "type": "multiple_choice",
+      "question": "How do you run a command in the background and later wait for it to complete?",
+      "options": [
+        "A) command & ; wait $!",
+        "B) bg command; fg command",
+        "C) command &\npid=$!\n# other work\nwait $pid",
+        "D) nohup command; collect"
+      ],
+      "correctAnswer": "C) command &\npid=$!\n# other work\nwait $pid",
+      "explanation": "Appending & sends a command to the background. $! captures the PID of the last background process. 'wait $pid' blocks until that process completes and returns its exit status. This pattern enables parallel execution with synchronization points in shell scripts.",
+      "difficulty": "advanced",
+      "lessonRef": "13-process-management"
+    },
+    {
+      "id": "a-ss-q42",
+      "type": "multiple_choice",
+      "question": "Which signal is sent by default when you press Ctrl+C in a terminal, and which signal is used for graceful shutdown requests?",
+      "options": [
+        "A) Ctrl+C sends SIGTERM; graceful shutdown uses SIGKILL",
+        "B) Ctrl+C sends SIGINT; graceful shutdown uses SIGTERM",
+        "C) Ctrl+C sends SIGHUP; graceful shutdown uses SIGQUIT",
+        "D) Ctrl+C sends SIGSTOP; graceful shutdown uses SIGCONT"
+      ],
+      "correctAnswer": "B) Ctrl+C sends SIGINT; graceful shutdown uses SIGTERM",
+      "explanation": "Ctrl+C sends SIGINT (signal 2), which is an interrupt signal. SIGTERM (signal 15) is the standard signal sent by 'kill' for requesting graceful termination. Both can be trapped and handled. SIGKILL (9) forces immediate termination and cannot be caught.",
+      "difficulty": "advanced",
+      "lessonRef": "13-process-management"
+    },
+    {
+      "id": "a-ss-q43",
+      "type": "code_completion",
+      "question": "Complete the signal handler that gracefully shuts down background workers when the script receives SIGTERM:\n\ncleanup() {\n  echo \"Shutting down...\"\n  kill -- -$$  # send signal to process group\n  wait\n  exit 0\n}\ntrap _____ SIGTERM SIGINT",
+      "options": [
+        "A) cleanup",
+        "B) 'cleanup()'",
+        "C) call cleanup",
+        "D) exec cleanup"
+      ],
+      "correctAnswer": "A) cleanup",
+      "explanation": "The trap command accepts either a string of commands or a function name. Passing the function name 'cleanup' (without parentheses or quotes for a single word) registers it as the handler for the specified signals. When SIGTERM or SIGINT is received, the cleanup function is called.",
+      "difficulty": "advanced",
+      "lessonRef": "13-process-management"
+    },
+    {
+      "id": "a-ss-q44",
+      "type": "multiple_choice",
+      "question": "What does the 'wait' command do when called without arguments?",
+      "options": [
+        "A) Pauses the script for 1 second",
+        "B) Waits for all background child processes to complete",
+        "C) Waits for user input",
+        "D) Waits for the most recent background process only"
+      ],
+      "correctAnswer": "B) Waits for all background child processes to complete",
+      "explanation": "'wait' without arguments blocks until all background child processes have finished. 'wait $pid' waits for a specific process. 'wait -n' (bash 4.3+) waits for the next background process to finish, which is useful for processing results as they complete.",
+      "difficulty": "advanced",
+      "lessonRef": "13-process-management"
+    },
+    {
+      "id": "a-ss-q45",
+      "type": "multiple_choice",
+      "question": "What does process substitution <() do in bash?",
+      "options": [
+        "A) Redirects input from a file",
+        "B) Creates a temporary file descriptor that presents a command's output as if it were a file",
+        "C) Runs a command as a subshell and discards its output",
+        "D) Reads from standard input"
+      ],
+      "correctAnswer": "B) Creates a temporary file descriptor that presents a command's output as if it were a file",
+      "explanation": "Process substitution <(command) runs the command and makes its stdout available as a file path (typically /dev/fd/N). This allows commands that expect file arguments to read from command output. For example: diff <(sort file1) <(sort file2) compares sorted versions without creating temp files.",
+      "difficulty": "advanced",
+      "lessonRef": "14-advanced-patterns"
+    },
+    {
+      "id": "a-ss-q46",
+      "type": "multiple_choice",
+      "question": "What is a named pipe (FIFO) and how is it created?",
+      "options": [
+        "A) A persistent file that stores pipe data; created with 'touch --fifo'",
+        "B) A special file that allows inter-process communication; created with 'mkfifo'",
+        "C) An alias for the | operator; created automatically by bash",
+        "D) A network socket for remote communication; created with 'mkpipe'"
+      ],
+      "correctAnswer": "B) A special file that allows inter-process communication; created with 'mkfifo'",
+      "explanation": "A named pipe (FIFO) is a special file type that enables communication between processes. Unlike anonymous pipes (|), FIFOs persist in the filesystem and can connect unrelated processes. Created with 'mkfifo /path/to/pipe'. One process writes to it, another reads -- data flows first-in-first-out.",
+      "difficulty": "advanced",
+      "lessonRef": "14-advanced-patterns"
+    },
+    {
+      "id": "a-ss-q47",
+      "type": "true_false",
+      "question": "Variables modified inside a subshell (created with parentheses) affect the parent shell's environment.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "A subshell (spawned with parentheses or pipes) creates a copy of the parent shell's environment. Any variable changes, directory changes, or other state modifications inside the subshell are lost when it exits. This is a common gotcha, especially with 'command | while read' where the while loop runs in a subshell.",
+      "difficulty": "advanced",
+      "lessonRef": "14-advanced-patterns"
+    },
+    {
+      "id": "a-ss-q48",
+      "type": "code_completion",
+      "question": "Complete the command to compare the output of two commands without creating temporary files:\n\ndiff _____ _____",
+      "options": [
+        "A) <(ls dir1) <(ls dir2)",
+        "B) $(ls dir1) $(ls dir2)",
+        "C) `ls dir1` `ls dir2`",
+        "D) {ls dir1} {ls dir2}"
+      ],
+      "correctAnswer": "A) <(ls dir1) <(ls dir2)",
+      "explanation": "Process substitution <() provides each command's output as a virtual file that diff can read. This avoids creating, managing, and cleaning up temporary files. It is one of the most powerful and practical uses of process substitution in bash.",
+      "difficulty": "advanced",
+      "lessonRef": "14-advanced-patterns"
+    },
+    {
+      "id": "a-ss-q49",
+      "type": "multiple_choice",
+      "question": "Which pattern is recommended for a deployment script that needs atomic updates (zero-downtime)?",
+      "options": [
+        "A) Overwrite files directly in the live directory",
+        "B) Deploy to a new release directory, then swap a symlink atomically",
+        "C) Stop the application, copy files, start the application",
+        "D) Use FTP to upload files one at a time"
+      ],
+      "correctAnswer": "B) Deploy to a new release directory, then swap a symlink atomically",
+      "explanation": "The symlink-swap pattern deploys to a new release directory (e.g., releases/v42), then uses 'ln -sfn releases/v42 current' to atomically switch the symlink. This enables instant rollback (re-point symlink to previous release) and prevents serving partially-deployed code.",
+      "difficulty": "advanced",
+      "lessonRef": "15-real-world-scripts"
+    },
+    {
+      "id": "a-ss-q50",
+      "type": "multiple_choice",
+      "question": "What is the correct approach for a backup script that needs to retain the last 7 daily backups?",
+      "options": [
+        "A) Overwrite the same backup file each day",
+        "B) Create timestamped backups and use find to delete backups older than 7 days",
+        "C) Keep all backups forever and let the system handle disk space",
+        "D) Use a single rotating log file"
+      ],
+      "correctAnswer": "B) Create timestamped backups and use find to delete backups older than 7 days",
+      "explanation": "Timestamped backups (e.g., backup-$(date +%Y%m%d).tar.gz) combined with 'find /backups -name \"backup-*.tar.gz\" -mtime +7 -delete' provides a reliable rotation strategy. This ensures recovery from recent failures while managing disk space automatically.",
+      "difficulty": "advanced",
+      "lessonRef": "15-real-world-scripts"
+    },
+    {
+      "id": "a-ss-q51",
+      "type": "code_completion",
+      "question": "Complete the monitoring script check that sends an alert when disk usage exceeds 90%:\n\nusage=$(df -h / | awk 'NR==2 {print $5}' | tr -d '%')\nif [ \"$usage\" _____ 90 ]; then\n  send_alert \"Disk usage critical: ${usage}%\"\nfi",
+      "options": [
+        "A) -gt",
+        "B) >",
+        "C) -greater",
+        "D) .gt."
+      ],
+      "correctAnswer": "A) -gt",
+      "explanation": "Inside [ ] (test brackets), integer comparison uses -gt (greater than). The > operator in [ ] performs string comparison, which would give incorrect results for numbers. Inside (( )), you can use > for arithmetic comparison instead.",
+      "difficulty": "advanced",
+      "lessonRef": "15-real-world-scripts"
+    },
+    {
+      "id": "a-ss-q52",
+      "type": "multiple_choice",
+      "question": "What is the recommended way to implement logging in a production shell script?",
+      "options": [
+        "A) Use 'echo' statements with no timestamp or severity level",
+        "B) Write a log function that includes timestamps, severity levels, and outputs to both stderr and a log file",
+        "C) Redirect all output to /dev/null to keep things clean",
+        "D) Only log errors; ignore informational messages"
+      ],
+      "correctAnswer": "B) Write a log function that includes timestamps, severity levels, and outputs to both stderr and a log file",
+      "explanation": "Production scripts should use a structured log function, e.g.: log() { echo \"[$(date '+%Y-%m-%d %H:%M:%S')] [$1] $2\" | tee -a \"$LOG_FILE\" >&2; }. This includes ISO timestamps, severity levels (INFO, WARN, ERROR), and dual output for both real-time monitoring (stderr) and persistent records (log file).",
+      "difficulty": "advanced",
+      "lessonRef": "16-production-scripting"
+    },
+    {
+      "id": "a-ss-q53",
+      "type": "multiple_choice",
+      "question": "How should a production script handle configuration values?",
+      "options": [
+        "A) Hardcode all values directly in the script",
+        "B) Source a configuration file with defaults, allowing environment variable overrides",
+        "C) Prompt the user for each value at runtime",
+        "D) Read configuration from /dev/random"
+      ],
+      "correctAnswer": "B) Source a configuration file with defaults, allowing environment variable overrides",
+      "explanation": "The pattern: CONFIG_FILE=\"/etc/myapp/config\"; [ -f \"$CONFIG_FILE\" ] && source \"$CONFIG_FILE\"; DB_HOST=${DB_HOST:-localhost}. This provides sensible defaults, allows configuration files for persistent settings, and supports environment variable overrides for containers and CI/CD, creating a flexible configuration hierarchy.",
+      "difficulty": "advanced",
+      "lessonRef": "16-production-scripting"
+    },
+    {
+      "id": "a-ss-q54",
+      "type": "multiple_choice",
+      "question": "Which security practice should ALWAYS be followed in production shell scripts?",
+      "options": [
+        "A) Run all scripts as root for maximum access",
+        "B) Store passwords directly in script variables for convenience",
+        "C) Quote all variable expansions, validate inputs, and never store secrets in scripts",
+        "D) Disable error checking with 'set +e' to prevent scripts from stopping"
+      ],
+      "correctAnswer": "C) Quote all variable expansions, validate inputs, and never store secrets in scripts",
+      "explanation": "Security best practices for shell scripts: always quote \"$variables\" to prevent word splitting and injection, validate and sanitize all input, never hardcode secrets (use environment variables or a secrets manager), apply the principle of least privilege, and use 'set -euo pipefail' for strict error handling.",
+      "difficulty": "advanced",
+      "lessonRef": "16-production-scripting"
+    },
+    {
+      "id": "a-ss-q55",
+      "type": "true_false",
+      "question": "Using '#!/bin/sh' instead of '#!/bin/bash' in the shebang guarantees that the script will work on any POSIX-compliant system, even if it uses bash-specific features like arrays.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "/bin/sh is a POSIX shell that may not be bash (on Debian/Ubuntu it is dash, on Alpine it is busybox ash). Bash-specific features like arrays, [[ ]], (( )), process substitution <(), and associative arrays will fail under /bin/sh. If your script uses bash features, always use #!/bin/bash or #!/usr/bin/env bash.",
+      "difficulty": "advanced",
+      "lessonRef": "16-production-scripting"
+    }
+  ]
+}

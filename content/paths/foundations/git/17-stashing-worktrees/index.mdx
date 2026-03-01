@@ -1,0 +1,1398 @@
+---
+title: "Stashing and Worktrees"
+description: "Work on multiple things at once without losing progress. Master git stash for quick context switches and git worktree for parallel development."
+order: 17
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 16-cherry-pick
+objectives:
+  - Use git stash for saving work-in-progress
+  - Manage multiple stashes effectively
+  - Use git worktree for parallel branch work
+  - Choose between stash and worktree for different scenarios
+tags:
+  - git
+  - stash
+  - worktree
+  - productivity
+---
+
+<Callout type="story" title="The Story">
+You're deep in a feature implementation when Slack lights up: "URGENT: production bug." You have uncommitted changes everywhere. You need to switch to main, fix the bug, deploy, then get back to your feature without losing anything. git stash saves your work in seconds. And git worktree lets you have main and your feature branch checked out simultaneously in different directories — no switching needed.
+</Callout>
+
+## git stash — Your Quick Save Button
+
+Think of `git stash` as a save slot in a video game. You're in the middle of something, an interruption happens, you quick-save, deal with the interruption, then load your save and pick up exactly where you left off.
+
+Under the hood, stash creates a special commit object that stores your working directory changes and staged changes. It's stored in `.git/refs/stash` and operates as a stack (last in, first out).
+
+```
+Working Directory      Staging Area        Stash Stack
+┌──────────────┐      ┌──────────────┐    ┌──────────────┐
+│ modified:    │      │ staged:      │    │ stash@{0}    │
+│  app.js      │─────→│  config.js   │───→│ stash@{1}    │
+│  utils.js    │ push │              │    │ stash@{2}    │
+│              │←─────│              │←───│              │
+└──────────────┘ pop  └──────────────┘    └──────────────┘
+```
+
+## Basic Stash Operations
+
+### Stash Push (Save Your Work)
+
+```bash
+# Stash all tracked changes (staged + unstaged)
+git stash
+# Saved working directory and index state WIP on feature: abc1234 Add login form
+
+# Stash with a descriptive message (highly recommended!)
+git stash push -m "WIP: halfway through payment validation"
+# Saved working directory and index state On feature: WIP: halfway through payment validation
+
+# Your working directory is now clean
+git status
+# On branch feature
+# nothing to commit, working tree clean
+
+# Now you can safely switch branches
+git switch main
+```
+
+<Callout type="tip" title="Always Name Your Stashes">
+`git stash` with no message creates entries like "WIP on feature: abc1234 commit message" which tells you almost nothing when you have 5 stashes. Always use `git stash push -m "description"` so you can identify each stash later. Your future self will thank you.
+</Callout>
+
+### Stash List (See All Stashes)
+
+```bash
+# List all stashes
+git stash list
+# stash@{0}: On feature: WIP: halfway through payment validation
+# stash@{1}: On main: debugging session - user login timeout
+# stash@{2}: On feature/api: experimental caching approach
+
+# Stashes are numbered from 0 (most recent) upward
+# They work like a stack: the last stash pushed is stash@{0}
+```
+
+### Stash Show (Inspect a Stash)
+
+```bash
+# Show a summary of the most recent stash
+git stash show
+#  src/payments/validator.js | 15 ++++++-----
+#  src/payments/processor.js |  8 ++++---
+#  2 files changed, 13 insertions(+), 10 deletions(-)
+
+# Show the full diff
+git stash show -p
+# diff --git a/src/payments/validator.js b/src/payments/validator.js
+# --- a/src/payments/validator.js
+# +++ b/src/payments/validator.js
+# @@ -10,7 +10,12 @@ function validateCard(card) {
+# ...
+
+# Show a specific stash
+git stash show stash@{2}
+git stash show -p stash@{1}
+```
+
+### Stash Pop (Restore and Remove)
+
+```bash
+# Apply the most recent stash and remove it from the stack
+git stash pop
+# On branch feature
+# Changes not staged for commit:
+#   modified: src/payments/validator.js
+#   modified: src/payments/processor.js
+# Dropped refs/stash@{0} (abc123def456...)
+
+# Pop a specific stash
+git stash pop stash@{2}
+```
+
+### Stash Apply (Restore but Keep)
+
+```bash
+# Apply the most recent stash but keep it in the stack
+git stash apply
+# Same output as pop, but the stash remains in the list
+
+# Apply a specific stash
+git stash apply stash@{1}
+
+# Useful when you want to apply the same stash to multiple branches
+git switch branch-a
+git stash apply stash@{0}
+git switch branch-b
+git stash apply stash@{0}
+```
+
+<Callout type="tip" title="Pop vs Apply">
+Use `pop` when you're done with the stash (the common case). Use `apply` when you might need the stash again — for example, applying the same set of debug changes to multiple branches, or when you're not sure the apply will work cleanly and want to keep the backup.
+</Callout>
+
+### Stash Drop and Clear
+
+```bash
+# Remove a specific stash
+git stash drop stash@{1}
+# Dropped stash@{1} (abc123def456...)
+
+# Remove the most recent stash
+git stash drop
+# Dropped refs/stash@{0} (def456ghi789...)
+
+# Remove ALL stashes (irreversible!)
+git stash clear
+# (no output — all stashes are gone)
+```
+
+<Callout type="warning" title="Stash Clear Is Permanent">
+`git stash clear` deletes all stashes with no confirmation and no recovery (stashes don't appear in the reflog after clearing). If you have important work in stashes, apply them first or create branches from them. Use `git stash drop` to remove individual stashes safely.
+</Callout>
+
+## Advanced Stash Operations
+
+### Stashing Specific Files
+
+```bash
+# Stash only specific files
+git stash push -m "just the config changes" -- src/config.js src/env.js
+# Only those two files are stashed; other changes remain in your working directory
+
+# Stash everything in a directory
+git stash push -m "all payment changes" -- src/payments/
+```
+
+### Stashing Untracked Files
+
+By default, `git stash` only saves tracked files (files Git already knows about). New files that haven't been added are ignored.
+
+```bash
+# This WON'T stash new-feature.js (untracked)
+git stash
+# new-feature.js is still in your working directory
+
+# Include untracked files
+git stash push -u -m "including new files"
+# or
+git stash push --include-untracked -m "including new files"
+
+# Include EVERYTHING — untracked AND ignored files
+git stash push -a -m "absolutely everything"
+# or
+git stash push --all -m "absolutely everything"
+# This stashes node_modules, .env, build/, etc.
+```
+
+<Callout type="warning" title="Be Careful with --all">
+`git stash push --all` includes ignored files like `node_modules/`, `.env`, and build directories. This can make the stash huge and slow. In most cases, `--include-untracked` (`-u`) is what you want — it includes new files but respects `.gitignore`.
+</Callout>
+
+### Partial Stash (Interactive)
+
+Stash only some changes within a file, not the whole file:
+
+```bash
+# Interactive patch mode — choose which hunks to stash
+git stash push -p -m "just the validation changes"
+# Git shows you each change hunk and asks:
+# Stash this hunk [y,n,q,a,d,/,s,e,?]?
+#   y = stash this hunk
+#   n = don't stash this hunk
+#   s = split into smaller hunks
+#   q = quit (stash what you've selected so far)
+
+# This is powerful: you can stash half your changes in a file
+# while keeping the other half in your working directory
+```
+
+### Creating a Branch from a Stash
+
+When a stash has grown into something more significant than a quick save:
+
+```bash
+# Create a new branch from a stash
+git stash branch feature/payment-validation stash@{0}
+# Creates a new branch at the commit where the stash was made
+# Applies the stash
+# Drops the stash if apply succeeds
+
+# This is especially useful when:
+# 1. The stash conflicts with current branch changes
+# 2. The stash has grown into a full feature worth its own branch
+# 3. You stashed on the wrong branch and want to work elsewhere
+```
+
+### Restoring Staged State
+
+By default, `git stash pop` puts everything back as unstaged changes, even files that were staged before stashing:
+
+```bash
+# Restore stash AND preserve the staged/unstaged distinction
+git stash pop --index
+# Files that were staged before stashing are staged again
+# Files that were modified but unstaged remain unstaged
+
+# Without --index, everything comes back as unstaged
+git stash pop
+# All changes are unstaged, regardless of their original state
+```
+
+## Stash Internals
+
+```bash
+# A stash is actually a special merge commit
+git stash list --format="%gd %H %s"
+# stash@{0} abc1234 On feature: WIP payment validation
+
+# You can see it in the object database
+git show stash@{0} --stat
+
+# The stash commit has 2-3 parents:
+# Parent 1: The HEAD commit when the stash was created
+# Parent 2: The index (staged changes)
+# Parent 3 (if -u or -a): Untracked files
+
+# This means you can cherry-pick from a stash!
+git cherry-pick -n stash@{0}
+```
+
+## git worktree — Multiple Working Directories
+
+While `git stash` saves and restores your work, `git worktree` takes a completely different approach: it lets you check out multiple branches simultaneously in separate directories. No stashing, no switching — just open another terminal.
+
+### The Concept
+
+```
+Normal Git (one working directory):
+  ~/project/        ← can only have ONE branch checked out
+    .git/
+    src/
+    ...
+
+With Worktrees (multiple working directories):
+  ~/project/                 ← main branch
+    .git/                    ← shared repository data
+    src/
+    ...
+  ~/project-hotfix/          ← hotfix/urgent-fix branch
+    src/                     ← different branch, same repo
+    ...
+  ~/project-review/          ← feature/pr-123 branch
+    src/                     ← yet another branch, same repo
+    ...
+
+All three directories share the SAME .git repository.
+Commits in one worktree are visible from all others.
+```
+
+### Adding a Worktree
+
+```bash
+# Create a worktree for an existing branch
+git worktree add ../project-hotfix hotfix/urgent-fix
+# Preparing worktree (new directory)
+# HEAD is now at abc1234 Start hotfix
+
+# Create a worktree with a NEW branch
+git worktree add -b hotfix/api-crash ../hotfix-api main
+# Creates new branch 'hotfix/api-crash' from 'main'
+# Checks it out in ../hotfix-api/
+
+# Create a worktree in detached HEAD state
+git worktree add --detach ../project-test abc1234
+# Useful for testing a specific commit without a branch
+```
+
+<Callout type="tip" title="Worktree Naming Convention">
+Put worktrees in sibling directories with clear names:
+```
+~/code/myproject/           ← main worktree (primary)
+~/code/myproject-hotfix/    ← hotfix worktree
+~/code/myproject-pr-review/ ← PR review worktree
+~/code/myproject-experiment/← experimental worktree
+```
+This keeps things organized and makes it obvious which directory is which.
+</Callout>
+
+### Working with Worktrees
+
+```bash
+# List all worktrees
+git worktree list
+# /home/dev/project         abc1234 [main]
+# /home/dev/project-hotfix  def5678 [hotfix/urgent-fix]
+# /home/dev/project-review  ghi9012 [feature/pr-123]
+
+# Work in a worktree — it's just a normal directory
+cd ../project-hotfix
+git log --oneline -3
+# This is the hotfix branch
+vim src/api.js
+git add . && git commit -m "Fix API crash"
+
+# Go back to main worktree
+cd ../project
+git log --oneline -3
+# This is still main — completely separate working directory
+
+# The commit you made in the hotfix worktree is visible here
+git log --oneline hotfix/urgent-fix -1
+# The fix commit shows up because they share the same repository
+```
+
+### Worktree Rules and Constraints
+
+```bash
+# You CANNOT check out the same branch in two worktrees
+git worktree add ../project-main2 main
+# fatal: 'main' is already checked out at '/home/dev/project'
+
+# Each worktree must have a unique branch (or be detached)
+# This prevents conflicting changes to the same branch
+
+# You CAN work on different branches simultaneously
+git worktree add ../wt-feature feature/new-ui
+git worktree add ../wt-hotfix hotfix/security
+git worktree add ../wt-release release/2.5
+# All four directories work independently, share one .git
+```
+
+### Removing Worktrees
+
+```bash
+# Remove a worktree (branch is NOT deleted)
+git worktree remove ../project-hotfix
+# Removes the directory and the worktree registration
+
+# If the worktree has uncommitted changes:
+git worktree remove ../project-hotfix
+# fatal: '../project-hotfix' contains modified or untracked files,
+# use --force to delete it
+
+# Force remove (discards uncommitted changes in that worktree)
+git worktree remove --force ../project-hotfix
+
+# If you manually deleted the directory, clean up the registration
+git worktree prune
+# Removes worktree entries whose directories no longer exist
+```
+
+### Worktree Lock (Prevent Accidental Removal)
+
+```bash
+# Lock a worktree to prevent accidental removal
+git worktree lock ../project-hotfix
+git worktree lock --reason "Active hotfix deployment" ../project-hotfix
+
+# Check lock status
+git worktree list --porcelain
+# worktree /home/dev/project-hotfix
+# HEAD abc1234def5678
+# branch refs/heads/hotfix/urgent-fix
+# locked Active hotfix deployment
+
+# Unlock when done
+git worktree unlock ../project-hotfix
+```
+
+## Worktree Use Cases
+
+### 1. Hotfix While Working on a Feature
+
+```bash
+# You're deep in feature work
+# ~/project/ has feature/new-dashboard checked out with lots of changes
+
+# Emergency! Need to fix production
+git worktree add -b hotfix/login-crash ../project-hotfix main
+
+# In another terminal:
+cd ../project-hotfix
+# Fix the bug
+vim src/auth/login.js
+git add . && git commit -m "Fix: login crash on empty session"
+git push origin hotfix/login-crash
+
+# Back to your feature terminal — nothing changed
+cd ../project
+git status  # your feature work is exactly as you left it
+
+# Clean up after hotfix is merged
+git worktree remove ../project-hotfix
+```
+
+### 2. Reviewing Pull Requests
+
+```bash
+# Review a PR without disrupting your work
+git fetch origin pull/123/head:pr-123
+git worktree add ../project-pr-123 pr-123
+
+cd ../project-pr-123
+# Build and test the PR
+npm install && npm test
+# Browse the code, run the app, etc.
+
+# Done reviewing
+cd ../project
+git worktree remove ../project-pr-123
+git branch -D pr-123
+```
+
+### 3. Running Tests on Another Branch
+
+```bash
+# Run the full test suite on main while you keep coding
+git worktree add ../project-test main
+
+# In another terminal:
+cd ../project-test
+npm test  # runs against main branch code
+
+# Compare with your feature branch tests
+cd ../project
+npm test  # runs against your feature branch
+
+# Side-by-side comparison without any branch switching
+```
+
+### 4. Comparing Implementations
+
+```bash
+# Check out two different approaches side by side
+git worktree add ../approach-a feature/search-v1
+git worktree add ../approach-b feature/search-v2
+
+# Open both in your editor/IDE
+code ../approach-a
+code ../approach-b
+# Compare file by file, run benchmarks, etc.
+
+# Clean up
+git worktree remove ../approach-a
+git worktree remove ../approach-b
+```
+
+## Stash vs Worktree: Decision Guide
+
+| Scenario | Stash | Worktree | Winner |
+|---|---|---|---|
+| Quick context switch (< 5 min) | Save/restore in seconds | Create/remove directory | Stash |
+| Long parallel work (hours/days) | Fragile (might forget) | Dedicated directory | Worktree |
+| Need to compare branches | Switch back and forth | Side-by-side directories | Worktree |
+| Saving incomplete experiments | Quick and lightweight | Overkill | Stash |
+| Reviewing PRs | Disruptive | Non-disruptive | Worktree |
+| Running tests on another branch | Must switch branches | Run in parallel | Worktree |
+| Limited disk space | No duplication | Duplicates working dir | Stash |
+| Multiple long-lived features | Stack gets messy | Clean separation | Worktree |
+
+```
+Quick interrupt?
+├── Yes (< 5 minutes)
+│   └── Use git stash
+└── No (longer parallel work)
+    ├── Need both branches simultaneously?
+    │   └── Use git worktree
+    ├── Just need to save progress?
+    │   └── Use git stash or commit WIP
+    └── Building/testing another branch?
+        └── Use git worktree
+```
+
+<Callout type="tip" title="The Hybrid Approach">
+You can combine stash and worktree. Use worktrees for your long-running parallel work (main + feature branches) and stash for quick saves within each worktree. They're complementary tools, not competitors.
+</Callout>
+
+<Exercise number={1} title="Stash Mastery">
+
+```bash
+# Comprehensive stash practice
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# Set up a project
+mkdir -p src tests
+cat > src/app.js << 'EOF'
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+app.get('/users', (req, res) => {
+  res.json({ users: [] });
+});
+
+module.exports = app;
+EOF
+cat > src/config.js << 'EOF'
+module.exports = {
+  port: 3000,
+  database: 'mongodb://localhost/myapp',
+  secret: 'development-secret'
+};
+EOF
+cat > tests/app.test.js << 'EOF'
+const app = require('../src/app');
+test('health check', () => { expect(true).toBe(true); });
+EOF
+git add . && git commit -q -m "Initial project setup"
+
+echo ""
+echo "=== 1. Basic Stash Push/Pop ==="
+echo ""
+
+# Make some changes
+cat >> src/app.js << 'EOF'
+
+app.get('/products', (req, res) => {
+  res.json({ products: [] });
+});
+EOF
+echo "Modified app.js — added products route"
+git status --short
+
+# Stash with a message
+git stash push -m "WIP: adding products endpoint"
+echo "After stash:"
+git status --short
+echo "(clean working directory)"
+
+# See the stash
+echo ""
+echo "Stash list:"
+git stash list
+
+# Show stash details
+echo ""
+echo "Stash contents:"
+git stash show
+echo ""
+git stash show -p | head -15
+
+# Pop the stash
+git stash pop
+echo ""
+echo "After pop:"
+git status --short
+echo "Changes are back!"
+
+# Commit the changes
+git add . && git commit -q -m "Add products endpoint"
+
+echo ""
+echo "=== 2. Multiple Named Stashes ==="
+echo ""
+
+# Create three different stashes
+echo "// auth middleware" >> src/app.js
+git stash push -m "WIP: auth middleware"
+
+echo "debug: true" >> src/config.js
+git stash push -m "Debug config changes"
+
+echo "// new test" >> tests/app.test.js
+git stash push -m "WIP: new test cases"
+
+echo "Three stashes created:"
+git stash list
+echo ""
+
+# Apply a specific stash (not the most recent)
+echo "Applying stash@{1} (debug config)..."
+git stash apply stash@{1}
+git status --short
+echo "Applied debug config but stash is still in list:"
+git stash list | wc -l
+echo "stashes remaining"
+
+# Drop that specific stash
+git stash drop stash@{1}
+echo ""
+echo "After dropping stash@{1}:"
+git stash list
+echo "(debug config stash is gone, others shifted)"
+
+# Clean up for next test
+git restore . && git stash clear
+
+echo ""
+echo "=== 3. Stash Untracked Files ==="
+echo ""
+
+# Create some new (untracked) files
+echo "new feature" > src/payments.js
+echo "new test" > tests/payments.test.js
+echo "Untracked files:"
+git status --short
+
+# Regular stash won't include them
+git stash push -m "without untracked"
+echo ""
+echo "After regular stash:"
+git status --short
+echo "(untracked files are still here!)"
+git stash pop -q
+
+# Stash with untracked files
+git stash push -u -m "with untracked files"
+echo ""
+echo "After stash -u:"
+git status --short
+echo "(everything is stashed, including new files!)"
+
+# Restore
+git stash pop
+echo ""
+echo "After pop:"
+git status --short
+echo "All files are back, including new ones"
+
+# Commit new files
+git add . && git commit -q -m "Add payments module"
+
+echo ""
+echo "=== 4. Stashing Specific Files ==="
+echo ""
+
+# Modify multiple files
+echo "// v2 config" >> src/config.js
+echo "// v2 app" >> src/app.js
+echo "// v2 payments" >> src/payments.js
+echo "All modified:"
+git status --short
+
+# Stash only config.js
+git stash push -m "just config changes" -- src/config.js
+echo ""
+echo "After stashing only config.js:"
+git status --short
+echo "(config.js is stashed, others still modified)"
+
+# Clean up
+git restore .
+git stash drop
+
+echo ""
+echo "=== 5. Creating a Branch from Stash ==="
+echo ""
+
+# Create a substantial stash
+cat > src/search.js << 'EOF'
+function search(query) {
+  // Full-text search implementation
+  return results.filter(r => r.includes(query));
+}
+module.exports = { search };
+EOF
+echo "// search route" >> src/app.js
+git add src/search.js  # stage the new file
+echo "Created new search module (staged) and modified app.js (unstaged)"
+git status --short
+
+git stash push -u -m "Search feature - promote to branch"
+echo ""
+echo "Stash created. Now creating a branch from it..."
+
+git stash branch feature/search stash@{0}
+echo ""
+echo "On new branch:"
+git branch --show-current
+echo "Status:"
+git status --short
+echo "Files:"
+ls src/
+
+# The stash is automatically dropped after successful branch creation
+echo ""
+echo "Stash list (should be empty):"
+git stash list
+echo "(stash was auto-dropped)"
+
+# Commit on the new branch
+git add . && git commit -q -m "Search feature from stash"
+git switch -q main
+
+echo ""
+echo "=== 6. Stash with --index (Preserve Staging) ==="
+echo ""
+
+# Stage some changes, leave others unstaged
+echo "staged change" >> src/config.js
+git add src/config.js
+echo "unstaged change" >> src/app.js
+echo "Before stash:"
+git status --short
+echo "(M = staged, M in second column = unstaged)"
+
+git stash push -m "mixed staged/unstaged"
+
+# Pop without --index
+git stash apply
+echo ""
+echo "Pop WITHOUT --index:"
+git status --short
+echo "(everything is unstaged now)"
+
+git restore .
+git stash drop
+
+# Now stash again and pop with --index
+echo "staged change" >> src/config.js
+git add src/config.js
+echo "unstaged change" >> src/app.js
+git stash push -m "mixed staged/unstaged v2"
+git stash apply --index
+echo ""
+echo "Pop WITH --index:"
+git status --short
+echo "(staging state is preserved!)"
+
+# Clean up
+git restore . && git restore --staged . && git stash clear
+
+echo ""
+echo "=== All stash operations demonstrated ==="
+git log --oneline
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Worktree Workflow">
+
+```bash
+# Set up parallel development with worktrees
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+REPO_NAME=$(basename "$REPO")
+
+# Build a project on main
+mkdir -p src tests
+cat > src/server.js << 'EOF'
+const http = require('http');
+const server = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200);
+    res.end('OK');
+  } else {
+    res.writeHead(404);
+    res.end('Not Found');
+  }
+});
+server.listen(3000);
+console.log('Server running on port 3000');
+EOF
+cat > src/utils.js << 'EOF'
+function formatDate(date) {
+  return date.toISOString().split('T')[0];
+}
+function generateId() {
+  return Math.random().toString(36).substr(2, 9);
+}
+module.exports = { formatDate, generateId };
+EOF
+echo '{"name": "worktree-demo", "version": "1.0.0"}' > package.json
+git add . && git commit -q -m "v1.0.0: Initial server"
+git tag v1.0.0
+
+# Add more commits to main
+echo "// logging middleware" >> src/server.js
+git add . && git commit -q -m "Add logging middleware"
+
+echo "// error handling" >> src/server.js
+git add . && git commit -q -m "Add error handling"
+
+echo ""
+echo "=== 1. Create Worktrees for Parallel Development ==="
+echo ""
+echo "Main worktree: $REPO"
+echo "Branch: $(git branch --show-current)"
+git log --oneline -3
+echo ""
+
+# Create a worktree for a hotfix
+git worktree add "${REPO}-hotfix" -b hotfix/security-patch main
+echo "Created hotfix worktree: ${REPO}-hotfix"
+
+# Create a worktree for a feature
+git worktree add "${REPO}-feature" -b feature/api-v2 main
+echo "Created feature worktree: ${REPO}-feature"
+
+# List all worktrees
+echo ""
+echo "All worktrees:"
+git worktree list
+echo ""
+
+echo "=== 2. Work in the Hotfix Worktree ==="
+echo ""
+
+cd "${REPO}-hotfix"
+echo "In hotfix worktree: $(pwd)"
+echo "Branch: $(git branch --show-current)"
+
+# Make the hotfix
+cat > src/utils.js << 'EOF'
+function formatDate(date) {
+  return date.toISOString().split('T')[0];
+}
+function generateId() {
+  return Math.random().toString(36).substr(2, 9);
+}
+function sanitize(input) {
+  // Security fix: sanitize all user input
+  return String(input).replace(/[<>&"']/g, (char) => {
+    const entities = { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' };
+    return entities[char];
+  });
+}
+module.exports = { formatDate, generateId, sanitize };
+EOF
+git add . && git commit -q -m "Security: Add input sanitization"
+echo "Hotfix committed:"
+git log --oneline -2
+echo ""
+
+echo "=== 3. Work in the Feature Worktree (Simultaneously) ==="
+echo ""
+
+cd "${REPO}-feature"
+echo "In feature worktree: $(pwd)"
+echo "Branch: $(git branch --show-current)"
+
+# Build the feature
+cat > src/server.js << 'EOF'
+const http = require('http');
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+
+  switch(req.url) {
+    case '/health':
+      res.end(JSON.stringify({ status: 'ok', version: '2.0' }));
+      break;
+    case '/api/v2/users':
+      res.end(JSON.stringify({ users: [], api: 'v2' }));
+      break;
+    case '/api/v2/products':
+      res.end(JSON.stringify({ products: [], api: 'v2' }));
+      break;
+    default:
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'Not Found' }));
+  }
+});
+server.listen(3000);
+console.log('API v2 server running on port 3000');
+EOF
+git add . && git commit -q -m "Feature: API v2 with new endpoints"
+echo "Feature committed:"
+git log --oneline -2
+echo ""
+
+echo "=== 4. Verify Isolation Between Worktrees ==="
+echo ""
+
+echo "--- Main worktree (${REPO}) ---"
+echo "server.js first line: $(head -1 ${REPO}/src/server.js)"
+echo ""
+
+echo "--- Hotfix worktree (${REPO}-hotfix) ---"
+echo "utils.js has sanitize: $(grep -c 'sanitize' ${REPO}-hotfix/src/utils.js) occurrence(s)"
+echo ""
+
+echo "--- Feature worktree (${REPO}-feature) ---"
+echo "server.js first line: $(head -1 ${REPO}-feature/src/server.js)"
+echo ""
+
+echo "All three directories have different content, same repository!"
+echo ""
+
+echo "=== 5. Shared Repository — Commits Are Visible Everywhere ==="
+echo ""
+
+cd "$REPO"
+echo "From main worktree, we can see all branches:"
+git branch -v
+echo ""
+echo "Hotfix branch log (visible from main):"
+git log --oneline hotfix/security-patch -2
+echo ""
+echo "Feature branch log (visible from main):"
+git log --oneline feature/api-v2 -2
+echo ""
+
+echo "=== 6. Merge Hotfix to Main (from main worktree) ==="
+echo ""
+
+git merge --no-ff hotfix/security-patch -m "Merge hotfix: input sanitization"
+echo "Merged! Main now has the security fix."
+git log --oneline --graph -5
+echo ""
+
+echo "=== 7. Clean Up Worktrees ==="
+echo ""
+
+echo "Before cleanup:"
+git worktree list
+echo ""
+
+# Remove hotfix worktree (no longer needed)
+git worktree remove "${REPO}-hotfix"
+echo "Removed hotfix worktree"
+
+# Feature worktree still active
+echo ""
+echo "After cleanup:"
+git worktree list
+echo ""
+
+# Prune any stale worktree references
+git worktree prune
+echo "Pruned stale references"
+
+echo ""
+echo "=== 8. Continue Feature Work (worktree still active) ==="
+echo ""
+
+cd "${REPO}-feature"
+echo "Feature worktree still works:"
+echo "Branch: $(git branch --show-current)"
+echo "Files: $(ls src/)"
+git log --oneline -2
+
+# Final cleanup
+cd "$REPO"
+git worktree remove "${REPO}-feature"
+
+echo ""
+echo "=== Final State ==="
+git worktree list
+echo ""
+git log --oneline --graph --all -10
+
+# Clean up everything
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Context Switch Tool">
+
+```bash
+cat > ~/context-switch.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Context Switch Tool — Manage stashes and worktrees for fast context switching
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Verify we're in a git repo
+if ! git rev-parse --git-dir &>/dev/null; then
+    echo -e "${RED}Error: Not in a git repository${NC}"
+    exit 1
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+REPO_NAME=$(basename "$REPO_ROOT")
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "DETACHED")
+
+usage() {
+    echo -e "${BLUE}Context Switch Tool${NC}"
+    echo -e "Quickly switch between tasks using stash or worktree"
+    echo ""
+    echo "Usage: $0 <command> [options]"
+    echo ""
+    echo "Quick Commands:"
+    echo "  save [message]       Stash current work with a message"
+    echo "  resume               List stashes and pop the selected one"
+    echo "  switch <branch>      Stash current work and switch to branch"
+    echo "  status               Show all active contexts (stashes + worktrees)"
+    echo ""
+    echo "Worktree Commands:"
+    echo "  open <branch>        Open a worktree for a branch"
+    echo "  close <branch>       Remove a worktree for a branch"
+    echo "  list                 List all worktrees"
+    echo ""
+    echo "Workflow Commands:"
+    echo "  hotfix [name]        Create a hotfix worktree from main"
+    echo "  review <pr-branch>   Create a worktree to review a branch"
+    echo "  cleanup              Remove all secondary worktrees"
+}
+
+# Save current work with descriptive stash
+cmd_save() {
+    local message="${1:-WIP on $CURRENT_BRANCH}"
+
+    # Check if there's anything to save
+    if [ -z "$(git status --porcelain)" ]; then
+        echo -e "${YELLOW}Nothing to save — working directory is clean.${NC}"
+        return 0
+    fi
+
+    local file_count
+    file_count=$(git status --porcelain | wc -l)
+
+    echo -e "${BLUE}Saving context on '${CURRENT_BRANCH}'...${NC}"
+    echo -e "Files: ${file_count} modified/untracked"
+    echo ""
+
+    # Include untracked files
+    git stash push -u -m "$message"
+
+    echo ""
+    echo -e "${GREEN}Context saved!${NC}"
+    echo -e "Message: ${CYAN}${message}${NC}"
+    echo -e "Restore with: ${CYAN}$0 resume${NC}"
+}
+
+# Resume from a stash
+cmd_resume() {
+    local stash_count
+    stash_count=$(git stash list | wc -l)
+
+    if [ "$stash_count" -eq 0 ]; then
+        echo -e "${YELLOW}No saved contexts (stash is empty).${NC}"
+        return 0
+    fi
+
+    echo -e "${BLUE}Saved Contexts:${NC}"
+    echo ""
+    git stash list --format="%gd | %gs" | nl -ba
+    echo ""
+
+    if [ "$stash_count" -eq 1 ]; then
+        echo -e "Only one stash. Restoring stash@{0}..."
+        git stash pop
+        echo -e "${GREEN}Context restored!${NC}"
+    else
+        read -r -p "Enter stash number (0-$((stash_count - 1))): " idx
+        if [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -lt "$stash_count" ]; then
+            git stash pop "stash@{$idx}"
+            echo -e "${GREEN}Context restored from stash@{$idx}!${NC}"
+        else
+            echo -e "${RED}Invalid stash number.${NC}"
+        fi
+    fi
+}
+
+# Stash and switch to another branch
+cmd_switch() {
+    local target_branch="$1"
+
+    # Save current work if dirty
+    if [ -n "$(git status --porcelain)" ]; then
+        echo -e "${BLUE}Saving current work on '${CURRENT_BRANCH}'...${NC}"
+        git stash push -u -m "auto-save: context switch from $CURRENT_BRANCH to $target_branch"
+        echo -e "${GREEN}Work saved.${NC}"
+        echo ""
+    fi
+
+    # Switch to target branch
+    echo -e "${BLUE}Switching to '${target_branch}'...${NC}"
+    git switch "$target_branch"
+    echo ""
+
+    # Check if there's a stash for this branch
+    local matching_stash
+    matching_stash=$(git stash list | grep "to ${target_branch}$" | head -1 | cut -d: -f1)
+    if [ -n "$matching_stash" ]; then
+        echo -e "${CYAN}Found saved context for this branch:${NC}"
+        git stash show "$matching_stash"
+        echo ""
+        read -r -p "Restore it? (yes/no): " response
+        if [ "$response" = "yes" ]; then
+            git stash pop "$matching_stash"
+            echo -e "${GREEN}Previous work restored!${NC}"
+        fi
+    fi
+
+    echo ""
+    echo -e "${GREEN}Now on branch: $(git branch --show-current)${NC}"
+}
+
+# Show all active contexts
+cmd_status() {
+    echo -e "${BLUE}=== Context Status ===${NC}"
+    echo ""
+
+    echo -e "${CYAN}Current:${NC}"
+    echo "  Branch: $CURRENT_BRANCH"
+    echo "  Directory: $REPO_ROOT"
+    local dirty_count
+    dirty_count=$(git status --porcelain | wc -l)
+    if [ "$dirty_count" -gt 0 ]; then
+        echo -e "  Status: ${YELLOW}${dirty_count} uncommitted changes${NC}"
+    else
+        echo -e "  Status: ${GREEN}clean${NC}"
+    fi
+    echo ""
+
+    echo -e "${CYAN}Saved Contexts (Stashes):${NC}"
+    local stash_count
+    stash_count=$(git stash list | wc -l)
+    if [ "$stash_count" -eq 0 ]; then
+        echo "  (none)"
+    else
+        git stash list --format="  %gd: %gs"
+    fi
+    echo ""
+
+    echo -e "${CYAN}Active Worktrees:${NC}"
+    git worktree list | while IFS= read -r line; do
+        echo "  $line"
+    done
+    echo ""
+
+    echo -e "${CYAN}Summary:${NC}"
+    echo "  Stashes: $stash_count"
+    echo "  Worktrees: $(git worktree list | wc -l)"
+}
+
+# Open a worktree for a branch
+cmd_open() {
+    local branch="$1"
+    local worktree_dir="${REPO_ROOT}-${branch//\//-}"
+
+    # Check if worktree already exists
+    if git worktree list | grep -q "$worktree_dir"; then
+        echo -e "${YELLOW}Worktree already exists: ${worktree_dir}${NC}"
+        echo "cd ${worktree_dir}"
+        return 0
+    fi
+
+    echo -e "${BLUE}Opening worktree for '${branch}'...${NC}"
+
+    # Check if branch exists
+    if git show-ref --verify --quiet "refs/heads/$branch"; then
+        git worktree add "$worktree_dir" "$branch"
+    else
+        echo -e "${YELLOW}Branch '${branch}' doesn't exist. Creating from current HEAD.${NC}"
+        git worktree add -b "$branch" "$worktree_dir"
+    fi
+
+    echo ""
+    echo -e "${GREEN}Worktree ready!${NC}"
+    echo -e "Directory: ${CYAN}${worktree_dir}${NC}"
+    echo -e "Branch:    ${CYAN}${branch}${NC}"
+    echo ""
+    echo "To start working:"
+    echo "  cd ${worktree_dir}"
+}
+
+# Close (remove) a worktree
+cmd_close() {
+    local branch="$1"
+    local worktree_dir="${REPO_ROOT}-${branch//\//-}"
+
+    if ! git worktree list | grep -q "$worktree_dir"; then
+        echo -e "${RED}No worktree found for '${branch}'${NC}"
+        echo "Active worktrees:"
+        git worktree list
+        return 1
+    fi
+
+    # Check for uncommitted changes
+    cd "$worktree_dir"
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        echo -e "${YELLOW}Warning: Worktree has uncommitted changes:${NC}"
+        git status --short
+        echo ""
+        read -r -p "Save to stash before closing? (yes/no/cancel): " response
+        case "$response" in
+            yes)
+                git stash push -u -m "auto-save: closing worktree $branch"
+                echo -e "${GREEN}Changes stashed.${NC}"
+                ;;
+            cancel)
+                echo "Aborted."
+                return 0
+                ;;
+        esac
+    fi
+    cd "$REPO_ROOT"
+
+    git worktree remove "$worktree_dir"
+    echo -e "${GREEN}Worktree closed: ${worktree_dir}${NC}"
+}
+
+# Create a hotfix worktree
+cmd_hotfix() {
+    local name="${1:-$(date +%Y%m%d-%H%M%S)}"
+    local branch="hotfix/$name"
+    local worktree_dir="${REPO_ROOT}-hotfix-${name}"
+
+    echo -e "${BLUE}Creating hotfix environment...${NC}"
+    echo ""
+
+    # Determine base branch (main or master)
+    local base_branch="main"
+    if ! git show-ref --verify --quiet "refs/heads/main"; then
+        base_branch="master"
+    fi
+
+    git worktree add -b "$branch" "$worktree_dir" "$base_branch"
+
+    echo ""
+    echo -e "${GREEN}Hotfix environment ready!${NC}"
+    echo -e "Directory: ${CYAN}${worktree_dir}${NC}"
+    echo -e "Branch:    ${CYAN}${branch}${NC} (from ${base_branch})"
+    echo ""
+    echo "Quick start:"
+    echo "  cd ${worktree_dir}"
+    echo "  # make your fix"
+    echo "  git add . && git commit -m 'Fix: description'"
+    echo "  cd ${REPO_ROOT}"
+    echo "  $0 close ${branch}"
+}
+
+# Create a worktree for PR review
+cmd_review() {
+    local branch="$1"
+    local worktree_dir="${REPO_ROOT}-review-${branch//\//-}"
+
+    echo -e "${BLUE}Setting up review environment for '${branch}'...${NC}"
+
+    git worktree add "$worktree_dir" "$branch"
+
+    echo ""
+    echo -e "${GREEN}Review environment ready!${NC}"
+    echo -e "Directory: ${CYAN}${worktree_dir}${NC}"
+    echo -e "Branch:    ${CYAN}${branch}${NC}"
+    echo ""
+    echo "Review workflow:"
+    echo "  cd ${worktree_dir}"
+    echo "  # review code, run tests, etc."
+    echo "  cd ${REPO_ROOT}"
+    echo "  $0 close ${branch}"
+}
+
+# Clean up all secondary worktrees
+cmd_cleanup() {
+    echo -e "${BLUE}Active worktrees:${NC}"
+    git worktree list
+    echo ""
+
+    local count
+    count=$(git worktree list | wc -l)
+
+    if [ "$count" -le 1 ]; then
+        echo "Only the main worktree exists. Nothing to clean up."
+        return 0
+    fi
+
+    echo -e "${YELLOW}This will remove all worktrees except the main one.${NC}"
+    read -r -p "Continue? (yes/no): " response
+    if [ "$response" != "yes" ]; then
+        echo "Aborted."
+        return 0
+    fi
+
+    git worktree list --porcelain | grep "^worktree " | tail -n +2 | cut -d' ' -f2- | while IFS= read -r wt_path; do
+        echo -e "Removing: ${wt_path}"
+        git worktree remove --force "$wt_path" 2>/dev/null || echo -e "  ${YELLOW}Could not remove (may have changes)${NC}"
+    done
+
+    git worktree prune
+    echo ""
+    echo -e "${GREEN}Cleanup complete.${NC}"
+    git worktree list
+}
+
+# Main dispatch
+case "${1:-help}" in
+    save)    shift; cmd_save "${*:-}" ;;
+    resume)  cmd_resume ;;
+    switch)  shift; cmd_switch "$1" ;;
+    status)  cmd_status ;;
+    open)    shift; cmd_open "$1" ;;
+    close)   shift; cmd_close "$1" ;;
+    list)    git worktree list ;;
+    hotfix)  shift; cmd_hotfix "${1:-}" ;;
+    review)  shift; cmd_review "$1" ;;
+    cleanup) cmd_cleanup ;;
+    help|--help|-h) usage ;;
+    *)
+        echo -e "${RED}Unknown command: $1${NC}"
+        usage
+        exit 1
+        ;;
+esac
+SCRIPT
+
+chmod +x ~/context-switch.sh
+
+echo "=== Context Switch Tool Created ==="
+echo ""
+~/context-switch.sh help
+echo ""
+
+# Demo the tool
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+mkdir -p src
+echo "initial" > src/app.js && git add . && git commit -q -m "Initial commit"
+echo "feature" >> src/app.js
+
+echo "=== Demo: Save current context ==="
+~/context-switch.sh save "Working on user authentication"
+echo ""
+
+echo "=== Demo: Check status ==="
+~/context-switch.sh status
+echo ""
+
+echo "=== Demo: Create a hotfix worktree ==="
+~/context-switch.sh hotfix urgent-fix
+echo ""
+
+echo "=== Demo: Status with worktree ==="
+~/context-switch.sh status
+echo ""
+
+echo "=== Demo: Resume saved context ==="
+~/context-switch.sh resume
+echo ""
+
+echo "=== Demo: Final status ==="
+~/context-switch.sh status
+
+# Clean up worktrees and repo
+git worktree remove --force "${REPO}-hotfix-urgent-fix" 2>/dev/null || true
+cd / && rm -rf "$REPO" "${REPO}-hotfix-urgent-fix" 2>/dev/null
+
+echo ""
+echo "Script saved to ~/context-switch.sh"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `git stash push -m "message"` saves your work instantly — always include a descriptive message
+- `git stash pop` restores and removes the stash; `git stash apply` restores but keeps the stash for reuse
+- Use `-u` (or `--include-untracked`) to stash new files that haven't been added to Git yet
+- `git stash push -p` lets you stash individual hunks within a file for granular saves
+- `git stash branch <name>` creates a branch from a stash when it's grown into something bigger
+- `git worktree add <path> <branch>` checks out a branch in a separate directory — no switching needed
+- All worktrees share the same `.git` repository: commits made in any worktree are visible from all others
+- You cannot check out the same branch in two worktrees simultaneously
+- Use stash for quick interruptions (under 5 minutes) and worktrees for longer parallel work
+- Combine both tools: use worktrees for your main workflows and stash for quick saves within each
+
+## What's Next
+
+You can now save your work instantly and juggle multiple branches simultaneously. But what happens when something breaks and you don't know which of the last 800 commits caused it? In **Finding Bugs with git bisect**, you'll learn to binary search through Git history and pinpoint the exact commit that introduced a bug — turning hours of manual searching into minutes of automated detection.

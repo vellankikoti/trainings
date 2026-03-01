@@ -1,0 +1,1337 @@
+---
+title: "Debugging Scripts"
+description: "Find and fix bugs in shell scripts efficiently. Master set -x tracing, debug traps, shellcheck, and systematic debugging strategies that save hours of frustration."
+order: 12
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 11-error-handling
+objectives:
+  - Use set -x and PS4 for execution tracing
+  - Debug with trap DEBUG
+  - Use shellcheck for static analysis
+  - Apply systematic debugging strategies
+  - Read and interpret error messages
+tags:
+  - shell-scripting
+  - debugging
+  - troubleshooting
+  - bash
+---
+
+<Callout type="story" title="The Story">
+Your script works perfectly on your machine but fails on the server. The error message says "line 47: unexpected end of file" but line 47 is the last line and looks fine. The real bug is an unclosed quote on line 12. Shell script errors are notoriously misleading. Good debugging skills transform hours of frustration into minutes of systematic investigation.
+</Callout>
+
+## set -x: Execution Tracing
+
+The single most powerful debugging tool for shell scripts is `set -x`. It prints every command to stderr before executing it, showing you exactly what the shell is doing:
+
+```bash
+#!/bin/bash
+set -x
+
+NAME="Alice"
+GREETING="Hello, $NAME"
+echo "$GREETING"
+```
+
+Output:
+
+```
++ NAME=Alice
++ GREETING='Hello, Alice'
++ echo 'Hello, Alice'
+Hello, Alice
+```
+
+Every line prefixed with `+` is the trace output (sent to stderr). The lines without `+` are normal program output (stdout). You see variable expansion, the exact arguments passed to each command, and the precise order of execution.
+
+### Enabling and Disabling Tracing
+
+You do not need to trace the entire script. Wrap just the suspicious section:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+echo "This part is not traced"
+
+# Turn tracing on for a specific section
+set -x
+problematic_variable="some value with spaces"
+echo "Debugging this: $problematic_variable"
+result=$((2 + 3))
+set +x
+
+echo "Tracing is off again"
+```
+
+### Running a Script with Tracing
+
+You can trace any script without modifying it using `bash -x`:
+
+```bash
+# Trace the entire script without editing it
+bash -x ./deploy.sh
+
+# Combine with other flags
+bash -eux ./deploy.sh
+
+# Trace with arguments
+bash -x ./deploy.sh --env production --version 2.1.0
+```
+
+## Customizing the Trace Prefix with PS4
+
+The default trace prefix is `+ `. The `PS4` variable lets you customize it to include the filename, line number, and function name — essential when debugging scripts that source other files or call many functions:
+
+```bash
+#!/bin/bash
+
+# Show line numbers in trace output
+export PS4='+(${BASH_SOURCE}:${LINENO}): '
+set -x
+
+NAME="world"
+echo "Hello, $NAME"
+```
+
+Output:
+
+```
++(./script.sh:6): NAME=world
++(./script.sh:7): echo 'Hello, world'
+Hello, world
+```
+
+### Recommended PS4 Configurations
+
+```bash
+# Line number only (minimal)
+export PS4='+L${LINENO}: '
+
+# File and line number
+export PS4='+${BASH_SOURCE##*/}:${LINENO}: '
+
+# File, line, and function name
+export PS4='+${BASH_SOURCE##*/}:${LINENO}:${FUNCNAME[0]:-main}(): '
+
+# Timestamp, file, line, and function (for performance debugging)
+export PS4='+$(date +%H:%M:%S) ${BASH_SOURCE##*/}:${LINENO} ${FUNCNAME[0]:-main}(): '
+```
+
+### Practical Example: Tracing a Function Call
+
+```bash
+#!/bin/bash
+export PS4='+${LINENO}:${FUNCNAME[0]:-main}(): '
+set -euo pipefail
+set -x
+
+deploy_app() {
+    local version="$1"
+    local target="/tmp/app-deploy"
+
+    mkdir -p "$target"
+    echo "v${version}" > "$target/version.txt"
+    echo "Deployed version $version"
+}
+
+validate_deploy() {
+    local target="/tmp/app-deploy"
+    local expected="$1"
+    local actual
+    actual=$(cat "$target/version.txt")
+
+    if [ "$actual" = "v${expected}" ]; then
+        echo "Validation passed"
+    else
+        echo "FAILED: expected v${expected}, got $actual" >&2
+        return 1
+    fi
+}
+
+deploy_app "2.1.0"
+validate_deploy "2.1.0"
+rm -rf /tmp/app-deploy
+```
+
+The trace output shows you which function is executing, on which line, and with what values — making it trivial to spot where things diverge from expectations.
+
+### Redirecting Trace Output to a File
+
+By default, `set -x` output goes to stderr, which can be noisy. You can redirect it to a separate file:
+
+```bash
+#!/bin/bash
+
+# Redirect trace output to a log file (bash 4.1+)
+exec 19>/tmp/debug-trace.log
+export BASH_XTRACEFD=19
+set -x
+
+# Your script runs normally on screen
+echo "Normal output appears here"
+# Trace output goes to /tmp/debug-trace.log
+
+# Later, review the trace:
+# cat /tmp/debug-trace.log
+```
+
+<Callout type="tip" title="BASH_XTRACEFD for Clean Output">
+Setting `BASH_XTRACEFD` to a custom file descriptor separates trace output from both stdout and stderr. This is essential when your script's stderr output is meaningful (error messages, warnings) and you do not want trace lines mixed in with them.
+</Callout>
+
+## trap DEBUG: Step Through Execution
+
+The `DEBUG` trap fires before every single command, letting you build an interactive debugger or inspect variables at each step:
+
+```bash
+#!/bin/bash
+
+# Simple step-through: show each command before it executes
+trap 'echo "DEBUG [line $LINENO]: $BASH_COMMAND"' DEBUG
+
+X=10
+Y=20
+SUM=$((X + Y))
+echo "Sum is $SUM"
+```
+
+Output:
+
+```
+DEBUG [line 5]: X=10
+DEBUG [line 6]: Y=20
+DEBUG [line 7]: SUM=$((X + Y))
+DEBUG [line 8]: echo "Sum is $SUM"
+Sum is 30
+```
+
+### Inspecting Variables at Each Step
+
+```bash
+#!/bin/bash
+
+# Debug trap that shows current variable state
+debug_trap() {
+    echo "--- DEBUG (line $1) ---" >&2
+    echo "  Next command: $BASH_COMMAND" >&2
+    echo "  COUNT=$COUNT, TOTAL=$TOTAL" >&2
+}
+trap 'debug_trap $LINENO' DEBUG
+
+COUNT=0
+TOTAL=0
+
+for i in 10 20 30; do
+    COUNT=$((COUNT + 1))
+    TOTAL=$((TOTAL + i))
+done
+
+echo "Processed $COUNT items, total=$TOTAL"
+```
+
+This is more verbose than `set -x` but gives you full control over what information is displayed at each step.
+
+### Conditional Debugging
+
+Only trace when a specific environment variable is set, avoiding noise in normal runs:
+
+```bash
+#!/bin/bash
+
+DEBUG_ENABLED="${DEBUG:-0}"
+
+debug_trace() {
+    [ "$DEBUG_ENABLED" -eq 1 ] || return 0
+    echo "TRACE [${FUNCNAME[1]:-main}:$1]: $BASH_COMMAND" >&2
+}
+trap 'debug_trace $LINENO' DEBUG
+
+process_item() {
+    local item="$1"
+    local result=$((item * 2))
+    echo "$result"
+}
+
+# Run normally:      ./script.sh
+# Run with tracing:  DEBUG=1 ./script.sh
+for i in 1 2 3; do
+    process_item "$i"
+done
+```
+
+### Interactive Step-Through Debugger
+
+You can build a crude but effective interactive debugger with `trap DEBUG`:
+
+```bash
+#!/bin/bash
+
+step_through() {
+    echo "" >&2
+    echo "NEXT [line $LINENO]: $BASH_COMMAND" >&2
+    read -rp "Press Enter to continue (q to quit)... " input < /dev/tty
+    [ "$input" = "q" ] && exit 0
+}
+trap step_through DEBUG
+
+# Every command pauses and shows what is about to execute
+X=10
+Y=20
+echo $((X + Y))
+
+trap - DEBUG    # Remove the debugger
+echo "Debugger disabled"
+```
+
+## ShellCheck: Static Analysis
+
+ShellCheck is a static analysis tool for shell scripts. It catches bugs, portability issues, and style problems without running your script. Think of it as a linter that knows hundreds of bash edge cases.
+
+### Installing ShellCheck
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install shellcheck
+
+# macOS
+brew install shellcheck
+
+# Fedora/RHEL
+sudo dnf install ShellCheck
+
+# Run from Docker (no install needed)
+docker run --rm -v "$PWD:/mnt" koalaman/shellcheck /mnt/script.sh
+
+# Web version (paste your script)
+# https://www.shellcheck.net
+```
+
+### Running ShellCheck
+
+```bash
+# Check a single script
+shellcheck deploy.sh
+
+# Check multiple scripts
+shellcheck scripts/*.sh
+
+# Check with a specific shell dialect
+shellcheck --shell=bash script.sh
+
+# Show only errors (ignore warnings and style)
+shellcheck -S error deploy.sh
+
+# Output as JSON (for CI integration)
+shellcheck -f json deploy.sh
+```
+
+### Common ShellCheck Warnings
+
+These are the warnings you will see most often, along with the fix for each:
+
+```bash
+#!/bin/bash
+
+# SC2086: Double-quote to prevent word splitting
+# BAD:
+echo $filename
+# GOOD:
+echo "$filename"
+
+# SC2046: Quote command substitution
+# BAD:
+files=$(ls *.txt)
+# GOOD:
+files="$(ls ./*.txt)"
+
+# SC2006: Use $(...) instead of legacy backticks
+# BAD:
+date=`date`
+# GOOD:
+date=$(date)
+
+# SC2155: Declare and assign separately to preserve exit codes
+# BAD:
+local result=$(some_command)
+# GOOD:
+local result
+result=$(some_command)
+
+# SC2164: Use cd ... || exit to handle cd failures
+# BAD:
+cd /some/dir
+# GOOD:
+cd /some/dir || exit 1
+
+# SC2162: read without -r mangles backslashes
+# BAD:
+read line
+# GOOD:
+read -r line
+
+# SC2068: Double-quote array expansions
+# BAD:
+for item in ${array[@]}; do echo "$item"; done
+# GOOD:
+for item in "${array[@]}"; do echo "$item"; done
+
+# SC2129: Consider grouping redirections
+# BAD:
+echo "line 1" >> file
+echo "line 2" >> file
+# GOOD:
+{
+    echo "line 1"
+    echo "line 2"
+} >> file
+```
+
+<Callout type="warning" title="SC2086 Is the Most Important Warning">
+Unquoted variables are the number one source of bugs in shell scripts. When a variable contains spaces, special characters, or glob patterns, an unquoted `$var` causes word splitting, unexpected filename expansion, or empty argument problems. Always double-quote your variables: `"$var"`. The only exception is when you intentionally need word splitting (rare and should be commented).
+</Callout>
+
+### Suppressing Specific Warnings
+
+When ShellCheck warns about something you are doing intentionally:
+
+```bash
+# Suppress for one line
+# shellcheck disable=SC2086
+echo $deliberately_unquoted_var
+
+# Suppress for the entire file (place at the top)
+# shellcheck disable=SC2034,SC2086
+
+# Suppress with an explanation
+# We intentionally word-split FLAGS to pass them as separate arguments
+# shellcheck disable=SC2086
+command $FLAGS
+```
+
+### Integrating ShellCheck into CI/CD
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# CI script: run ShellCheck on all shell scripts
+echo "Running ShellCheck on all .sh files..."
+FAILED=0
+
+while IFS= read -r script; do
+    echo "  Checking: $script"
+    if ! shellcheck "$script"; then
+        FAILED=$((FAILED + 1))
+    fi
+done < <(find . -name "*.sh" -type f -not -path "./.git/*")
+
+if [ "$FAILED" -gt 0 ]; then
+    echo "ShellCheck found issues in $FAILED file(s)" >&2
+    exit 1
+fi
+
+echo "All scripts passed ShellCheck."
+```
+
+## Common Bugs and How to Find Them
+
+### Unquoted Variables
+
+The most common shell scripting bug. It causes word splitting and glob expansion:
+
+```bash
+# BUG: If filename contains spaces, this breaks
+filename="my report.txt"
+if [ -f $filename ]; then    # Becomes: [ -f my report.txt ] — 3 args, error
+    cat $filename              # Tries to cat "my" and "report.txt" separately
+fi
+
+# FIX: Always quote
+if [ -f "$filename" ]; then
+    cat "$filename"
+fi
+```
+
+### Wrong Test Brackets
+
+```bash
+# Single brackets [ ] are fragile with empty variables
+# BUG: if $var is empty, this becomes [ = "value" ] — syntax error
+[ $var = "value" ]
+
+# FIX: Quote the variable
+[ "$var" = "value" ]
+
+# BETTER: [[ ]] handles empty vars and spaces safely
+[[ $var = "value" ]]
+
+# Numeric comparison
+# BUG: -eq only works with integers
+[ "$string_var" -eq 5 ]    # Error if string_var is not a number
+
+# FIX: Use arithmetic context
+(( num_var == 5 ))
+```
+
+### Subshell Variable Scope
+
+Variables set inside a pipeline are invisible to the parent shell because each pipe stage runs in a subshell:
+
+```bash
+# BUG: COUNT stays 0 because the while loop runs in a subshell (due to pipe)
+COUNT=0
+cat file.txt | while read -r line; do
+    COUNT=$((COUNT + 1))
+done
+echo "Lines: $COUNT"    # Always prints 0!
+
+# FIX: Use input redirection instead of pipe
+COUNT=0
+while read -r line; do
+    COUNT=$((COUNT + 1))
+done < file.txt
+echo "Lines: $COUNT"    # Correct count
+
+# FIX (alternative): Use process substitution
+COUNT=0
+while read -r line; do
+    COUNT=$((COUNT + 1))
+done < <(some_command)
+echo "Lines: $COUNT"    # Correct count
+```
+
+### Unclosed Quotes
+
+An unclosed quote on line 12 causes "unexpected end of file" on the last line:
+
+```bash
+#!/bin/bash
+
+# Line 12 has an unclosed quote — but the error says line 47
+echo "Starting process      # <-- Missing closing quote here!
+echo "Step 1 complete"
+echo "Step 2 complete"
+# ... 30 more lines ...
+echo "Done"
+# ERROR: line 47: unexpected end of file
+# Bash thinks everything from line 12 to EOF is one giant string
+```
+
+### Missing Spaces in Test Brackets
+
+```bash
+# BUG: No space after [ and before ]
+if [-f "$file"]; then       # ERROR: [-f: command not found
+    echo "exists"
+fi
+
+# FIX: [ and ] require surrounding spaces
+if [ -f "$file" ]; then
+    echo "exists"
+fi
+```
+
+<Callout type="tip" title="Finding Unclosed Quotes">
+When you see "unexpected end of file" on the last line, the real bug is almost always an unclosed quote, brace, or parenthesis much earlier in the script. Use `bash -n script.sh` for syntax checking. Use a syntax-highlighting editor that visually shows unmatched quotes. Search backward from the error for a quote that changes the color of everything after it.
+</Callout>
+
+## Systematic Debugging Strategies
+
+### Strategy 1: Reproduce First
+
+Before fixing anything, make the bug happen reliably:
+
+```bash
+# 1. Identify the exact inputs that trigger the bug
+# 2. Create a minimal reproduction case
+# 3. Verify the bug happens every time
+
+# Example: Script fails for filenames with spaces
+touch "test file.txt"
+./process.sh "test file.txt"
+# Confirmed: fails with "test: No such file or directory"
+```
+
+### Strategy 2: Isolate with Binary Search
+
+When a long script fails and you do not know where, narrow it down by commenting out half the code:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+step_1    # Comment everything below — does this work alone?
+step_2    # Uncomment this — still working?
+step_3    # Uncomment this — still working?
+step_4    # This one fails! Bug is in step_4 or depends on step_3's state
+```
+
+Add `set -x` before the failing step to see exactly what happens.
+
+### Strategy 3: Add Instrumentation
+
+Insert debug logging at key points to see what the script is doing:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+debug() {
+    [ "${DEBUG:-0}" = "1" ] && echo "DEBUG [$1]: $2" >&2
+    return 0
+}
+
+process_files() {
+    local dir="$1"
+    debug "process_files" "dir='$dir'"
+
+    local count=0
+    for f in "$dir"/*.txt; do
+        [ -f "$f" ] || continue
+        debug "process_files" "processing: '$f'"
+        count=$((count + 1))
+    done
+    debug "process_files" "processed $count files"
+}
+
+# Run: DEBUG=1 ./script.sh
+process_files "/var/data"
+```
+
+### Strategy 4: Test Functions in Isolation
+
+Source the script and call individual functions to test them separately:
+
+```bash
+# In your script (deploy.sh):
+validate_config() {
+    local config="$1"
+    [ -f "$config" ] || return 1
+    grep -q "version=" "$config" || return 1
+    return 0
+}
+
+# Test interactively:
+$ source deploy.sh
+$ validate_config "/etc/myapp.conf"
+$ echo $?
+```
+
+### Strategy 5: Syntax Check with bash -n
+
+Check for structural errors without running the script:
+
+```bash
+# Syntax check only — script does not execute
+bash -n script.sh
+
+# No output means no syntax errors
+# Errors show line numbers:
+# script.sh: line 12: unexpected EOF while looking for matching `"'
+# script.sh: line 47: syntax error: unexpected end of file
+```
+
+### Strategy 6: Compare Environments
+
+When a script works on your machine but fails elsewhere:
+
+```bash
+# Check bash version (syntax differs between versions)
+bash --version
+
+# Compare environment variables
+env | sort > /tmp/env-here.txt
+# On the other machine: env | sort > /tmp/env-there.txt
+# diff the two files
+
+# Check which commands are being used
+which grep sed awk    # GNU or BSD versions?
+type -a python        # Which python?
+
+# Check file line endings
+file script.sh
+# "with CRLF line terminators" = Windows line endings = broken
+# Fix: dos2unix script.sh   OR   sed -i 's/\r$//' script.sh
+```
+
+## Reading Error Messages
+
+Shell error messages are often cryptic. Here is a quick reference:
+
+```bash
+# "command not found"
+# -> Not installed, or not in PATH
+# -> Check: which command_name; echo $PATH
+
+# "Permission denied"
+# -> File is not executable, or you lack read/write permission
+# -> Check: ls -la file; Fix: chmod +x script.sh
+
+# "No such file or directory"
+# -> Path is wrong, file does not exist, OR shebang points to bad interpreter
+# -> Check: head -1 script.sh (is #!/bin/bash correct?)
+# -> Also: file script.sh (Windows line endings make shebang fail)
+
+# "unexpected end of file"
+# -> Unclosed quote, brace, parenthesis, or heredoc EARLIER in the script
+# -> The line number is where bash gave up, not where the bug is
+# -> Fix: Search backward for unmatched quotes or brackets
+
+# "ambiguous redirect"
+# -> Variable in a redirect is empty or has spaces
+# -> BAD: > $logfile (when logfile is empty = > nothing)
+# -> Fix: > "$logfile"
+
+# "unary operator expected" / "binary operator expected"
+# -> Empty variable in a [ ] test expression
+# -> BAD: [ $var = "hello" ] when var is empty -> [ = "hello" ]
+# -> Fix: [ "$var" = "hello" ]
+
+# "bad substitution"
+# -> Invalid parameter expansion, or using bash syntax with sh
+# -> Check shebang: #!/bin/bash not #!/bin/sh
+```
+
+<Exercise number={1} title="Find the Bugs">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Find the Bugs Exercise
+# A script with 5 intentional bugs. We identify each one and show the fix.
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# --- Create the buggy script ---
+cat > "$TEMP_DIR/buggy.sh" << 'BUGSCRIPT'
+#!/bin/bash
+
+# Server Health Checker — BUGGY VERSION
+# Contains 5 bugs. Can you find them all?
+
+SERVERS="web01 web02 api01 db01"
+LOG_FILE=/tmp/health check.log
+TIMEOUT=5
+HEALTHY_COUNT=0
+
+check_server() {
+    local server=$1
+    local port=$2
+
+    if [ $server = "db01" ]; then
+        port=5432
+    fi
+
+    echo "Checking $server on port $port..."
+
+    result=`echo "healthy"`
+
+    if [ $result = "healthy" ]; then
+        echo "$server is UP" >> $LOG_FILE
+        HEALTHY_COUNT=$((HEALTHY_COUNT + 1))
+    fi
+}
+
+echo "Health Check Report" > $LOG_FILE
+echo "Date: $(date)" >> $LOG_FILE
+
+for server in $SERVERS; do
+    check_server $server 80
+done
+
+echo "Healthy servers: $HEALTHY_COUNT out of 4" >> $LOG_FILE
+cat $LOG_FILE
+BUGSCRIPT
+
+echo "=== BUGGY SCRIPT ==="
+cat -n "$TEMP_DIR/buggy.sh"
+
+echo ""
+echo "=== BUG ANALYSIS ==="
+echo ""
+echo "Bug 1 (Line 7): Unquoted variable with space in filename"
+echo "  BUGGY:  LOG_FILE=/tmp/health check.log"
+echo "  FIXED:  LOG_FILE=\"/tmp/health_check.log\""
+echo "  WHY:    The space causes bash to treat 'check.log' as a separate command."
+echo "          LOG_FILE is set to '/tmp/health' and bash tries to run 'check.log'."
+echo ""
+echo "Bug 2 (Line 14): Unquoted variable in [ ] test"
+echo "  BUGGY:  if [ \$server = \"db01\" ]; then"
+echo "  FIXED:  if [ \"\$server\" = \"db01\" ]; then"
+echo "  WHY:    If server is empty, [ = \"db01\" ] is a syntax error."
+echo ""
+echo "Bug 3 (Line 21): Backticks instead of \$(...)"
+echo "  BUGGY:  result=\`echo \"healthy\"\`"
+echo "  FIXED:  result=\$(echo \"healthy\")"
+echo "  WHY:    Backticks are deprecated. They handle escaping differently and"
+echo "          cannot be nested. \$() is the modern standard."
+echo ""
+echo "Bug 4 (Lines 23-24): Unquoted variables in test and redirect"
+echo "  BUGGY:  if [ \$result = \"healthy\" ]; then ... >> \$LOG_FILE"
+echo "  FIXED:  if [ \"\$result\" = \"healthy\" ]; then ... >> \"\$LOG_FILE\""
+echo "  WHY:    Unquoted vars cause word splitting. \$LOG_FILE with spaces causes"
+echo "          'ambiguous redirect'."
+echo ""
+echo "Bug 5 (Line 4): Missing 'set -euo pipefail'"
+echo "  BUGGY:  (no strict mode)"
+echo "  FIXED:  set -euo pipefail"
+echo "  WHY:    Without strict mode, all the bugs above fail silently."
+echo "          With set -u, the typo bugs would be caught immediately."
+echo ""
+
+# --- Create and run the FIXED script ---
+cat > "$TEMP_DIR/fixed.sh" << 'FIXEDSCRIPT'
+#!/bin/bash
+set -euo pipefail                      # Fix 5: Enable strict mode
+
+SERVERS="web01 web02 api01 db01"
+LOG_FILE="/tmp/health_check.log"       # Fix 1: No spaces, quoted
+TIMEOUT=5
+HEALTHY_COUNT=0
+
+check_server() {
+    local server="$1"                   # Quoted
+    local port="$2"                     # Quoted
+
+    if [ "$server" = "db01" ]; then     # Fix 2: Quoted variable in test
+        port=5432
+    fi
+
+    echo "Checking $server on port $port..."
+
+    result=$(echo "healthy")            # Fix 3: $() instead of backticks
+
+    if [ "$result" = "healthy" ]; then  # Fix 4: Quoted variables
+        echo "$server is UP" >> "$LOG_FILE"
+        HEALTHY_COUNT=$((HEALTHY_COUNT + 1))
+    fi
+}
+
+echo "Health Check Report" > "$LOG_FILE"
+echo "Date: $(date)" >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"
+
+for server in $SERVERS; do
+    check_server "$server" 80
+done
+
+echo "" >> "$LOG_FILE"
+echo "Healthy servers: $HEALTHY_COUNT out of 4" >> "$LOG_FILE"
+
+echo ""
+echo "=== FIXED SCRIPT OUTPUT ==="
+cat "$LOG_FILE"
+
+rm -f "$LOG_FILE"
+FIXEDSCRIPT
+
+chmod +x "$TEMP_DIR/fixed.sh"
+"$TEMP_DIR/fixed.sh"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Debug Trace">
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Debug Trace Exercise
+# Use set -x and PS4 to trace a failing script and find the bug.
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# --- Create a script with a subtle bug ---
+cat > "$TEMP_DIR/deploy-broken.sh" << 'DEPLOY'
+#!/bin/bash
+set -euo pipefail
+
+# Deployment script — has a subtle variable name typo
+
+APP_NAME="myapp"
+VERSION="2.0"
+DEPLOY_DIR="/tmp/debug-deploy"
+CONFIG_DIR="$DEPLOY_DIR/config"
+
+setup_dirs() {
+    mkdir -p "$DEPLOY_DIR"
+    mkdir -p "$CONFIG_DIR"
+}
+
+write_config() {
+    local env="$1"
+    # BUG: VERISON instead of VERSION (typo!)
+    cat > "$CONFIG_DIR/$env.conf" << EOF
+app=$APP_NAME
+version=$VERISON
+environment=$env
+EOF
+}
+
+verify_config() {
+    local env="$1"
+    local config="$CONFIG_DIR/$env.conf"
+
+    if [ ! -f "$config" ]; then
+        echo "ERROR: Config not found: $config" >&2
+        return 1
+    fi
+
+    local ver
+    ver=$(grep "^version=" "$config" | cut -d= -f2)
+
+    if [ "$ver" != "$VERSION" ]; then
+        echo "ERROR: Version mismatch: expected '$VERSION', got '$ver'" >&2
+        return 1
+    fi
+
+    echo "Config verified: $config"
+}
+
+setup_dirs
+write_config "production"
+verify_config "production"
+rm -rf "$DEPLOY_DIR"
+DEPLOY
+
+echo "=== Step 1: Run the broken script normally ==="
+echo ""
+if bash "$TEMP_DIR/deploy-broken.sh" 2>&1; then
+    echo "Script succeeded (unexpected)"
+else
+    echo ""
+    echo "Script FAILED with exit code $?"
+fi
+
+echo ""
+echo "=== Step 2: Run with set -x to trace execution ==="
+echo ""
+echo "Using: PS4='+L\${LINENO}: ' bash -x ./deploy-broken.sh"
+echo ""
+
+if PS4='+L${LINENO}: ' bash -x "$TEMP_DIR/deploy-broken.sh" 2>&1; then
+    echo "Script succeeded (unexpected)"
+else
+    echo ""
+    echo "The trace reveals the bug!"
+fi
+
+echo ""
+echo "=== Step 3: Analysis ==="
+echo ""
+echo "The trace shows:"
+echo "  - write_config references \$VERISON (typo) instead of \$VERSION"
+echo "  - With set -u (strict mode), bash catches the undefined variable"
+echo "  - Error: VERISON: unbound variable"
+echo "  - Without set -u, \$VERISON would silently expand to empty string"
+echo "  - The version would be empty and verify_config would catch the mismatch"
+echo ""
+
+echo "=== Step 4: Fix and verify ==="
+echo ""
+
+cat > "$TEMP_DIR/deploy-fixed.sh" << 'DEPLOY_FIXED'
+#!/bin/bash
+set -euo pipefail
+
+APP_NAME="myapp"
+VERSION="2.0"
+DEPLOY_DIR="/tmp/debug-deploy"
+CONFIG_DIR="$DEPLOY_DIR/config"
+
+setup_dirs() {
+    mkdir -p "$DEPLOY_DIR"
+    mkdir -p "$CONFIG_DIR"
+}
+
+write_config() {
+    local env="$1"
+    # FIXED: $VERSION instead of $VERISON
+    cat > "$CONFIG_DIR/$env.conf" << EOF
+app=$APP_NAME
+version=$VERSION
+environment=$env
+EOF
+}
+
+verify_config() {
+    local env="$1"
+    local config="$CONFIG_DIR/$env.conf"
+
+    if [ ! -f "$config" ]; then
+        echo "ERROR: Config not found: $config" >&2
+        return 1
+    fi
+
+    local ver
+    ver=$(grep "^version=" "$config" | cut -d= -f2)
+
+    if [ "$ver" != "$VERSION" ]; then
+        echo "ERROR: Version mismatch: expected '$VERSION', got '$ver'" >&2
+        return 1
+    fi
+
+    echo "Config verified: $config (version=$ver)"
+}
+
+setup_dirs
+write_config "production"
+verify_config "production"
+echo "Deployment successful!"
+rm -rf "$DEPLOY_DIR"
+DEPLOY_FIXED
+
+echo "--- Running fixed script with trace ---"
+PS4='+L${LINENO}: ' bash -x "$TEMP_DIR/deploy-fixed.sh" 2>&1
+
+echo ""
+echo "=== Lessons Learned ==="
+echo "1. set -u caught the typo: without it, \$VERISON silently becomes empty"
+echo "2. set -x showed exactly which line and command failed"
+echo "3. Custom PS4 with \${LINENO} pinpointed the line number"
+echo "4. bash -x lets you trace without editing the script"
+echo "5. Multiple defenses (set -u + verify_config) create safety nets"
+```
+
+</Exercise>
+
+<MiniProject title="Script Linter">
+
+```bash
+cat > ~/script-linter.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# ==============================================================
+# Script Linter
+# A wrapper that runs shellcheck (if available) plus custom
+# checks on shell scripts. Produces a structured quality report.
+#
+# Usage: ./script-linter.sh <script_or_directory> [--fix]
+# ==============================================================
+
+TOTAL_FILES=0
+TOTAL_WARNINGS=0
+TOTAL_ERRORS=0
+TOTAL_STYLE=0
+FILES_PASSED=0
+FIX_MODE=0
+
+# --- Argument parsing ---
+TARGET=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --fix)
+            FIX_MODE=1
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 <script_or_directory> [--fix]"
+            echo ""
+            echo "Runs shellcheck (if installed) and custom quality checks."
+            echo "  --fix    Attempt to auto-fix simple issues (trailing whitespace, permissions)"
+            exit 0
+            ;;
+        -*)
+            echo "Error: Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            TARGET="$1"
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$TARGET" ]; then
+    echo "Error: No target specified." >&2
+    echo "Usage: $0 <script_or_directory> [--fix]" >&2
+    exit 1
+fi
+
+# --- Custom check functions ---
+
+check_shebang() {
+    local file="$1"
+    local first_line
+    first_line=$(head -1 "$file")
+
+    if [[ ! "$first_line" =~ ^#! ]]; then
+        echo "  [ERROR] Missing shebang line (#!/bin/bash)"
+        TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+        return
+    fi
+
+    if [[ "$first_line" =~ ^#!/bin/bash ]] || [[ "$first_line" =~ ^#!/usr/bin/env\ bash ]]; then
+        echo "  [PASS]  Valid bash shebang"
+    elif [[ "$first_line" =~ ^#!/bin/sh ]]; then
+        echo "  [INFO]  Uses /bin/sh — bash-specific features may not work"
+    fi
+}
+
+check_strict_mode() {
+    local file="$1"
+    local has_e=0 has_u=0 has_pipefail=0
+
+    if grep -qE 'set -e|set -euo|set -eu ' "$file" 2>/dev/null; then has_e=1; fi
+    if grep -qE 'set -.*u|set -euo' "$file" 2>/dev/null; then has_u=1; fi
+    if grep -q 'pipefail' "$file" 2>/dev/null; then has_pipefail=1; fi
+
+    if [ "$has_e" -eq 1 ] && [ "$has_u" -eq 1 ] && [ "$has_pipefail" -eq 1 ]; then
+        echo "  [PASS]  Has strict mode (set -euo pipefail)"
+    else
+        [ "$has_e" -eq 0 ] && { echo "  [WARN]  Missing set -e (exit on error)"; TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1)); }
+        [ "$has_u" -eq 0 ] && { echo "  [WARN]  Missing set -u (undefined variable check)"; TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1)); }
+        [ "$has_pipefail" -eq 0 ] && { echo "  [WARN]  Missing set -o pipefail"; TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1)); }
+    fi
+}
+
+check_executable() {
+    local file="$1"
+    if [ ! -x "$file" ]; then
+        echo "  [WARN]  Not executable (chmod +x needed)"
+        TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1))
+        if [ "$FIX_MODE" -eq 1 ]; then
+            chmod +x "$file"
+            echo "  [FIXED] Made executable"
+        fi
+    else
+        echo "  [PASS]  Is executable"
+    fi
+}
+
+check_line_endings() {
+    local file="$1"
+    if file "$file" | grep -q "CRLF" 2>/dev/null; then
+        echo "  [ERROR] Windows line endings (CRLF) — will break on Linux"
+        TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+        if [ "$FIX_MODE" -eq 1 ]; then
+            sed -i 's/\r$//' "$file"
+            echo "  [FIXED] Converted to Unix line endings"
+        fi
+    fi
+}
+
+check_trailing_whitespace() {
+    local file="$1"
+    local count
+    count=$(grep -cP '\S\s+$' "$file" 2>/dev/null || echo "0")
+    if [ "$count" -gt 0 ]; then
+        echo "  [STYLE] Trailing whitespace on $count line(s)"
+        TOTAL_STYLE=$((TOTAL_STYLE + 1))
+        if [ "$FIX_MODE" -eq 1 ]; then
+            sed -i 's/[[:space:]]*$//' "$file"
+            echo "  [FIXED] Removed trailing whitespace"
+        fi
+    fi
+}
+
+check_common_issues() {
+    local file="$1"
+    local line_no=0
+
+    while IFS= read -r line; do
+        line_no=$((line_no + 1))
+
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+
+        # Check for backtick command substitution
+        if [[ "$line" == *'`'*'`'* ]]; then
+            echo "  [WARN]  Line $line_no: Backticks — use \$(command) instead"
+            TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1))
+        fi
+
+        # Check for cd without error handling
+        if [[ "$line" =~ ^[[:space:]]*cd[[:space:]] ]] && \
+           [[ "$line" != *"||"* ]] && [[ "$line" != *"&&"* ]] && \
+           [[ "$line" != *"if "* ]]; then
+            echo "  [WARN]  Line $line_no: cd without error handling"
+            TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1))
+        fi
+
+        # Check for rm -rf with unquoted variable
+        if echo "$line" | grep -qE 'rm\s+-r[f]?\s+\$[A-Za-z_]' 2>/dev/null; then
+            echo "  [ERROR] Line $line_no: rm -rf with unquoted variable (dangerous)"
+            TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+        fi
+
+        # Check for eval
+        if [[ "$line" =~ ^[[:space:]]*eval[[:space:]] ]]; then
+            echo "  [WARN]  Line $line_no: Uses eval (potential security risk)"
+            TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1))
+        fi
+
+        # Check for read without -r
+        if [[ "$line" =~ ^[[:space:]]*read[[:space:]] ]] && [[ "$line" != *"-r"* ]]; then
+            echo "  [WARN]  Line $line_no: read without -r (backslashes mangled)"
+            TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1))
+        fi
+
+        # Check for TODO/FIXME markers
+        if echo "$line" | grep -qiE '#.*(TODO|FIXME|HACK|XXX)' 2>/dev/null; then
+            echo "  [INFO]  Line $line_no: Contains TODO/FIXME marker"
+        fi
+
+    done < "$file"
+}
+
+run_shellcheck() {
+    local file="$1"
+    if command -v shellcheck &>/dev/null; then
+        echo ""
+        echo "  --- ShellCheck ---"
+        if shellcheck --format=gcc "$file" 2>&1 | head -20; then
+            if shellcheck "$file" > /dev/null 2>&1; then
+                echo "  [PASS]  ShellCheck: no issues"
+            else
+                echo "  [WARN]  ShellCheck found issues (see above)"
+                TOTAL_WARNINGS=$((TOTAL_WARNINGS + 1))
+            fi
+        fi
+    else
+        echo "  [INFO]  ShellCheck not installed — skipping static analysis"
+    fi
+}
+
+# --- Lint a single file ---
+lint_file() {
+    local file="$1"
+    TOTAL_FILES=$((TOTAL_FILES + 1))
+    local errors_before=$TOTAL_ERRORS
+    local warnings_before=$TOTAL_WARNINGS
+
+    echo ""
+    echo "========================================"
+    echo "  Linting: $file"
+    echo "========================================"
+
+    check_shebang "$file"
+    check_strict_mode "$file"
+    check_executable "$file"
+    check_line_endings "$file"
+    check_trailing_whitespace "$file"
+    check_common_issues "$file"
+    run_shellcheck "$file"
+
+    local new_errors=$((TOTAL_ERRORS - errors_before))
+    local new_warnings=$((TOTAL_WARNINGS - warnings_before))
+    if [ "$new_errors" -eq 0 ] && [ "$new_warnings" -eq 0 ]; then
+        FILES_PASSED=$((FILES_PASSED + 1))
+    fi
+}
+
+# --- Main ---
+echo "========================================"
+echo "  Script Linter"
+echo "  $(date '+%Y-%m-%d %H:%M:%S')"
+echo "  Mode: $([ "$FIX_MODE" -eq 1 ] && echo "FIX (auto-fix enabled)" || echo "CHECK (report only)")"
+echo "========================================"
+
+if [ -f "$TARGET" ]; then
+    lint_file "$TARGET"
+elif [ -d "$TARGET" ]; then
+    while IFS= read -r script; do
+        lint_file "$script"
+    done < <(find "$TARGET" -name "*.sh" -type f 2>/dev/null | sort)
+
+    if [ "$TOTAL_FILES" -eq 0 ]; then
+        echo "No .sh files found in $TARGET"
+        exit 0
+    fi
+else
+    echo "Error: $TARGET is not a file or directory" >&2
+    exit 1
+fi
+
+# --- Summary ---
+TOTAL_ISSUES=$((TOTAL_ERRORS + TOTAL_WARNINGS + TOTAL_STYLE))
+
+echo ""
+echo "========================================"
+echo "  LINTER SUMMARY"
+echo "========================================"
+echo "  Files checked:  $TOTAL_FILES"
+echo "  Files clean:    $FILES_PASSED"
+echo "  Errors:         $TOTAL_ERRORS"
+echo "  Warnings:       $TOTAL_WARNINGS"
+echo "  Style issues:   $TOTAL_STYLE"
+echo "  Total issues:   $TOTAL_ISSUES"
+echo "========================================"
+
+if [ "$TOTAL_ERRORS" -gt 0 ]; then
+    echo "RESULT: FAIL — $TOTAL_ERRORS error(s) must be fixed"
+    exit 1
+elif [ "$TOTAL_WARNINGS" -gt 0 ]; then
+    echo "RESULT: PASS WITH WARNINGS — $TOTAL_WARNINGS warning(s) to address"
+    exit 0
+else
+    echo "RESULT: ALL CLEAR"
+    exit 0
+fi
+SCRIPT
+
+chmod +x ~/script-linter.sh
+
+# --- Create sample scripts to test the linter ---
+DEMO_DIR="/tmp/lint-demo"
+mkdir -p "$DEMO_DIR"
+
+# A clean script
+cat > "$DEMO_DIR/good.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+GREETING="Hello"
+echo "$GREETING, $(whoami)!"
+EOF
+chmod +x "$DEMO_DIR/good.sh"
+
+# A script with issues
+cat > "$DEMO_DIR/problems.sh" << 'EOF'
+#!/bin/bash
+
+name=`whoami`
+echo "Hello $name"
+cd /tmp
+rm -rf $CLEANUP_DIR
+eval "echo unsafe"
+read line < /dev/null
+# TODO: fix this later
+EOF
+
+# Run the linter
+~/script-linter.sh "$DEMO_DIR"
+
+# Cleanup
+rm -rf "$DEMO_DIR"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `set -x` is the single most powerful debugging tool — it shows every command with expanded variables before execution
+- Customize `PS4` to include line numbers and function names: `export PS4='+${BASH_SOURCE##*/}:${LINENO}: '`
+- Use `bash -x script.sh` to trace without modifying the script, and `BASH_XTRACEFD` to redirect trace output to a file
+- `trap '...' DEBUG` fires before every command, letting you build custom debuggers or step through execution interactively
+- `bash -n script.sh` catches syntax errors without executing — essential for "unexpected end of file" errors
+- ShellCheck catches the most common bugs statically: unquoted variables (SC2086), backticks (SC2006), missing cd error handling (SC2164), and read without -r (SC2162)
+- The most frequent bugs: unquoted variables, wrong test brackets, subshell variable scope (pipe + while), unclosed quotes, and missing spaces around `[ ]`
+- Debug systematically: reproduce first, isolate with binary search, add instrumentation, test functions in isolation
+- When a script works locally but fails elsewhere, compare bash versions, PATH, available commands, and line endings
+- "unexpected end of file" on the last line almost always means an unclosed quote or brace earlier in the script — search backward, not forward
+
+## What's Next
+
+You can find and fix bugs in any shell script. Now it is time to manage what your scripts control — running processes. In **Process Management in Scripts**, you'll learn to launch background processes, track PIDs, wait for completion, run tasks in parallel, and handle the complex lifecycle of child processes from within your scripts.
