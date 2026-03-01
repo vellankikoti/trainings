@@ -1,0 +1,463 @@
+---
+title: "Why Python for DevOps"
+description: "Discover why Python is the language of DevOps. Compare bash vs Python, understand Python's ecosystem for automation, and see where Python fits in the DevOps toolkit."
+order: 1
+xpReward: 75
+estimatedMinutes: 20
+prerequisites: []
+objectives:
+  - Understand why Python dominates the DevOps ecosystem
+  - Know when to use bash vs Python for automation tasks
+  - Identify Python-powered DevOps tools you already use
+  - Write your first DevOps-oriented Python script
+tags:
+  - python
+  - devops
+  - automation
+---
+
+<Callout type="story" title="The Story">
+A script that started as 50 lines of bash grew to 500 lines. It needed JSON parsing from an API, conditional logic based on nested response fields, error handling with retries, and Slack notifications on failure. Every change broke something else. One afternoon, we rewrote it in Python — half the code, twice the readability, proper error handling, and unit tests. Python isn't replacing bash — it's for when bash isn't enough.
+</Callout>
+
+## The DevOps Language Problem
+
+Every DevOps engineer faces the same crossroads: your bash script works, but it's getting complicated. You need to parse JSON, call REST APIs, handle errors gracefully, or process complex data. This is where Python steps in.
+
+Python isn't the only option — Go, Ruby, and Perl all have their place. But Python has won the DevOps ecosystem for very specific reasons.
+
+### When Bash vs Python
+
+The decision isn't bash OR Python. It's knowing when each is the right tool.
+
+| Criteria | Use Bash | Use Python |
+|---|---|---|
+| Combining CLI commands | Yes | Overkill |
+| Quick file manipulation | Yes | Overkill |
+| JSON/YAML parsing | Painful (jq helps) | Native and easy |
+| REST API interactions | Hacky (curl + jq) | Clean (requests) |
+| Error handling | Limited (set -e) | Full try/except |
+| Complex data structures | Arrays only | Lists, dicts, sets, classes |
+| Unit testing | Difficult | Built-in (pytest) |
+| Cross-platform | Linux/Mac only | Everywhere |
+| Lines of code threshold | Under 100 lines | Over 100 lines |
+
+<Callout type="tip" title="The 100-Line Rule">
+If your bash script passes 100 lines, or if you find yourself fighting with string parsing and nested conditionals, it's time to rewrite in Python. The investment pays off immediately in maintainability.
+</Callout>
+
+## Python in the DevOps Ecosystem
+
+Here's something most people don't realize: **you're already using Python**. The biggest DevOps tools are built with it.
+
+### Tools Written in Python
+
+```text
+Ansible          → Configuration management (100% Python)
+AWS CLI          → Amazon's command-line interface (Python + boto3)
+OpenStack        → Cloud infrastructure platform (Python)
+SaltStack        → Infrastructure automation (Python)
+Fabric           → SSH deployment tool (Python)
+Supervisor       → Process control system (Python)
+Certbot          → Let's Encrypt client (Python)
+Docker Compose   → Multi-container Docker (Python)
+```
+
+### Python SDKs and Libraries for DevOps
+
+```python
+# Cloud providers
+import boto3                  # AWS SDK
+from azure.identity import DefaultAzureCredential  # Azure SDK
+from google.cloud import storage  # GCP SDK
+
+# Container orchestration
+import docker                 # Docker SDK
+from kubernetes import client  # Kubernetes client
+
+# Infrastructure
+import paramiko               # SSH connections
+import requests               # HTTP/REST APIs
+import jinja2                 # Template rendering (used by Ansible)
+
+# Data formats
+import json                   # JSON parsing
+import yaml                   # YAML parsing
+import toml                   # TOML parsing
+
+# Monitoring and logging
+import prometheus_client      # Prometheus metrics
+import logging                # Built-in structured logging
+```
+
+Every major cloud provider, container platform, and infrastructure tool has a first-class Python SDK. This isn't coincidence — it's ecosystem dominance.
+
+## Python's DevOps Strengths
+
+### 1. Readability Is Maintainability
+
+In DevOps, scripts get handed between team members, revisited at 3 AM during incidents, and maintained for years. Readability matters more than cleverness.
+
+```python
+# Python: clear intent, easy to understand at 3 AM
+def check_server_health(servers):
+    """Check health of all servers and return unhealthy ones."""
+    unhealthy = []
+    for server in servers:
+        try:
+            response = requests.get(f"http://{server}/health", timeout=5)
+            if response.status_code != 200:
+                unhealthy.append(server)
+        except requests.ConnectionError:
+            unhealthy.append(server)
+    return unhealthy
+```
+
+Compare the equivalent bash:
+
+```bash
+# Bash: works but harder to maintain and extend
+check_servers() {
+    local unhealthy=()
+    for server in "$@"; do
+        status=$(curl -s -o /dev/null -w "%{http_code}" \
+            --connect-timeout 5 "http://${server}/health" 2>/dev/null)
+        if [ "$status" != "200" ]; then
+            unhealthy+=("$server")
+        fi
+    done
+    echo "${unhealthy[@]}"
+}
+```
+
+### 2. Error Handling That Actually Works
+
+```python
+# Python: granular error handling
+try:
+    config = yaml.safe_load(open("config.yml"))
+    response = requests.post(config["api_url"], json=payload)
+    response.raise_for_status()
+except FileNotFoundError:
+    logger.error("Config file not found — using defaults")
+    config = DEFAULT_CONFIG
+except yaml.YAMLError as e:
+    logger.error(f"Invalid YAML in config: {e}")
+    sys.exit(1)
+except requests.HTTPError as e:
+    logger.error(f"API call failed: {e}")
+    notify_slack(f"Deployment API returned {response.status_code}")
+```
+
+### 3. Testing Your Automation
+
+```python
+# You can unit test Python automation scripts
+import pytest
+from deployment import check_server_health
+
+def test_healthy_servers(mock_responses):
+    servers = ["web1:8080", "web2:8080"]
+    result = check_server_health(servers)
+    assert result == []  # No unhealthy servers
+
+def test_unhealthy_server_detected(mock_responses):
+    # mock_responses returns 500 for web2
+    servers = ["web1:8080", "web2:8080"]
+    result = check_server_health(servers)
+    assert "web2:8080" in result
+```
+
+Try writing meaningful unit tests for a 200-line bash script. It's painful. With Python, it's natural.
+
+## Real-World DevOps Python Scripts
+
+Python scripts power every stage of the DevOps lifecycle:
+
+```text
+Development    → Code linting, pre-commit hooks, environment setup
+Building       → Custom build steps, artifact packaging
+Testing        → Integration test frameworks, test data generation
+Deployment     → Blue-green deployment logic, canary analysis
+Monitoring     → Custom metrics collection, log parsing
+Incident       → Auto-remediation scripts, runbook automation
+Security       → Vulnerability scanning, compliance checks
+```
+
+### A Real Example: Deployment Notifier
+
+```python
+#!/usr/bin/env python3
+"""Notify Slack when a deployment starts, succeeds, or fails."""
+
+import json
+import os
+import sys
+import requests
+
+SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK_URL")
+
+def notify(message, color="good"):
+    """Send a formatted message to Slack."""
+    payload = {
+        "attachments": [{
+            "color": color,
+            "text": message,
+            "footer": f"Deploy Bot | {os.environ.get('CI_PIPELINE_ID', 'manual')}",
+        }]
+    }
+    requests.post(SLACK_WEBHOOK, json=payload, timeout=10)
+
+if __name__ == "__main__":
+    action = sys.argv[1] if len(sys.argv) > 1 else "unknown"
+    service = os.environ.get("SERVICE_NAME", "unknown-service")
+    version = os.environ.get("VERSION", "unknown")
+
+    messages = {
+        "start":   (f"Deploying *{service}* v{version}...", "warning"),
+        "success": (f"Deployed *{service}* v{version} successfully", "good"),
+        "failure": (f"FAILED to deploy *{service}* v{version}", "danger"),
+    }
+
+    msg, color = messages.get(action, (f"Unknown action: {action}", "warning"))
+    notify(msg, color)
+```
+
+<Callout type="warning" title="Python 3 Only">
+Always use Python 3. Python 2 reached end-of-life in January 2020 and no longer receives security patches. Every example in this course uses Python 3.8+ features. If you see `python` on your system and it points to Python 2, use `python3` explicitly.
+</Callout>
+
+## Python vs Other DevOps Languages
+
+| Language | Strengths | When to Use |
+|---|---|---|
+| **Bash** | Already installed, great for CLI glue | Quick tasks, system commands |
+| **Python** | Readable, huge ecosystem, rapid development | Automation, APIs, data processing |
+| **Go** | Fast binaries, single binary deploy, concurrency | CLI tools, high-performance services |
+| **Ruby** | Chef/Vagrant ecosystem | If team already uses Ruby tools |
+| **PowerShell** | Windows automation, Azure integration | Windows-heavy environments |
+
+Python sits in the sweet spot: more powerful than bash, faster to write than Go, with the largest DevOps ecosystem of any language.
+
+<Exercise number={1} title="Bash vs Python Decision Making">
+
+For each task, decide whether bash or Python is the better choice and explain why:
+
+```python
+# Decision framework — apply to each scenario:
+
+scenarios = [
+    "Restart a service and check its status",
+    "Parse a 500MB JSON log file and aggregate error counts",
+    "Run three commands in sequence on a remote server",
+    "Build a CLI tool that interacts with AWS, Slack, and Jira APIs",
+    "Find and delete files older than 30 days",
+    "Generate a weekly infrastructure report from multiple data sources",
+    "Set up a cron job to rotate logs",
+    "Implement a deployment pipeline with rollback capability",
+]
+
+# Answers:
+decisions = {
+    "Restart service":           "Bash  — two commands, no logic needed",
+    "Parse 500MB JSON":          "Python — json module, memory-efficient processing",
+    "Remote commands":            "Bash  — simple ssh + commands",
+    "Multi-API CLI tool":        "Python — requests, argparse, error handling",
+    "Delete old files":          "Bash  — single find command",
+    "Weekly infra report":       "Python — data aggregation, formatting, scheduling",
+    "Cron log rotation":         "Bash  — system utility wrapper",
+    "Deployment with rollback":  "Python — complex state management, error handling",
+}
+
+for scenario, decision in decisions.items():
+    print(f"  {scenario:30s} → {decision}")
+```
+
+</Exercise>
+
+<Exercise number={2} title="Your First DevOps Python Script">
+
+Write a Python script that does something useful for a DevOps engineer. This script checks if critical ports are open:
+
+```python
+#!/usr/bin/env python3
+"""Check if critical services are responding on expected ports."""
+
+import socket
+import sys
+
+# Services to check: (host, port, name)
+SERVICES = [
+    ("localhost", 22,   "SSH"),
+    ("localhost", 80,   "HTTP"),
+    ("localhost", 443,  "HTTPS"),
+    ("localhost", 5432, "PostgreSQL"),
+    ("localhost", 6379, "Redis"),
+]
+
+def check_port(host, port, timeout=3):
+    """Return True if the port is open and accepting connections."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            return result == 0
+    except socket.error:
+        return False
+
+def main():
+    print(f"{'Service':<15} {'Host':<15} {'Port':<8} {'Status'}")
+    print("-" * 50)
+
+    failures = 0
+    for host, port, name in SERVICES:
+        is_open = check_port(host, port)
+        status = "UP" if is_open else "DOWN"
+        symbol = "+" if is_open else "!"
+        print(f"  [{symbol}] {name:<13} {host:<15} {port:<8} {status}")
+        if not is_open:
+            failures += 1
+
+    print(f"\nResult: {len(SERVICES) - failures}/{len(SERVICES)} services healthy")
+    sys.exit(1 if failures > 0 else 0)
+
+if __name__ == "__main__":
+    main()
+```
+
+Run it with `python3 port_check.py`. Notice how the exit code signals success or failure — just like any good DevOps tool.
+
+</Exercise>
+
+<MiniProject title="Bash vs Python Comparison">
+
+Implement the same task in both bash and Python to see the difference firsthand. The task: check disk usage on all mounted filesystems and alert if any exceed 80%.
+
+**Bash version:**
+
+```bash
+#!/bin/bash
+# disk_check.sh — Alert on high disk usage
+
+THRESHOLD=80
+
+echo "=== Disk Usage Check ==="
+echo "Threshold: ${THRESHOLD}%"
+echo ""
+
+alert=0
+while read -r line; do
+    usage=$(echo "$line" | awk '{print $5}' | tr -d '%')
+    mount=$(echo "$line" | awk '{print $6}')
+    filesystem=$(echo "$line" | awk '{print $1}')
+
+    if [ "$usage" -ge "$THRESHOLD" ] 2>/dev/null; then
+        echo "[ALERT] $mount is at ${usage}% ($filesystem)"
+        alert=1
+    else
+        echo "[  OK ] $mount is at ${usage}% ($filesystem)"
+    fi
+done < <(df -h | grep -v "^Filesystem" | grep -v "tmpfs")
+
+echo ""
+if [ "$alert" -eq 1 ]; then
+    echo "WARNING: One or more filesystems exceeded ${THRESHOLD}%"
+    exit 1
+else
+    echo "All filesystems within threshold"
+    exit 0
+fi
+```
+
+**Python version:**
+
+```python
+#!/usr/bin/env python3
+"""disk_check.py — Alert on high disk usage with detailed reporting."""
+
+import shutil
+import os
+import json
+from pathlib import Path
+from datetime import datetime
+
+THRESHOLD = 80
+
+def get_disk_usage():
+    """Get disk usage for all mount points."""
+    results = []
+    seen_devices = set()
+
+    with open("/proc/mounts") as f:
+        for line in f:
+            parts = line.split()
+            device, mount_point = parts[0], parts[1]
+
+            # Skip virtual filesystems
+            if not device.startswith("/dev/"):
+                continue
+            if device in seen_devices:
+                continue
+            seen_devices.add(device)
+
+            try:
+                usage = shutil.disk_usage(mount_point)
+                percent = (usage.used / usage.total) * 100
+                results.append({
+                    "device": device,
+                    "mount": mount_point,
+                    "total_gb": round(usage.total / (1024**3), 1),
+                    "used_gb": round(usage.used / (1024**3), 1),
+                    "free_gb": round(usage.free / (1024**3), 1),
+                    "percent": round(percent, 1),
+                    "status": "ALERT" if percent >= THRESHOLD else "OK",
+                })
+            except PermissionError:
+                continue
+
+    return sorted(results, key=lambda x: x["percent"], reverse=True)
+
+def main():
+    disks = get_disk_usage()
+    alerts = [d for d in disks if d["status"] == "ALERT"]
+
+    print(f"Disk Usage Report — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Threshold: {THRESHOLD}%")
+    print(f"{'Mount':<20} {'Device':<15} {'Used':<10} {'Free':<10} {'Usage'}")
+    print("-" * 70)
+
+    for disk in disks:
+        symbol = "!" if disk["status"] == "ALERT" else " "
+        bar_filled = int(disk["percent"] / 5)
+        bar = "#" * bar_filled + "-" * (20 - bar_filled)
+        print(f"[{symbol}] {disk['mount']:<18} {disk['device']:<15} "
+              f"{disk['used_gb']}G/{disk['total_gb']}G  [{bar}] {disk['percent']}%")
+
+    print(f"\nSummary: {len(alerts)} alert(s) out of {len(disks)} filesystems")
+
+    # Python advantage: easy to output as JSON for other tools
+    if "--json" in __import__("sys").argv:
+        print(json.dumps(disks, indent=2))
+
+    return 1 if alerts else 0
+
+if __name__ == "__main__":
+    exit(main())
+```
+
+Notice the differences: the Python version has structured data, JSON output for pipeline integration, proper error handling, and is easier to extend with email alerts, Slack notifications, or database logging.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Python is the dominant language in the DevOps ecosystem — Ansible, AWS CLI, and dozens of major tools are built with it
+- Use bash for quick command-line glue under 100 lines; use Python when complexity grows
+- Python's strengths for DevOps are readability, error handling, testing, and its massive library ecosystem
+- Every major cloud provider and infrastructure tool has a Python SDK
+- Always use Python 3 — Python 2 is dead
+- Python doesn't replace bash; it complements it for more complex automation
+
+## What's Next
+
+You know why Python matters for DevOps. In **Installation and Setup**, you'll install Python properly using pyenv for version management, set up virtual environments for project isolation, and configure pip for package management — the professional setup every DevOps engineer needs.

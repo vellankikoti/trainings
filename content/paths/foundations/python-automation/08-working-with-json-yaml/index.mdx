@@ -1,0 +1,948 @@
+---
+title: "Working with JSON and YAML"
+description: "Parse, create, and transform the configuration languages of DevOps. JSON for APIs, YAML for Kubernetes and Ansible — master both with Python."
+order: 8
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 07-file-operations
+objectives:
+  - Parse and generate JSON with Python's json module
+  - Read and write YAML with PyYAML
+  - Convert between JSON and YAML formats
+  - Validate and merge configuration files
+  - Use Jinja2 templates to generate configs dynamically
+tags:
+  - python
+  - json
+  - yaml
+  - configuration
+---
+
+<Callout type="story" title="The Story">
+Your team manages 40 microservices, each with its own Kubernetes deployment manifest, Helm values file, and environment-specific overrides. A new compliance requirement means every service needs three new labels and a resource limit adjustment. You could open 120 YAML files by hand, or you could write a Python script that reads each manifest, validates the structure, merges the new requirements, and writes the updated files — in under a minute. JSON and YAML are the languages your infrastructure speaks. Python is how you speak back.
+</Callout>
+
+## JSON in Python
+
+Python's `json` module is part of the standard library — no install needed. It converts between JSON strings and Python dictionaries seamlessly.
+
+### Parsing JSON
+
+```python
+import json
+
+# Parse a JSON string into a Python dict
+raw = '{"name": "web-api", "replicas": 3, "port": 8080}'
+config = json.loads(raw)
+
+print(config["name"])       # web-api
+print(config["replicas"])   # 3
+print(type(config))         # <class 'dict'>
+```
+
+The key functions to remember: `json.loads()` parses a **s**tring, `json.load()` reads from a **f**ile.
+
+### Reading JSON from Files
+
+```python
+import json
+
+# Read a JSON config file
+with open("config.json", "r") as f:
+    config = json.load(f)
+
+print(config["database"]["host"])
+print(config["database"]["port"])
+```
+
+### Writing JSON
+
+```python
+import json
+
+deployment = {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+        "name": "web-api",
+        "labels": {
+            "app": "web-api",
+            "environment": "production"
+        }
+    },
+    "spec": {
+        "replicas": 3
+    }
+}
+
+# Write to string
+json_string = json.dumps(deployment)
+print(json_string)  # Single line, compact
+
+# Pretty print with indentation
+pretty = json.dumps(deployment, indent=2)
+print(pretty)
+
+# Write to file
+with open("deployment.json", "w") as f:
+    json.dump(deployment, f, indent=2)
+```
+
+<Callout type="tip" title="Pretty Printing for Debugging">
+Always use `indent=2` or `indent=4` when writing JSON for human consumption. Add `sort_keys=True` to make diffs cleaner in version control: `json.dumps(data, indent=2, sort_keys=True)`.
+</Callout>
+
+### Handling Nested Structures
+
+Real-world DevOps JSON is deeply nested. Access it safely:
+
+```python
+import json
+
+# Kubernetes-style nested JSON
+pod_spec = {
+    "spec": {
+        "containers": [
+            {
+                "name": "app",
+                "image": "myapp:1.2.3",
+                "resources": {
+                    "limits": {"cpu": "500m", "memory": "256Mi"},
+                    "requests": {"cpu": "250m", "memory": "128Mi"}
+                },
+                "ports": [{"containerPort": 8080}]
+            }
+        ]
+    }
+}
+
+# Direct access (risky — raises KeyError if missing)
+image = pod_spec["spec"]["containers"][0]["image"]
+print(image)  # myapp:1.2.3
+
+# Safe access with .get() and defaults
+cpu_limit = (pod_spec
+    .get("spec", {})
+    .get("containers", [{}])[0]
+    .get("resources", {})
+    .get("limits", {})
+    .get("cpu", "not set"))
+print(cpu_limit)  # 500m
+```
+
+### JSON vs Python Dict
+
+They look similar but are not the same:
+
+```python
+import json
+
+# Python dict — keys can be any hashable type, values can be any object
+py_dict = {
+    "count": 42,
+    "active": True,       # Python: True (capital T)
+    "data": None,         # Python: None
+    (1, 2): "tuple key",  # Valid in Python, invalid in JSON
+}
+
+# JSON — keys must be strings, limited value types
+json_str = json.dumps({"count": 42, "active": True, "data": None})
+print(json_str)
+# {"count": 42, "active": true, "data": null}
+# Note: true (lowercase), null (not None)
+```
+
+## YAML in Python
+
+YAML is the dominant format in DevOps — Kubernetes manifests, Ansible playbooks, Docker Compose files, GitHub Actions, and Helm charts all use it. Python handles YAML through the `PyYAML` library.
+
+### Installing PyYAML
+
+```python
+# Install PyYAML
+# pip install pyyaml
+
+import yaml
+
+# Parse a YAML string
+yaml_string = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-api
+  labels:
+    app: web-api
+    environment: production
+spec:
+  replicas: 3
+"""
+
+config = yaml.safe_load(yaml_string)
+print(config["metadata"]["name"])    # web-api
+print(config["spec"]["replicas"])    # 3
+print(type(config))                  # <class 'dict'>
+```
+
+<Callout type="warning" title="Always Use safe_load">
+Never use `yaml.load()` without a Loader argument — it can execute arbitrary Python code embedded in YAML. Always use `yaml.safe_load()` for untrusted input. This is not theoretical: YAML deserialization attacks have compromised real systems.
+</Callout>
+
+### Reading and Writing YAML Files
+
+```python
+import yaml
+
+# Read a YAML file
+with open("deployment.yaml", "r") as f:
+    manifest = yaml.safe_load(f)
+
+# Modify it
+manifest["spec"]["replicas"] = 5
+manifest["metadata"]["labels"]["version"] = "2.0.0"
+
+# Write it back
+with open("deployment.yaml", "w") as f:
+    yaml.safe_dump(manifest, f, default_flow_style=False)
+```
+
+### Multi-Document YAML
+
+Some YAML files contain multiple documents separated by `---` (common in Kubernetes):
+
+```python
+import yaml
+
+multi_doc = """
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-api
+spec:
+  ports:
+    - port: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-api
+spec:
+  replicas: 3
+"""
+
+# Load all documents
+docs = list(yaml.safe_load_all(multi_doc))
+print(f"Found {len(docs)} documents")
+
+for doc in docs:
+    print(f"  {doc['kind']}: {doc['metadata']['name']}")
+
+# Write multiple documents
+with open("manifests.yaml", "w") as f:
+    yaml.safe_dump_all(docs, f, default_flow_style=False)
+```
+
+### YAML Anchors and Aliases
+
+YAML supports anchors (`&`) and aliases (`*`) to avoid repetition:
+
+```python
+import yaml
+
+yaml_with_anchors = """
+defaults: &defaults
+  cpu: "250m"
+  memory: "128Mi"
+
+services:
+  web:
+    resources:
+      <<: *defaults
+  api:
+    resources:
+      <<: *defaults
+      cpu: "500m"
+"""
+
+config = yaml.safe_load(yaml_with_anchors)
+print(config["services"]["web"]["resources"])
+# {'cpu': '250m', 'memory': '128Mi'}
+print(config["services"]["api"]["resources"])
+# {'cpu': '500m', 'memory': '128Mi'}  — cpu overridden
+```
+
+## Converting Between Formats
+
+A frequent task: converting configs from one format to another.
+
+```python
+import json
+import yaml
+
+def yaml_to_json(yaml_path, json_path):
+    """Convert a YAML file to JSON."""
+    with open(yaml_path, "r") as f:
+        data = yaml.safe_load(f)
+
+    with open(json_path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"Converted {yaml_path} -> {json_path}")
+
+def json_to_yaml(json_path, yaml_path):
+    """Convert a JSON file to YAML."""
+    with open(json_path, "r") as f:
+        data = json.load(f)
+
+    with open(yaml_path, "w") as f:
+        yaml.safe_dump(data, f, default_flow_style=False)
+    print(f"Converted {json_path} -> {yaml_path}")
+```
+
+## Validating Config Files
+
+Before applying a config, validate it:
+
+```python
+import json
+import yaml
+import sys
+
+def validate_k8s_manifest(filepath):
+    """Basic validation for Kubernetes manifests."""
+    required_fields = ["apiVersion", "kind", "metadata"]
+
+    with open(filepath, "r") as f:
+        docs = list(yaml.safe_load_all(f))
+
+    errors = []
+    for i, doc in enumerate(docs):
+        if doc is None:
+            continue
+        for field in required_fields:
+            if field not in doc:
+                errors.append(f"Document {i}: missing required field '{field}'")
+        if "metadata" in doc and "name" not in doc.get("metadata", {}):
+            errors.append(f"Document {i}: metadata.name is required")
+
+    if errors:
+        print(f"Validation FAILED for {filepath}:")
+        for error in errors:
+            print(f"  - {error}")
+        return False
+
+    print(f"Validation PASSED for {filepath}: {len(docs)} document(s)")
+    return True
+```
+
+## Merging Configurations
+
+Deep merging lets you overlay environment-specific values on a base config:
+
+```python
+import copy
+
+def deep_merge(base, override):
+    """Deep merge two dictionaries. Override values take precedence."""
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if (key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+# Base config
+base = {
+    "app": "web-api",
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080,
+        "workers": 4
+    },
+    "logging": {
+        "level": "INFO",
+        "format": "json"
+    }
+}
+
+# Production overrides
+production = {
+    "server": {
+        "workers": 16
+    },
+    "logging": {
+        "level": "WARNING"
+    },
+    "tls": {
+        "enabled": True,
+        "cert": "/etc/ssl/cert.pem"
+    }
+}
+
+merged = deep_merge(base, production)
+print(json.dumps(merged, indent=2))
+# server.workers is 16, server.port is still 8080
+# logging.level is WARNING, logging.format is still json
+# tls section is added
+```
+
+## Jinja2 Templating for Configs
+
+Jinja2 lets you generate config files from templates — the same engine Ansible uses:
+
+```python
+# pip install jinja2
+from jinja2 import Template
+
+template_str = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ service_name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ service_name }}
+    version: "{{ version }}"
+    team: {{ team }}
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: {{ service_name }}
+  template:
+    spec:
+      containers:
+      - name: {{ service_name }}
+        image: {{ registry }}/{{ service_name }}:{{ version }}
+        ports:
+        - containerPort: {{ port }}
+        resources:
+          limits:
+            cpu: "{{ cpu_limit }}"
+            memory: "{{ memory_limit }}"
+"""
+
+template = Template(template_str)
+
+# Generate for multiple services
+services = [
+    {"service_name": "frontend", "port": 80, "replicas": 3,
+     "cpu_limit": "500m", "memory_limit": "256Mi"},
+    {"service_name": "api", "port": 3000, "replicas": 2,
+     "cpu_limit": "1000m", "memory_limit": "512Mi"},
+]
+
+common = {
+    "namespace": "production",
+    "version": "2.1.0",
+    "team": "platform",
+    "registry": "registry.example.com"
+}
+
+for svc in services:
+    rendered = template.render(**common, **svc)
+    print(rendered)
+    print("---")
+```
+
+<Exercise number={1} title="Format Converter and Validator">
+
+Build a script that converts between JSON and YAML and validates Kubernetes manifests.
+
+```python
+import json
+import yaml
+import sys
+import os
+
+def detect_format(filepath):
+    """Detect if a file is JSON or YAML based on extension."""
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in (".json",):
+        return "json"
+    elif ext in (".yaml", ".yml"):
+        return "yaml"
+    return None
+
+def load_config(filepath):
+    """Load a config file, auto-detecting format."""
+    fmt = detect_format(filepath)
+    with open(filepath, "r") as f:
+        if fmt == "json":
+            return json.load(f), fmt
+        elif fmt == "yaml":
+            return yaml.safe_load(f), fmt
+        else:
+            # Try JSON first, then YAML
+            content = f.read()
+            try:
+                return json.loads(content), "json"
+            except json.JSONDecodeError:
+                return yaml.safe_load(content), "yaml"
+
+def save_config(data, filepath, fmt=None):
+    """Save config data to file in the specified format."""
+    if fmt is None:
+        fmt = detect_format(filepath) or "yaml"
+
+    with open(filepath, "w") as f:
+        if fmt == "json":
+            json.dump(data, f, indent=2)
+        else:
+            yaml.safe_dump(data, f, default_flow_style=False)
+    print(f"Saved {fmt.upper()} to {filepath}")
+
+def validate_manifest(data):
+    """Validate a Kubernetes-style manifest."""
+    errors = []
+    warnings = []
+
+    # Required top-level fields
+    for field in ("apiVersion", "kind", "metadata"):
+        if field not in data:
+            errors.append(f"Missing required field: {field}")
+
+    # Metadata checks
+    meta = data.get("metadata", {})
+    if not meta.get("name"):
+        errors.append("metadata.name is required")
+    if not meta.get("labels"):
+        warnings.append("metadata.labels is empty (recommended)")
+
+    # Deployment-specific checks
+    if data.get("kind") == "Deployment":
+        spec = data.get("spec", {})
+        if "replicas" not in spec:
+            warnings.append("spec.replicas not set (defaults to 1)")
+
+        containers = (spec.get("template", {})
+                         .get("spec", {})
+                         .get("containers", []))
+        for c in containers:
+            if "resources" not in c:
+                warnings.append(
+                    f"Container '{c.get('name', '?')}' has no resource limits"
+                )
+
+    return errors, warnings
+
+# --- Demo ---
+sample_yaml = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  labels:
+    app: demo
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+      - name: app
+        image: demo:1.0.0
+        ports:
+        - containerPort: 8080
+"""
+
+# Parse and validate
+data = yaml.safe_load(sample_yaml)
+errors, warnings = validate_manifest(data)
+
+print("=== Validation Results ===")
+if errors:
+    print("ERRORS:")
+    for e in errors:
+        print(f"  [FAIL] {e}")
+if warnings:
+    print("WARNINGS:")
+    for w in warnings:
+        print(f"  [WARN] {w}")
+if not errors:
+    print("Validation PASSED" + (" with warnings" if warnings else ""))
+
+# Convert to JSON
+print("\n=== As JSON ===")
+print(json.dumps(data, indent=2))
+```
+
+</Exercise>
+
+<Exercise number={2} title="Config Merger with Environment Overrides">
+
+Build a system that merges base configs with environment-specific overrides.
+
+```python
+import json
+import yaml
+import copy
+
+def deep_merge(base, override):
+    """Recursively merge override into base."""
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if (key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+# Base configuration
+base_config = {
+    "app": {
+        "name": "order-service",
+        "version": "2.3.1",
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080,
+        "workers": 2,
+        "timeout": 30
+    },
+    "database": {
+        "host": "localhost",
+        "port": 5432,
+        "name": "orders",
+        "pool_size": 5
+    },
+    "logging": {
+        "level": "DEBUG",
+        "format": "text",
+        "file": "/var/log/app.log"
+    },
+    "features": {
+        "cache_enabled": False,
+        "rate_limiting": False,
+        "metrics": True
+    }
+}
+
+# Environment overrides
+environments = {
+    "staging": {
+        "server": {"workers": 4},
+        "database": {
+            "host": "staging-db.internal",
+            "pool_size": 10
+        },
+        "logging": {"level": "INFO"},
+        "features": {"cache_enabled": True}
+    },
+    "production": {
+        "server": {"workers": 16, "timeout": 60},
+        "database": {
+            "host": "prod-db.internal",
+            "pool_size": 50
+        },
+        "logging": {
+            "level": "WARNING",
+            "format": "json"
+        },
+        "features": {
+            "cache_enabled": True,
+            "rate_limiting": True
+        }
+    }
+}
+
+# Merge and display each environment
+for env_name, overrides in environments.items():
+    merged = deep_merge(base_config, overrides)
+    print(f"=== {env_name.upper()} ===")
+    print(yaml.safe_dump(merged, default_flow_style=False))
+
+    # Show what changed
+    print(f"  Changes from base:")
+    def show_changes(base, merged, prefix=""):
+        for key in merged:
+            full_key = f"{prefix}.{key}" if prefix else key
+            if key not in base:
+                print(f"    + {full_key}: {merged[key]}")
+            elif isinstance(merged[key], dict) and isinstance(base.get(key), dict):
+                show_changes(base[key], merged[key], full_key)
+            elif base[key] != merged[key]:
+                print(f"    ~ {full_key}: {base[key]} -> {merged[key]}")
+
+    show_changes(base_config, merged)
+    print()
+```
+
+</Exercise>
+
+<MiniProject title="Config File Manager">
+
+Build a comprehensive config manager that reads, validates, merges, and generates YAML/JSON configurations.
+
+```python
+import json
+import yaml
+import copy
+import os
+from datetime import datetime
+
+# --- Config File Manager ---
+
+class ConfigManager:
+    """Manages configuration files with validation, merging, and generation."""
+
+    def __init__(self):
+        self.configs = {}
+        self.schemas = {}
+
+    def load(self, name, filepath=None, raw_data=None):
+        """Load a config from a file or raw data."""
+        if filepath:
+            fmt = "yaml" if filepath.endswith((".yaml", ".yml")) else "json"
+            with open(filepath, "r") as f:
+                if fmt == "json":
+                    data = json.load(f)
+                else:
+                    data = yaml.safe_load(f)
+        elif raw_data:
+            data = copy.deepcopy(raw_data)
+        else:
+            raise ValueError("Provide filepath or raw_data")
+
+        self.configs[name] = data
+        print(f"[LOAD] '{name}' loaded ({len(str(data))} chars)")
+        return data
+
+    def register_schema(self, name, required_fields, field_types=None):
+        """Register a validation schema for a config type."""
+        self.schemas[name] = {
+            "required": required_fields,
+            "types": field_types or {}
+        }
+
+    def validate(self, config_name, schema_name=None):
+        """Validate a loaded config against a schema."""
+        if config_name not in self.configs:
+            return [f"Config '{config_name}' not loaded"]
+
+        data = self.configs[config_name]
+        schema_name = schema_name or config_name
+        errors = []
+        warnings = []
+
+        if schema_name in self.schemas:
+            schema = self.schemas[schema_name]
+
+            # Check required fields
+            for field_path in schema["required"]:
+                parts = field_path.split(".")
+                current = data
+                found = True
+                for part in parts:
+                    if isinstance(current, dict) and part in current:
+                        current = current[part]
+                    else:
+                        found = False
+                        break
+                if not found:
+                    errors.append(f"Missing required field: {field_path}")
+
+            # Check types
+            for field_path, expected_type in schema.get("types", {}).items():
+                parts = field_path.split(".")
+                current = data
+                for part in parts:
+                    if isinstance(current, dict) and part in current:
+                        current = current[part]
+                    else:
+                        current = None
+                        break
+                if current is not None and not isinstance(current, expected_type):
+                    errors.append(
+                        f"Field {field_path}: expected {expected_type.__name__}, "
+                        f"got {type(current).__name__}"
+                    )
+        else:
+            warnings.append(f"No schema registered for '{schema_name}'")
+
+        return errors, warnings
+
+    def merge(self, base_name, override_name, result_name=None):
+        """Deep merge two configs."""
+        if base_name not in self.configs:
+            raise KeyError(f"Config '{base_name}' not loaded")
+        if override_name not in self.configs:
+            raise KeyError(f"Config '{override_name}' not loaded")
+
+        result_name = result_name or f"{base_name}_merged"
+        merged = self._deep_merge(
+            self.configs[base_name],
+            self.configs[override_name]
+        )
+        self.configs[result_name] = merged
+        print(f"[MERGE] '{base_name}' + '{override_name}' -> '{result_name}'")
+        return merged
+
+    def _deep_merge(self, base, override):
+        """Recursively merge two dicts."""
+        result = copy.deepcopy(base)
+        for key, value in override.items():
+            if (key in result
+                    and isinstance(result[key], dict)
+                    and isinstance(value, dict)):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = copy.deepcopy(value)
+        return result
+
+    def diff(self, name_a, name_b):
+        """Show differences between two configs."""
+        a = self.configs.get(name_a, {})
+        b = self.configs.get(name_b, {})
+        changes = []
+        self._diff_recursive(a, b, "", changes)
+        return changes
+
+    def _diff_recursive(self, a, b, prefix, changes):
+        all_keys = set(list(a.keys()) + list(b.keys()))
+        for key in sorted(all_keys):
+            path = f"{prefix}.{key}" if prefix else key
+            if key not in a:
+                changes.append(("added", path, None, b[key]))
+            elif key not in b:
+                changes.append(("removed", path, a[key], None))
+            elif isinstance(a[key], dict) and isinstance(b[key], dict):
+                self._diff_recursive(a[key], b[key], path, changes)
+            elif a[key] != b[key]:
+                changes.append(("changed", path, a[key], b[key]))
+
+    def export(self, name, filepath, fmt=None):
+        """Export a config to file (JSON or YAML)."""
+        if name not in self.configs:
+            raise KeyError(f"Config '{name}' not loaded")
+
+        if fmt is None:
+            fmt = "yaml" if filepath.endswith((".yaml", ".yml")) else "json"
+
+        data = self.configs[name]
+        with open(filepath, "w") as f:
+            if fmt == "json":
+                json.dump(data, f, indent=2, default=str)
+            else:
+                yaml.safe_dump(data, f, default_flow_style=False)
+        print(f"[EXPORT] '{name}' -> {filepath} ({fmt.upper()})")
+
+    def list_configs(self):
+        """List all loaded configs."""
+        for name, data in self.configs.items():
+            kind = data.get("kind", data.get("type", "config"))
+            keys = len(data)
+            print(f"  {name}: {kind} ({keys} top-level keys)")
+
+
+# --- Demo ---
+mgr = ConfigManager()
+
+# Register a schema for deployments
+mgr.register_schema("deployment", required_fields=[
+    "apiVersion", "kind", "metadata", "metadata.name", "spec"
+], field_types={
+    "spec.replicas": int
+})
+
+# Load base deployment
+base_deployment = {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+        "name": "order-service",
+        "namespace": "default",
+        "labels": {
+            "app": "order-service",
+            "version": "1.0.0"
+        }
+    },
+    "spec": {
+        "replicas": 1,
+        "template": {
+            "spec": {
+                "containers": [{
+                    "name": "app",
+                    "image": "order-service:1.0.0",
+                    "ports": [{"containerPort": 8080}],
+                    "resources": {
+                        "limits": {"cpu": "500m", "memory": "256Mi"},
+                        "requests": {"cpu": "250m", "memory": "128Mi"}
+                    }
+                }]
+            }
+        }
+    }
+}
+
+prod_overrides = {
+    "metadata": {
+        "namespace": "production",
+        "labels": {"environment": "production"}
+    },
+    "spec": {
+        "replicas": 5,
+        "template": {
+            "spec": {
+                "containers": [{
+                    "name": "app",
+                    "image": "order-service:1.0.0",
+                    "resources": {
+                        "limits": {"cpu": "2000m", "memory": "1Gi"},
+                        "requests": {"cpu": "1000m", "memory": "512Mi"}
+                    }
+                }]
+            }
+        }
+    }
+}
+
+mgr.load("base", raw_data=base_deployment)
+mgr.load("prod-overrides", raw_data=prod_overrides)
+
+# Validate
+errors, warnings = mgr.validate("base", "deployment")
+print(f"\n[VALIDATE] base: {len(errors)} errors, {len(warnings)} warnings")
+for e in errors:
+    print(f"  [FAIL] {e}")
+
+# Merge
+merged = mgr.merge("base", "prod-overrides", "production")
+
+# Show diff
+print("\n[DIFF] base vs production:")
+for change_type, path, old, new in mgr.diff("base", "production"):
+    if change_type == "added":
+        print(f"  + {path}: {new}")
+    elif change_type == "removed":
+        print(f"  - {path}: {old}")
+    elif change_type == "changed":
+        print(f"  ~ {path}: {old} -> {new}")
+
+# Display result
+print("\n[RESULT] Production config:")
+print(yaml.safe_dump(merged, default_flow_style=False))
+
+# List all managed configs
+print("[CONFIGS]")
+mgr.list_configs()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- `json.loads()` parses strings; `json.load()` reads files — the trailing `s` means **s**tring
+- Always use `yaml.safe_load()`, never `yaml.load()` — unsafe YAML parsing can execute arbitrary code
+- `yaml.safe_load_all()` handles multi-document YAML files separated by `---`
+- Deep merge lets you overlay environment-specific configs on a base without losing unchanged values
+- Jinja2 templates generate config files dynamically — the same engine powering Ansible
+- Validate configs before applying them: check required fields, types, and structural rules
+- `json.dumps(data, indent=2, sort_keys=True)` produces clean, diff-friendly output
+
+## What's Next
+
+You can read and transform configuration files. But DevOps scripts need to interact with the operating system itself — running shell commands, reading environment variables, and managing processes. In **OS and Subprocess**, you'll learn to bridge Python scripts with the Linux tools you already know.

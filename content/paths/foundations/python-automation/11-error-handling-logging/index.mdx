@@ -1,0 +1,939 @@
+---
+title: "Error Handling and Logging"
+description: "Write robust automation scripts. Master try/except, custom exceptions, the logging module, and the error handling patterns that keep production scripts reliable."
+order: 11
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 10-http-requests
+objectives:
+  - Use try/except/else/finally for structured error handling
+  - Create custom exceptions for domain-specific errors
+  - Configure Python's logging module with handlers and formatters
+  - Implement retry patterns with exponential backoff
+  - Build scripts that degrade gracefully instead of crashing
+tags:
+  - python
+  - errors
+  - logging
+  - reliability
+---
+
+<Callout type="story" title="The Story">
+Your deployment script runs at 3 AM via cron. It talks to three APIs, reads config files, and pushes to a container registry. Last night it failed silently — no logs, no alerts, no clue what happened. The deploy half-completed, leaving production in an inconsistent state. Today you rewrite it with proper error handling: every API call retries on failure, every step logs what it is doing, and if something goes irreversibly wrong, it rolls back cleanly. The difference between a script that works and a script you can trust is error handling and logging.
+</Callout>
+
+## try/except/else/finally
+
+Python's error handling has four parts, each with a specific role:
+
+```python
+try:
+    # Code that might fail
+    config = open("config.yaml").read()
+    data = yaml.safe_load(config)
+except FileNotFoundError:
+    # Handle a specific error
+    print("Config file not found, using defaults")
+    data = {"port": 8080}
+except yaml.YAMLError as e:
+    # Handle another specific error
+    print(f"Invalid YAML: {e}")
+    data = {"port": 8080}
+else:
+    # Runs ONLY if no exception occurred
+    print(f"Config loaded successfully: {len(data)} keys")
+finally:
+    # Runs ALWAYS, whether exception or not
+    print("Config loading complete")
+```
+
+### Catching Specific Exceptions
+
+Always catch the most specific exception possible:
+
+```python
+import requests
+import json
+
+def fetch_config(url):
+    """Fetch config from API with specific error handling."""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.json()
+
+    except requests.exceptions.ConnectionError:
+        print(f"Cannot connect to {url} — is the service running?")
+        return None
+    except requests.exceptions.Timeout:
+        print(f"Request to {url} timed out after 10s")
+        return None
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP {e.response.status_code} from {url}")
+        return None
+    except json.JSONDecodeError:
+        print(f"Response from {url} is not valid JSON")
+        return None
+```
+
+<Callout type="warning" title="Never Use Bare except">
+`except:` or `except Exception:` catches everything, including `KeyboardInterrupt` and `SystemExit`. This hides bugs and makes debugging impossible. Always catch specific exceptions. If you must catch broadly, use `except Exception as e:` and log the full error.
+</Callout>
+
+### Re-raising Exceptions
+
+Sometimes you want to log an error and then let it propagate:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+def process_deployment(manifest):
+    """Process a deployment, logging errors before re-raising."""
+    try:
+        validate_manifest(manifest)
+        apply_manifest(manifest)
+    except ValidationError as e:
+        logger.error(f"Manifest validation failed: {e}")
+        raise  # Re-raise the same exception
+    except Exception as e:
+        logger.error(f"Unexpected error during deployment: {e}")
+        raise  # Don't swallow unknown errors
+```
+
+## Custom Exceptions
+
+Custom exceptions make your code's failure modes explicit and catchable:
+
+```python
+class DeploymentError(Exception):
+    """Base exception for deployment operations."""
+    pass
+
+class ConfigError(DeploymentError):
+    """Raised when configuration is invalid."""
+    pass
+
+class ServiceUnavailableError(DeploymentError):
+    """Raised when a required service cannot be reached."""
+    def __init__(self, service, url, original_error=None):
+        self.service = service
+        self.url = url
+        self.original_error = original_error
+        message = f"Service '{service}' unavailable at {url}"
+        if original_error:
+            message += f": {original_error}"
+        super().__init__(message)
+
+class RollbackError(DeploymentError):
+    """Raised when a rollback itself fails."""
+    pass
+
+# Usage
+def connect_to_database(config):
+    try:
+        # attempt connection...
+        pass
+    except ConnectionRefusedError as e:
+        raise ServiceUnavailableError(
+            service="database",
+            url=f"{config['host']}:{config['port']}",
+            original_error=e
+        )
+
+# Catching hierarchically
+try:
+    connect_to_database({"host": "db.internal", "port": 5432})
+except ServiceUnavailableError as e:
+    print(f"Service down: {e.service} at {e.url}")
+except DeploymentError as e:
+    print(f"Deployment issue: {e}")
+except Exception as e:
+    print(f"Unexpected: {e}")
+```
+
+## The logging Module
+
+`print()` is for debugging. `logging` is for production. The logging module gives you levels, formatting, file output, rotation, and structured output.
+
+### Basic Setup
+
+```python
+import logging
+
+# Basic configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+
+logger = logging.getLogger("deploy")
+
+# Log levels (from least to most severe)
+logger.debug("Variable x = 42")          # Detailed diagnostic info
+logger.info("Deployment started")          # General operational events
+logger.warning("Disk usage above 80%")     # Something unexpected but not fatal
+logger.error("Failed to connect to DB")    # An operation failed
+logger.critical("Cannot reach any DB replica — aborting")  # System is unusable
+```
+
+### Logging to Files
+
+```python
+import logging
+from logging.handlers import RotatingFileHandler
+
+def setup_logger(name, log_file, level=logging.INFO):
+    """Create a logger with file and console output."""
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    # File handler with rotation (10MB per file, keep 5 backups)
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setLevel(level)
+    file_format = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
+    file_handler.setFormatter(file_format)
+
+    # Console handler (can have a different level)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.WARNING)  # Only warnings+ on console
+    console_format = logging.Formatter(
+        "[%(levelname)s] %(message)s"
+    )
+    console_handler.setFormatter(console_format)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
+# Usage
+logger = setup_logger("deploy", "/var/log/deploy.log")
+logger.info("Deployment started")    # Goes to file only
+logger.warning("Slow response")      # Goes to file AND console
+logger.error("Connection failed")    # Goes to file AND console
+```
+
+<Callout type="tip" title="Use __name__ for Logger Names">
+Using `logging.getLogger(__name__)` names the logger after the module. This creates a hierarchy (e.g., `myapp.deploy.rollback`) that lets you control logging at any level. Set the root logger to WARNING and your specific module to DEBUG during troubleshooting.
+</Callout>
+
+### Structured Logging (JSON Logs)
+
+JSON logs are parseable by log aggregation tools like ELK, Datadog, and CloudWatch:
+
+```python
+import logging
+import json
+from datetime import datetime, timezone
+
+class JSONFormatter(logging.Formatter):
+    """Format log records as JSON."""
+    def format(self, record):
+        log_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0]:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        # Include extra fields
+        for key in ("service", "request_id", "user", "duration"):
+            if hasattr(record, key):
+                log_entry[key] = getattr(record, key)
+        return json.dumps(log_entry)
+
+# Setup
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+
+logger = logging.getLogger("app")
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+# Usage
+logger.info("Deployment started", extra={"service": "web-api", "user": "deploy-bot"})
+logger.error("Connection failed", extra={"service": "database", "duration": 30.5})
+# Output:
+# {"timestamp": "2024-...", "level": "INFO", "logger": "app",
+#  "message": "Deployment started", "service": "web-api", "user": "deploy-bot"}
+```
+
+## Retry Patterns
+
+Network calls fail. APIs return 500s. Databases have brief outages. Retrying with backoff is essential:
+
+### Manual Retry with Exponential Backoff
+
+```python
+import time
+import random
+import logging
+
+logger = logging.getLogger(__name__)
+
+def retry_with_backoff(func, max_retries=3, base_delay=1,
+                       max_delay=60, exceptions=(Exception,)):
+    """Retry a function with exponential backoff and jitter."""
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except exceptions as e:
+            if attempt == max_retries:
+                logger.error(
+                    f"All {max_retries} retries failed. Last error: {e}"
+                )
+                raise
+
+            # Exponential backoff with jitter
+            delay = min(base_delay * (2 ** attempt), max_delay)
+            jitter = random.uniform(0, delay * 0.1)
+            wait = delay + jitter
+
+            logger.warning(
+                f"Attempt {attempt + 1}/{max_retries} failed: {e}. "
+                f"Retrying in {wait:.1f}s..."
+            )
+            time.sleep(wait)
+
+# Usage
+import requests
+
+def fetch_data():
+    response = requests.get("https://api.example.com/data", timeout=10)
+    response.raise_for_status()
+    return response.json()
+
+data = retry_with_backoff(
+    fetch_data,
+    max_retries=3,
+    exceptions=(requests.exceptions.RequestException,)
+)
+```
+
+### Using the tenacity Library
+
+```python
+# pip install tenacity
+from tenacity import (
+    retry, stop_after_attempt, wait_exponential,
+    retry_if_exception_type, before_sleep_log
+)
+import requests
+import logging
+
+logger = logging.getLogger(__name__)
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=60),
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
+)
+def reliable_api_call(url):
+    """API call that automatically retries on failure."""
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    return response.json()
+
+# tenacity handles all the retry logic
+data = reliable_api_call("https://api.example.com/health")
+```
+
+## Graceful Degradation
+
+When a non-critical component fails, keep going with reduced functionality:
+
+```python
+import logging
+
+logger = logging.getLogger("deploy")
+
+def deploy_with_degradation(service_name, config):
+    """Deploy a service, degrading gracefully on non-critical failures."""
+    results = {"service": service_name, "status": "success", "warnings": []}
+
+    # Step 1: Critical — must succeed
+    try:
+        pull_image(config["image"])
+    except Exception as e:
+        logger.critical(f"Cannot pull image: {e}")
+        results["status"] = "failed"
+        return results
+
+    # Step 2: Important but not critical
+    try:
+        run_health_check(config["health_url"])
+    except Exception as e:
+        logger.warning(f"Health check failed: {e}. Continuing...")
+        results["warnings"].append(f"Health check skipped: {e}")
+
+    # Step 3: Nice to have
+    try:
+        notify_slack(f"Deployed {service_name}")
+    except Exception as e:
+        logger.warning(f"Slack notification failed: {e}")
+        results["warnings"].append(f"Notification failed: {e}")
+
+    return results
+```
+
+## Context Managers for Cleanup
+
+Ensure resources are cleaned up even when errors occur:
+
+```python
+import os
+import tempfile
+import shutil
+from contextlib import contextmanager
+
+@contextmanager
+def temp_workspace(prefix="deploy-"):
+    """Create a temporary workspace that's cleaned up on exit."""
+    workspace = tempfile.mkdtemp(prefix=prefix)
+    print(f"Created workspace: {workspace}")
+    try:
+        yield workspace
+    except Exception:
+        print(f"Error in workspace — preserving for debugging: {workspace}")
+        raise
+    else:
+        # Only clean up on success
+        shutil.rmtree(workspace)
+        print(f"Cleaned up workspace: {workspace}")
+
+# Usage
+with temp_workspace() as ws:
+    config_path = os.path.join(ws, "config.yaml")
+    with open(config_path, "w") as f:
+        f.write("key: value\n")
+    # Workspace is auto-cleaned on success
+```
+
+## Debugging with breakpoint()
+
+When you need to investigate interactively:
+
+```python
+def process_manifest(data):
+    """Process a Kubernetes manifest."""
+    for doc in data:
+        kind = doc.get("kind")
+        name = doc.get("metadata", {}).get("name")
+
+        if kind is None:
+            # Drop into debugger to inspect the bad document
+            breakpoint()  # Python 3.7+ — equivalent to import pdb; pdb.set_trace()
+
+        print(f"Processing {kind}/{name}")
+```
+
+<Exercise number={1} title="Robust Config Loader">
+
+Build a config loader with comprehensive error handling and logging.
+
+```python
+import json
+import logging
+import os
+from datetime import datetime
+
+# Setup logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S"
+)
+logger = logging.getLogger("config-loader")
+
+class ConfigError(Exception):
+    """Base config error."""
+    pass
+
+class ConfigNotFoundError(ConfigError):
+    """Config file does not exist."""
+    pass
+
+class ConfigParseError(ConfigError):
+    """Config file cannot be parsed."""
+    pass
+
+class ConfigValidationError(ConfigError):
+    """Config values are invalid."""
+    pass
+
+def load_config(filepath, required_keys=None, defaults=None):
+    """Load and validate a JSON config file."""
+    defaults = defaults or {}
+    required_keys = required_keys or []
+
+    logger.info(f"Loading config from {filepath}")
+
+    # Check file exists
+    if not os.path.exists(filepath):
+        logger.error(f"Config file not found: {filepath}")
+        raise ConfigNotFoundError(f"File not found: {filepath}")
+
+    # Read and parse
+    try:
+        with open(filepath, "r") as f:
+            raw = f.read()
+    except PermissionError:
+        logger.error(f"Permission denied reading {filepath}")
+        raise ConfigError(f"Cannot read {filepath}: permission denied")
+
+    if not raw.strip():
+        logger.error(f"Config file is empty: {filepath}")
+        raise ConfigParseError(f"Empty config file: {filepath}")
+
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in {filepath}: {e}")
+        raise ConfigParseError(f"Invalid JSON: {e}")
+
+    if not isinstance(config, dict):
+        raise ConfigParseError(f"Expected JSON object, got {type(config).__name__}")
+
+    # Apply defaults
+    for key, default_value in defaults.items():
+        if key not in config:
+            logger.debug(f"Using default for '{key}': {default_value}")
+            config[key] = default_value
+
+    # Validate required keys
+    missing = [k for k in required_keys if k not in config]
+    if missing:
+        logger.error(f"Missing required keys: {missing}")
+        raise ConfigValidationError(
+            f"Missing required config keys: {', '.join(missing)}"
+        )
+
+    logger.info(f"Config loaded: {len(config)} keys")
+    return config
+
+def load_config_with_fallback(*filepaths, **kwargs):
+    """Try loading from multiple paths, return first success."""
+    errors = []
+    for fp in filepaths:
+        try:
+            return load_config(fp, **kwargs)
+        except ConfigNotFoundError:
+            errors.append(f"  {fp}: not found")
+        except ConfigParseError as e:
+            errors.append(f"  {fp}: parse error — {e}")
+
+    logger.error("All config sources failed:")
+    for err in errors:
+        logger.error(err)
+    raise ConfigError("No valid config found in any location")
+
+# --- Demo ---
+import tempfile
+
+# Create test configs
+tmp = tempfile.mkdtemp()
+
+# Valid config
+valid_path = os.path.join(tmp, "config.json")
+with open(valid_path, "w") as f:
+    json.dump({
+        "app_name": "web-api",
+        "port": 8080,
+        "database": {"host": "db.local", "port": 5432}
+    }, f)
+
+# Invalid JSON
+bad_path = os.path.join(tmp, "bad.json")
+with open(bad_path, "w") as f:
+    f.write("{invalid json content")
+
+print("=== Test 1: Valid config ===")
+try:
+    cfg = load_config(valid_path, required_keys=["app_name", "port"],
+                      defaults={"log_level": "INFO"})
+    print(f"  Loaded: {cfg}")
+except ConfigError as e:
+    print(f"  Error: {e}")
+
+print("\n=== Test 2: Missing file ===")
+try:
+    cfg = load_config("/nonexistent/config.json")
+except ConfigError as e:
+    print(f"  Caught: {type(e).__name__}: {e}")
+
+print("\n=== Test 3: Invalid JSON ===")
+try:
+    cfg = load_config(bad_path)
+except ConfigError as e:
+    print(f"  Caught: {type(e).__name__}: {e}")
+
+print("\n=== Test 4: Fallback loading ===")
+try:
+    cfg = load_config_with_fallback(
+        "/etc/myapp/config.json",
+        os.path.expanduser("~/.myapp/config.json"),
+        valid_path,
+        required_keys=["app_name"]
+    )
+    print(f"  Loaded from fallback: {cfg['app_name']}")
+except ConfigError as e:
+    print(f"  All failed: {e}")
+
+# Cleanup
+import shutil
+shutil.rmtree(tmp)
+```
+
+</Exercise>
+
+<Exercise number={2} title="Structured Logger with Context">
+
+Build a logger that outputs structured JSON with request context.
+
+```python
+import logging
+import json
+import uuid
+from datetime import datetime, timezone
+from contextlib import contextmanager
+import threading
+
+# Thread-local storage for request context
+_context = threading.local()
+
+def get_context():
+    """Get the current logging context."""
+    return getattr(_context, "data", {})
+
+@contextmanager
+def log_context(**kwargs):
+    """Add context fields to all log messages in this block."""
+    previous = getattr(_context, "data", {})
+    _context.data = {**previous, **kwargs}
+    try:
+        yield
+    finally:
+        _context.data = previous
+
+class StructuredFormatter(logging.Formatter):
+    """Format logs as JSON with context."""
+    def format(self, record):
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+
+        # Add thread-local context
+        entry.update(get_context())
+
+        # Add extra fields from the log call
+        for key in ("duration", "status_code", "error_type", "component"):
+            if hasattr(record, key):
+                entry[key] = getattr(record, key)
+
+        # Add exception info
+        if record.exc_info and record.exc_info[0]:
+            entry["exception"] = {
+                "type": record.exc_info[0].__name__,
+                "message": str(record.exc_info[1]),
+            }
+
+        return json.dumps(entry)
+
+# Setup
+handler = logging.StreamHandler()
+handler.setFormatter(StructuredFormatter())
+
+logger = logging.getLogger("app")
+logger.handlers = [handler]
+logger.setLevel(logging.DEBUG)
+
+# --- Demo: Simulated deployment ---
+def deploy_service(service_name, version):
+    """Simulate a deployment with structured logging."""
+    request_id = str(uuid.uuid4())[:8]
+
+    with log_context(request_id=request_id, service=service_name,
+                     version=version):
+        logger.info("Deployment started")
+
+        # Simulate steps
+        try:
+            logger.info("Pulling image",
+                        extra={"component": "registry"})
+            logger.info("Running health check",
+                        extra={"component": "health"})
+
+            # Simulate a warning
+            logger.warning("High memory usage detected",
+                           extra={"component": "monitor"})
+
+            logger.info("Deployment complete",
+                        extra={"duration": 45.2, "status_code": 200})
+        except Exception as e:
+            logger.error("Deployment failed",
+                         extra={"error_type": type(e).__name__},
+                         exc_info=True)
+            raise
+
+deploy_service("web-api", "2.3.1")
+print()  # Blank line between deployments
+deploy_service("worker", "1.0.5")
+```
+
+</Exercise>
+
+<MiniProject title="Resilient API Client">
+
+Build an HTTP client with retry, logging, error handling, and graceful degradation.
+
+```python
+import requests
+import logging
+import time
+import random
+import json
+from datetime import datetime, timezone
+from functools import wraps
+
+# --- Logging setup ---
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        entry = {
+            "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+            "level": record.levelname,
+            "msg": record.getMessage(),
+        }
+        for key in ("url", "method", "status", "duration", "attempt"):
+            if hasattr(record, key):
+                entry[key] = getattr(record, key)
+        return json.dumps(entry)
+
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+logger = logging.getLogger("api-client")
+logger.handlers = [handler]
+logger.setLevel(logging.INFO)
+
+# --- Custom Exceptions ---
+class APIError(Exception):
+    """Base API error."""
+    def __init__(self, message, status_code=None, response=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response = response
+
+class RateLimitError(APIError):
+    """API rate limit exceeded."""
+    def __init__(self, retry_after=60, **kwargs):
+        super().__init__(f"Rate limited. Retry after {retry_after}s", **kwargs)
+        self.retry_after = retry_after
+
+class AuthenticationError(APIError):
+    """Authentication failed."""
+    pass
+
+# --- Resilient API Client ---
+class ResilientClient:
+    """HTTP client with retry, logging, and graceful degradation."""
+
+    def __init__(self, base_url, token=None, max_retries=3,
+                 timeout=30, rate_limit_pause=1.0):
+        self.base_url = base_url.rstrip("/")
+        self.max_retries = max_retries
+        self.timeout = timeout
+        self.rate_limit_pause = rate_limit_pause
+        self.stats = {"requests": 0, "retries": 0, "failures": 0}
+
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Accept": "application/json",
+            "User-Agent": "resilient-client/1.0"
+        })
+        if token:
+            self.session.headers["Authorization"] = f"token {token}"
+
+    def request(self, method, path, retryable=True, **kwargs):
+        """Make an HTTP request with retry and error handling."""
+        url = f"{self.base_url}{path}" if not path.startswith("http") else path
+        kwargs.setdefault("timeout", self.timeout)
+
+        last_error = None
+        for attempt in range(self.max_retries + 1):
+            self.stats["requests"] += 1
+
+            try:
+                start = time.time()
+                response = self.session.request(method, url, **kwargs)
+                duration = round(time.time() - start, 3)
+
+                logger.info(
+                    f"{method} {path} -> {response.status_code}",
+                    extra={
+                        "method": method, "url": path,
+                        "status": response.status_code,
+                        "duration": duration, "attempt": attempt + 1
+                    }
+                )
+
+                # Handle specific status codes
+                if response.status_code == 401:
+                    raise AuthenticationError(
+                        "Authentication failed",
+                        status_code=401, response=response
+                    )
+                elif response.status_code == 429:
+                    retry_after = int(
+                        response.headers.get("Retry-After", 60)
+                    )
+                    raise RateLimitError(
+                        retry_after=retry_after,
+                        status_code=429, response=response
+                    )
+                elif response.status_code >= 500 and retryable:
+                    raise APIError(
+                        f"Server error: {response.status_code}",
+                        status_code=response.status_code,
+                        response=response
+                    )
+
+                response.raise_for_status()
+                return response
+
+            except RateLimitError as e:
+                if attempt < self.max_retries:
+                    self.stats["retries"] += 1
+                    logger.warning(
+                        f"Rate limited. Waiting {e.retry_after}s...",
+                        extra={"attempt": attempt + 1}
+                    )
+                    time.sleep(e.retry_after)
+                    last_error = e
+                    continue
+                raise
+
+            except AuthenticationError:
+                # Don't retry auth failures
+                self.stats["failures"] += 1
+                raise
+
+            except (APIError, requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout) as e:
+                last_error = e
+                if not retryable or attempt == self.max_retries:
+                    self.stats["failures"] += 1
+                    raise
+
+                self.stats["retries"] += 1
+                delay = min(2 ** attempt + random.uniform(0, 1), 30)
+                logger.warning(
+                    f"Attempt {attempt + 1} failed: {e}. "
+                    f"Retrying in {delay:.1f}s...",
+                    extra={"attempt": attempt + 1}
+                )
+                time.sleep(delay)
+
+        self.stats["failures"] += 1
+        raise last_error or APIError("Request failed after all retries")
+
+    def get(self, path, **kwargs):
+        return self.request("GET", path, **kwargs)
+
+    def post(self, path, **kwargs):
+        return self.request("POST", path, **kwargs)
+
+    def get_json(self, path, default=None, **kwargs):
+        """GET with JSON parsing and optional fallback."""
+        try:
+            return self.get(path, **kwargs).json()
+        except (APIError, requests.exceptions.RequestException) as e:
+            if default is not None:
+                logger.warning(
+                    f"Request failed, using default: {e}"
+                )
+                return default
+            raise
+
+    def health_check(self, path="/health"):
+        """Check if the API is reachable."""
+        try:
+            response = self.get(path, retryable=False, timeout=5)
+            return response.ok
+        except Exception:
+            return False
+
+    def report(self):
+        """Print statistics."""
+        s = self.stats
+        print(f"\n--- Client Stats ---")
+        print(f"  Requests: {s['requests']}")
+        print(f"  Retries:  {s['retries']}")
+        print(f"  Failures: {s['failures']}")
+
+# --- Demo ---
+print("=== Resilient API Client Demo ===\n")
+
+client = ResilientClient(
+    base_url="https://api.github.com",
+    max_retries=2,
+    timeout=15
+)
+
+# Successful request
+try:
+    user = client.get_json("/users/octocat")
+    print(f"\nUser: {user['login']}")
+    print(f"Public repos: {user['public_repos']}")
+except APIError as e:
+    print(f"API error: {e}")
+
+# Request with graceful degradation (default value on failure)
+repos = client.get_json(
+    "/users/octocat/repos",
+    default=[],
+    params={"per_page": 5}
+)
+print(f"\nFetched {len(repos)} repos")
+for repo in repos[:3]:
+    print(f"  - {repo['name']}")
+
+# Request that will fail gracefully
+data = client.get_json(
+    "/this/does/not/exist",
+    default={"status": "unavailable"}
+)
+print(f"\nFallback data: {data}")
+
+client.report()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Catch specific exceptions, not bare `except:` — it hides bugs and makes debugging impossible
+- Use `try/except/else/finally` to separate error handling from success logic and cleanup
+- Create custom exception hierarchies for your domain — `DeploymentError`, `ConfigError`, etc.
+- Use `logging` instead of `print()` — it gives you levels, file output, rotation, and formatting
+- JSON-formatted logs integrate with log aggregation tools like ELK, Datadog, and CloudWatch
+- Retry with exponential backoff and jitter for transient failures (network, API 500s)
+- Design for graceful degradation: if Slack notification fails, the deployment should still succeed
+- Context managers (`with` statements) ensure cleanup even when exceptions occur
+
+## What's Next
+
+Your scripts are now robust and observable. But DevOps automation often means extracting data from messy sources — log files, command output, config files with irregular formats. In **Regex and Text Processing**, you'll learn Python's `re` module for pattern matching and the text processing techniques that power log analysis and data extraction.

@@ -1,0 +1,1206 @@
+---
+title: "File Operations"
+description: "Read, write, and manage files with Python. Parse configs, process logs, manage directories, and handle the file operations that every automation script needs."
+order: 7
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 06-functions-and-modules
+objectives:
+  - Read and write files safely using context managers
+  - Use pathlib for modern, cross-platform file path handling
+  - Process log files efficiently line by line
+  - Work with CSV files and temporary files for automation tasks
+tags:
+  - python
+  - files
+  - pathlib
+  - io
+---
+
+<Callout type="story" title="The Story">
+A 4GB access log needed analysis: how many 5xx errors per hour, which endpoints were slowest, and which IPs were hammering the server. Opening it in a text editor crashed the machine. A bash pipeline worked but took 20 minutes. A Python script using line-by-line processing, dictionaries for aggregation, and CSV output for the report did it in 3 minutes — and the script was reusable for every log rotation. File operations are the bread and butter of DevOps automation.
+</Callout>
+
+## Reading Files
+
+### The Context Manager Pattern
+
+Always use `with` to open files. It guarantees the file is closed, even if an error occurs:
+
+```python
+# The right way — context manager
+with open("/var/log/syslog") as f:
+    content = f.read()
+
+# The file is automatically closed after the 'with' block
+
+# The wrong way — don't do this
+f = open("/var/log/syslog")
+content = f.read()
+f.close()  # If an error occurs above, close() never runs
+```
+
+### Reading Methods
+
+```python
+# Read the entire file as a string
+with open("config.txt") as f:
+    content = f.read()
+    print(f"File size: {len(content)} characters")
+
+# Read all lines into a list
+with open("servers.txt") as f:
+    lines = f.readlines()
+    # ['web-01\n', 'web-02\n', 'api-01\n']
+
+# Read lines without trailing newlines
+with open("servers.txt") as f:
+    servers = [line.strip() for line in f.readlines()]
+    # ['web-01', 'web-02', 'api-01']
+
+# Read line by line (memory efficient for large files)
+with open("/var/log/syslog") as f:
+    for line in f:
+        if "error" in line.lower():
+            print(line.strip())
+
+# Read a specific number of characters
+with open("big_file.log") as f:
+    header = f.read(1024)  # Read first 1KB
+```
+
+<Callout type="tip" title="Memory-Efficient File Reading">
+For large files (100MB+), never use `f.read()` or `f.readlines()` — they load the entire file into memory. Instead, iterate line by line with `for line in f:`. Python reads one line at a time, keeping memory usage constant.
+</Callout>
+
+### Reading with Encoding
+
+```python
+# Specify encoding explicitly (good practice)
+with open("config.txt", encoding="utf-8") as f:
+    content = f.read()
+
+# Handle files with unknown encoding
+try:
+    with open("mystery_file.txt", encoding="utf-8") as f:
+        content = f.read()
+except UnicodeDecodeError:
+    with open("mystery_file.txt", encoding="latin-1") as f:
+        content = f.read()
+```
+
+## Writing Files
+
+### Basic Writing
+
+```python
+# Write (creates or overwrites)
+with open("report.txt", "w") as f:
+    f.write("Deployment Report\n")
+    f.write(f"Date: {datetime.now()}\n")
+    f.write("Status: Success\n")
+
+# Append (adds to existing file)
+with open("deploy.log", "a") as f:
+    f.write(f"{datetime.now()} - Deployed web-api v2.1.0\n")
+
+# Write multiple lines
+lines = ["web-01", "web-02", "web-03"]
+with open("servers.txt", "w") as f:
+    f.writelines(line + "\n" for line in lines)
+
+# Write with print (simpler for formatted output)
+with open("report.txt", "w") as f:
+    print("Server Health Report", file=f)
+    print(f"Generated: {datetime.now()}", file=f)
+    print("-" * 40, file=f)
+    for server in ["web-01", "web-02"]:
+        print(f"  {server}: healthy", file=f)
+```
+
+### Atomic Writes with tempfile
+
+Writing directly to a file is dangerous — if the script crashes mid-write, you get a corrupted file. Atomic writes solve this:
+
+```python
+import tempfile
+import os
+
+def atomic_write(filepath, content):
+    """Write to a file atomically — no partial writes.
+
+    Writes to a temporary file first, then renames it.
+    If the script crashes during write, the original file is untouched.
+    """
+    directory = os.path.dirname(filepath)
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=directory, delete=False, suffix=".tmp"
+    ) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    # Atomic rename (on the same filesystem)
+    os.replace(tmp_path, filepath)
+
+# Usage
+config = """
+server:
+  port: 8080
+  workers: 4
+  debug: false
+"""
+atomic_write("/tmp/config.yml", config)
+```
+
+<Callout type="warning" title="Atomic Writes for Config Files">
+Always use atomic writes for configuration files. If your script crashes while writing a config file, a half-written config can bring down your service on the next restart. Write to a temp file first, then rename.
+</Callout>
+
+## pathlib — Modern File Paths
+
+pathlib is Python 3's modern way to work with file paths. It's more readable and cross-platform than `os.path`.
+
+### Path Objects
+
+```python
+from pathlib import Path
+
+# Create paths
+log_dir = Path("/var/log")
+config_file = Path("/etc/myapp/config.yml")
+home = Path.home()
+cwd = Path.cwd()
+
+# Build paths with / operator (no os.path.join needed)
+app_log = log_dir / "myapp" / "app.log"
+user_config = home / ".config" / "myapp" / "settings.yml"
+
+# Path properties
+print(config_file.name)      # "config.yml"
+print(config_file.stem)      # "config"
+print(config_file.suffix)    # ".yml"
+print(config_file.parent)    # Path("/etc/myapp")
+print(config_file.parts)     # ('/', 'etc', 'myapp', 'config.yml')
+
+# Resolve to absolute path
+relative = Path("./scripts/deploy.py")
+absolute = relative.resolve()  # /home/user/project/scripts/deploy.py
+```
+
+### Path Operations
+
+```python
+from pathlib import Path
+
+path = Path("/var/log/myapp")
+
+# Check existence and type
+path.exists()        # True/False
+path.is_file()       # True if it's a regular file
+path.is_dir()        # True if it's a directory
+path.is_symlink()    # True if it's a symbolic link
+
+# File metadata
+if path.is_file():
+    stat = path.stat()
+    print(f"Size: {stat.st_size} bytes")
+    print(f"Modified: {stat.st_mtime}")
+    print(f"Permissions: {oct(stat.st_mode)}")
+
+# Create directories
+log_dir = Path("/tmp/myapp/logs")
+log_dir.mkdir(parents=True, exist_ok=True)
+# parents=True: create parent directories
+# exist_ok=True: don't error if it already exists
+
+# Read and write (convenience methods)
+config_path = Path("/tmp/config.txt")
+config_path.write_text("port: 8080\ndebug: false\n")
+content = config_path.read_text()
+
+# Binary read/write
+data_path = Path("/tmp/data.bin")
+data_path.write_bytes(b"\x00\x01\x02\x03")
+data = data_path.read_bytes()
+```
+
+### Globbing — Find Files by Pattern
+
+```python
+from pathlib import Path
+
+log_dir = Path("/var/log")
+
+# Find all .log files in a directory
+for log_file in log_dir.glob("*.log"):
+    print(f"Log: {log_file.name} ({log_file.stat().st_size} bytes)")
+
+# Recursive glob — search subdirectories too
+project = Path("/home/user/project")
+for py_file in project.rglob("*.py"):
+    print(f"Python file: {py_file}")
+
+# Multiple patterns
+config_files = list(project.rglob("*.yml")) + list(project.rglob("*.yaml"))
+
+# Find specific files
+dockerfiles = list(project.rglob("Dockerfile*"))
+makefiles = list(project.rglob("Makefile"))
+```
+
+## shutil — High-Level File Operations
+
+```python
+import shutil
+from pathlib import Path
+
+# Copy a file
+shutil.copy2("config.yml", "config.yml.bak")  # copy2 preserves metadata
+
+# Copy a directory tree
+shutil.copytree("config/", "config_backup/")
+
+# Move/rename
+shutil.move("old_name.txt", "new_name.txt")
+
+# Delete a directory tree (DANGEROUS — no confirmation!)
+shutil.rmtree("temp_build/")
+
+# Safe delete pattern
+backup_dir = Path("old_backup")
+if backup_dir.exists() and backup_dir.is_dir():
+    shutil.rmtree(backup_dir)
+    print(f"Removed {backup_dir}")
+
+# Disk usage
+usage = shutil.disk_usage("/")
+print(f"Total: {usage.total // (1024**3)} GB")
+print(f"Used:  {usage.used // (1024**3)} GB")
+print(f"Free:  {usage.free // (1024**3)} GB")
+```
+
+## os.walk — Directory Traversal
+
+```python
+import os
+
+# Walk through a directory tree
+for dirpath, dirnames, filenames in os.walk("/var/log"):
+    # dirpath: current directory path
+    # dirnames: subdirectories in current directory
+    # filenames: files in current directory
+
+    # Skip hidden directories
+    dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+
+    for filename in filenames:
+        filepath = os.path.join(dirpath, filename)
+        size = os.path.getsize(filepath)
+        if size > 100 * 1024 * 1024:  # Larger than 100MB
+            print(f"Large file: {filepath} ({size // (1024*1024)} MB)")
+```
+
+## Temporary Files and Directories
+
+```python
+import tempfile
+from pathlib import Path
+
+# Create a temporary file (auto-deleted when closed)
+with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+    tmp.write('{"status": "ok"}')
+    tmp_path = tmp.name
+    print(f"Temp file: {tmp_path}")
+
+# Create a temporary directory (auto-deleted when exiting with block)
+with tempfile.TemporaryDirectory(prefix="deploy_") as tmpdir:
+    print(f"Temp dir: {tmpdir}")
+    # Do work in the temp directory
+    work_file = Path(tmpdir) / "build.log"
+    work_file.write_text("Building...\n")
+    # Directory and all contents deleted automatically
+
+# Create a temp dir that persists (you clean it up)
+tmpdir = tempfile.mkdtemp(prefix="backup_")
+print(f"Persistent temp dir: {tmpdir}")
+# Remember to clean up later: shutil.rmtree(tmpdir)
+```
+
+## CSV Files
+
+CSV is the universal data exchange format. Python's `csv` module handles edge cases (quoting, escaping) correctly.
+
+### Reading CSV
+
+```python
+import csv
+
+# Read as lists
+with open("servers.csv") as f:
+    reader = csv.reader(f)
+    header = next(reader)  # Skip header row
+    for row in reader:
+        hostname, ip, role, region = row
+        print(f"  {hostname}: {ip} ({role})")
+
+# Read as dictionaries (recommended)
+with open("servers.csv") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        print(f"  {row['hostname']}: {row['ip']} ({row['role']})")
+```
+
+### Writing CSV
+
+```python
+import csv
+
+# Write from list of dicts
+servers = [
+    {"hostname": "web-01", "ip": "10.0.1.10", "role": "web", "region": "us-east-1"},
+    {"hostname": "web-02", "ip": "10.0.1.11", "role": "web", "region": "us-east-1"},
+    {"hostname": "api-01", "ip": "10.0.2.10", "role": "api", "region": "us-east-1"},
+]
+
+with open("inventory.csv", "w", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=["hostname", "ip", "role", "region"])
+    writer.writeheader()
+    writer.writerows(servers)
+
+# Result:
+# hostname,ip,role,region
+# web-01,10.0.1.10,web,us-east-1
+# web-02,10.0.1.11,web,us-east-1
+# api-01,10.0.2.10,api,us-east-1
+```
+
+## Processing Log Files
+
+### Line-by-Line Processing
+
+```python
+import re
+from collections import Counter, defaultdict
+from datetime import datetime
+
+def process_access_log(log_path):
+    """Process an nginx access log and extract statistics."""
+    status_counts = Counter()
+    hourly_requests = defaultdict(int)
+    slow_requests = []
+    ip_counts = Counter()
+
+    # Common log format regex
+    pattern = re.compile(
+        r'(\d+\.\d+\.\d+\.\d+) .+ \[(.+?)\] "(\w+) (.+?) .+" (\d+) \d+ .+ (\d+\.\d+)'
+    )
+
+    line_count = 0
+    with open(log_path) as f:
+        for line in f:
+            line_count += 1
+            match = pattern.search(line)
+            if not match:
+                continue
+
+            ip, timestamp, method, path, status, response_time = match.groups()
+            status = int(status)
+            response_time = float(response_time)
+
+            # Count status codes
+            status_counts[status] += 1
+
+            # Count requests per hour
+            # Parse: 15/Mar/2024:10:30:45 +0000
+            try:
+                dt = datetime.strptime(timestamp.split()[0], "%d/%b/%Y:%H:%M:%S")
+                hour_key = dt.strftime("%Y-%m-%d %H:00")
+                hourly_requests[hour_key] += 1
+            except ValueError:
+                pass
+
+            # Track slow requests (> 2 seconds)
+            if response_time > 2.0:
+                slow_requests.append({
+                    "path": path,
+                    "time": response_time,
+                    "status": status,
+                    "ip": ip,
+                })
+
+            # Count requests per IP
+            ip_counts[ip] += 1
+
+    return {
+        "total_lines": line_count,
+        "status_codes": dict(status_counts.most_common()),
+        "hourly_requests": dict(sorted(hourly_requests.items())),
+        "slow_requests": sorted(slow_requests, key=lambda x: x["time"], reverse=True)[:10],
+        "top_ips": dict(ip_counts.most_common(10)),
+    }
+```
+
+### Watching Files for Changes
+
+```python
+import time
+from pathlib import Path
+
+def tail_file(filepath, interval=1.0):
+    """Watch a file for new lines (like tail -f).
+
+    Args:
+        filepath: Path to the file to watch.
+        interval: Seconds between checks.
+    """
+    path = Path(filepath)
+
+    # Start at the end of the file
+    with open(path) as f:
+        f.seek(0, 2)  # Seek to end
+
+        while True:
+            line = f.readline()
+            if line:
+                yield line.strip()
+            else:
+                time.sleep(interval)
+
+                # Check if file was rotated (new inode)
+                try:
+                    if path.stat().st_ino != os.fstat(f.fileno()).st_ino:
+                        # File was rotated — reopen
+                        f.close()
+                        f = open(path)
+                except FileNotFoundError:
+                    time.sleep(interval)
+
+# Usage
+# for line in tail_file("/var/log/app.log"):
+#     if "ERROR" in line:
+#         notify_slack(f"Error in app log: {line}")
+```
+
+## File Permissions
+
+```python
+import os
+import stat
+from pathlib import Path
+
+# Check permissions
+path = Path("/etc/ssh/sshd_config")
+mode = path.stat().st_mode
+
+print(f"Readable:   {bool(mode & stat.S_IRUSR)}")
+print(f"Writable:   {bool(mode & stat.S_IWUSR)}")
+print(f"Executable: {bool(mode & stat.S_IXUSR)}")
+print(f"Permissions: {oct(mode & 0o777)}")  # e.g., 0o644
+
+# Set permissions
+script = Path("deploy.sh")
+script.chmod(0o755)  # rwxr-xr-x
+
+# Set secure permissions on sensitive files
+secret = Path("api_key.txt")
+secret.chmod(0o600)  # rw------- (owner only)
+
+# Check for insecure permissions
+def check_file_security(filepath):
+    """Warn if a file has overly permissive permissions."""
+    path = Path(filepath)
+    if not path.exists():
+        return
+
+    mode = path.stat().st_mode
+    perms = mode & 0o777
+
+    if perms & 0o077:  # Group or others have any permission
+        print(f"WARNING: {filepath} has permissions {oct(perms)} — "
+              f"consider restricting to 0o600")
+```
+
+<Exercise number={1} title="Config File Manager">
+
+Build a utility that reads, validates, and manages configuration files:
+
+```python
+#!/usr/bin/env python3
+"""Config file manager — read, validate, and merge config files."""
+
+import json
+import os
+from pathlib import Path
+from datetime import datetime
+
+def read_config(filepath):
+    """Read a configuration file (supports JSON and simple key=value)."""
+    path = Path(filepath)
+
+    if not path.exists():
+        print(f"  Config file not found: {filepath}")
+        return None
+
+    suffix = path.suffix.lower()
+
+    if suffix == ".json":
+        with open(path) as f:
+            return json.load(f)
+    elif suffix in (".conf", ".cfg", ".ini", ".env"):
+        config = {}
+        with open(path) as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                # Skip empty lines and comments
+                if not line or line.startswith("#") or line.startswith(";"):
+                    continue
+                if "=" not in line:
+                    print(f"  Warning: Line {line_num} has no '=': {line}")
+                    continue
+                key, _, value = line.partition("=")
+                config[key.strip()] = value.strip().strip('"').strip("'")
+        return config
+    else:
+        print(f"  Unsupported config format: {suffix}")
+        return None
+
+def validate_config(config, schema):
+    """Validate a config dict against a schema.
+
+    Schema format: {key: {"type": type, "required": bool, "default": value}}
+    """
+    errors = []
+    validated = {}
+
+    for key, rules in schema.items():
+        value = config.get(key)
+
+        if value is None:
+            if rules.get("required", False):
+                errors.append(f"Missing required key: {key}")
+                continue
+            else:
+                validated[key] = rules.get("default")
+                continue
+
+        # Type checking and conversion
+        expected_type = rules.get("type", str)
+        try:
+            if expected_type == bool:
+                validated[key] = str(value).lower() in ("true", "1", "yes")
+            elif expected_type == int:
+                validated[key] = int(value)
+            elif expected_type == float:
+                validated[key] = float(value)
+            else:
+                validated[key] = str(value)
+        except (ValueError, TypeError):
+            errors.append(f"Invalid type for {key}: expected {expected_type.__name__}, got '{value}'")
+
+    return validated, errors
+
+def write_config(filepath, config, file_format="json"):
+    """Write a configuration file."""
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if file_format == "json":
+        with open(path, "w") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+    elif file_format == "env":
+        with open(path, "w") as f:
+            f.write(f"# Generated: {datetime.now().isoformat()}\n")
+            for key, value in sorted(config.items()):
+                f.write(f"{key}={value}\n")
+
+    print(f"  Config written to {filepath}")
+
+# Demo
+print("=== Config File Manager ===\n")
+
+# Create a sample config
+sample_config = {
+    "APP_NAME": "web-api",
+    "APP_PORT": "8080",
+    "APP_DEBUG": "true",
+    "APP_WORKERS": "4",
+    "DB_HOST": "localhost",
+    "DB_PORT": "5432",
+}
+
+# Write it
+write_config("/tmp/app.json", sample_config, file_format="json")
+write_config("/tmp/app.env", sample_config, file_format="env")
+
+# Read it back
+print("\n[1] Reading JSON config:")
+json_config = read_config("/tmp/app.json")
+for key, value in json_config.items():
+    print(f"  {key} = {value}")
+
+print("\n[2] Reading ENV config:")
+env_config = read_config("/tmp/app.env")
+for key, value in env_config.items():
+    print(f"  {key} = {value}")
+
+# Validate
+print("\n[3] Validating config:")
+schema = {
+    "APP_NAME":    {"type": str, "required": True},
+    "APP_PORT":    {"type": int, "required": True},
+    "APP_DEBUG":   {"type": bool, "required": False, "default": False},
+    "APP_WORKERS": {"type": int, "required": False, "default": 2},
+    "DB_HOST":     {"type": str, "required": True},
+    "DB_PORT":     {"type": int, "required": True},
+    "REDIS_URL":   {"type": str, "required": False, "default": "redis://localhost:6379"},
+}
+
+validated, errors = validate_config(json_config, schema)
+if errors:
+    print("  Validation errors:")
+    for error in errors:
+        print(f"    - {error}")
+else:
+    print("  All validations passed!")
+
+print("  Validated config:")
+for key, value in validated.items():
+    print(f"    {key} = {value!r} ({type(value).__name__})")
+```
+
+</Exercise>
+
+<Exercise number={2} title="Directory Analyzer">
+
+Build a tool that analyzes a directory structure and reports statistics:
+
+```python
+#!/usr/bin/env python3
+"""Analyze a directory structure and report statistics."""
+
+import os
+from pathlib import Path
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
+
+def analyze_directory(root_path, max_depth=3):
+    """Analyze a directory and return comprehensive statistics."""
+    root = Path(root_path)
+    if not root.exists():
+        print(f"Directory not found: {root_path}")
+        return None
+
+    stats = {
+        "root": str(root.resolve()),
+        "total_files": 0,
+        "total_dirs": 0,
+        "total_size": 0,
+        "by_extension": Counter(),
+        "size_by_extension": defaultdict(int),
+        "largest_files": [],
+        "empty_dirs": [],
+        "recent_files": [],
+        "old_files": [],
+    }
+
+    now = datetime.now()
+    one_week_ago = now - timedelta(days=7)
+    one_year_ago = now - timedelta(days=365)
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Skip hidden and virtual directories
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith(".") and d not in ("__pycache__", "node_modules", "venv", ".git")
+        ]
+
+        current_depth = len(Path(dirpath).relative_to(root).parts)
+        if current_depth > max_depth:
+            dirnames.clear()
+            continue
+
+        stats["total_dirs"] += 1
+
+        if not filenames and not dirnames:
+            stats["empty_dirs"].append(dirpath)
+
+        for filename in filenames:
+            filepath = Path(dirpath) / filename
+            try:
+                file_stat = filepath.stat()
+            except (PermissionError, FileNotFoundError):
+                continue
+
+            file_size = file_stat.st_size
+            file_ext = filepath.suffix.lower() or "(no extension)"
+            mod_time = datetime.fromtimestamp(file_stat.st_mtime)
+
+            stats["total_files"] += 1
+            stats["total_size"] += file_size
+            stats["by_extension"][file_ext] += 1
+            stats["size_by_extension"][file_ext] += file_size
+
+            # Track largest files
+            stats["largest_files"].append((str(filepath), file_size))
+
+            # Track recent and old files
+            if mod_time > one_week_ago:
+                stats["recent_files"].append((str(filepath), mod_time))
+            if mod_time < one_year_ago:
+                stats["old_files"].append((str(filepath), mod_time))
+
+    # Sort and trim
+    stats["largest_files"] = sorted(stats["largest_files"], key=lambda x: x[1], reverse=True)[:10]
+    stats["recent_files"] = sorted(stats["recent_files"], key=lambda x: x[1], reverse=True)[:10]
+    stats["old_files"] = sorted(stats["old_files"], key=lambda x: x[1])[:10]
+
+    return stats
+
+def format_size(size_bytes):
+    """Format bytes into human-readable size."""
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} PB"
+
+def print_analysis(stats):
+    """Print formatted directory analysis."""
+    if not stats:
+        return
+
+    print(f"\n{'=' * 65}")
+    print(f"  Directory Analysis: {stats['root']}")
+    print(f"{'=' * 65}\n")
+
+    # Overview
+    print(f"  Total files:       {stats['total_files']:,}")
+    print(f"  Total directories: {stats['total_dirs']:,}")
+    print(f"  Total size:        {format_size(stats['total_size'])}")
+
+    # By extension
+    print(f"\n  {'--- Files by Extension ---':^60}")
+    print(f"  {'Extension':<20} {'Count':>8} {'Total Size':>15}")
+    print(f"  {'-' * 45}")
+    for ext, count in stats["by_extension"].most_common(15):
+        size = format_size(stats["size_by_extension"][ext])
+        print(f"  {ext:<20} {count:>8} {size:>15}")
+
+    # Largest files
+    if stats["largest_files"]:
+        print(f"\n  {'--- Largest Files ---':^60}")
+        for filepath, size in stats["largest_files"]:
+            # Show relative path for readability
+            try:
+                rel = Path(filepath).relative_to(stats["root"])
+            except ValueError:
+                rel = filepath
+            print(f"  {format_size(size):>10}  {rel}")
+
+    # Empty directories
+    if stats["empty_dirs"]:
+        print(f"\n  {'--- Empty Directories ---':^60}")
+        for dirpath in stats["empty_dirs"][:5]:
+            print(f"  {dirpath}")
+        if len(stats["empty_dirs"]) > 5:
+            print(f"  ... and {len(stats['empty_dirs']) - 5} more")
+
+    print(f"\n{'=' * 65}")
+
+# Run the analysis
+target = os.environ.get("ANALYZE_DIR", ".")
+stats = analyze_directory(target, max_depth=4)
+if stats:
+    print_analysis(stats)
+```
+
+</Exercise>
+
+<MiniProject title="Log File Processor">
+
+Build a comprehensive log file processor that extracts patterns, aggregates data, and generates reports:
+
+```python
+#!/usr/bin/env python3
+"""log_processor.py — Process large log files, extract patterns, generate reports.
+
+Processes application log files line by line (memory-efficient),
+extracts key metrics, and generates both console and CSV reports.
+
+Usage:
+    python3 log_processor.py <logfile> [--output report.csv] [--format text|csv|json]
+"""
+
+import csv
+import json
+import os
+import re
+import sys
+from collections import Counter, defaultdict
+from datetime import datetime
+from pathlib import Path
+
+# Log line patterns
+PATTERNS = {
+    "standard": re.compile(
+        r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+"
+        r"(\w+)\s+"
+        r"\[(\w+)\]\s+"
+        r"(.+)"
+    ),
+    "ip_address": re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b"),
+    "response_time": re.compile(r"(\d+(?:\.\d+)?)\s*ms"),
+    "http_status": re.compile(r"\b([1-5]\d{2})\b"),
+    "error_message": re.compile(r"(?:error|exception|failed|timeout)[:=\s]+(.+)", re.IGNORECASE),
+}
+
+
+class LogProcessor:
+    """Process log files and extract statistics."""
+
+    def __init__(self):
+        self.total_lines = 0
+        self.parsed_lines = 0
+        self.level_counts = Counter()
+        self.component_counts = Counter()
+        self.hourly_counts = defaultdict(int)
+        self.error_messages = Counter()
+        self.ip_addresses = Counter()
+        self.response_times = []
+        self.http_status_codes = Counter()
+        self.errors_by_component = defaultdict(list)
+        self.first_timestamp = None
+        self.last_timestamp = None
+
+    def process_line(self, line):
+        """Process a single log line."""
+        self.total_lines += 1
+        line = line.strip()
+        if not line:
+            return
+
+        # Try to parse the standard format
+        match = PATTERNS["standard"].match(line)
+        if match:
+            timestamp_str, level, component, message = match.groups()
+            self.parsed_lines += 1
+
+            # Track timestamps
+            try:
+                timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                if self.first_timestamp is None:
+                    self.first_timestamp = timestamp
+                self.last_timestamp = timestamp
+
+                # Hourly aggregation
+                hour_key = timestamp.strftime("%Y-%m-%d %H:00")
+                self.hourly_counts[hour_key] += 1
+            except ValueError:
+                pass
+
+            # Count levels and components
+            self.level_counts[level] += 1
+            self.component_counts[component] += 1
+
+            # Track errors
+            if level in ("ERROR", "CRITICAL", "FATAL"):
+                self.errors_by_component[component].append(message[:100])
+                error_match = PATTERNS["error_message"].search(message)
+                if error_match:
+                    self.error_messages[error_match.group(1)[:80]] += 1
+
+        # Extract IPs from any line
+        for ip in PATTERNS["ip_address"].findall(line):
+            self.ip_addresses[ip] += 1
+
+        # Extract response times
+        time_match = PATTERNS["response_time"].search(line)
+        if time_match:
+            self.response_times.append(float(time_match.group(1)))
+
+        # Extract HTTP status codes
+        status_match = PATTERNS["http_status"].search(line)
+        if status_match:
+            self.http_status_codes[int(status_match.group(1))] += 1
+
+    def process_file(self, filepath):
+        """Process an entire log file line by line."""
+        path = Path(filepath)
+        if not path.exists():
+            print(f"Error: File not found: {filepath}")
+            return False
+
+        file_size = path.stat().st_size
+        processed_bytes = 0
+        last_progress = 0
+
+        print(f"Processing: {filepath}")
+        print(f"File size: {file_size / (1024*1024):.1f} MB")
+
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                self.process_line(line)
+                processed_bytes += len(line.encode("utf-8"))
+
+                # Progress indicator (every 10%)
+                progress = int((processed_bytes / file_size) * 100) if file_size > 0 else 100
+                if progress >= last_progress + 10:
+                    print(f"  Progress: {progress}% ({self.total_lines:,} lines)")
+                    last_progress = progress
+
+        print(f"  Done: {self.total_lines:,} lines processed")
+        return True
+
+    def get_summary(self):
+        """Generate a summary dict of all statistics."""
+        avg_response = 0
+        p95_response = 0
+        p99_response = 0
+
+        if self.response_times:
+            sorted_times = sorted(self.response_times)
+            avg_response = sum(sorted_times) / len(sorted_times)
+            p95_index = int(len(sorted_times) * 0.95)
+            p99_index = int(len(sorted_times) * 0.99)
+            p95_response = sorted_times[p95_index] if p95_index < len(sorted_times) else 0
+            p99_response = sorted_times[p99_index] if p99_index < len(sorted_times) else 0
+
+        time_span = "unknown"
+        if self.first_timestamp and self.last_timestamp:
+            duration = self.last_timestamp - self.first_timestamp
+            hours = duration.total_seconds() / 3600
+            time_span = f"{hours:.1f} hours"
+
+        return {
+            "total_lines": self.total_lines,
+            "parsed_lines": self.parsed_lines,
+            "parse_rate": f"{(self.parsed_lines / self.total_lines * 100):.1f}%" if self.total_lines else "0%",
+            "time_span": time_span,
+            "log_levels": dict(self.level_counts.most_common()),
+            "components": dict(self.component_counts.most_common(10)),
+            "top_errors": dict(self.error_messages.most_common(10)),
+            "top_ips": dict(self.ip_addresses.most_common(10)),
+            "http_status_codes": dict(sorted(self.http_status_codes.items())),
+            "response_time_avg": round(avg_response, 2),
+            "response_time_p95": round(p95_response, 2),
+            "response_time_p99": round(p99_response, 2),
+            "errors_by_component": {
+                comp: len(msgs) for comp, msgs in self.errors_by_component.items()
+            },
+            "hourly_counts": dict(sorted(self.hourly_counts.items())),
+        }
+
+
+def print_report(summary):
+    """Print a formatted text report."""
+    print(f"\n{'=' * 70}")
+    print(f"  Log Analysis Report")
+    print(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'=' * 70}\n")
+
+    # Overview
+    print(f"  Lines processed:  {summary['total_lines']:>12,}")
+    print(f"  Lines parsed:     {summary['parsed_lines']:>12,} ({summary['parse_rate']})")
+    print(f"  Time span:        {summary['time_span']:>12}")
+
+    # Log levels
+    print(f"\n  {'--- Log Levels ---':^65}")
+    for level, count in summary["log_levels"].items():
+        pct = (count / summary["total_lines"] * 100) if summary["total_lines"] else 0
+        bar = "#" * int(pct * 2)
+        print(f"  {level:<10} {count:>8,}  ({pct:>5.1f}%) {bar}")
+
+    # Components with errors
+    if summary["errors_by_component"]:
+        print(f"\n  {'--- Errors by Component ---':^65}")
+        for comp, count in sorted(summary["errors_by_component"].items(),
+                                   key=lambda x: x[1], reverse=True):
+            print(f"  {comp:<20} {count:>8,} errors")
+
+    # Top error messages
+    if summary["top_errors"]:
+        print(f"\n  {'--- Top Error Messages ---':^65}")
+        for msg, count in list(summary["top_errors"].items())[:5]:
+            print(f"  [{count:>5}x] {msg[:60]}")
+
+    # Response times
+    if summary["response_time_avg"] > 0:
+        print(f"\n  {'--- Response Times ---':^65}")
+        print(f"  Average:  {summary['response_time_avg']:>8.1f} ms")
+        print(f"  P95:      {summary['response_time_p95']:>8.1f} ms")
+        print(f"  P99:      {summary['response_time_p99']:>8.1f} ms")
+
+    # Top IPs
+    if summary["top_ips"]:
+        print(f"\n  {'--- Top IP Addresses ---':^65}")
+        for ip, count in list(summary["top_ips"].items())[:5]:
+            print(f"  {ip:<20} {count:>8,} requests")
+
+    # HTTP status codes
+    if summary["http_status_codes"]:
+        print(f"\n  {'--- HTTP Status Codes ---':^65}")
+        for code, count in summary["http_status_codes"].items():
+            print(f"  {code}  {count:>8,}")
+
+    print(f"\n{'=' * 70}")
+
+
+def write_csv_report(summary, output_path):
+    """Write summary data to a CSV file."""
+    with open(output_path, "w", newline="") as f:
+        # Summary section
+        writer = csv.writer(f)
+        writer.writerow(["Metric", "Value"])
+        writer.writerow(["Total Lines", summary["total_lines"]])
+        writer.writerow(["Parsed Lines", summary["parsed_lines"]])
+        writer.writerow(["Time Span", summary["time_span"]])
+        writer.writerow(["Avg Response Time (ms)", summary["response_time_avg"]])
+        writer.writerow(["P95 Response Time (ms)", summary["response_time_p95"]])
+        writer.writerow(["P99 Response Time (ms)", summary["response_time_p99"]])
+        writer.writerow([])
+
+        # Log levels
+        writer.writerow(["Log Level", "Count"])
+        for level, count in summary["log_levels"].items():
+            writer.writerow([level, count])
+        writer.writerow([])
+
+        # Hourly counts
+        writer.writerow(["Hour", "Request Count"])
+        for hour, count in summary["hourly_counts"].items():
+            writer.writerow([hour, count])
+
+    print(f"CSV report written to: {output_path}")
+
+
+def generate_sample_log(filepath, num_lines=100):
+    """Generate a sample log file for testing."""
+    import random
+
+    components = ["web", "api", "db", "auth", "cache"]
+    levels = ["INFO"] * 70 + ["WARN"] * 15 + ["ERROR"] * 12 + ["DEBUG"] * 3
+    ips = [f"10.0.{random.randint(1,5)}.{random.randint(1,254)}" for _ in range(20)]
+
+    messages = {
+        "INFO": [
+            "Request completed in {time}ms",
+            "User {user} logged in from {ip}",
+            "Health check passed",
+            "Connection pool: {n}/20 active",
+            "Cache hit ratio: {pct}%",
+        ],
+        "WARN": [
+            "Slow query: {time}ms on {table}",
+            "Rate limit approaching for {ip}",
+            "Disk usage at {pct}% on /var/log",
+            "Connection pool usage high: {n}/20",
+        ],
+        "ERROR": [
+            "Connection refused to {host}:{port}",
+            "Query timeout after {time}ms",
+            "Failed login attempt from {ip}",
+            "HTTP 502 Bad Gateway from upstream",
+            "Out of memory: allocated {n}MB",
+        ],
+        "DEBUG": [
+            "Processing request {id}",
+            "Cache lookup for key {key}",
+        ],
+    }
+
+    base_time = datetime(2024, 3, 15, 8, 0, 0)
+
+    with open(filepath, "w") as f:
+        for i in range(num_lines):
+            timestamp = base_time.replace(
+                hour=8 + (i * 10 // num_lines),
+                minute=random.randint(0, 59),
+                second=random.randint(0, 59),
+            )
+            level = random.choice(levels)
+            component = random.choice(components)
+            template = random.choice(messages[level])
+            message = template.format(
+                time=random.randint(5, 5000),
+                user=random.choice(["admin", "deploy-bot", "jenkins"]),
+                ip=random.choice(ips),
+                n=random.randint(1, 100),
+                pct=random.randint(50, 99),
+                table=random.choice(["users", "orders", "sessions"]),
+                host=random.choice(["db-01", "cache-01", "api-02"]),
+                port=random.choice([5432, 6379, 8080]),
+                id=random.randint(10000, 99999),
+                key=f"session:{random.randint(1000, 9999)}",
+            )
+            f.write(f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')} {level:5} [{component}] {message}\n")
+
+    print(f"Generated sample log: {filepath} ({num_lines} lines)")
+
+
+def main():
+    """Main entry point."""
+    # Generate sample data if no file provided
+    if len(sys.argv) < 2 or sys.argv[1] == "--demo":
+        log_file = "/tmp/sample_app.log"
+        generate_sample_log(log_file, num_lines=500)
+    else:
+        log_file = sys.argv[1]
+
+    # Process the log file
+    processor = LogProcessor()
+    success = processor.process_file(log_file)
+
+    if not success:
+        sys.exit(1)
+
+    # Generate reports
+    summary = processor.get_summary()
+    print_report(summary)
+
+    # Write CSV if requested
+    output_arg = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--output" and i + 1 < len(sys.argv):
+            output_arg = sys.argv[i + 1]
+
+    if output_arg:
+        write_csv_report(summary, output_arg)
+
+    # Write JSON if requested
+    if "--json" in sys.argv:
+        print(json.dumps(summary, indent=2, default=str))
+
+    # Exit with error if critical issues found
+    error_count = summary["log_levels"].get("ERROR", 0)
+    critical_count = summary["log_levels"].get("CRITICAL", 0)
+    if critical_count > 0:
+        return 2
+    elif error_count > summary["total_lines"] * 0.1:  # >10% errors
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Run it: `python3 log_processor.py --demo` to see it in action with generated data, or `python3 log_processor.py /var/log/syslog --output report.csv` to analyze a real log file. This is a production-ready pattern for log analysis automation.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Always use `with open(...)` context managers — they guarantee files are closed properly
+- For large files, iterate line by line (`for line in f:`) instead of reading the entire file
+- Use `pathlib.Path` for all file path operations — it's cleaner than `os.path`
+- Use atomic writes (tempfile + rename) for configuration files to prevent corruption
+- `shutil` provides high-level operations: copy, move, and delete directory trees
+- `csv.DictReader` and `csv.DictWriter` make CSV handling clean and readable
+- Process log files with compiled regex patterns and `Counter`/`defaultdict` for aggregation
+- Always handle `FileNotFoundError`, `PermissionError`, and `UnicodeDecodeError`
+
+## What's Next
+
+You've mastered file operations — the foundation of log processing, config management, and data handling. In the next section of the Python Automation path, you'll tackle **error handling and exceptions** in depth, learning to build automation scripts that fail gracefully and recover automatically.

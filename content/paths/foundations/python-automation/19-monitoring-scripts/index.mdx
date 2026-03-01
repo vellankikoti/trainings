@@ -1,0 +1,1473 @@
+---
+title: "Monitoring and Alerting Scripts"
+description: "Build monitoring that catches problems before users do. Write Python scripts that check health, collect metrics, and alert when things go wrong."
+order: 19
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 18-testing-automation
+objectives:
+  - Build health check scripts for HTTP, TCP, disk, and process monitoring
+  - Collect system metrics with psutil
+  - Expose Prometheus metrics from Python scripts
+  - Implement alerting with Slack webhooks and email
+  - Build terminal dashboards and scheduled monitors
+tags:
+  - python
+  - monitoring
+  - alerting
+  - observability
+---
+
+<Callout type="story" title="The Story">
+It is Friday afternoon when the database fills up its disk. Nobody notices until customers start seeing errors. The incident takes two hours to resolve, and the postmortem reveals a painful truth: disk usage had been climbing steadily for a week. If anyone had been watching, the fix would have taken five minutes on Tuesday. You write a monitoring script that checks disk, memory, services, and endpoints every few minutes, and sends a Slack alert the moment something crosses a threshold. Monday's problem gets caught on Monday.
+</Callout>
+
+## Health Check Scripts
+
+Health checks are the foundation of monitoring. They answer one question: "Is this thing working right now?" A good health check is fast, specific, and returns a clear pass/fail.
+
+### HTTP Endpoint Checks
+
+```python
+# pip install requests
+
+import requests
+import time
+
+
+def check_http(name, url, expected_status=200, timeout=5):
+    """Check an HTTP endpoint and return health status."""
+    start = time.time()
+    try:
+        response = requests.get(url, timeout=timeout)
+        elapsed_ms = (time.time() - start) * 1000
+
+        healthy = response.status_code == expected_status
+        return {
+            "name": name,
+            "url": url,
+            "healthy": healthy,
+            "status_code": response.status_code,
+            "response_time_ms": round(elapsed_ms, 1),
+        }
+    except requests.ConnectionError:
+        return {"name": name, "url": url, "healthy": False, "error": "connection_refused"}
+    except requests.Timeout:
+        elapsed_ms = (time.time() - start) * 1000
+        return {"name": name, "url": url, "healthy": False, "error": "timeout",
+                "response_time_ms": round(elapsed_ms, 1)}
+    except requests.RequestException as e:
+        return {"name": name, "url": url, "healthy": False, "error": str(e)}
+
+
+# Check multiple endpoints
+endpoints = [
+    ("Web App", "https://app.example.com/health"),
+    ("API", "https://api.example.com/health"),
+    ("Auth Service", "https://auth.example.com/health"),
+]
+
+for name, url in endpoints:
+    result = check_http(name, url)
+    status = "OK" if result["healthy"] else "FAIL"
+    detail = f"{result.get('response_time_ms', '?')}ms" if result["healthy"] else result.get("error", "unknown")
+    print(f"  [{status:4s}] {name:20s} {detail}")
+```
+
+### TCP Port Checks
+
+```python
+import socket
+
+
+def check_port(name, host, port, timeout=3):
+    """Check if a TCP port is open and accepting connections."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        start = time.time()
+        result = sock.connect_ex((host, port))
+        elapsed_ms = (time.time() - start) * 1000
+        sock.close()
+
+        return {
+            "name": name,
+            "host": host,
+            "port": port,
+            "healthy": result == 0,
+            "response_time_ms": round(elapsed_ms, 1),
+        }
+    except socket.error as e:
+        return {"name": name, "host": host, "port": port, "healthy": False, "error": str(e)}
+
+
+# Check critical services
+services = [
+    ("PostgreSQL", "db.internal", 5432),
+    ("Redis", "cache.internal", 6379),
+    ("Elasticsearch", "search.internal", 9200),
+    ("SSH", "bastion.internal", 22),
+]
+
+for name, host, port in services:
+    result = check_port(name, host, port)
+    status = "UP" if result["healthy"] else "DOWN"
+    print(f"  [{status:4s}] {name:20s} {host}:{port}")
+```
+
+### Process Checks
+
+```python
+# pip install psutil
+
+import psutil
+
+
+def check_process(name, process_name=None, pid_file=None):
+    """Check if a process is running by name or PID file."""
+    if pid_file:
+        try:
+            pid = int(open(pid_file).read().strip())
+            if psutil.pid_exists(pid):
+                proc = psutil.Process(pid)
+                return {
+                    "name": name,
+                    "healthy": proc.is_running(),
+                    "pid": pid,
+                    "cpu_percent": proc.cpu_percent(interval=0.1),
+                    "memory_mb": proc.memory_info().rss / (1024 * 1024),
+                }
+        except (FileNotFoundError, ValueError, psutil.NoSuchProcess):
+            return {"name": name, "healthy": False, "error": "process not found"}
+
+    if process_name:
+        procs = [p for p in psutil.process_iter(["name", "pid"])
+                 if p.info["name"] == process_name]
+        if procs:
+            proc = procs[0]
+            return {
+                "name": name,
+                "healthy": True,
+                "pid": proc.pid,
+                "instances": len(procs),
+                "cpu_percent": proc.cpu_percent(interval=0.1),
+                "memory_mb": proc.memory_info().rss / (1024 * 1024),
+            }
+        return {"name": name, "healthy": False, "error": "not running"}
+
+    return {"name": name, "healthy": False, "error": "no process_name or pid_file"}
+```
+
+<Callout type="tip" title="Health Check Design">
+A health check should be fast (under 5 seconds), cheap (no heavy computation), and specific (check one thing well). Return both a boolean "healthy" and a detail string explaining why. This makes it easy to compose checks into dashboards and alerts. Never let a health check itself cause an outage by being too expensive to run.
+</Callout>
+
+## Collecting System Metrics with psutil
+
+`psutil` gives you cross-platform access to CPU, memory, disk, network, and process information — the same data you get from `top`, `free`, `df`, and `netstat`, but in Python.
+
+```python
+import psutil
+import time
+
+
+def collect_system_metrics():
+    """Collect comprehensive system metrics."""
+    metrics = {}
+
+    # CPU
+    metrics["cpu"] = {
+        "percent": psutil.cpu_percent(interval=1),
+        "count": psutil.cpu_count(),
+        "count_logical": psutil.cpu_count(logical=True),
+        "load_avg": list(psutil.getloadavg()),
+        "per_cpu": psutil.cpu_percent(interval=0.1, percpu=True),
+    }
+
+    # Memory
+    mem = psutil.virtual_memory()
+    metrics["memory"] = {
+        "total_gb": round(mem.total / (1024 ** 3), 1),
+        "used_gb": round(mem.used / (1024 ** 3), 1),
+        "available_gb": round(mem.available / (1024 ** 3), 1),
+        "percent": mem.percent,
+    }
+
+    # Swap
+    swap = psutil.swap_memory()
+    metrics["swap"] = {
+        "total_gb": round(swap.total / (1024 ** 3), 1),
+        "used_gb": round(swap.used / (1024 ** 3), 1),
+        "percent": swap.percent,
+    }
+
+    # Disk
+    disk = psutil.disk_usage("/")
+    metrics["disk"] = {
+        "total_gb": round(disk.total / (1024 ** 3), 1),
+        "used_gb": round(disk.used / (1024 ** 3), 1),
+        "free_gb": round(disk.free / (1024 ** 3), 1),
+        "percent": disk.percent,
+    }
+
+    # Network
+    net = psutil.net_io_counters()
+    metrics["network"] = {
+        "bytes_sent": net.bytes_sent,
+        "bytes_recv": net.bytes_recv,
+        "packets_sent": net.packets_sent,
+        "packets_recv": net.packets_recv,
+        "errors_in": net.errin,
+        "errors_out": net.errout,
+    }
+
+    # Top processes by memory
+    procs = []
+    for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
+        try:
+            info = proc.info
+            if info["memory_percent"] and info["memory_percent"] > 1.0:
+                procs.append(info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    procs.sort(key=lambda p: p.get("memory_percent", 0), reverse=True)
+    metrics["top_processes"] = procs[:10]
+
+    return metrics
+
+
+def print_metrics(metrics):
+    """Pretty-print system metrics."""
+    cpu = metrics["cpu"]
+    print(f"  CPU:    {cpu['percent']:5.1f}%  (load: {cpu['load_avg'][0]:.2f}, {cpu['load_avg'][1]:.2f}, {cpu['load_avg'][2]:.2f})")
+
+    mem = metrics["memory"]
+    print(f"  Memory: {mem['percent']:5.1f}%  ({mem['used_gb']:.1f} / {mem['total_gb']:.1f} GB)")
+
+    swap = metrics["swap"]
+    print(f"  Swap:   {swap['percent']:5.1f}%  ({swap['used_gb']:.1f} / {swap['total_gb']:.1f} GB)")
+
+    disk = metrics["disk"]
+    print(f"  Disk:   {disk['percent']:5.1f}%  ({disk['used_gb']:.1f} / {disk['total_gb']:.1f} GB, {disk['free_gb']:.1f} GB free)")
+
+    print(f"\n  Top Processes by Memory:")
+    for proc in metrics["top_processes"][:5]:
+        print(f"    PID {proc['pid']:6d}  {proc['name']:25s}  "
+              f"CPU: {proc.get('cpu_percent', 0):5.1f}%  Mem: {proc.get('memory_percent', 0):5.1f}%")
+```
+
+## Prometheus Client Library
+
+Prometheus is the standard for metrics collection in modern infrastructure. The Python client lets you expose metrics from your scripts that Prometheus can scrape.
+
+```python
+# pip install prometheus-client
+
+from prometheus_client import Counter, Gauge, Histogram, Summary, start_http_server
+import time
+import random
+import psutil
+
+
+# Define metrics
+
+# Counter: only goes up (requests served, errors encountered)
+http_requests_total = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["method", "endpoint", "status"],
+)
+
+# Gauge: can go up or down (current temperature, active connections)
+system_cpu_usage = Gauge("system_cpu_usage_percent", "Current CPU usage percentage")
+system_memory_usage = Gauge("system_memory_usage_percent", "Current memory usage percentage")
+system_disk_usage = Gauge("system_disk_usage_percent", "Current disk usage percentage")
+active_connections = Gauge("active_connections", "Number of active connections")
+
+# Histogram: distribution of values (request latency, response sizes)
+request_latency = Histogram(
+    "request_latency_seconds",
+    "Request latency in seconds",
+    ["endpoint"],
+    buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+)
+
+# Summary: similar to histogram with quantiles
+request_duration = Summary(
+    "request_duration_seconds",
+    "Request duration in seconds",
+)
+
+
+def update_system_metrics():
+    """Update system metric gauges with current values."""
+    system_cpu_usage.set(psutil.cpu_percent(interval=0.1))
+    system_memory_usage.set(psutil.virtual_memory().percent)
+    system_disk_usage.set(psutil.disk_usage("/").percent)
+
+
+def simulate_request(endpoint):
+    """Simulate an HTTP request and record metrics."""
+    start = time.time()
+
+    # Simulate work
+    latency = random.uniform(0.01, 0.5)
+    time.sleep(latency)
+
+    # Record metrics
+    elapsed = time.time() - start
+    status = random.choice(["200", "200", "200", "200", "404", "500"])
+    http_requests_total.labels(method="GET", endpoint=endpoint, status=status).inc()
+    request_latency.labels(endpoint=endpoint).observe(elapsed)
+    request_duration.observe(elapsed)
+
+
+# Start the metrics HTTP server on port 8000
+# Prometheus scrapes http://localhost:8000/metrics
+# start_http_server(8000)
+# print("Metrics server running on :8000/metrics")
+#
+# while True:
+#     update_system_metrics()
+#     simulate_request("/api/users")
+#     simulate_request("/api/orders")
+#     time.sleep(1)
+```
+
+<Callout type="warning" title="Metric Naming Conventions">
+Follow the Prometheus naming convention: `snake_case`, with a suffix indicating the unit (`_seconds`, `_bytes`, `_total` for counters). Use labels for dimensions (method, endpoint, status) rather than encoding them in the metric name. Bad: `http_get_200_requests`. Good: `http_requests_total{method="GET", status="200"}`.
+</Callout>
+
+## Alerting Patterns
+
+Good alerting means notifying the right people, at the right time, without overwhelming them. The key patterns are threshold checking, cooldown periods, and escalation.
+
+### Threshold Checks with Cooldown
+
+```python
+import time
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+@dataclass
+class AlertRule:
+    name: str
+    warning_threshold: float
+    critical_threshold: float
+    cooldown_seconds: int = 300
+    last_alert_time: float = 0
+    last_alert_level: Optional[str] = None
+
+
+class AlertManager:
+    """Manages alert rules, thresholds, and cooldown periods."""
+
+    def __init__(self):
+        self.rules = {}
+        self.handlers = []
+
+    def add_rule(self, rule: AlertRule):
+        self.rules[rule.name] = rule
+
+    def add_handler(self, handler_func):
+        """Add a notification handler (Slack, email, PagerDuty, etc.)."""
+        self.handlers.append(handler_func)
+
+    def check(self, rule_name, current_value):
+        """Check a value against a rule and fire alerts if needed."""
+        rule = self.rules.get(rule_name)
+        if not rule:
+            return None
+
+        now = time.time()
+
+        # Determine alert level
+        if current_value >= rule.critical_threshold:
+            level = "critical"
+        elif current_value >= rule.warning_threshold:
+            level = "warning"
+        else:
+            # Value is OK — clear any previous alert
+            if rule.last_alert_level:
+                self._send_alert(rule, "resolved", current_value)
+                rule.last_alert_level = None
+            return "ok"
+
+        # Check cooldown
+        if (rule.last_alert_level == level and
+                now - rule.last_alert_time < rule.cooldown_seconds):
+            return "cooldown"
+
+        # Fire the alert
+        self._send_alert(rule, level, current_value)
+        rule.last_alert_time = now
+        rule.last_alert_level = level
+        return level
+
+    def _send_alert(self, rule, level, value):
+        """Send alert to all registered handlers."""
+        alert = {
+            "rule": rule.name,
+            "level": level,
+            "value": value,
+            "threshold": rule.critical_threshold if level == "critical" else rule.warning_threshold,
+            "timestamp": time.time(),
+        }
+        for handler in self.handlers:
+            try:
+                handler(alert)
+            except Exception as e:
+                print(f"Alert handler error: {e}")
+
+
+# Usage
+manager = AlertManager()
+manager.add_rule(AlertRule("cpu", warning_threshold=75, critical_threshold=90))
+manager.add_rule(AlertRule("memory", warning_threshold=80, critical_threshold=95))
+manager.add_rule(AlertRule("disk", warning_threshold=80, critical_threshold=90, cooldown_seconds=600))
+```
+
+### Slack Webhook Notifications
+
+```python
+import requests
+import json
+from datetime import datetime
+
+
+def send_slack_alert(webhook_url, alert):
+    """Send an alert to Slack via incoming webhook."""
+    color_map = {
+        "critical": "#FF0000",
+        "warning": "#FFA500",
+        "resolved": "#36A64F",
+    }
+
+    level = alert["level"]
+    color = color_map.get(level, "#808080")
+    icon = {"critical": "!!", "warning": "!", "resolved": "OK"}.get(level, "?")
+
+    payload = {
+        "attachments": [
+            {
+                "color": color,
+                "title": f"[{icon}] {alert['rule']} — {level.upper()}",
+                "fields": [
+                    {"title": "Current Value", "value": f"{alert['value']:.1f}", "short": True},
+                    {"title": "Threshold", "value": f"{alert['threshold']:.1f}", "short": True},
+                ],
+                "footer": "Monitoring Script",
+                "ts": int(alert["timestamp"]),
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(webhook_url, json=payload, timeout=10)
+        response.raise_for_status()
+        return True
+    except requests.RequestException as e:
+        print(f"Slack notification failed: {e}")
+        return False
+
+
+# Register with AlertManager
+# SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK_URL")
+# if SLACK_WEBHOOK:
+#     manager.add_handler(lambda alert: send_slack_alert(SLACK_WEBHOOK, alert))
+```
+
+### Email Notifications
+
+```python
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+
+def send_email_alert(smtp_config, recipients, alert):
+    """Send an alert via email."""
+    level = alert["level"].upper()
+    subject = f"[{level}] {alert['rule']} Alert"
+
+    body = f"""
+    Alert: {alert['rule']}
+    Level: {level}
+    Current Value: {alert['value']:.1f}
+    Threshold: {alert['threshold']:.1f}
+    Time: {datetime.fromtimestamp(alert['timestamp']).isoformat()}
+    """
+
+    msg = MIMEMultipart()
+    msg["From"] = smtp_config["from_addr"]
+    msg["To"] = ", ".join(recipients)
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP(smtp_config["host"], smtp_config["port"]) as server:
+            if smtp_config.get("use_tls"):
+                server.starttls()
+            if smtp_config.get("username"):
+                server.login(smtp_config["username"], smtp_config["password"])
+            server.send_message(msg)
+        return True
+    except smtplib.SMTPException as e:
+        print(f"Email notification failed: {e}")
+        return False
+```
+
+## Scheduled Monitoring
+
+Monitoring scripts need to run continuously or on a schedule. The `schedule` library makes this straightforward.
+
+```python
+# pip install schedule
+
+import schedule
+import time
+import psutil
+
+
+def check_system_health():
+    """Run all system health checks."""
+    print(f"\n--- Health Check at {time.strftime('%H:%M:%S')} ---")
+
+    # CPU
+    cpu = psutil.cpu_percent(interval=1)
+    manager.check("cpu", cpu)
+    print(f"  CPU: {cpu:.1f}%")
+
+    # Memory
+    mem = psutil.virtual_memory().percent
+    manager.check("memory", mem)
+    print(f"  Memory: {mem:.1f}%")
+
+    # Disk
+    disk = psutil.disk_usage("/").percent
+    manager.check("disk", disk)
+    print(f"  Disk: {disk:.1f}%")
+
+
+def check_service_health():
+    """Check that critical services are responding."""
+    services = [
+        ("Web App", "https://app.example.com/health"),
+        ("API", "https://api.example.com/health"),
+    ]
+    for name, url in services:
+        result = check_http(name, url)
+        status = "OK" if result["healthy"] else "FAIL"
+        print(f"  [{status}] {name}")
+
+
+# Schedule checks at different intervals
+# schedule.every(1).minutes.do(check_system_health)
+# schedule.every(5).minutes.do(check_service_health)
+# schedule.every(1).hours.do(collect_and_push_metrics)
+#
+# print("Monitor started. Press Ctrl+C to stop.")
+# while True:
+#     schedule.run_pending()
+#     time.sleep(1)
+```
+
+## Terminal Dashboard with Rich
+
+The `rich` library creates beautiful terminal dashboards for real-time monitoring:
+
+```python
+# pip install rich
+
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.live import Live
+import psutil
+import time
+
+console = Console()
+
+
+def create_system_table():
+    """Create a rich table with system metrics."""
+    table = Table(title="System Metrics", show_header=True)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+    table.add_column("Status", justify="center")
+
+    # CPU
+    cpu = psutil.cpu_percent(interval=0.1)
+    cpu_status = "[green]OK[/]" if cpu < 75 else ("[yellow]WARN[/]" if cpu < 90 else "[red]CRIT[/]")
+    table.add_row("CPU Usage", f"{cpu:.1f}%", cpu_status)
+
+    # Memory
+    mem = psutil.virtual_memory()
+    mem_status = "[green]OK[/]" if mem.percent < 80 else ("[yellow]WARN[/]" if mem.percent < 95 else "[red]CRIT[/]")
+    table.add_row("Memory", f"{mem.percent:.1f}% ({mem.used // (1024**3)}/{mem.total // (1024**3)} GB)", mem_status)
+
+    # Disk
+    disk = psutil.disk_usage("/")
+    disk_status = "[green]OK[/]" if disk.percent < 80 else ("[yellow]WARN[/]" if disk.percent < 90 else "[red]CRIT[/]")
+    table.add_row("Disk (/)", f"{disk.percent:.1f}% ({disk.free // (1024**3)} GB free)", disk_status)
+
+    # Load
+    load = psutil.getloadavg()
+    cores = psutil.cpu_count()
+    load_status = "[green]OK[/]" if load[0] < cores else "[yellow]WARN[/]"
+    table.add_row("Load Avg", f"{load[0]:.2f}, {load[1]:.2f}, {load[2]:.2f}", load_status)
+
+    # Network
+    net = psutil.net_io_counters()
+    table.add_row("Network In", f"{net.bytes_recv // (1024**2)} MB", "[blue]--[/]")
+    table.add_row("Network Out", f"{net.bytes_sent // (1024**2)} MB", "[blue]--[/]")
+
+    return table
+
+
+def create_process_table():
+    """Create a rich table with top processes."""
+    table = Table(title="Top Processes (by Memory)", show_header=True)
+    table.add_column("PID", justify="right", style="dim")
+    table.add_column("Name", style="cyan")
+    table.add_column("CPU%", justify="right")
+    table.add_column("Mem%", justify="right")
+    table.add_column("RSS", justify="right")
+
+    procs = []
+    for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent", "memory_info"]):
+        try:
+            info = proc.info
+            if info["memory_percent"] and info["memory_percent"] > 0.5:
+                procs.append(info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    procs.sort(key=lambda p: p.get("memory_percent", 0), reverse=True)
+
+    for proc in procs[:8]:
+        rss_mb = (proc.get("memory_info").rss if proc.get("memory_info") else 0) // (1024 * 1024)
+        table.add_row(
+            str(proc["pid"]),
+            str(proc["name"])[:30],
+            f"{proc.get('cpu_percent', 0):.1f}",
+            f"{proc.get('memory_percent', 0):.1f}",
+            f"{rss_mb} MB",
+        )
+
+    return table
+
+
+def run_dashboard(refresh_interval=2):
+    """Run the live terminal dashboard."""
+    with Live(console=console, refresh_per_second=1) as live:
+        while True:
+            layout = Table.grid(padding=1)
+            layout.add_row(create_system_table())
+            layout.add_row(create_process_table())
+            layout.add_row(
+                f"[dim]Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')} "
+                f"| Refresh: {refresh_interval}s | Ctrl+C to exit[/]"
+            )
+            live.update(layout)
+            time.sleep(refresh_interval)
+
+
+# run_dashboard()
+```
+
+## Grafana API Basics
+
+Grafana is the standard dashboard tool. You can create and manage dashboards programmatically:
+
+```python
+import requests
+import json
+
+
+class GrafanaClient:
+    """Simple Grafana API client for managing dashboards and alerts."""
+
+    def __init__(self, base_url, api_key):
+        self.base_url = base_url.rstrip("/")
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        })
+
+    def get_health(self):
+        """Check Grafana health."""
+        resp = self.session.get(f"{self.base_url}/api/health")
+        return resp.json()
+
+    def list_dashboards(self):
+        """List all dashboards."""
+        resp = self.session.get(f"{self.base_url}/api/search?type=dash-db")
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_dashboard(self, uid):
+        """Get a dashboard by UID."""
+        resp = self.session.get(f"{self.base_url}/api/dashboards/uid/{uid}")
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_or_update_dashboard(self, dashboard_json, folder_id=0):
+        """Create or update a dashboard."""
+        payload = {
+            "dashboard": dashboard_json,
+            "folderId": folder_id,
+            "overwrite": True,
+        }
+        resp = self.session.post(f"{self.base_url}/api/dashboards/db", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    def list_alert_rules(self):
+        """List all alert rules."""
+        resp = self.session.get(f"{self.base_url}/api/v1/provisioning/alert-rules")
+        resp.raise_for_status()
+        return resp.json()
+
+
+# Usage:
+# grafana = GrafanaClient("https://grafana.example.com", os.environ["GRAFANA_API_KEY"])
+# dashboards = grafana.list_dashboards()
+# for d in dashboards:
+#     print(f"  {d['title']} (uid: {d['uid']})")
+```
+
+<Exercise number={1} title="System Health Monitor">
+
+Build a monitoring script that checks CPU, memory, disk, and critical processes, then outputs a formatted report.
+
+```python
+#!/usr/bin/env python3
+"""System health monitor with threshold checking and reporting."""
+
+import psutil
+import time
+import socket
+from datetime import datetime
+
+
+# --- Configuration ---
+
+THRESHOLDS = {
+    "cpu": {"warning": 75, "critical": 90},
+    "memory": {"warning": 80, "critical": 95},
+    "disk": {"warning": 80, "critical": 90},
+    "swap": {"warning": 50, "critical": 80},
+}
+
+CRITICAL_PROCESSES = ["sshd", "cron", "systemd"]
+
+HOSTNAME = socket.gethostname()
+
+
+# --- Check Functions ---
+
+def check_cpu():
+    """Check CPU usage."""
+    usage = psutil.cpu_percent(interval=1)
+    load = psutil.getloadavg()
+    cores = psutil.cpu_count()
+
+    return {
+        "name": "CPU",
+        "value": usage,
+        "unit": "%",
+        "details": {
+            "load_1m": load[0],
+            "load_5m": load[1],
+            "load_15m": load[2],
+            "cores": cores,
+        },
+        **evaluate("cpu", usage),
+    }
+
+
+def check_memory():
+    """Check memory usage."""
+    mem = psutil.virtual_memory()
+    return {
+        "name": "Memory",
+        "value": mem.percent,
+        "unit": "%",
+        "details": {
+            "total_gb": round(mem.total / (1024 ** 3), 1),
+            "used_gb": round(mem.used / (1024 ** 3), 1),
+            "available_gb": round(mem.available / (1024 ** 3), 1),
+        },
+        **evaluate("memory", mem.percent),
+    }
+
+
+def check_disk(path="/"):
+    """Check disk usage."""
+    disk = psutil.disk_usage(path)
+    return {
+        "name": f"Disk ({path})",
+        "value": disk.percent,
+        "unit": "%",
+        "details": {
+            "total_gb": round(disk.total / (1024 ** 3), 1),
+            "free_gb": round(disk.free / (1024 ** 3), 1),
+        },
+        **evaluate("disk", disk.percent),
+    }
+
+
+def check_swap():
+    """Check swap usage."""
+    swap = psutil.swap_memory()
+    return {
+        "name": "Swap",
+        "value": swap.percent,
+        "unit": "%",
+        "details": {
+            "total_gb": round(swap.total / (1024 ** 3), 1),
+            "used_gb": round(swap.used / (1024 ** 3), 1),
+        },
+        **evaluate("swap", swap.percent),
+    }
+
+
+def check_processes():
+    """Check that critical processes are running."""
+    results = []
+    for proc_name in CRITICAL_PROCESSES:
+        procs = [p for p in psutil.process_iter(["name"]) if p.info["name"] == proc_name]
+        results.append({
+            "name": proc_name,
+            "running": len(procs) > 0,
+            "count": len(procs),
+        })
+    return results
+
+
+def evaluate(metric, value):
+    """Evaluate a value against thresholds."""
+    thresholds = THRESHOLDS.get(metric, {})
+    if value >= thresholds.get("critical", float("inf")):
+        return {"status": "CRITICAL", "level": 2}
+    elif value >= thresholds.get("warning", float("inf")):
+        return {"status": "WARNING", "level": 1}
+    return {"status": "OK", "level": 0}
+
+
+# --- Report ---
+
+def generate_report():
+    """Generate a complete health report."""
+    print("=" * 60)
+    print(f"  System Health Report")
+    print(f"  Host: {HOSTNAME}")
+    print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
+
+    checks = [check_cpu(), check_memory(), check_disk(), check_swap()]
+    overall_status = "HEALTHY"
+
+    print(f"\n  {'METRIC':15s} {'VALUE':10s} {'STATUS':10s} {'DETAILS'}")
+    print(f"  {'-' * 55}")
+
+    for check in checks:
+        value_str = f"{check['value']:.1f}{check['unit']}"
+        status = check["status"]
+        details = ", ".join(f"{k}={v}" for k, v in check.get("details", {}).items())
+
+        if check["level"] >= 2:
+            overall_status = "CRITICAL"
+        elif check["level"] >= 1 and overall_status != "CRITICAL":
+            overall_status = "DEGRADED"
+
+        print(f"  {check['name']:15s} {value_str:10s} {status:10s} {details}")
+
+    # Process checks
+    print(f"\n  Critical Processes:")
+    processes = check_processes()
+    for proc in processes:
+        status = "RUNNING" if proc["running"] else "STOPPED"
+        if not proc["running"]:
+            overall_status = "DEGRADED" if overall_status == "HEALTHY" else overall_status
+        print(f"    {proc['name']:20s} {status} ({proc['count']} instance(s))")
+
+    print(f"\n  {'=' * 40}")
+    print(f"  Overall Status: {overall_status}")
+    print(f"  {'=' * 40}\n")
+
+    return overall_status
+
+
+if __name__ == "__main__":
+    status = generate_report()
+    exit(0 if status == "HEALTHY" else 1)
+```
+
+</Exercise>
+
+<Exercise number={2} title="Multi-Endpoint Monitor with Alerting">
+
+Build a monitor that checks multiple HTTP endpoints and sends alerts when they go down or recover.
+
+```python
+#!/usr/bin/env python3
+"""Multi-endpoint monitor with state tracking and alerting."""
+
+import requests
+import time
+import json
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+# --- Configuration ---
+
+ENDPOINTS = [
+    {"name": "Web App", "url": "https://httpbin.org/status/200", "expected_status": 200},
+    {"name": "API Health", "url": "https://httpbin.org/status/200", "expected_status": 200},
+    {"name": "Auth Service", "url": "https://httpbin.org/delay/1", "expected_status": 200},
+    {"name": "Failing Endpoint", "url": "https://httpbin.org/status/500", "expected_status": 200},
+]
+
+CHECK_INTERVAL = 30  # seconds
+ALERT_COOLDOWN = 300  # seconds between repeated alerts
+
+
+# --- State Tracking ---
+
+@dataclass
+class EndpointState:
+    name: str
+    url: str
+    healthy: bool = True
+    consecutive_failures: int = 0
+    last_check_time: Optional[float] = None
+    last_alert_time: float = 0
+    last_status_code: int = 0
+    last_response_time_ms: float = 0
+    last_error: Optional[str] = None
+
+
+states = {}
+
+
+# --- Check Function ---
+
+def check_endpoint(config):
+    """Check a single endpoint and update state."""
+    name = config["name"]
+    url = config["url"]
+    expected = config["expected_status"]
+
+    if name not in states:
+        states[name] = EndpointState(name=name, url=url)
+
+    state = states[name]
+    state.last_check_time = time.time()
+
+    try:
+        start = time.time()
+        response = requests.get(url, timeout=10)
+        elapsed_ms = (time.time() - start) * 1000
+
+        state.last_status_code = response.status_code
+        state.last_response_time_ms = round(elapsed_ms, 1)
+        state.last_error = None
+
+        if response.status_code == expected:
+            if not state.healthy:
+                # Recovery detected
+                send_alert(state, "RECOVERED",
+                           f"{name} is back up (HTTP {response.status_code}, {elapsed_ms:.0f}ms)")
+            state.healthy = True
+            state.consecutive_failures = 0
+        else:
+            state.consecutive_failures += 1
+            state.healthy = False
+            state.last_error = f"Expected {expected}, got {response.status_code}"
+
+    except requests.ConnectionError:
+        state.consecutive_failures += 1
+        state.healthy = False
+        state.last_error = "Connection refused"
+        state.last_status_code = 0
+        state.last_response_time_ms = 0
+
+    except requests.Timeout:
+        state.consecutive_failures += 1
+        state.healthy = False
+        state.last_error = "Request timed out"
+        state.last_status_code = 0
+
+    # Alert on failure (after 2 consecutive failures to avoid flapping)
+    if state.consecutive_failures >= 2:
+        if time.time() - state.last_alert_time > ALERT_COOLDOWN:
+            send_alert(state, "DOWN",
+                       f"{name} has failed {state.consecutive_failures} consecutive checks: {state.last_error}")
+
+    return state
+
+
+# --- Alerting ---
+
+def send_alert(state, level, message):
+    """Send an alert (prints to console; replace with Slack/email in production)."""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"\n  ** ALERT [{level}] {timestamp}: {message} **\n")
+    state.last_alert_time = time.time()
+
+    # In production, add:
+    # send_slack_alert(WEBHOOK_URL, {"rule": state.name, "level": level, ...})
+    # send_email_alert(smtp_config, recipients, alert)
+
+
+# --- Report ---
+
+def print_status_report():
+    """Print current status of all endpoints."""
+    print(f"\n  {'ENDPOINT':20s} {'STATUS':8s} {'CODE':6s} {'LATENCY':10s} {'FAILS':6s} {'LAST ERROR'}")
+    print(f"  {'-' * 80}")
+
+    for config in ENDPOINTS:
+        name = config["name"]
+        state = states.get(name)
+
+        if not state:
+            print(f"  {name:20s} {'?':8s} {'--':6s} {'--':10s} {'--':6s}")
+            continue
+
+        status = "UP" if state.healthy else "DOWN"
+        code = str(state.last_status_code) if state.last_status_code else "--"
+        latency = f"{state.last_response_time_ms:.0f}ms" if state.last_response_time_ms else "--"
+        error = (state.last_error or "")[:30]
+
+        print(f"  {name:20s} {status:8s} {code:6s} {latency:10s} {state.consecutive_failures:<6d} {error}")
+
+
+# --- Main Loop ---
+
+def run_monitor(cycles=3):
+    """Run the monitoring loop."""
+    print("=" * 60)
+    print("  Endpoint Monitor")
+    print(f"  Monitoring {len(ENDPOINTS)} endpoints")
+    print(f"  Check interval: {CHECK_INTERVAL}s")
+    print("=" * 60)
+
+    for cycle in range(cycles):
+        print(f"\n--- Check #{cycle + 1} at {datetime.now().strftime('%H:%M:%S')} ---")
+
+        for config in ENDPOINTS:
+            check_endpoint(config)
+
+        print_status_report()
+
+        healthy_count = sum(1 for s in states.values() if s.healthy)
+        total = len(states)
+        print(f"\n  Summary: {healthy_count}/{total} healthy")
+
+        if cycle < cycles - 1:
+            print(f"  Next check in {CHECK_INTERVAL}s...")
+            time.sleep(CHECK_INTERVAL)
+
+    print("\n  Monitor stopped.")
+
+
+if __name__ == "__main__":
+    run_monitor(cycles=3)
+```
+
+</Exercise>
+
+<MiniProject title="System Monitor with Alerts">
+
+Build a complete system monitoring tool that checks health, sends Slack notifications, and exposes Prometheus metrics.
+
+```python
+#!/usr/bin/env python3
+"""
+System Monitor with Alerts
+Comprehensive monitoring tool that:
+- Checks system health (CPU, memory, disk, processes)
+- Monitors HTTP endpoints
+- Sends alerts via Slack webhooks
+- Exposes Prometheus metrics
+- Runs on a configurable schedule
+"""
+
+import os
+import sys
+import time
+import json
+import socket
+import requests
+import psutil
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Optional
+from collections import defaultdict
+
+try:
+    from prometheus_client import Counter, Gauge, Histogram, start_http_server
+    HAS_PROMETHEUS = True
+except ImportError:
+    HAS_PROMETHEUS = False
+
+
+# ============================================================
+# Configuration
+# ============================================================
+
+CONFIG = {
+    "hostname": socket.gethostname(),
+    "check_interval": 60,           # seconds between checks
+    "alert_cooldown": 300,           # seconds between repeated alerts
+    "metrics_port": 9100,            # Prometheus metrics port
+    "thresholds": {
+        "cpu_warning": 75,
+        "cpu_critical": 90,
+        "memory_warning": 80,
+        "memory_critical": 95,
+        "disk_warning": 80,
+        "disk_critical": 90,
+    },
+    "endpoints": [
+        {"name": "Web App", "url": "http://localhost:8080/health"},
+        {"name": "API", "url": "http://localhost:3000/health"},
+    ],
+    "slack_webhook": os.environ.get("SLACK_WEBHOOK_URL"),
+}
+
+
+# ============================================================
+# Prometheus Metrics (if available)
+# ============================================================
+
+if HAS_PROMETHEUS:
+    PROM_CPU = Gauge("system_cpu_percent", "CPU usage percentage")
+    PROM_MEMORY = Gauge("system_memory_percent", "Memory usage percentage")
+    PROM_DISK = Gauge("system_disk_percent", "Disk usage percentage", ["mountpoint"])
+    PROM_CHECKS = Counter("health_checks_total", "Total health checks run", ["check_type"])
+    PROM_ALERTS = Counter("alerts_sent_total", "Total alerts sent", ["level"])
+    PROM_ENDPOINT = Gauge("endpoint_healthy", "Endpoint health status", ["name"])
+    PROM_LATENCY = Histogram(
+        "endpoint_response_seconds", "Endpoint response time",
+        ["name"], buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+    )
+
+
+# ============================================================
+# Alert State
+# ============================================================
+
+@dataclass
+class AlertState:
+    last_level: Optional[str] = None
+    last_alert_time: float = 0
+    consecutive_failures: int = 0
+
+
+alert_states = defaultdict(AlertState)
+alert_log = []
+
+
+# ============================================================
+# System Checks
+# ============================================================
+
+def check_system():
+    """Run all system health checks and return results."""
+    results = []
+
+    # CPU
+    cpu_pct = psutil.cpu_percent(interval=1)
+    load = psutil.getloadavg()
+    results.append({
+        "check": "cpu",
+        "value": cpu_pct,
+        "unit": "%",
+        "status": evaluate_threshold("cpu", cpu_pct),
+        "details": f"load: {load[0]:.2f}, {load[1]:.2f}, {load[2]:.2f}",
+    })
+    if HAS_PROMETHEUS:
+        PROM_CPU.set(cpu_pct)
+        PROM_CHECKS.labels(check_type="cpu").inc()
+
+    # Memory
+    mem = psutil.virtual_memory()
+    results.append({
+        "check": "memory",
+        "value": mem.percent,
+        "unit": "%",
+        "status": evaluate_threshold("memory", mem.percent),
+        "details": f"{mem.used // (1024**3)}/{mem.total // (1024**3)} GB",
+    })
+    if HAS_PROMETHEUS:
+        PROM_MEMORY.set(mem.percent)
+        PROM_CHECKS.labels(check_type="memory").inc()
+
+    # Disk
+    disk = psutil.disk_usage("/")
+    results.append({
+        "check": "disk",
+        "value": disk.percent,
+        "unit": "%",
+        "status": evaluate_threshold("disk", disk.percent),
+        "details": f"{disk.free // (1024**3)} GB free",
+    })
+    if HAS_PROMETHEUS:
+        PROM_DISK.labels(mountpoint="/").set(disk.percent)
+        PROM_CHECKS.labels(check_type="disk").inc()
+
+    return results
+
+
+def check_endpoints():
+    """Check all configured HTTP endpoints."""
+    results = []
+
+    for ep in CONFIG["endpoints"]:
+        name = ep["name"]
+        url = ep["url"]
+
+        try:
+            start = time.time()
+            resp = requests.get(url, timeout=10)
+            elapsed = time.time() - start
+
+            healthy = resp.status_code == 200
+            result = {
+                "check": f"endpoint:{name}",
+                "value": resp.status_code,
+                "unit": "",
+                "status": "ok" if healthy else "critical",
+                "details": f"{elapsed*1000:.0f}ms",
+                "healthy": healthy,
+            }
+
+            if HAS_PROMETHEUS:
+                PROM_ENDPOINT.labels(name=name).set(1 if healthy else 0)
+                PROM_LATENCY.labels(name=name).observe(elapsed)
+
+        except requests.RequestException as e:
+            result = {
+                "check": f"endpoint:{name}",
+                "value": 0,
+                "unit": "",
+                "status": "critical",
+                "details": str(e)[:50],
+                "healthy": False,
+            }
+            if HAS_PROMETHEUS:
+                PROM_ENDPOINT.labels(name=name).set(0)
+
+        if HAS_PROMETHEUS:
+            PROM_CHECKS.labels(check_type="endpoint").inc()
+
+        results.append(result)
+
+    return results
+
+
+def evaluate_threshold(metric, value):
+    """Evaluate a metric value against configured thresholds."""
+    t = CONFIG["thresholds"]
+    if value >= t.get(f"{metric}_critical", float("inf")):
+        return "critical"
+    elif value >= t.get(f"{metric}_warning", float("inf")):
+        return "warning"
+    return "ok"
+
+
+# ============================================================
+# Alerting
+# ============================================================
+
+def process_alerts(results):
+    """Process check results and fire alerts as needed."""
+    now = time.time()
+
+    for result in results:
+        check_name = result["check"]
+        status = result["status"]
+        state = alert_states[check_name]
+
+        if status in ("warning", "critical"):
+            state.consecutive_failures += 1
+
+            # Only alert after 2 consecutive failures (avoid flapping)
+            if state.consecutive_failures >= 2:
+                if (state.last_level != status or
+                        now - state.last_alert_time > CONFIG["alert_cooldown"]):
+                    fire_alert(check_name, status, result)
+                    state.last_level = status
+                    state.last_alert_time = now
+        else:
+            # Recovery
+            if state.last_level in ("warning", "critical"):
+                fire_alert(check_name, "resolved", result)
+            state.consecutive_failures = 0
+            state.last_level = None
+
+
+def fire_alert(check_name, level, result):
+    """Send an alert via all configured channels."""
+    alert = {
+        "check": check_name,
+        "level": level,
+        "value": result["value"],
+        "details": result.get("details", ""),
+        "hostname": CONFIG["hostname"],
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    alert_log.append(alert)
+
+    # Console
+    icon = {"critical": "!!", "warning": "!", "resolved": "OK"}.get(level, "?")
+    print(f"\n  [{icon}] ALERT [{level.upper()}] {check_name}: "
+          f"{result['value']}{result.get('unit', '')} — {result.get('details', '')}")
+
+    # Slack
+    if CONFIG.get("slack_webhook"):
+        send_slack_notification(CONFIG["slack_webhook"], alert)
+
+    if HAS_PROMETHEUS:
+        PROM_ALERTS.labels(level=level).inc()
+
+
+def send_slack_notification(webhook_url, alert):
+    """Send alert to Slack."""
+    color_map = {"critical": "#FF0000", "warning": "#FFA500", "resolved": "#36A64F"}
+    level = alert["level"]
+
+    payload = {
+        "attachments": [{
+            "color": color_map.get(level, "#808080"),
+            "title": f"[{level.upper()}] {alert['check']}",
+            "text": f"Value: {alert['value']} | {alert['details']}",
+            "footer": f"Host: {alert['hostname']}",
+            "ts": int(time.time()),
+        }]
+    }
+
+    try:
+        requests.post(webhook_url, json=payload, timeout=5)
+    except requests.RequestException as e:
+        print(f"  Slack notification failed: {e}")
+
+
+# ============================================================
+# Display
+# ============================================================
+
+def print_report(system_results, endpoint_results):
+    """Print a formatted monitoring report."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    print(f"\n{'=' * 60}")
+    print(f"  System Monitor — {CONFIG['hostname']} — {now}")
+    print(f"{'=' * 60}")
+
+    print(f"\n  {'CHECK':20s} {'VALUE':10s} {'STATUS':10s} {'DETAILS'}")
+    print(f"  {'-' * 55}")
+
+    for r in system_results:
+        value_str = f"{r['value']:.1f}{r['unit']}"
+        status = r["status"].upper()
+        print(f"  {r['check']:20s} {value_str:10s} {status:10s} {r.get('details', '')}")
+
+    if endpoint_results:
+        print(f"\n  Endpoints:")
+        for r in endpoint_results:
+            name = r["check"].replace("endpoint:", "")
+            status = r["status"].upper()
+            print(f"    {name:20s} HTTP {r['value']:<6d} {status:10s} {r.get('details', '')}")
+
+    # Alert summary
+    active_alerts = [s for s in alert_states.values() if s.last_level in ("warning", "critical")]
+    if active_alerts:
+        print(f"\n  Active alerts: {len(active_alerts)}")
+    else:
+        print(f"\n  No active alerts")
+
+
+# ============================================================
+# Main
+# ============================================================
+
+def run_once():
+    """Run a single monitoring cycle."""
+    system_results = check_system()
+    endpoint_results = check_endpoints()
+    process_alerts(system_results + endpoint_results)
+    print_report(system_results, endpoint_results)
+
+
+def run_loop(cycles=None):
+    """Run the monitoring loop."""
+    print(f"Starting system monitor on {CONFIG['hostname']}")
+    print(f"  Check interval: {CONFIG['check_interval']}s")
+    print(f"  Slack alerts: {'enabled' if CONFIG.get('slack_webhook') else 'disabled'}")
+    print(f"  Prometheus metrics: {'enabled' if HAS_PROMETHEUS else 'disabled'}")
+
+    if HAS_PROMETHEUS:
+        start_http_server(CONFIG["metrics_port"])
+        print(f"  Metrics: http://localhost:{CONFIG['metrics_port']}/metrics")
+
+    count = 0
+    try:
+        while cycles is None or count < cycles:
+            run_once()
+            count += 1
+            if cycles is None or count < cycles:
+                time.sleep(CONFIG["check_interval"])
+    except KeyboardInterrupt:
+        print("\n\nMonitor stopped.")
+
+    # Summary
+    print(f"\n  Total checks: {count}")
+    print(f"  Total alerts: {len(alert_log)}")
+    for alert in alert_log[-5:]:
+        print(f"    [{alert['level']:8s}] {alert['check']}: {alert['details']}")
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "once":
+        run_once()
+    elif len(sys.argv) > 1 and sys.argv[1] == "demo":
+        run_loop(cycles=3)
+    else:
+        run_loop()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Health checks should be fast, specific, and return both a status and a detail string
+- Use `psutil` for cross-platform system metrics: CPU, memory, disk, network, and processes
+- Prometheus metrics use four types: Counter (only up), Gauge (up/down), Histogram (distribution), Summary (quantiles)
+- Follow Prometheus naming conventions: `snake_case` with unit suffixes (`_seconds`, `_bytes`, `_total`)
+- Implement alert cooldowns to prevent notification storms — never page every minute for the same issue
+- Track consecutive failures before alerting to avoid flapping (2-3 failures = real problem, 1 failure = maybe a blip)
+- Always implement recovery notifications so the team knows when an issue resolves itself
+- Use the `rich` library for terminal dashboards that make monitoring data easy to read
+- Separate data collection from alerting from display — each can be tested and replaced independently
+- Start simple (print to console) and add channels (Slack, email, PagerDuty) incrementally
+
+## What's Next
+
+You can now build monitoring that catches problems before users do. In **Production Automation Patterns**, the final lesson, you will learn the patterns that separate scripts from production tools: configuration management, secrets handling, idempotency, concurrency, packaging, and the production readiness checklist.

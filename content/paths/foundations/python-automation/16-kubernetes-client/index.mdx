@@ -1,0 +1,1437 @@
+---
+title: "Kubernetes Python Client"
+description: "Interact with Kubernetes from Python. List pods, create deployments, watch events, and build the automation that manages your clusters."
+order: 16
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 15-docker-sdk
+objectives:
+  - Install and configure the Kubernetes Python client
+  - List and inspect pods, services, deployments, and namespaces
+  - Create and update Kubernetes resources programmatically
+  - Watch cluster events and stream pod logs
+  - Handle API errors and work with label selectors
+tags:
+  - python
+  - kubernetes
+  - client
+  - orchestration
+---
+
+<Callout type="story" title="The Story">
+Your company runs 200 microservices across three Kubernetes clusters. The platform team gets Slack messages all day: "Is my pod running?" "Why did my deployment fail?" "Can you scale my service to 5 replicas?" You build a Python tool that answers these questions automatically — a CLI that shows pod status, tails logs, scales deployments, and watches for problems. The kubectl command is powerful, but your Python automation is smarter.
+</Callout>
+
+## Setting Up the Kubernetes Python Client
+
+The official Kubernetes Python client is a full-featured SDK that mirrors the Kubernetes API. It can talk to any cluster your `kubectl` can reach.
+
+```python
+# Install the client
+# pip install kubernetes
+
+from kubernetes import client, config
+
+# Load kubeconfig from default location (~/.kube/config)
+# This is what you use in development / on your laptop
+config.load_kube_config()
+
+# In a pod running inside Kubernetes, use in-cluster config instead:
+# config.load_incluster_config()
+
+# Auto-detect: try in-cluster first, fall back to kubeconfig
+def load_k8s_config():
+    """Load Kubernetes config, auto-detecting the environment."""
+    try:
+        config.load_incluster_config()
+        print("Loaded in-cluster config")
+    except config.ConfigException:
+        config.load_kube_config()
+        print("Loaded kubeconfig")
+
+load_k8s_config()
+
+# Create API clients for different resource groups
+v1 = client.CoreV1Api()          # Pods, Services, ConfigMaps, Secrets, Namespaces
+apps_v1 = client.AppsV1Api()     # Deployments, StatefulSets, DaemonSets
+batch_v1 = client.BatchV1Api()   # Jobs, CronJobs
+
+# Verify connection
+version = client.VersionApi().get_code()
+print(f"Connected to Kubernetes {version.git_version}")
+```
+
+<Callout type="tip" title="Context Switching">
+The `load_kube_config()` function accepts a `context` parameter to target a specific cluster: `config.load_kube_config(context="production-cluster")`. This is how your automation switches between dev, staging, and production clusters without changing environment variables.
+</Callout>
+
+## Working with Pods
+
+Pods are the fundamental unit in Kubernetes. The Python client lets you list, inspect, read logs from, and exec into pods programmatically.
+
+### Listing and Inspecting Pods
+
+```python
+from kubernetes import client, config
+
+config.load_kube_config()
+v1 = client.CoreV1Api()
+
+# List all pods in a namespace
+pods = v1.list_namespaced_pod(namespace="default")
+print(f"Found {len(pods.items)} pods in 'default' namespace\n")
+
+for pod in pods.items:
+    name = pod.metadata.name
+    phase = pod.status.phase  # Pending, Running, Succeeded, Failed, Unknown
+    node = pod.spec.node_name or "unscheduled"
+
+    # Get container statuses
+    container_statuses = pod.status.container_statuses or []
+    ready_count = sum(1 for cs in container_statuses if cs.ready)
+    total_count = len(container_statuses)
+
+    # Get restart count
+    restart_count = sum(cs.restart_count for cs in container_statuses)
+
+    print(f"  {name:45s}  {phase:10s}  {ready_count}/{total_count} ready  "
+          f"restarts: {restart_count}  node: {node}")
+
+# List pods across ALL namespaces
+all_pods = v1.list_pod_for_all_namespaces()
+print(f"\nTotal pods across all namespaces: {len(all_pods.items)}")
+
+# Get a specific pod
+pod = v1.read_namespaced_pod(name="my-pod", namespace="default")
+print(f"\nPod: {pod.metadata.name}")
+print(f"  Namespace: {pod.metadata.namespace}")
+print(f"  Labels: {pod.metadata.labels}")
+print(f"  IP: {pod.status.pod_ip}")
+print(f"  Host IP: {pod.status.host_ip}")
+print(f"  Start time: {pod.status.start_time}")
+```
+
+### Label Selectors and Field Selectors
+
+Label selectors are how Kubernetes (and your automation) finds specific resources:
+
+```python
+from kubernetes import client, config
+
+config.load_kube_config()
+v1 = client.CoreV1Api()
+
+# Find pods with a specific label
+pods = v1.list_namespaced_pod(
+    namespace="default",
+    label_selector="app=web-server"
+)
+print(f"Pods with app=web-server: {len(pods.items)}")
+
+# Multiple label selectors
+pods = v1.list_namespaced_pod(
+    namespace="default",
+    label_selector="app=web-server,env=production"
+)
+
+# Label selector with set-based requirement
+pods = v1.list_namespaced_pod(
+    namespace="default",
+    label_selector="app in (web-server, api-server),env!=test"
+)
+
+# Field selectors (filter by status, node, etc.)
+running_pods = v1.list_namespaced_pod(
+    namespace="default",
+    field_selector="status.phase=Running"
+)
+print(f"Running pods: {len(running_pods.items)}")
+
+# Pods on a specific node
+pods_on_node = v1.list_pod_for_all_namespaces(
+    field_selector="spec.nodeName=worker-node-1"
+)
+print(f"Pods on worker-node-1: {len(pods_on_node.items)}")
+```
+
+### Reading Pod Logs
+
+```python
+from kubernetes import client, config
+
+config.load_kube_config()
+v1 = client.CoreV1Api()
+
+# Get logs from a pod
+logs = v1.read_namespaced_pod_log(
+    name="my-pod",
+    namespace="default",
+    tail_lines=100,          # Last 100 lines
+)
+print(logs)
+
+# Logs from a specific container in a multi-container pod
+logs = v1.read_namespaced_pod_log(
+    name="my-pod",
+    namespace="default",
+    container="sidecar",
+)
+
+# Logs with timestamps
+logs = v1.read_namespaced_pod_log(
+    name="my-pod",
+    namespace="default",
+    timestamps=True,
+)
+
+# Logs since a specific time
+from datetime import datetime, timedelta, timezone
+since = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp())
+logs = v1.read_namespaced_pod_log(
+    name="my-pod",
+    namespace="default",
+    since_seconds=3600,   # Last hour
+)
+
+# Previous container logs (after a crash/restart)
+logs = v1.read_namespaced_pod_log(
+    name="my-pod",
+    namespace="default",
+    previous=True,
+)
+```
+
+### Executing Commands in Pods
+
+```python
+from kubernetes import client, config
+from kubernetes.stream import stream
+
+config.load_kube_config()
+v1 = client.CoreV1Api()
+
+# Execute a command in a pod (like kubectl exec)
+result = stream(
+    v1.connect_get_namespaced_pod_exec,
+    name="my-pod",
+    namespace="default",
+    command=["sh", "-c", "hostname && date && cat /etc/os-release"],
+    stderr=True,
+    stdin=False,
+    stdout=True,
+    tty=False,
+)
+print(result)
+
+# Execute in a specific container
+result = stream(
+    v1.connect_get_namespaced_pod_exec,
+    name="my-pod",
+    namespace="default",
+    container="app",
+    command=["python", "-c", "import sys; print(sys.version)"],
+    stderr=True,
+    stdin=False,
+    stdout=True,
+    tty=False,
+)
+print(result)
+```
+
+## Working with Deployments
+
+Deployments manage replica sets and rolling updates. The Python client lets you create, update, and scale them.
+
+### Listing and Inspecting Deployments
+
+```python
+from kubernetes import client, config
+
+config.load_kube_config()
+apps_v1 = client.AppsV1Api()
+
+# List deployments
+deployments = apps_v1.list_namespaced_deployment(namespace="default")
+
+for dep in deployments.items:
+    name = dep.metadata.name
+    replicas = dep.spec.replicas
+    ready = dep.status.ready_replicas or 0
+    available = dep.status.available_replicas or 0
+    updated = dep.status.updated_replicas or 0
+
+    print(f"  {name:35s}  {ready}/{replicas} ready  "
+          f"{available} available  {updated} updated")
+
+# Get a specific deployment
+dep = apps_v1.read_namespaced_deployment(name="web-app", namespace="default")
+print(f"\nDeployment: {dep.metadata.name}")
+print(f"  Replicas: {dep.spec.replicas}")
+print(f"  Strategy: {dep.spec.strategy.type}")
+print(f"  Image: {dep.spec.template.spec.containers[0].image}")
+```
+
+### Creating a Deployment
+
+```python
+from kubernetes import client, config
+
+config.load_kube_config()
+apps_v1 = client.AppsV1Api()
+
+# Create a deployment programmatically
+deployment = client.V1Deployment(
+    metadata=client.V1ObjectMeta(
+        name="web-app",
+        labels={"app": "web-app"},
+    ),
+    spec=client.V1DeploymentSpec(
+        replicas=3,
+        selector=client.V1LabelSelector(
+            match_labels={"app": "web-app"},
+        ),
+        template=client.V1PodTemplateSpec(
+            metadata=client.V1ObjectMeta(
+                labels={"app": "web-app"},
+            ),
+            spec=client.V1PodSpec(
+                containers=[
+                    client.V1Container(
+                        name="web",
+                        image="nginx:1.25",
+                        ports=[client.V1ContainerPort(container_port=80)],
+                        resources=client.V1ResourceRequirements(
+                            requests={"cpu": "100m", "memory": "128Mi"},
+                            limits={"cpu": "500m", "memory": "256Mi"},
+                        ),
+                        liveness_probe=client.V1Probe(
+                            http_get=client.V1HTTPGetAction(path="/", port=80),
+                            initial_delay_seconds=10,
+                            period_seconds=5,
+                        ),
+                    ),
+                ],
+            ),
+        ),
+    ),
+)
+
+result = apps_v1.create_namespaced_deployment(
+    namespace="default",
+    body=deployment,
+)
+print(f"Created deployment: {result.metadata.name}")
+```
+
+### Scaling a Deployment
+
+```python
+from kubernetes import client, config
+
+config.load_kube_config()
+apps_v1 = client.AppsV1Api()
+
+
+def scale_deployment(name, namespace, replicas):
+    """Scale a deployment to the specified number of replicas."""
+    # Patch the deployment's replica count
+    body = {"spec": {"replicas": replicas}}
+    result = apps_v1.patch_namespaced_deployment_scale(
+        name=name,
+        namespace=namespace,
+        body=body,
+    )
+    print(f"Scaled {name} to {result.spec.replicas} replicas")
+    return result
+
+
+# Scale up
+scale_deployment("web-app", "default", 5)
+
+# Scale down
+scale_deployment("web-app", "default", 2)
+
+# Scale to zero (useful for maintenance)
+scale_deployment("web-app", "default", 0)
+```
+
+### Updating a Deployment (Rolling Update)
+
+```python
+from kubernetes import client, config
+
+config.load_kube_config()
+apps_v1 = client.AppsV1Api()
+
+
+def update_deployment_image(name, namespace, container_name, new_image):
+    """Update a deployment's container image (triggers rolling update)."""
+    # Read current deployment
+    deployment = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+
+    # Find the container and update its image
+    for container in deployment.spec.template.spec.containers:
+        if container.name == container_name:
+            old_image = container.image
+            container.image = new_image
+            break
+    else:
+        raise ValueError(f"Container '{container_name}' not found in deployment '{name}'")
+
+    # Apply the update
+    result = apps_v1.replace_namespaced_deployment(
+        name=name,
+        namespace=namespace,
+        body=deployment,
+    )
+
+    print(f"Updated {name}/{container_name}: {old_image} -> {new_image}")
+    return result
+
+
+# Trigger a rolling update
+update_deployment_image("web-app", "default", "web", "nginx:1.26")
+```
+
+## Working with Services, Namespaces, and Nodes
+
+```python
+from kubernetes import client, config
+
+config.load_kube_config()
+v1 = client.CoreV1Api()
+
+# --- Services ---
+services = v1.list_namespaced_service(namespace="default")
+for svc in services.items:
+    svc_type = svc.spec.type
+    cluster_ip = svc.spec.cluster_ip
+    ports = ", ".join(
+        f"{p.port}/{p.protocol}" for p in (svc.spec.ports or [])
+    )
+    print(f"  {svc.metadata.name:30s}  {svc_type:12s}  {cluster_ip:16s}  {ports}")
+
+# --- Namespaces ---
+namespaces = v1.list_namespace()
+for ns in namespaces.items:
+    print(f"  {ns.metadata.name:30s}  {ns.status.phase}")
+
+# --- Nodes ---
+nodes = v1.list_node()
+for node in nodes.items:
+    # Get node conditions
+    conditions = {c.type: c.status for c in node.status.conditions}
+    ready = conditions.get("Ready", "Unknown")
+
+    # Get resource capacity
+    capacity = node.status.capacity
+    cpu = capacity.get("cpu", "?")
+    memory = capacity.get("memory", "?")
+
+    # Get node labels for role
+    labels = node.metadata.labels or {}
+    roles = [k.split("/")[-1] for k in labels if "node-role.kubernetes.io/" in k]
+    role = ", ".join(roles) if roles else "worker"
+
+    print(f"  {node.metadata.name:30s}  Ready={ready:5s}  "
+          f"CPU={cpu:4s}  Memory={memory:12s}  Role={role}")
+```
+
+## Creating Resources from YAML
+
+Sometimes it is easier to define Kubernetes resources in YAML (especially for complex objects) and create them with Python:
+
+```python
+from kubernetes import client, config, utils
+import yaml
+
+config.load_kube_config()
+k8s_client = client.ApiClient()
+
+# Load a YAML manifest
+yaml_content = """
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+data:
+  DATABASE_URL: "postgresql://db:5432/appdb"
+  REDIS_URL: "redis://cache:6379"
+  LOG_LEVEL: "info"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+  namespace: default
+spec:
+  selector:
+    app: web-app
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: ClusterIP
+"""
+
+# Create all resources from the YAML
+resources = yaml.safe_load_all(yaml_content)
+for resource in resources:
+    try:
+        utils.create_from_dict(k8s_client, resource)
+        kind = resource.get("kind", "unknown")
+        name = resource.get("metadata", {}).get("name", "unknown")
+        print(f"Created {kind}: {name}")
+    except utils.FailToCreateError as e:
+        print(f"Failed: {e}")
+
+# Create from a YAML file
+# utils.create_from_yaml(k8s_client, "deployment.yaml")
+
+# Create from a directory of YAML files
+# utils.create_from_yaml(k8s_client, "k8s-manifests/", verbose=True)
+```
+
+<Callout type="warning" title="Idempotency Matters">
+`create_from_dict` will fail if the resource already exists. For automation that might run multiple times, use the patch or replace API methods instead, or catch the `409 Conflict` error and handle it. Production automation should always be safe to run twice.
+</Callout>
+
+## Watching Events
+
+The Kubernetes watch API lets you monitor the cluster in real-time. Instead of polling, you get notified when resources change.
+
+```python
+from kubernetes import client, config, watch
+
+config.load_kube_config()
+v1 = client.CoreV1Api()
+
+# Watch for pod events in a namespace
+w = watch.Watch()
+
+print("Watching pods (Ctrl+C to stop)...")
+try:
+    for event in w.stream(v1.list_namespaced_pod, namespace="default", timeout_seconds=60):
+        event_type = event["type"]        # ADDED, MODIFIED, DELETED
+        pod = event["object"]
+        name = pod.metadata.name
+        phase = pod.status.phase
+
+        print(f"  [{event_type:8s}] {name:40s} -> {phase}")
+
+        # Stop watching after a specific condition
+        if event_type == "DELETED" and "cleanup" in name:
+            w.stop()
+            break
+except KeyboardInterrupt:
+    w.stop()
+
+# Watch for events across all namespaces
+print("\nWatching cluster events...")
+w = watch.Watch()
+for event in w.stream(v1.list_event_for_all_namespaces, timeout_seconds=30):
+    ev = event["object"]
+    kind = ev.involved_object.kind
+    name = ev.involved_object.name
+    reason = ev.reason
+    message = ev.message
+    print(f"  {kind:15s} {name:30s} {reason:20s} {message}")
+```
+
+## Error Handling
+
+The Kubernetes API raises specific exceptions that your automation must handle:
+
+```python
+from kubernetes import client, config
+from kubernetes.client.exceptions import ApiException
+import json
+
+config.load_kube_config()
+v1 = client.CoreV1Api()
+apps_v1 = client.AppsV1Api()
+
+
+def safe_get_pod(name, namespace="default"):
+    """Get a pod, returning None if not found."""
+    try:
+        return v1.read_namespaced_pod(name=name, namespace=namespace)
+    except ApiException as e:
+        if e.status == 404:
+            print(f"Pod not found: {name}")
+            return None
+        elif e.status == 403:
+            print(f"Permission denied: cannot read pod {name}")
+            return None
+        else:
+            print(f"API error ({e.status}): {e.reason}")
+            raise
+
+
+def safe_create_deployment(deployment, namespace="default"):
+    """Create a deployment, handling conflicts."""
+    try:
+        result = apps_v1.create_namespaced_deployment(
+            namespace=namespace,
+            body=deployment,
+        )
+        print(f"Created deployment: {result.metadata.name}")
+        return result
+    except ApiException as e:
+        if e.status == 409:
+            # Already exists — update instead
+            name = deployment.metadata.name
+            print(f"Deployment {name} already exists, updating...")
+            result = apps_v1.replace_namespaced_deployment(
+                name=name,
+                namespace=namespace,
+                body=deployment,
+            )
+            print(f"Updated deployment: {result.metadata.name}")
+            return result
+        elif e.status == 422:
+            # Unprocessable entity — usually validation error
+            body = json.loads(e.body)
+            print(f"Validation error: {body.get('message', e.reason)}")
+            return None
+        else:
+            print(f"API error ({e.status}): {e.reason}")
+            raise
+
+
+def safe_delete_resource(api_func, name, namespace="default"):
+    """Delete a resource, ignoring 'not found' errors."""
+    try:
+        api_func(name=name, namespace=namespace)
+        print(f"Deleted: {name}")
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            print(f"Already gone: {name}")
+            return True
+        else:
+            print(f"Failed to delete {name}: {e.reason}")
+            return False
+
+
+# Usage
+safe_delete_resource(v1.delete_namespaced_pod, "old-pod")
+safe_delete_resource(apps_v1.delete_namespaced_deployment, "old-deployment")
+```
+
+<Exercise number={1} title="Pod Inspector Script">
+
+Write a script that lists all pods across namespaces, groups them by status, and reports any pods in a problematic state (CrashLoopBackOff, ImagePullBackOff, Pending for too long).
+
+```python
+#!/usr/bin/env python3
+"""Pod inspector — finds and reports problematic pods."""
+
+from kubernetes import client, config
+from kubernetes.client.exceptions import ApiException
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+
+# Load config
+try:
+    config.load_incluster_config()
+except config.ConfigException:
+    config.load_kube_config()
+
+v1 = client.CoreV1Api()
+
+
+def get_pod_condition(pod):
+    """Determine the effective condition of a pod."""
+    phase = pod.status.phase or "Unknown"
+    container_statuses = pod.status.container_statuses or []
+
+    # Check container-level issues
+    for cs in container_statuses:
+        if cs.state.waiting:
+            reason = cs.state.waiting.reason or "Waiting"
+            if reason in ("CrashLoopBackOff", "ImagePullBackOff",
+                          "ErrImagePull", "CreateContainerConfigError"):
+                return reason
+        if cs.state.terminated:
+            reason = cs.state.terminated.reason or "Terminated"
+            if reason not in ("Completed",):
+                return f"Terminated:{reason}"
+
+    return phase
+
+
+def get_pod_age(pod):
+    """Get pod age as a human-readable string."""
+    if not pod.metadata.creation_timestamp:
+        return "unknown"
+
+    now = datetime.now(timezone.utc)
+    age = now - pod.metadata.creation_timestamp.replace(tzinfo=timezone.utc)
+
+    if age.days > 0:
+        return f"{age.days}d"
+    hours = age.seconds // 3600
+    if hours > 0:
+        return f"{hours}h"
+    minutes = age.seconds // 60
+    return f"{minutes}m"
+
+
+def inspect_pods():
+    """Inspect all pods and generate a report."""
+    print("=" * 80)
+    print("  Pod Inspector Report")
+    print(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 80)
+
+    try:
+        pods = v1.list_pod_for_all_namespaces()
+    except ApiException as e:
+        print(f"Error listing pods: {e.reason}")
+        return
+
+    # Group pods by condition
+    by_condition = defaultdict(list)
+    by_namespace = defaultdict(int)
+    problems = []
+
+    for pod in pods.items:
+        condition = get_pod_condition(pod)
+        by_condition[condition].append(pod)
+        by_namespace[pod.metadata.namespace] += 1
+
+        # Flag problematic pods
+        problem_conditions = {
+            "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull",
+            "CreateContainerConfigError", "Failed", "Unknown",
+        }
+        if condition in problem_conditions or condition.startswith("Terminated:"):
+            problems.append(pod)
+
+        # Flag pods pending for too long
+        if condition == "Pending" and pod.metadata.creation_timestamp:
+            age = datetime.now(timezone.utc) - pod.metadata.creation_timestamp.replace(
+                tzinfo=timezone.utc
+            )
+            if age > timedelta(minutes=5):
+                problems.append(pod)
+
+    # Summary by condition
+    print(f"\n--- Pod Status Summary ---")
+    total = len(pods.items)
+    print(f"Total pods: {total}\n")
+    for condition, pod_list in sorted(by_condition.items(), key=lambda x: -len(x[1])):
+        pct = len(pod_list) / total * 100 if total else 0
+        bar = "#" * int(pct / 2)
+        print(f"  {condition:30s}  {len(pod_list):4d}  ({pct:5.1f}%)  {bar}")
+
+    # Summary by namespace
+    print(f"\n--- Pods by Namespace ---")
+    for ns, count in sorted(by_namespace.items(), key=lambda x: -x[1]):
+        print(f"  {ns:30s}  {count:4d}")
+
+    # Problem pods
+    if problems:
+        print(f"\n--- Problematic Pods ({len(problems)}) ---")
+        print(f"{'NAMESPACE':20s} {'POD':35s} {'CONDITION':25s} {'AGE':6s} {'RESTARTS'}")
+        print("-" * 95)
+
+        for pod in problems:
+            ns = pod.metadata.namespace
+            name = pod.metadata.name
+            condition = get_pod_condition(pod)
+            age = get_pod_age(pod)
+            restarts = sum(
+                cs.restart_count for cs in (pod.status.container_statuses or [])
+            )
+            print(f"{ns:20s} {name:35s} {condition:25s} {age:6s} {restarts}")
+
+        # Detailed info for each problem pod
+        print(f"\n--- Problem Details ---")
+        for pod in problems[:5]:  # Limit detail to first 5
+            name = f"{pod.metadata.namespace}/{pod.metadata.name}"
+            print(f"\n  {name}")
+            for cs in (pod.status.container_statuses or []):
+                if cs.state.waiting:
+                    print(f"    Container '{cs.name}': Waiting — {cs.state.waiting.reason}")
+                    if cs.state.waiting.message:
+                        print(f"      Message: {cs.state.waiting.message}")
+                if cs.state.terminated:
+                    print(f"    Container '{cs.name}': Terminated — {cs.state.terminated.reason}")
+                    print(f"      Exit code: {cs.state.terminated.exit_code}")
+    else:
+        print(f"\n--- No Problematic Pods Found ---")
+        print("  All pods are healthy.")
+
+    print()
+
+
+if __name__ == "__main__":
+    inspect_pods()
+```
+
+</Exercise>
+
+<Exercise number={2} title="Deployment Manager">
+
+Write a script that manages deployments: list them with status, scale by name, and update the container image to trigger a rolling update.
+
+```python
+#!/usr/bin/env python3
+"""Deployment manager — list, scale, and update deployments."""
+
+from kubernetes import client, config
+from kubernetes.client.exceptions import ApiException
+import sys
+import time
+
+# Load config
+try:
+    config.load_incluster_config()
+except config.ConfigException:
+    config.load_kube_config()
+
+apps_v1 = client.AppsV1Api()
+v1 = client.CoreV1Api()
+
+
+def list_deployments(namespace="default"):
+    """List all deployments with their current status."""
+    try:
+        deployments = apps_v1.list_namespaced_deployment(namespace=namespace)
+    except ApiException as e:
+        print(f"Error: {e.reason}")
+        return
+
+    if not deployments.items:
+        print(f"No deployments found in namespace '{namespace}'")
+        return
+
+    print(f"\nDeployments in '{namespace}':")
+    print(f"{'NAME':35s} {'READY':10s} {'UP-TO-DATE':12s} {'AVAILABLE':12s} {'IMAGE'}")
+    print("-" * 110)
+
+    for dep in deployments.items:
+        name = dep.metadata.name
+        replicas = dep.spec.replicas or 0
+        ready = dep.status.ready_replicas or 0
+        updated = dep.status.updated_replicas or 0
+        available = dep.status.available_replicas or 0
+        image = dep.spec.template.spec.containers[0].image
+
+        ready_str = f"{ready}/{replicas}"
+        print(f"{name:35s} {ready_str:10s} {updated:<12d} {available:<12d} {image}")
+
+    print()
+
+
+def scale_deployment(name, replicas, namespace="default"):
+    """Scale a deployment to the specified number of replicas."""
+    print(f"Scaling {name} to {replicas} replicas...")
+
+    try:
+        # Read current state
+        dep = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+        old_replicas = dep.spec.replicas
+
+        # Patch the scale
+        body = {"spec": {"replicas": replicas}}
+        result = apps_v1.patch_namespaced_deployment_scale(
+            name=name,
+            namespace=namespace,
+            body=body,
+        )
+
+        print(f"  {name}: {old_replicas} -> {result.spec.replicas} replicas")
+
+        # Wait for the scaling to complete
+        print("  Waiting for rollout...", end="", flush=True)
+        for _ in range(30):
+            dep = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+            ready = dep.status.ready_replicas or 0
+            if ready == replicas:
+                print(f" done ({ready}/{replicas} ready)")
+                return True
+            print(".", end="", flush=True)
+            time.sleep(2)
+
+        print(f" timeout (current: {dep.status.ready_replicas or 0}/{replicas})")
+        return False
+
+    except ApiException as e:
+        if e.status == 404:
+            print(f"  Deployment '{name}' not found in namespace '{namespace}'")
+        else:
+            print(f"  Error: {e.reason}")
+        return False
+
+
+def update_image(name, container_name, new_image, namespace="default"):
+    """Update a deployment's container image, triggering a rolling update."""
+    print(f"Updating {name}/{container_name} to {new_image}...")
+
+    try:
+        dep = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+
+        # Find the container
+        container_found = False
+        for container in dep.spec.template.spec.containers:
+            if container.name == container_name:
+                old_image = container.image
+                container.image = new_image
+                container_found = True
+                break
+
+        if not container_found:
+            print(f"  Container '{container_name}' not found in deployment '{name}'")
+            containers = [c.name for c in dep.spec.template.spec.containers]
+            print(f"  Available containers: {containers}")
+            return False
+
+        # Apply the update
+        apps_v1.replace_namespaced_deployment(
+            name=name, namespace=namespace, body=dep,
+        )
+        print(f"  Image updated: {old_image} -> {new_image}")
+
+        # Monitor the rollout
+        print("  Monitoring rollout...", end="", flush=True)
+        desired = dep.spec.replicas or 1
+        for _ in range(60):
+            dep = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+            updated = dep.status.updated_replicas or 0
+            ready = dep.status.ready_replicas or 0
+            available = dep.status.available_replicas or 0
+
+            if updated == desired and ready == desired and available == desired:
+                print(f" complete ({ready}/{desired} ready)")
+                return True
+
+            print(".", end="", flush=True)
+            time.sleep(2)
+
+        print(f" timeout — check 'kubectl rollout status deployment/{name}'")
+        return False
+
+    except ApiException as e:
+        if e.status == 404:
+            print(f"  Deployment '{name}' not found")
+        elif e.status == 422:
+            print(f"  Invalid update: {e.reason}")
+        else:
+            print(f"  Error: {e.reason}")
+        return False
+
+
+def show_deployment_detail(name, namespace="default"):
+    """Show detailed information about a deployment."""
+    try:
+        dep = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+    except ApiException as e:
+        print(f"Error: {e.reason}")
+        return
+
+    print(f"\nDeployment: {dep.metadata.name}")
+    print(f"  Namespace:  {dep.metadata.namespace}")
+    print(f"  Created:    {dep.metadata.creation_timestamp}")
+    print(f"  Replicas:   {dep.spec.replicas}")
+    print(f"  Strategy:   {dep.spec.strategy.type}")
+    print(f"  Selector:   {dep.spec.selector.match_labels}")
+    print(f"  Labels:     {dep.metadata.labels}")
+
+    print(f"\n  Containers:")
+    for c in dep.spec.template.spec.containers:
+        print(f"    {c.name}:")
+        print(f"      Image: {c.image}")
+        if c.ports:
+            ports = ", ".join(str(p.container_port) for p in c.ports)
+            print(f"      Ports: {ports}")
+        if c.resources:
+            if c.resources.requests:
+                print(f"      Requests: {dict(c.resources.requests)}")
+            if c.resources.limits:
+                print(f"      Limits: {dict(c.resources.limits)}")
+
+    print(f"\n  Status:")
+    print(f"    Ready:     {dep.status.ready_replicas or 0}/{dep.spec.replicas}")
+    print(f"    Updated:   {dep.status.updated_replicas or 0}")
+    print(f"    Available: {dep.status.available_replicas or 0}")
+
+    # Show conditions
+    if dep.status.conditions:
+        print(f"\n  Conditions:")
+        for cond in dep.status.conditions:
+            print(f"    {cond.type}: {cond.status} — {cond.message}")
+
+    print()
+
+
+def main():
+    usage = """
+Deployment Manager
+
+Usage:
+    deploy.py list [namespace]
+    deploy.py detail <name> [namespace]
+    deploy.py scale <name> <replicas> [namespace]
+    deploy.py update <name> <container> <image> [namespace]
+"""
+    if len(sys.argv) < 2:
+        print(usage)
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    if command == "list":
+        namespace = sys.argv[2] if len(sys.argv) > 2 else "default"
+        list_deployments(namespace)
+
+    elif command == "detail":
+        if len(sys.argv) < 3:
+            print("Usage: deploy.py detail <name> [namespace]")
+            sys.exit(1)
+        name = sys.argv[2]
+        namespace = sys.argv[3] if len(sys.argv) > 3 else "default"
+        show_deployment_detail(name, namespace)
+
+    elif command == "scale":
+        if len(sys.argv) < 4:
+            print("Usage: deploy.py scale <name> <replicas> [namespace]")
+            sys.exit(1)
+        name = sys.argv[2]
+        replicas = int(sys.argv[3])
+        namespace = sys.argv[4] if len(sys.argv) > 4 else "default"
+        scale_deployment(name, replicas, namespace)
+
+    elif command == "update":
+        if len(sys.argv) < 5:
+            print("Usage: deploy.py update <name> <container> <image> [namespace]")
+            sys.exit(1)
+        name = sys.argv[2]
+        container = sys.argv[3]
+        image = sys.argv[4]
+        namespace = sys.argv[5] if len(sys.argv) > 5 else "default"
+        update_image(name, container, image, namespace)
+
+    else:
+        print(f"Unknown command: {command}")
+        print(usage)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</Exercise>
+
+<MiniProject title="K8s Cluster Dashboard">
+
+Build a CLI dashboard that shows a comprehensive view of cluster health: pod status, resource usage, recent events, and problematic workloads.
+
+```python
+#!/usr/bin/env python3
+"""
+K8s Cluster Dashboard
+A CLI tool that provides a comprehensive overview of cluster health,
+including pod status, node resources, recent events, and problem detection.
+"""
+
+from kubernetes import client, config
+from kubernetes.client.exceptions import ApiException
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+import sys
+
+# --- Configuration ---
+
+try:
+    config.load_incluster_config()
+except config.ConfigException:
+    config.load_kube_config()
+
+v1 = client.CoreV1Api()
+apps_v1 = client.AppsV1Api()
+
+
+# --- Formatting Helpers ---
+
+def format_age(timestamp):
+    """Convert a timestamp to a human-readable age string."""
+    if not timestamp:
+        return "N/A"
+    now = datetime.now(timezone.utc)
+    ts = timestamp.replace(tzinfo=timezone.utc) if timestamp.tzinfo is None else timestamp
+    delta = now - ts
+    if delta.days > 0:
+        return f"{delta.days}d"
+    hours = delta.seconds // 3600
+    if hours > 0:
+        return f"{hours}h"
+    minutes = delta.seconds // 60
+    return f"{minutes}m"
+
+
+def format_bytes(value_str):
+    """Convert Kubernetes memory strings (Ki, Mi, Gi) to readable format."""
+    if not value_str:
+        return "N/A"
+    if value_str.endswith("Ki"):
+        return f"{int(value_str[:-2]) // 1024} Mi"
+    if value_str.endswith("Mi"):
+        return f"{value_str}"
+    if value_str.endswith("Gi"):
+        return f"{value_str}"
+    return value_str
+
+
+def section_header(title):
+    """Print a formatted section header."""
+    print(f"\n{'=' * 70}")
+    print(f"  {title}")
+    print(f"{'=' * 70}")
+
+
+# --- Dashboard Sections ---
+
+def show_cluster_info():
+    """Show basic cluster information."""
+    section_header("Cluster Information")
+    try:
+        version_info = client.VersionApi().get_code()
+        print(f"  Kubernetes Version: {version_info.git_version}")
+        print(f"  Platform:           {version_info.platform}")
+    except ApiException as e:
+        print(f"  Error getting version: {e.reason}")
+
+    try:
+        namespaces = v1.list_namespace()
+        print(f"  Namespaces:         {len(namespaces.items)}")
+        ns_names = [ns.metadata.name for ns in namespaces.items]
+        print(f"                      {', '.join(ns_names)}")
+    except ApiException:
+        pass
+
+
+def show_node_status():
+    """Show node status and resource capacity."""
+    section_header("Node Status")
+
+    try:
+        nodes = v1.list_node()
+    except ApiException as e:
+        print(f"  Error: {e.reason}")
+        return
+
+    print(f"  Total nodes: {len(nodes.items)}\n")
+    print(f"  {'NODE':30s} {'STATUS':10s} {'ROLE':15s} {'CPU':6s} {'MEMORY':12s} {'AGE'}")
+    print(f"  {'-'*85}")
+
+    for node in nodes.items:
+        name = node.metadata.name
+        conditions = {c.type: c.status for c in (node.status.conditions or [])}
+        status = "Ready" if conditions.get("Ready") == "True" else "NotReady"
+
+        labels = node.metadata.labels or {}
+        roles = [k.split("/")[-1] for k in labels if "node-role.kubernetes.io/" in k]
+        role = ", ".join(roles) if roles else "worker"
+
+        capacity = node.status.capacity or {}
+        cpu = capacity.get("cpu", "?")
+        memory = format_bytes(capacity.get("memory", "?"))
+        age = format_age(node.metadata.creation_timestamp)
+
+        print(f"  {name:30s} {status:10s} {role:15s} {cpu:6s} {memory:12s} {age}")
+
+
+def show_pod_summary():
+    """Show pod status summary across all namespaces."""
+    section_header("Pod Summary")
+
+    try:
+        pods = v1.list_pod_for_all_namespaces()
+    except ApiException as e:
+        print(f"  Error: {e.reason}")
+        return
+
+    # Count by status
+    status_counts = defaultdict(int)
+    ns_counts = defaultdict(lambda: defaultdict(int))
+
+    for pod in pods.items:
+        phase = pod.status.phase or "Unknown"
+
+        # Check for more specific conditions
+        for cs in (pod.status.container_statuses or []):
+            if cs.state.waiting and cs.state.waiting.reason:
+                phase = cs.state.waiting.reason
+                break
+
+        status_counts[phase] += 1
+        ns_counts[pod.metadata.namespace][phase] += 1
+
+    total = len(pods.items)
+    print(f"  Total pods: {total}\n")
+
+    # Status breakdown
+    print(f"  {'STATUS':25s} {'COUNT':6s} {'PCT':8s}")
+    print(f"  {'-'*45}")
+    for status, count in sorted(status_counts.items(), key=lambda x: -x[1]):
+        pct = count / total * 100 if total else 0
+        bar = "#" * int(pct / 3)
+        print(f"  {status:25s} {count:6d} {pct:6.1f}%  {bar}")
+
+    # Namespace breakdown
+    print(f"\n  {'NAMESPACE':25s} {'RUNNING':8s} {'OTHER':8s} {'TOTAL':8s}")
+    print(f"  {'-'*55}")
+    for ns in sorted(ns_counts.keys()):
+        running = ns_counts[ns].get("Running", 0)
+        total_ns = sum(ns_counts[ns].values())
+        other = total_ns - running
+        print(f"  {ns:25s} {running:8d} {other:8d} {total_ns:8d}")
+
+
+def show_deployments():
+    """Show deployment status across namespaces."""
+    section_header("Deployments")
+
+    try:
+        deployments = apps_v1.list_deployment_for_all_namespaces()
+    except ApiException as e:
+        print(f"  Error: {e.reason}")
+        return
+
+    if not deployments.items:
+        print("  No deployments found.")
+        return
+
+    print(f"  {'NAMESPACE':20s} {'DEPLOYMENT':30s} {'READY':10s} {'UP-TO-DATE':12s} {'AGE'}")
+    print(f"  {'-'*80}")
+
+    problems = []
+    for dep in deployments.items:
+        ns = dep.metadata.namespace
+        name = dep.metadata.name
+        desired = dep.spec.replicas or 0
+        ready = dep.status.ready_replicas or 0
+        updated = dep.status.updated_replicas or 0
+        age = format_age(dep.metadata.creation_timestamp)
+
+        ready_str = f"{ready}/{desired}"
+
+        # Flag unhealthy deployments
+        if ready < desired:
+            problems.append(dep)
+
+        print(f"  {ns:20s} {name:30s} {ready_str:10s} {updated:<12d} {age}")
+
+    if problems:
+        print(f"\n  ** {len(problems)} deployment(s) with insufficient replicas **")
+
+
+def show_problem_pods():
+    """Show pods that are in a problematic state."""
+    section_header("Problem Pods")
+
+    try:
+        pods = v1.list_pod_for_all_namespaces()
+    except ApiException as e:
+        print(f"  Error: {e.reason}")
+        return
+
+    problem_states = {
+        "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull",
+        "CreateContainerConfigError", "OOMKilled", "Error", "Failed",
+    }
+
+    problems = []
+    for pod in pods.items:
+        issue = None
+        for cs in (pod.status.container_statuses or []):
+            if cs.state.waiting and cs.state.waiting.reason in problem_states:
+                issue = cs.state.waiting.reason
+            elif cs.state.terminated and cs.state.terminated.reason in problem_states:
+                issue = cs.state.terminated.reason
+            elif cs.restart_count > 10:
+                issue = f"HighRestarts({cs.restart_count})"
+
+        if pod.status.phase in ("Failed", "Unknown"):
+            issue = pod.status.phase
+
+        if issue:
+            problems.append((pod, issue))
+
+    if not problems:
+        print("  No problematic pods found. Everything looks healthy.")
+        return
+
+    print(f"  Found {len(problems)} problematic pod(s):\n")
+    print(f"  {'NAMESPACE':20s} {'POD':35s} {'ISSUE':25s} {'RESTARTS':10s} {'AGE'}")
+    print(f"  {'-'*100}")
+
+    for pod, issue in problems:
+        ns = pod.metadata.namespace
+        name = pod.metadata.name[:34]
+        restarts = sum(cs.restart_count for cs in (pod.status.container_statuses or []))
+        age = format_age(pod.metadata.creation_timestamp)
+        print(f"  {ns:20s} {name:35s} {issue:25s} {restarts:<10d} {age}")
+
+
+def show_recent_events(limit=15):
+    """Show recent cluster events, focusing on warnings."""
+    section_header(f"Recent Events (last {limit})")
+
+    try:
+        events = v1.list_event_for_all_namespaces()
+    except ApiException as e:
+        print(f"  Error: {e.reason}")
+        return
+
+    # Sort by last timestamp, most recent first
+    sorted_events = sorted(
+        events.items,
+        key=lambda e: e.last_timestamp or e.metadata.creation_timestamp or datetime.min.replace(
+            tzinfo=timezone.utc
+        ),
+        reverse=True,
+    )
+
+    # Show warnings first, then normals
+    warnings = [e for e in sorted_events if e.type == "Warning"]
+    normals = [e for e in sorted_events if e.type == "Normal"]
+
+    if warnings:
+        print(f"\n  Warnings ({len(warnings)} total, showing latest):\n")
+        print(f"  {'AGE':6s} {'NAMESPACE':15s} {'KIND':12s} {'NAME':25s} {'REASON':20s} {'MESSAGE'}")
+        print(f"  {'-'*110}")
+
+        for event in warnings[:limit]:
+            age = format_age(event.last_timestamp or event.metadata.creation_timestamp)
+            ns = event.metadata.namespace or "cluster"
+            kind = event.involved_object.kind or "?"
+            name = (event.involved_object.name or "?")[:24]
+            reason = (event.reason or "?")[:19]
+            message = (event.message or "")[:50]
+            print(f"  {age:6s} {ns:15s} {kind:12s} {name:25s} {reason:20s} {message}")
+    else:
+        print("\n  No warning events found.")
+
+    # Brief normal events summary
+    if normals:
+        reason_counts = defaultdict(int)
+        for e in normals:
+            reason_counts[e.reason or "Unknown"] += 1
+        top_reasons = sorted(reason_counts.items(), key=lambda x: -x[1])[:5]
+        print(f"\n  Normal events summary (top 5 reasons):")
+        for reason, count in top_reasons:
+            print(f"    {reason:30s}  {count} event(s)")
+
+
+def show_resource_quotas():
+    """Show resource quotas and their usage."""
+    section_header("Resource Quotas")
+
+    try:
+        quotas = v1.list_resource_quota_for_all_namespaces()
+    except ApiException as e:
+        print(f"  Error: {e.reason}")
+        return
+
+    if not quotas.items:
+        print("  No resource quotas configured.")
+        return
+
+    for quota in quotas.items:
+        print(f"\n  Quota: {quota.metadata.name} (ns: {quota.metadata.namespace})")
+        hard = quota.status.hard or {}
+        used = quota.status.used or {}
+
+        print(f"    {'RESOURCE':25s} {'USED':15s} {'HARD LIMIT':15s}")
+        print(f"    {'-'*55}")
+        for resource_name in sorted(hard.keys()):
+            h = hard.get(resource_name, "N/A")
+            u = used.get(resource_name, "0")
+            print(f"    {resource_name:25s} {u:15s} {h:15s}")
+
+
+# --- Main Dashboard ---
+
+def run_dashboard(namespace=None):
+    """Run the complete cluster dashboard."""
+    print("\n" + "#" * 70)
+    print(f"#{'K8s Cluster Dashboard':^68s}#")
+    print(f"#{'Generated: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S'):^68s}#")
+    print("#" * 70)
+
+    show_cluster_info()
+    show_node_status()
+    show_pod_summary()
+    show_deployments()
+    show_problem_pods()
+    show_recent_events()
+    show_resource_quotas()
+
+    print(f"\n{'=' * 70}")
+    print(f"  Dashboard complete.")
+    print(f"{'=' * 70}\n")
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print("K8s Cluster Dashboard")
+        print("\nUsage: dashboard.py [section]")
+        print("\nSections:")
+        print("  all        Full dashboard (default)")
+        print("  nodes      Node status")
+        print("  pods       Pod summary")
+        print("  deploys    Deployment status")
+        print("  problems   Problematic pods")
+        print("  events     Recent events")
+        sys.exit(0)
+
+    section = sys.argv[1] if len(sys.argv) > 1 else "all"
+
+    section_map = {
+        "all": run_dashboard,
+        "nodes": show_node_status,
+        "pods": show_pod_summary,
+        "deploys": show_deployments,
+        "problems": show_problem_pods,
+        "events": show_recent_events,
+    }
+
+    func = section_map.get(section)
+    if func:
+        if section == "all":
+            func()
+        else:
+            func()
+    else:
+        print(f"Unknown section: {section}")
+        print(f"Available: {', '.join(section_map.keys())}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Use `config.load_kube_config()` for local development and `config.load_incluster_config()` when running inside a cluster
+- The Kubernetes API is organized by groups: `CoreV1Api` for pods/services, `AppsV1Api` for deployments, `BatchV1Api` for jobs
+- Label selectors are the primary way to find and filter resources — always label your workloads
+- The `watch` API is far more efficient than polling — use it for real-time monitoring
+- Always handle `ApiException` with status code checks: 404 (not found), 409 (conflict), 403 (forbidden), 422 (validation)
+- Creating resources from YAML with `create_from_dict` is simpler than building Python objects for complex manifests
+- Scale deployments with `patch_namespaced_deployment_scale` — it is cleaner than patching the full deployment
+- Pod logs and exec require the pod to be running — check status before attempting these operations
+- For idempotent automation, try create and fall back to replace on 409 Conflict
+
+## What's Next
+
+You can now interact with both Docker and Kubernetes programmatically. In **Building CLI Tools with Click**, you will learn to package your automation into professional command-line tools with argument parsing, subcommands, help text, and output formatting — tools that your entire team can use.

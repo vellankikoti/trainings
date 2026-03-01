@@ -1,0 +1,1137 @@
+---
+title: "Functions and Modules"
+description: "Write reusable Python code. Functions with type hints, decorators for cross-cutting concerns, and modules for organizing automation libraries."
+order: 6
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 05-control-flow
+objectives:
+  - Write functions with type hints, defaults, and *args/**kwargs
+  - Create decorators for retry logic, timing, and logging
+  - Organize code into modules and packages
+  - Use key standard library modules for DevOps automation
+tags:
+  - python
+  - functions
+  - modules
+  - decorators
+---
+
+<Callout type="story" title="The Story">
+Your team has five different deployment scripts. Each one has its own retry logic, its own logging setup, its own error handling. When someone improves the retry logic in one script, the others don't benefit. You refactor: extract the retry decorator, the logging setup, and the notification helpers into a shared library. Now every script imports `from devops_lib import retry, notify_slack, setup_logging`. One improvement benefits all scripts. That's the power of functions and modules.
+</Callout>
+
+## Functions
+
+### Basic Functions
+
+```python
+def check_port(host, port):
+    """Check if a TCP port is open."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(3)
+            return sock.connect_ex((host, port)) == 0
+    except socket.error:
+        return False
+
+# Call it
+is_open = check_port("localhost", 8080)
+print(f"Port 8080: {'open' if is_open else 'closed'}")
+```
+
+### Parameters and Defaults
+
+```python
+def deploy(service, environment="staging", replicas=1, dry_run=False):
+    """Deploy a service to the specified environment.
+
+    Args:
+        service: Name of the service to deploy.
+        environment: Target environment (default: staging).
+        replicas: Number of replicas to run (default: 1).
+        dry_run: If True, print what would happen without doing it.
+    """
+    action = "Would deploy" if dry_run else "Deploying"
+    print(f"{action} {service} to {environment} with {replicas} replicas")
+
+    if not dry_run:
+        # actual deployment logic
+        pass
+
+# Different calling styles
+deploy("web-api")                                    # Uses all defaults
+deploy("web-api", "production")                      # Positional args
+deploy("web-api", environment="production")           # Named args
+deploy("web-api", replicas=3, environment="production")  # Named, any order
+deploy("web-api", dry_run=True)                       # Skip middle defaults
+```
+
+### Return Values
+
+```python
+def check_server(hostname, port=80):
+    """Check server health and return a result dict."""
+    import socket
+    import time
+
+    start = time.time()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5)
+            result = sock.connect_ex((hostname, port))
+            elapsed = (time.time() - start) * 1000
+
+            return {
+                "hostname": hostname,
+                "port": port,
+                "is_up": result == 0,
+                "response_ms": round(elapsed, 2),
+                "error": None,
+            }
+    except socket.error as e:
+        return {
+            "hostname": hostname,
+            "port": port,
+            "is_up": False,
+            "response_ms": None,
+            "error": str(e),
+        }
+
+# Use the result
+result = check_server("localhost", 22)
+if result["is_up"]:
+    print(f"{result['hostname']} is up ({result['response_ms']}ms)")
+else:
+    print(f"{result['hostname']} is down: {result['error']}")
+```
+
+### *args and **kwargs
+
+```python
+# *args — accept any number of positional arguments
+def check_servers(*hostnames):
+    """Check multiple servers at once."""
+    results = []
+    for hostname in hostnames:
+        results.append(check_server(hostname))
+    return results
+
+results = check_servers("web-01", "web-02", "api-01")
+
+# **kwargs — accept any number of keyword arguments
+def create_resource(resource_type, name, **properties):
+    """Create a cloud resource with arbitrary properties."""
+    resource = {
+        "type": resource_type,
+        "name": name,
+        **properties,
+    }
+    print(f"Creating {resource_type}: {name}")
+    for key, value in properties.items():
+        print(f"  {key}: {value}")
+    return resource
+
+# Use it — pass any properties you want
+vm = create_resource("vm", "web-01",
+    instance_type="t3.medium",
+    region="us-east-1",
+    disk_size=100,
+    tags={"env": "production"},
+)
+
+# Combine both: accept anything
+def run_command(command, *args, **options):
+    """Run a command with arguments and options."""
+    print(f"Command: {command}")
+    print(f"Args: {args}")
+    print(f"Options: {options}")
+```
+
+## Type Hints
+
+Type hints document what your functions expect and return. They don't enforce types at runtime but enable IDE autocomplete, catch bugs with mypy, and serve as documentation.
+
+```python
+from typing import Optional, Union
+
+def check_port(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Check if a TCP port is open."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            return sock.connect_ex((host, port)) == 0
+    except socket.error:
+        return False
+
+def get_servers(role: str, region: Optional[str] = None) -> list[dict]:
+    """Get servers filtered by role and optionally by region."""
+    pass
+
+def parse_port(value: Union[str, int]) -> int:
+    """Parse a port from string or int."""
+    return int(value)
+
+def deploy(
+    service: str,
+    version: str,
+    environment: str = "staging",
+    replicas: int = 1,
+    dry_run: bool = False,
+) -> dict[str, str]:
+    """Deploy a service and return deployment info."""
+    return {
+        "service": service,
+        "version": version,
+        "status": "deployed",
+    }
+```
+
+<Callout type="tip" title="Type Hints Are Documentation">
+Even if you never run mypy, type hints make your code self-documenting. `def deploy(service: str, version: str) -> dict` tells you everything about the function interface at a glance.
+</Callout>
+
+### Docstrings (Google Style)
+
+```python
+def scale_service(
+    service: str,
+    replicas: int,
+    environment: str = "staging",
+) -> dict[str, str]:
+    """Scale a service to the specified number of replicas.
+
+    This function adjusts the replica count for a service in the
+    given environment. It waits for the scaling operation to complete
+    before returning.
+
+    Args:
+        service: Name of the service to scale.
+        replicas: Target number of replicas (must be >= 0).
+        environment: Target environment (default: staging).
+
+    Returns:
+        Dictionary with scaling results containing:
+            - service: The service name
+            - previous_replicas: Count before scaling
+            - current_replicas: Count after scaling
+            - status: "success" or "failed"
+
+    Raises:
+        ValueError: If replicas is negative.
+        ConnectionError: If unable to reach the orchestrator.
+    """
+    if replicas < 0:
+        raise ValueError(f"Replicas must be >= 0, got {replicas}")
+
+    # Implementation here
+    return {"service": service, "status": "success"}
+```
+
+### Lambda Functions
+
+Lambdas are anonymous one-line functions — useful for sorting and filtering:
+
+```python
+# Sort servers by CPU usage
+servers = [
+    {"name": "web-01", "cpu": 85},
+    {"name": "api-01", "cpu": 45},
+    {"name": "db-01", "cpu": 92},
+]
+
+by_cpu = sorted(servers, key=lambda s: s["cpu"], reverse=True)
+# [{'name': 'db-01', 'cpu': 92}, {'name': 'web-01', 'cpu': 85}, ...]
+
+# Filter with lambda
+high_cpu = list(filter(lambda s: s["cpu"] > 80, servers))
+# Better as a comprehension:
+high_cpu = [s for s in servers if s["cpu"] > 80]
+```
+
+## Decorators
+
+Decorators wrap functions to add behavior without modifying the original function. They're perfect for cross-cutting concerns like retry logic, timing, and logging.
+
+### Timer Decorator
+
+```python
+import time
+import functools
+
+def timer(func):
+    """Measure and print execution time of a function."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        elapsed = time.time() - start
+        print(f"  [{func.__name__}] completed in {elapsed:.3f}s")
+        return result
+    return wrapper
+
+@timer
+def deploy_service(service):
+    """Deploy a service (simulated)."""
+    time.sleep(0.5)  # Simulate work
+    return {"status": "deployed"}
+
+# When you call deploy_service(), the timer decorator runs automatically
+result = deploy_service("web-api")
+# [deploy_service] completed in 0.502s
+```
+
+### Retry Decorator
+
+```python
+import time
+import functools
+
+def retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
+    """Retry a function on failure with exponential backoff.
+
+    Args:
+        max_attempts: Maximum number of attempts.
+        delay: Initial delay between retries in seconds.
+        backoff: Multiplier for delay after each retry.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            current_delay = delay
+            last_exception = None
+
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt == max_attempts:
+                        print(f"  [{func.__name__}] Failed after {max_attempts} attempts: {e}")
+                        raise
+                    print(f"  [{func.__name__}] Attempt {attempt} failed: {e}. "
+                          f"Retrying in {current_delay}s...")
+                    time.sleep(current_delay)
+                    current_delay *= backoff
+
+        return wrapper
+    return decorator
+
+@retry(max_attempts=3, delay=1.0, backoff=2.0)
+def call_api(url):
+    """Call an API endpoint (may fail)."""
+    import requests
+    response = requests.get(url, timeout=5)
+    response.raise_for_status()
+    return response.json()
+
+# Usage — retries automatically on failure
+# result = call_api("https://api.example.com/health")
+```
+
+### Logging Decorator
+
+```python
+import functools
+import logging
+
+logger = logging.getLogger(__name__)
+
+def log_call(func):
+    """Log function calls with arguments and return values."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        args_repr = [repr(a) for a in args]
+        kwargs_repr = [f"{k}={v!r}" for k, v in kwargs.items()]
+        signature = ", ".join(args_repr + kwargs_repr)
+        logger.info(f"Calling {func.__name__}({signature})")
+
+        try:
+            result = func(*args, **kwargs)
+            logger.info(f"{func.__name__} returned {result!r}")
+            return result
+        except Exception as e:
+            logger.error(f"{func.__name__} raised {type(e).__name__}: {e}")
+            raise
+
+    return wrapper
+
+@log_call
+def restart_service(service_name, force=False):
+    """Restart a service."""
+    return {"service": service_name, "status": "restarted"}
+```
+
+<Callout type="warning" title="Always Use @functools.wraps">
+Without `@functools.wraps(func)`, the decorator replaces the function's `__name__` and `__doc__` attributes. This breaks debugging, logging, and documentation. Always include it.
+</Callout>
+
+## Modules and Packages
+
+### Importing Modules
+
+```python
+# Import the whole module
+import os
+import sys
+import json
+
+# Import specific items
+from pathlib import Path
+from datetime import datetime, timedelta
+from collections import defaultdict, Counter
+
+# Import with alias
+import subprocess as sp
+from datetime import datetime as dt
+
+# Import everything (avoid — pollutes namespace)
+# from os import *  ← Don't do this
+```
+
+### The __name__ == "__main__" Pattern
+
+```python
+#!/usr/bin/env python3
+"""server_utils.py — Utility functions for server management."""
+
+import socket
+
+def check_port(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Check if a TCP port is open."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            return sock.connect_ex((host, port)) == 0
+    except socket.error:
+        return False
+
+def get_hostname() -> str:
+    """Get the current hostname."""
+    return socket.gethostname()
+
+# This block runs only when the file is executed directly,
+# not when it's imported
+if __name__ == "__main__":
+    # Self-test / demo
+    print(f"Hostname: {get_hostname()}")
+    print(f"Port 22: {'open' if check_port('localhost', 22) else 'closed'}")
+    print(f"Port 80: {'open' if check_port('localhost', 80) else 'closed'}")
+```
+
+```python
+# Other scripts can import from it
+from server_utils import check_port, get_hostname
+
+if check_port("web-01", 8080):
+    print("web-01 is responding")
+```
+
+### Creating Packages
+
+A package is a directory with an `__init__.py` file:
+
+```text
+devops_lib/
+├── __init__.py          # Makes this a package
+├── servers.py           # Server-related functions
+├── notifications.py     # Slack/email notifications
+├── cloud/               # Sub-package for cloud providers
+│   ├── __init__.py
+│   ├── aws.py
+│   └── gcp.py
+└── decorators.py        # Reusable decorators
+```
+
+```python
+# devops_lib/__init__.py
+"""DevOps utility library."""
+
+from .decorators import retry, timer, log_call
+from .notifications import notify_slack
+
+__version__ = "1.0.0"
+```
+
+```python
+# Usage in scripts
+from devops_lib import retry, notify_slack
+from devops_lib.servers import check_port
+from devops_lib.cloud.aws import get_instances
+```
+
+## Standard Library Highlights for DevOps
+
+### os and sys — System Interaction
+
+```python
+import os
+import sys
+
+# Environment variables
+db_host = os.environ.get("DB_HOST", "localhost")
+os.environ["LOG_LEVEL"] = "DEBUG"  # Set env var
+
+# Current directory and paths
+cwd = os.getcwd()
+home = os.path.expanduser("~")
+
+# Command-line arguments
+script_name = sys.argv[0]
+args = sys.argv[1:]
+
+# Exit with status code
+sys.exit(0)  # Success
+sys.exit(1)  # Failure
+```
+
+### pathlib — Modern File Paths
+
+```python
+from pathlib import Path
+
+# Create paths
+log_dir = Path("/var/log/myapp")
+config = Path.home() / ".config" / "myapp" / "config.yml"
+
+# Path operations
+print(config.name)       # "config.yml"
+print(config.stem)       # "config"
+print(config.suffix)     # ".yml"
+print(config.parent)     # "/home/user/.config/myapp"
+
+# Check existence
+if config.exists():
+    content = config.read_text()
+
+# Create directories
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# Glob for files
+for log_file in Path("/var/log").glob("*.log"):
+    print(f"Found log: {log_file}")
+
+# Recursive glob
+for py_file in Path(".").rglob("*.py"):
+    print(f"Python file: {py_file}")
+```
+
+### subprocess — Run External Commands
+
+```python
+import subprocess
+
+# Simple command
+result = subprocess.run(["ls", "-la", "/var/log"], capture_output=True, text=True)
+print(result.stdout)
+print(result.returncode)  # 0 = success
+
+# Command with error handling
+result = subprocess.run(
+    ["systemctl", "status", "nginx"],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"nginx is not running: {result.stderr}")
+
+# Command with shell (use sparingly — security risk with user input)
+result = subprocess.run(
+    "df -h | grep '/dev/'",
+    shell=True,
+    capture_output=True,
+    text=True,
+)
+```
+
+### datetime — Time Operations
+
+```python
+from datetime import datetime, timedelta
+
+# Current time
+now = datetime.now()
+utc_now = datetime.utcnow()
+
+# Format timestamps
+print(now.strftime("%Y-%m-%d %H:%M:%S"))  # 2024-03-15 14:30:45
+print(now.isoformat())                      # 2024-03-15T14:30:45.123456
+
+# Parse timestamps from logs
+log_time = datetime.strptime("2024-03-15 10:30:45", "%Y-%m-%d %H:%M:%S")
+
+# Time arithmetic
+one_hour_ago = now - timedelta(hours=1)
+tomorrow = now + timedelta(days=1)
+backup_age = now - log_time
+print(f"Backup age: {backup_age.days} days, {backup_age.seconds // 3600} hours")
+```
+
+### collections — Specialized Containers
+
+```python
+from collections import defaultdict, Counter, namedtuple
+
+# defaultdict — dict with automatic default values
+errors_by_host = defaultdict(list)
+errors_by_host["web-01"].append("timeout")
+errors_by_host["web-01"].append("502")
+errors_by_host["web-02"].append("connection refused")
+
+# Counter — count occurrences
+log_levels = ["ERROR", "INFO", "ERROR", "WARN", "INFO", "INFO", "ERROR"]
+counts = Counter(log_levels)
+print(counts.most_common())  # [('INFO', 3), ('ERROR', 3), ('WARN', 1)]
+
+# namedtuple — lightweight immutable objects
+Server = namedtuple("Server", ["hostname", "ip", "role"])
+web1 = Server("web-01", "10.0.1.10", "frontend")
+print(web1.hostname)  # "web-01"
+```
+
+<Exercise number={1} title="Build a Retry Decorator">
+
+Create a configurable retry decorator and test it with a flaky function:
+
+```python
+#!/usr/bin/env python3
+"""Build and test a retry decorator."""
+
+import time
+import functools
+import random
+
+def retry(max_attempts=3, delay=1.0, backoff=2.0, exceptions=(Exception,)):
+    """Retry decorator with exponential backoff.
+
+    Args:
+        max_attempts: Maximum retry attempts.
+        delay: Initial delay between retries (seconds).
+        backoff: Multiplier applied to delay after each retry.
+        exceptions: Tuple of exception types to catch.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            current_delay = delay
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    if attempt > 1:
+                        print(f"  [{func.__name__}] Succeeded on attempt {attempt}")
+                    return result
+                except exceptions as e:
+                    if attempt == max_attempts:
+                        print(f"  [{func.__name__}] Failed after {max_attempts} attempts")
+                        raise
+                    print(f"  [{func.__name__}] Attempt {attempt} failed: {e}. "
+                          f"Retrying in {current_delay:.1f}s...")
+                    time.sleep(current_delay)
+                    current_delay *= backoff
+        return wrapper
+    return decorator
+
+# Test with a flaky function that fails randomly
+call_count = 0
+
+@retry(max_attempts=5, delay=0.1, backoff=1.5)
+def flaky_api_call(endpoint):
+    """Simulate an unreliable API call."""
+    global call_count
+    call_count += 1
+    if random.random() < 0.6:  # 60% chance of failure
+        raise ConnectionError(f"Connection to {endpoint} refused")
+    return {"status": "ok", "endpoint": endpoint}
+
+# Test the retry decorator
+print("Testing retry decorator:\n")
+for i in range(3):
+    call_count = 0
+    try:
+        result = flaky_api_call(f"/api/test/{i}")
+        print(f"  Result: {result}\n")
+    except ConnectionError:
+        print(f"  Gave up after all retries\n")
+```
+
+</Exercise>
+
+<Exercise number={2} title="Standard Library Exploration">
+
+Use standard library modules to build DevOps utility functions:
+
+```python
+#!/usr/bin/env python3
+"""Standard library utilities for DevOps."""
+
+import os
+import sys
+import subprocess
+import json
+from pathlib import Path
+from datetime import datetime, timedelta
+from collections import Counter, defaultdict
+
+# 1. Run a command and parse its output
+def run_command(cmd, timeout=30):
+    """Run a shell command and return (success, stdout, stderr)."""
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=timeout
+        )
+        return result.returncode == 0, result.stdout.strip(), result.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return False, "", f"Command timed out after {timeout}s"
+
+# 2. Find files modified in the last N hours
+def find_recent_files(directory, hours=24, pattern="*"):
+    """Find files modified within the last N hours."""
+    cutoff = datetime.now() - timedelta(hours=hours)
+    path = Path(directory)
+    recent = []
+
+    if not path.exists():
+        return recent
+
+    for file_path in path.rglob(pattern):
+        if file_path.is_file():
+            mod_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+            if mod_time > cutoff:
+                recent.append({
+                    "path": str(file_path),
+                    "size": file_path.stat().st_size,
+                    "modified": mod_time.isoformat(),
+                })
+
+    return sorted(recent, key=lambda f: f["modified"], reverse=True)
+
+# 3. Parse environment into a config dict
+def get_app_config(prefix="APP_"):
+    """Extract all environment variables with a given prefix into a config dict."""
+    config = {}
+    for key, value in os.environ.items():
+        if key.startswith(prefix):
+            clean_key = key[len(prefix):].lower()
+            # Try to convert types
+            if value.lower() in ("true", "false"):
+                config[clean_key] = value.lower() == "true"
+            elif value.isdigit():
+                config[clean_key] = int(value)
+            else:
+                config[clean_key] = value
+    return config
+
+# 4. Summarize disk usage by directory
+def disk_usage_summary(directory, depth=1):
+    """Summarize disk usage by subdirectory."""
+    path = Path(directory)
+    if not path.exists():
+        return {}
+
+    usage = defaultdict(int)
+    for file_path in path.rglob("*"):
+        if file_path.is_file():
+            # Get the relative path at the desired depth
+            try:
+                relative = file_path.relative_to(path)
+                parts = relative.parts
+                key = str(Path(*parts[:depth])) if len(parts) > depth else str(relative)
+                usage[key] += file_path.stat().st_size
+            except (ValueError, PermissionError):
+                continue
+
+    return dict(sorted(usage.items(), key=lambda x: x[1], reverse=True))
+
+# Demo
+print("=== DevOps Standard Library Utilities ===\n")
+
+# Test run_command
+print("[1] Running system commands:")
+success, stdout, stderr = run_command("uname -a")
+print(f"  uname: {stdout[:80]}...")
+
+success, stdout, stderr = run_command("python3 --version")
+print(f"  Python: {stdout}")
+
+# Test find_recent_files
+print(f"\n[2] Recent Python files in current directory:")
+recent = find_recent_files(".", hours=48, pattern="*.py")
+for f in recent[:5]:
+    print(f"  {f['path']} ({f['size']} bytes) modified {f['modified']}")
+
+# Test config parser
+print(f"\n[3] App configuration from environment:")
+os.environ.update({"APP_PORT": "8080", "APP_DEBUG": "true", "APP_NAME": "demo"})
+config = get_app_config()
+print(f"  Config: {json.dumps(config, indent=4)}")
+
+# Test disk usage
+print(f"\n[4] Disk usage summary:")
+usage = disk_usage_summary(".", depth=1)
+for path_name, size in list(usage.items())[:5]:
+    size_kb = size / 1024
+    print(f"  {path_name:<30} {size_kb:>10.1f} KB")
+```
+
+</Exercise>
+
+<MiniProject title="DevOps Utility Library">
+
+Build a reusable DevOps utility library with decorators, helper functions, and a clean module structure:
+
+```python
+#!/usr/bin/env python3
+"""devops_toolkit.py — A reusable DevOps utility library.
+
+Provides decorators (retry, timer, log_call), notification helpers,
+and common DevOps utility functions. Designed to be imported by
+automation scripts.
+
+Usage:
+    from devops_toolkit import retry, timer, notify
+    # or run directly for self-test:
+    python3 devops_toolkit.py
+"""
+
+import functools
+import logging
+import os
+import socket
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+# ============================================================
+# Logging Setup
+# ============================================================
+
+def setup_logging(
+    level: str = "INFO",
+    log_format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    log_file: Optional[str] = None,
+) -> logging.Logger:
+    """Configure logging for a DevOps script.
+
+    Args:
+        level: Log level (DEBUG, INFO, WARNING, ERROR).
+        log_format: Format string for log messages.
+        log_file: Optional file path to write logs to.
+
+    Returns:
+        Configured root logger.
+    """
+    logger = logging.getLogger()
+    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+    # Console handler
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(console)
+
+    # File handler (optional)
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S"))
+        logger.addHandler(file_handler)
+
+    return logger
+
+
+# ============================================================
+# Decorators
+# ============================================================
+
+def timer(func):
+    """Measure and log execution time."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        logger = logging.getLogger(func.__module__)
+        start = time.time()
+        try:
+            result = func(*args, **kwargs)
+            elapsed = time.time() - start
+            logger.info(f"{func.__name__} completed in {elapsed:.3f}s")
+            return result
+        except Exception:
+            elapsed = time.time() - start
+            logger.error(f"{func.__name__} failed after {elapsed:.3f}s")
+            raise
+    return wrapper
+
+
+def retry(
+    max_attempts: int = 3,
+    delay: float = 1.0,
+    backoff: float = 2.0,
+    exceptions: tuple = (Exception,),
+):
+    """Retry a function with exponential backoff.
+
+    Args:
+        max_attempts: Maximum number of attempts.
+        delay: Initial delay between retries (seconds).
+        backoff: Multiplier for delay after each retry.
+        exceptions: Exception types to catch and retry on.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            logger = logging.getLogger(func.__module__)
+            current_delay = delay
+
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    if attempt == max_attempts:
+                        logger.error(
+                            f"{func.__name__} failed after {max_attempts} attempts: {e}"
+                        )
+                        raise
+                    logger.warning(
+                        f"{func.__name__} attempt {attempt}/{max_attempts} failed: {e}. "
+                        f"Retrying in {current_delay:.1f}s..."
+                    )
+                    time.sleep(current_delay)
+                    current_delay *= backoff
+
+        return wrapper
+    return decorator
+
+
+def log_call(func):
+    """Log function calls with arguments and results."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        logger = logging.getLogger(func.__module__)
+        args_str = ", ".join(
+            [repr(a) for a in args] +
+            [f"{k}={v!r}" for k, v in kwargs.items()]
+        )
+        logger.debug(f"Calling {func.__name__}({args_str})")
+
+        try:
+            result = func(*args, **kwargs)
+            logger.debug(f"{func.__name__} returned {result!r}")
+            return result
+        except Exception as e:
+            logger.error(f"{func.__name__} raised {type(e).__name__}: {e}")
+            raise
+
+    return wrapper
+
+
+# ============================================================
+# Utility Functions
+# ============================================================
+
+def check_port(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Check if a TCP port is accepting connections."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            return sock.connect_ex((host, port)) == 0
+    except socket.error:
+        return False
+
+
+def run_command(
+    command: str,
+    timeout: int = 30,
+    check: bool = False,
+) -> dict:
+    """Run a shell command and return structured results.
+
+    Args:
+        command: Shell command to execute.
+        timeout: Maximum execution time in seconds.
+        check: If True, raise on non-zero exit code.
+
+    Returns:
+        Dict with keys: success, exit_code, stdout, stderr, duration_ms.
+    """
+    start = time.time()
+    try:
+        result = subprocess.run(
+            command, shell=True, capture_output=True,
+            text=True, timeout=timeout,
+        )
+        duration_ms = (time.time() - start) * 1000
+
+        output = {
+            "success": result.returncode == 0,
+            "exit_code": result.returncode,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+            "duration_ms": round(duration_ms, 2),
+        }
+
+        if check and result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode, command, result.stdout, result.stderr
+            )
+
+        return output
+
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"Command timed out after {timeout}s",
+            "duration_ms": timeout * 1000,
+        }
+
+
+def notify(message: str, level: str = "info", channel: str = "console"):
+    """Send a notification. Supports console output and Slack webhook.
+
+    Args:
+        message: Notification message.
+        level: Severity level (info, warning, error, critical).
+        channel: Notification channel (console, slack).
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    formatted = f"[{timestamp}] [{level.upper()}] {message}"
+
+    if channel == "console":
+        print(formatted)
+    elif channel == "slack":
+        webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+        if not webhook_url:
+            print(f"SLACK_WEBHOOK_URL not set — falling back to console")
+            print(formatted)
+            return
+
+        import requests
+        color_map = {"info": "#36a64f", "warning": "#ff9900",
+                     "error": "#ff0000", "critical": "#8b0000"}
+        payload = {
+            "attachments": [{
+                "color": color_map.get(level, "#808080"),
+                "text": message,
+                "footer": f"DevOps Toolkit | {timestamp}",
+            }]
+        }
+        try:
+            requests.post(webhook_url, json=payload, timeout=10)
+        except Exception as e:
+            print(f"Slack notification failed: {e}")
+            print(formatted)
+
+
+def wait_for_service(
+    host: str,
+    port: int,
+    timeout: int = 60,
+    interval: int = 5,
+) -> bool:
+    """Wait for a service to become available.
+
+    Args:
+        host: Hostname to check.
+        port: Port to check.
+        timeout: Maximum wait time in seconds.
+        interval: Check interval in seconds.
+
+    Returns:
+        True if service became available, False if timed out.
+    """
+    logger = logging.getLogger(__name__)
+    elapsed = 0
+
+    while elapsed < timeout:
+        if check_port(host, port):
+            logger.info(f"{host}:{port} is ready (waited {elapsed}s)")
+            return True
+        logger.info(f"Waiting for {host}:{port}... ({elapsed}s/{timeout}s)")
+        time.sleep(interval)
+        elapsed += interval
+
+    logger.error(f"{host}:{port} not ready after {timeout}s")
+    return False
+
+
+# ============================================================
+# Self-Test
+# ============================================================
+
+if __name__ == "__main__":
+    # Set up logging for self-test
+    setup_logging(level="DEBUG")
+    logger = logging.getLogger(__name__)
+
+    print("=" * 60)
+    print("  DevOps Toolkit — Self Test")
+    print("=" * 60)
+
+    # Test timer decorator
+    @timer
+    def slow_task():
+        time.sleep(0.2)
+        return "done"
+
+    print("\n[1] Timer decorator:")
+    slow_task()
+
+    # Test retry decorator
+    attempt_counter = 0
+
+    @retry(max_attempts=3, delay=0.1, backoff=1.5)
+    def flaky_operation():
+        global attempt_counter
+        attempt_counter += 1
+        if attempt_counter < 3:
+            raise ConnectionError("Simulated failure")
+        return "success"
+
+    print("\n[2] Retry decorator:")
+    result = flaky_operation()
+    print(f"  Result: {result}")
+
+    # Test run_command
+    print("\n[3] run_command:")
+    result = run_command("python3 --version")
+    print(f"  Python version: {result['stdout']}")
+    print(f"  Duration: {result['duration_ms']}ms")
+
+    # Test check_port
+    print("\n[4] check_port:")
+    for port in [22, 80, 443, 8080]:
+        status = "open" if check_port("localhost", port, timeout=1) else "closed"
+        print(f"  localhost:{port} = {status}")
+
+    # Test notify
+    print("\n[5] Notifications:")
+    notify("Deployment started", level="info")
+    notify("High CPU usage detected", level="warning")
+    notify("Database connection failed", level="error")
+
+    print("\n" + "=" * 60)
+    print("  All self-tests passed")
+    print("=" * 60)
+```
+
+This library is designed to be imported into any DevOps script: `from devops_toolkit import retry, timer, run_command, notify`. One library, consistent behavior across all your automation.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Functions should do one thing and have clear names — `check_port()`, not `do_stuff()`
+- Type hints serve as documentation even without mypy — `def deploy(service: str) -> dict`
+- Use Google-style docstrings for all public functions
+- Decorators handle cross-cutting concerns: retry, timing, logging, authentication
+- Always use `@functools.wraps(func)` in decorators to preserve function metadata
+- `__name__ == "__main__"` lets a file be both a module and a standalone script
+- Standard library essentials: `os`, `sys`, `pathlib`, `subprocess`, `datetime`, `collections`
+
+## What's Next
+
+You can write and organize reusable Python code. In **File Operations**, you'll learn to read, write, and manage files — parsing configs, processing logs, managing directories, and handling the file operations that every automation script needs.

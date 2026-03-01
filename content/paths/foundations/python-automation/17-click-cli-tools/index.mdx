@@ -1,0 +1,1238 @@
+---
+title: "Building CLI Tools with Click"
+description: "Build professional command-line tools. Master Click for argument parsing, subcommands, output formatting, and the CLI patterns that make tools people actually want to use."
+order: 17
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 16-kubernetes-client
+objectives:
+  - Build CLI tools with Click decorators and commands
+  - Add options, arguments, types, and validation
+  - Organize commands into groups with subcommands
+  - Format output with colors, tables, and progress bars
+  - Package and distribute CLI tools with entry points
+tags:
+  - python
+  - click
+  - cli
+  - tools
+---
+
+<Callout type="story" title="The Story">
+Your team has a dozen Python scripts for common DevOps tasks: checking server health, deploying services, managing configs. Everyone runs them differently — some pass arguments in the wrong order, some forget required flags, some do not know the scripts exist. You consolidate them into a single CLI tool with `devops server status`, `devops deploy app`, and `devops config set`. Tab completion, help text, colored output. Suddenly everyone uses the same commands, the same way, and the scripts actually get maintained.
+</Callout>
+
+## Click Basics
+
+Click is a Python library for building command-line interfaces. It uses decorators to define commands, options, and arguments — turning a regular function into a CLI tool with minimal boilerplate.
+
+```python
+# pip install click
+
+import click
+
+# The simplest Click command
+@click.command()
+@click.option("--name", "-n", default="World", help="Who to greet.")
+@click.option("--count", "-c", default=1, help="Number of greetings.", type=int)
+def hello(name, count):
+    """A simple greeting CLI tool."""
+    for _ in range(count):
+        click.echo(f"Hello, {name}!")
+
+# Run it:
+# python hello.py --name DevOps --count 3
+# python hello.py -n DevOps -c 3
+# python hello.py --help
+
+if __name__ == "__main__":
+    hello()
+```
+
+```
+$ python hello.py --help
+Usage: hello.py [OPTIONS]
+
+  A simple greeting CLI tool.
+
+Options:
+  -n, --name TEXT     Who to greet.
+  -c, --count INTEGER Number of greetings.
+  --help              Show this message and exit.
+```
+
+<Callout type="tip" title="click.echo vs print">
+Use `click.echo()` instead of `print()` in Click applications. It handles encoding issues on different platforms, works correctly when output is piped, and integrates with Click's testing utilities. `click.echo()` is the `print()` that does not break in production.
+</Callout>
+
+## Options and Arguments
+
+Click distinguishes between **options** (flags like `--verbose`) and **arguments** (positional values like a filename). Understanding the difference is key to building intuitive CLIs.
+
+### Options with Types and Validation
+
+```python
+import click
+
+@click.command()
+@click.option("--host", "-h", required=True, help="Server hostname.")
+@click.option("--port", "-p", default=22, type=int, help="SSH port.")
+@click.option("--user", "-u", envvar="SSH_USER", help="Username (or set SSH_USER env).")
+@click.option("--timeout", type=click.IntRange(1, 300), default=30, help="Timeout in seconds (1-300).")
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output.")
+@click.option(
+    "--format", "output_format",          # Rename to avoid shadowing built-in
+    type=click.Choice(["text", "json", "yaml"], case_sensitive=False),
+    default="text",
+    help="Output format.",
+)
+@click.option(
+    "--config", type=click.Path(exists=True, dir_okay=False),
+    help="Path to config file.",
+)
+def connect(host, port, user, timeout, verbose, output_format, config):
+    """Connect to a remote server."""
+    if verbose:
+        click.echo(f"Connecting to {user}@{host}:{port} (timeout={timeout}s)")
+        click.echo(f"Output format: {output_format}")
+    click.echo(f"Connected to {host}")
+
+# Run it:
+# python connect.py --host server1 --port 2222 --user admin -v
+# SSH_USER=admin python connect.py -h server1 --format json
+```
+
+### Arguments (Positional Values)
+
+```python
+import click
+
+@click.command()
+@click.argument("source", type=click.Path(exists=True))
+@click.argument("destination", type=click.Path())
+@click.option("--dry-run", is_flag=True, help="Show what would be done.")
+def deploy(source, destination, dry_run):
+    """Deploy SOURCE directory to DESTINATION."""
+    if dry_run:
+        click.echo(f"Would deploy {source} -> {destination}")
+    else:
+        click.echo(f"Deploying {source} -> {destination}")
+
+# Run it:
+# python deploy.py ./build/ /var/www/app/
+# python deploy.py ./build/ /var/www/app/ --dry-run
+
+
+# Variable number of arguments
+@click.command()
+@click.argument("servers", nargs=-1, required=True)
+@click.option("--command", "-c", required=True, help="Command to run.")
+def run_on(servers, command):
+    """Run a command on one or more SERVERS."""
+    for server in servers:
+        click.echo(f"[{server}] Running: {command}")
+
+# Run it:
+# python run_on.py web1 web2 web3 -c "systemctl restart nginx"
+```
+
+### Prompting for Input
+
+```python
+import click
+
+@click.command()
+@click.option("--name", prompt="Service name", help="Name of the service.")
+@click.option(
+    "--password",
+    prompt=True,
+    hide_input=True,
+    confirmation_prompt=True,
+    help="Service password.",
+)
+@click.option(
+    "--confirm",
+    is_flag=True,
+    help="Skip confirmation prompt.",
+)
+def create_service(name, password, confirm):
+    """Create a new service configuration."""
+    if not confirm:
+        click.confirm(f"Create service '{name}'?", abort=True)
+
+    click.echo(f"Created service: {name}")
+
+# Without flags, it prompts interactively:
+# $ python create.py
+# Service name: my-api
+# Password: ****
+# Repeat for confirmation: ****
+# Create service 'my-api'? [y/N]: y
+# Created service: my-api
+```
+
+## Command Groups and Subcommands
+
+Real CLI tools have subcommands: `git commit`, `docker run`, `kubectl get`. Click handles this with `@click.group()`.
+
+```python
+import click
+
+@click.group()
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output.")
+@click.pass_context
+def cli(ctx, verbose):
+    """DevOps management tool."""
+    # ctx.ensure_object(dict) creates ctx.obj if it does not exist
+    ctx.ensure_object(dict)
+    ctx.obj["VERBOSE"] = verbose
+
+
+@cli.command()
+@click.argument("name")
+@click.option("--port", "-p", default=80, type=int, help="Service port.")
+@click.pass_context
+def status(ctx, name, port):
+    """Check the status of a service."""
+    verbose = ctx.obj["VERBOSE"]
+    if verbose:
+        click.echo(f"Checking {name} on port {port}...")
+    click.echo(f"{name}: running (port {port})")
+
+
+@cli.command()
+@click.argument("name")
+@click.option("--replicas", "-r", default=1, type=int, help="Number of replicas.")
+@click.pass_context
+def scale(ctx, name, replicas):
+    """Scale a service to N replicas."""
+    click.echo(f"Scaling {name} to {replicas} replicas...")
+    click.echo(f"Done.")
+
+
+@cli.command()
+@click.argument("name")
+@click.option("--image", "-i", required=True, help="Docker image to deploy.")
+@click.option("--env", "-e", multiple=True, help="Environment variable (KEY=VALUE).")
+@click.option("--dry-run", is_flag=True, help="Show what would be deployed.")
+def deploy(name, image, env, dry_run):
+    """Deploy a service."""
+    if dry_run:
+        click.echo(f"[DRY RUN] Would deploy {name} with image {image}")
+        for e in env:
+            click.echo(f"  env: {e}")
+        return
+
+    click.echo(f"Deploying {name}...")
+    click.echo(f"  Image: {image}")
+    for e in env:
+        click.echo(f"  Env: {e}")
+    click.echo("Deploy complete.")
+
+# Usage:
+# python tool.py --help
+# python tool.py status web-api
+# python tool.py -v status web-api --port 8080
+# python tool.py scale web-api --replicas 5
+# python tool.py deploy web-api -i nginx:latest -e PORT=8080 -e ENV=prod
+
+if __name__ == "__main__":
+    cli()
+```
+
+### Nested Command Groups
+
+```python
+import click
+
+@click.group()
+def cli():
+    """DevOps toolkit."""
+    pass
+
+
+# --- Server commands ---
+@cli.group()
+def server():
+    """Manage servers."""
+    pass
+
+@server.command("list")
+@click.option("--env", type=click.Choice(["dev", "staging", "prod"]), help="Filter by environment.")
+def server_list(env):
+    """List all servers."""
+    click.echo(f"Listing servers" + (f" in {env}" if env else ""))
+
+@server.command()
+@click.argument("hostname")
+def ssh(hostname):
+    """SSH into a server."""
+    click.echo(f"Connecting to {hostname}...")
+
+
+# --- Config commands ---
+@cli.group()
+def config():
+    """Manage configuration."""
+    pass
+
+@config.command()
+@click.argument("key")
+def get(key):
+    """Get a config value."""
+    click.echo(f"{key} = some_value")
+
+@config.command("set")
+@click.argument("key")
+@click.argument("value")
+def set_config(key, value):
+    """Set a config value."""
+    click.echo(f"Set {key} = {value}")
+
+
+# Usage:
+# python tool.py server list --env prod
+# python tool.py server ssh web-01
+# python tool.py config get database_url
+# python tool.py config set log_level debug
+
+if __name__ == "__main__":
+    cli()
+```
+
+## Output Formatting
+
+Good CLI tools present information clearly. Click provides utilities for colored output, and you can combine it with libraries like `tabulate` for tables.
+
+### Colored and Styled Output
+
+```python
+import click
+
+# Basic colors
+click.echo(click.style("SUCCESS", fg="green", bold=True) + " Deployment complete")
+click.echo(click.style("WARNING", fg="yellow") + " High memory usage detected")
+click.echo(click.style("ERROR", fg="red", bold=True) + " Connection refused")
+
+# secho = style + echo (convenience shortcut)
+click.secho("All systems operational", fg="green")
+click.secho("Degraded performance", fg="yellow")
+click.secho("System failure!", fg="red", bold=True)
+
+# Available colors: black, red, green, yellow, blue, magenta, cyan, white
+# Styles: bold, dim, underline, blink, reverse
+
+
+def status_line(name, status, detail=""):
+    """Print a formatted status line with color."""
+    color_map = {
+        "ok": "green",
+        "running": "green",
+        "warning": "yellow",
+        "degraded": "yellow",
+        "error": "red",
+        "down": "red",
+    }
+    color = color_map.get(status.lower(), "white")
+    status_str = click.style(f"[{status.upper():8s}]", fg=color, bold=True)
+    click.echo(f"  {status_str}  {name:30s}  {detail}")
+
+
+# Usage
+status_line("web-server", "running", "port 8080")
+status_line("database", "degraded", "high latency")
+status_line("cache", "down", "connection refused")
+```
+
+### Tables with tabulate
+
+```python
+# pip install tabulate
+import click
+from tabulate import tabulate
+
+servers = [
+    {"name": "web-01", "ip": "10.0.1.10", "status": "running", "cpu": "23%"},
+    {"name": "web-02", "ip": "10.0.1.11", "status": "running", "cpu": "45%"},
+    {"name": "db-01", "ip": "10.0.2.10", "status": "running", "cpu": "67%"},
+    {"name": "cache-01", "ip": "10.0.3.10", "status": "stopped", "cpu": "0%"},
+]
+
+# Simple table
+headers = ["Name", "IP", "Status", "CPU"]
+rows = [[s["name"], s["ip"], s["status"], s["cpu"]] for s in servers]
+click.echo(tabulate(rows, headers=headers, tablefmt="simple"))
+
+# Other table formats: grid, pipe, github, fancy_grid, plain
+click.echo("\n" + tabulate(rows, headers=headers, tablefmt="grid"))
+```
+
+### Progress Bars
+
+```python
+import click
+import time
+
+# Simple progress bar
+items = range(100)
+with click.progressbar(items, label="Deploying") as bar:
+    for item in bar:
+        time.sleep(0.02)  # Simulate work
+
+# Progress bar with custom formatting
+files = ["app.py", "config.yaml", "Dockerfile", "requirements.txt", "tests.py"]
+with click.progressbar(files, label="Uploading files", show_pos=True) as bar:
+    for f in bar:
+        time.sleep(0.5)
+
+# Manual progress bar for unknown total
+with click.progressbar(length=1000, label="Processing logs") as bar:
+    processed = 0
+    while processed < 1000:
+        batch = min(50, 1000 - processed)
+        time.sleep(0.05)
+        processed += batch
+        bar.update(batch)
+```
+
+## File Handling
+
+Click provides special types for working with files safely:
+
+```python
+import click
+
+@click.command()
+@click.argument("input_file", type=click.File("r"))
+@click.argument("output_file", type=click.File("w"))
+def convert(input_file, output_file):
+    """Convert input file and write to output file."""
+    for line in input_file:
+        output_file.write(line.upper())
+    click.echo(f"Converted {input_file.name} -> {output_file.name}")
+
+# Supports stdin/stdout with "-"
+# python convert.py input.txt output.txt
+# cat input.txt | python convert.py - output.txt
+# python convert.py input.txt -   (writes to stdout)
+
+
+@click.command()
+@click.option(
+    "--output", "-o",
+    type=click.File("w"),
+    default="-",            # Default to stdout
+    help="Output file (default: stdout).",
+)
+def export(output):
+    """Export data to a file or stdout."""
+    output.write("exported data\n")
+```
+
+## Error Handling
+
+Click provides clean error handling that produces user-friendly messages instead of tracebacks:
+
+```python
+import click
+import sys
+
+@click.command()
+@click.argument("server")
+@click.option("--port", "-p", type=int, default=22)
+def connect(server, port):
+    """Connect to a server."""
+    # ClickException shows a clean error message and exits with code 1
+    if not server.strip():
+        raise click.ClickException("Server name cannot be empty")
+
+    # BadParameter points to the specific parameter that was wrong
+    if port < 1 or port > 65535:
+        raise click.BadParameter(f"Port must be 1-65535, got {port}", param_hint="'--port'")
+
+    # UsageError shows the error with a hint to use --help
+    try:
+        # Simulate connection
+        if server == "unreachable":
+            raise ConnectionError("Connection timed out")
+        click.echo(f"Connected to {server}:{port}")
+    except ConnectionError as e:
+        raise click.ClickException(f"Cannot connect to {server}:{port}: {e}")
+
+# Custom error handler for a group
+@click.group()
+def cli():
+    """Tool with error handling."""
+    pass
+
+@cli.command()
+@click.argument("name")
+def delete(name):
+    """Delete a resource."""
+    if not click.confirm(f"Really delete '{name}'?"):
+        raise click.Abort()
+    click.echo(f"Deleted: {name}")
+```
+
+<Callout type="warning" title="Never Show Tracebacks to Users">
+A CLI tool that dumps a Python traceback on error feels broken. Use `click.ClickException` for expected errors (missing files, bad input, connection failures). Reserve actual tracebacks for unexpected bugs, and even then, suggest running with `--debug` to see them. Your tool's error messages are part of its user interface.
+</Callout>
+
+## Packaging CLI Tools
+
+A CLI tool is only useful if people can install and run it easily. Python packaging with entry points makes your tool installable via `pip`.
+
+```python
+# pyproject.toml
+"""
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "devops-toolkit"
+version = "1.0.0"
+description = "DevOps CLI toolkit"
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.0",
+    "tabulate>=0.9",
+    "requests>=2.28",
+]
+
+[project.scripts]
+devops = "devops_toolkit.cli:cli"
+"""
+
+# After installing: pip install .
+# The 'devops' command becomes available system-wide:
+# devops server list
+# devops deploy web-app --image nginx:latest
+```
+
+## Testing CLI Tools
+
+Click includes `CliRunner` for testing commands without actually running them in a subprocess:
+
+```python
+from click.testing import CliRunner
+
+# Assuming 'cli' is your Click group/command
+# from myapp.cli import cli
+
+def test_status_command():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["status", "web-server"])
+
+    assert result.exit_code == 0
+    assert "web-server" in result.output
+    assert "running" in result.output
+
+
+def test_deploy_dry_run():
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "deploy", "web-app",
+        "--image", "nginx:latest",
+        "--dry-run",
+    ])
+
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.output
+    assert "nginx:latest" in result.output
+
+
+def test_missing_required_option():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["deploy", "web-app"])  # Missing --image
+
+    assert result.exit_code != 0
+    assert "Missing option" in result.output or "required" in result.output.lower()
+
+
+def test_with_environment_variables():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["status", "web"], env={"VERBOSE": "1"})
+    assert result.exit_code == 0
+
+
+def test_with_file_input():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        with open("config.yaml", "w") as f:
+            f.write("key: value\n")
+        result = runner.invoke(cli, ["config", "load", "config.yaml"])
+        assert result.exit_code == 0
+```
+
+<Exercise number={1} title="Server Management CLI">
+
+Build a CLI tool for managing servers with list, status, and ssh subcommands.
+
+```python
+#!/usr/bin/env python3
+"""Server management CLI built with Click."""
+
+import click
+import json
+import os
+from pathlib import Path
+from tabulate import tabulate
+
+# Simulated server inventory
+SERVERS = {
+    "web-01": {"ip": "10.0.1.10", "env": "prod", "role": "web", "status": "running"},
+    "web-02": {"ip": "10.0.1.11", "env": "prod", "role": "web", "status": "running"},
+    "web-03": {"ip": "10.0.1.12", "env": "staging", "role": "web", "status": "stopped"},
+    "db-01": {"ip": "10.0.2.10", "env": "prod", "role": "database", "status": "running"},
+    "db-02": {"ip": "10.0.2.11", "env": "staging", "role": "database", "status": "running"},
+    "cache-01": {"ip": "10.0.3.10", "env": "prod", "role": "cache", "status": "running"},
+    "cache-02": {"ip": "10.0.3.11", "env": "staging", "role": "cache", "status": "stopped"},
+}
+
+
+@click.group()
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output.")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["table", "json", "plain"], case_sensitive=False),
+    default="table",
+    help="Output format.",
+)
+@click.version_option(version="1.0.0")
+@click.pass_context
+def cli(ctx, verbose, output_format):
+    """Server management CLI tool.
+
+    Manage your infrastructure from the command line.
+    """
+    ctx.ensure_object(dict)
+    ctx.obj["VERBOSE"] = verbose
+    ctx.obj["FORMAT"] = output_format
+
+
+@cli.command("list")
+@click.option("--env", "-e", type=click.Choice(["dev", "staging", "prod"]),
+              help="Filter by environment.")
+@click.option("--role", "-r", type=click.Choice(["web", "database", "cache"]),
+              help="Filter by role.")
+@click.option("--status", "-s", type=click.Choice(["running", "stopped"]),
+              help="Filter by status.")
+@click.pass_context
+def list_servers(ctx, env, role, status):
+    """List servers with optional filtering."""
+    output_format = ctx.obj["FORMAT"]
+
+    # Apply filters
+    filtered = {}
+    for name, info in SERVERS.items():
+        if env and info["env"] != env:
+            continue
+        if role and info["role"] != role:
+            continue
+        if status and info["status"] != status:
+            continue
+        filtered[name] = info
+
+    if not filtered:
+        click.secho("No servers match the given filters.", fg="yellow")
+        return
+
+    if output_format == "json":
+        click.echo(json.dumps(filtered, indent=2))
+    elif output_format == "plain":
+        for name, info in filtered.items():
+            click.echo(f"{name} {info['ip']} {info['env']} {info['role']} {info['status']}")
+    else:
+        rows = []
+        for name, info in sorted(filtered.items()):
+            status_color = "green" if info["status"] == "running" else "red"
+            status_str = click.style(info["status"], fg=status_color)
+            rows.append([name, info["ip"], info["env"], info["role"], status_str])
+        headers = ["Name", "IP", "Environment", "Role", "Status"]
+        click.echo(tabulate(rows, headers=headers, tablefmt="simple"))
+
+    if ctx.obj["VERBOSE"]:
+        click.echo(f"\n  Showing {len(filtered)}/{len(SERVERS)} servers")
+
+
+@cli.command()
+@click.argument("server_name")
+@click.pass_context
+def status(ctx, server_name):
+    """Show detailed status of a specific server."""
+    if server_name not in SERVERS:
+        raise click.ClickException(f"Server '{server_name}' not found")
+
+    info = SERVERS[server_name]
+
+    if ctx.obj["FORMAT"] == "json":
+        click.echo(json.dumps({server_name: info}, indent=2))
+        return
+
+    click.secho(f"\n  Server: {server_name}", bold=True)
+    click.echo(f"  IP:     {info['ip']}")
+    click.echo(f"  Env:    {info['env']}")
+    click.echo(f"  Role:   {info['role']}")
+
+    status_color = "green" if info["status"] == "running" else "red"
+    click.echo(f"  Status: {click.style(info['status'], fg=status_color)}")
+    click.echo()
+
+
+@cli.command()
+@click.argument("server_name")
+@click.option("--user", "-u", default="admin", help="SSH username.")
+@click.option("--key", "-k", type=click.Path(exists=True), help="SSH key file.")
+def ssh(server_name, user, key):
+    """SSH into a server."""
+    if server_name not in SERVERS:
+        raise click.ClickException(f"Server '{server_name}' not found")
+
+    info = SERVERS[server_name]
+    if info["status"] != "running":
+        raise click.ClickException(f"Server '{server_name}' is not running")
+
+    cmd = f"ssh {user}@{info['ip']}"
+    if key:
+        cmd += f" -i {key}"
+
+    click.echo(f"Connecting: {cmd}")
+    # In a real tool: os.execvp("ssh", ["ssh", f"{user}@{info['ip']}"])
+
+
+@cli.command()
+@click.argument("server_names", nargs=-1, required=True)
+@click.option("--command", "-c", required=True, help="Command to execute.")
+@click.option("--parallel", is_flag=True, help="Run on all servers in parallel.")
+def exec(server_names, command, parallel):
+    """Execute a command on one or more servers."""
+    for name in server_names:
+        if name not in SERVERS:
+            click.secho(f"  [SKIP] {name}: not found", fg="yellow")
+            continue
+
+        info = SERVERS[name]
+        if info["status"] != "running":
+            click.secho(f"  [SKIP] {name}: not running", fg="yellow")
+            continue
+
+        click.echo(f"  [{name}] Running: {command}")
+        click.secho(f"  [{name}] OK", fg="green")
+
+
+if __name__ == "__main__":
+    cli()
+```
+
+</Exercise>
+
+<Exercise number={2} title="Config Manager CLI">
+
+Build a CLI tool for managing key-value configuration with get, set, list, and delete commands.
+
+```python
+#!/usr/bin/env python3
+"""Configuration manager CLI built with Click."""
+
+import click
+import json
+import os
+from pathlib import Path
+
+CONFIG_DIR = Path.home() / ".devops-config"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+def load_config():
+    """Load configuration from the JSON file."""
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def save_config(data):
+    """Save configuration to the JSON file."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+
+
+@click.group()
+@click.option("--config-file", type=click.Path(), help="Custom config file path.")
+@click.pass_context
+def cli(ctx, config_file):
+    """Configuration manager.
+
+    Manage key-value configuration for DevOps tools.
+    """
+    global CONFIG_FILE
+    if config_file:
+        CONFIG_FILE = Path(config_file)
+    ctx.ensure_object(dict)
+
+
+@cli.command("get")
+@click.argument("key")
+@click.option("--default", "default_value", help="Default value if key not found.")
+def get_value(key, default_value):
+    """Get a configuration value by KEY."""
+    config = load_config()
+
+    # Support dotted keys: database.host
+    parts = key.split(".")
+    value = config
+    for part in parts:
+        if isinstance(value, dict) and part in value:
+            value = value[part]
+        else:
+            if default_value is not None:
+                click.echo(default_value)
+                return
+            raise click.ClickException(f"Key not found: {key}")
+
+    if isinstance(value, dict):
+        click.echo(json.dumps(value, indent=2))
+    else:
+        click.echo(value)
+
+
+@cli.command("set")
+@click.argument("key")
+@click.argument("value")
+def set_value(key, value):
+    """Set a configuration value. Supports dotted keys (e.g., database.host)."""
+    config = load_config()
+
+    # Try to parse value as JSON (for numbers, booleans, lists)
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, ValueError):
+        parsed = value
+
+    # Support dotted keys
+    parts = key.split(".")
+    current = config
+    for part in parts[:-1]:
+        if part not in current or not isinstance(current[part], dict):
+            current[part] = {}
+        current = current[part]
+
+    old_value = current.get(parts[-1])
+    current[parts[-1]] = parsed
+    save_config(config)
+
+    if old_value is not None:
+        click.echo(f"Updated: {key} = {parsed} (was: {old_value})")
+    else:
+        click.echo(f"Set: {key} = {parsed}")
+
+
+@cli.command("list")
+@click.option("--prefix", "-p", help="Filter keys by prefix.")
+@click.option("--flat", is_flag=True, help="Show as flat key=value pairs.")
+def list_values(prefix, flat):
+    """List all configuration values."""
+    config = load_config()
+
+    if not config:
+        click.echo("No configuration values set.")
+        click.echo(f"Config file: {CONFIG_FILE}")
+        return
+
+    def flatten(d, parent_key=""):
+        """Flatten nested dict to dotted keys."""
+        items = {}
+        for k, v in d.items():
+            new_key = f"{parent_key}.{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.update(flatten(v, new_key))
+            else:
+                items[new_key] = v
+        return items
+
+    if flat or prefix:
+        flat_config = flatten(config)
+        for key in sorted(flat_config):
+            if prefix and not key.startswith(prefix):
+                continue
+            click.echo(f"  {key} = {flat_config[key]}")
+    else:
+        click.echo(json.dumps(config, indent=2, sort_keys=True))
+
+
+@cli.command("delete")
+@click.argument("key")
+@click.option("--force", "-f", is_flag=True, help="Skip confirmation.")
+def delete_value(key, force):
+    """Delete a configuration key."""
+    config = load_config()
+
+    parts = key.split(".")
+    current = config
+    for part in parts[:-1]:
+        if part not in current:
+            raise click.ClickException(f"Key not found: {key}")
+        current = current[part]
+
+    if parts[-1] not in current:
+        raise click.ClickException(f"Key not found: {key}")
+
+    if not force:
+        value = current[parts[-1]]
+        click.confirm(f"Delete '{key}' (current value: {value})?", abort=True)
+
+    del current[parts[-1]]
+    save_config(config)
+    click.secho(f"Deleted: {key}", fg="green")
+
+
+@cli.command("import")
+@click.argument("input_file", type=click.File("r"))
+@click.option("--merge", is_flag=True, help="Merge with existing config.")
+def import_config(input_file, merge):
+    """Import configuration from a JSON file."""
+    try:
+        new_config = json.load(input_file)
+    except json.JSONDecodeError as e:
+        raise click.ClickException(f"Invalid JSON: {e}")
+
+    if merge:
+        config = load_config()
+        config.update(new_config)
+        save_config(config)
+        click.echo(f"Merged {len(new_config)} keys from {input_file.name}")
+    else:
+        save_config(new_config)
+        click.echo(f"Imported {len(new_config)} keys from {input_file.name}")
+
+
+@cli.command("export")
+@click.option("--output", "-o", type=click.File("w"), default="-",
+              help="Output file (default: stdout).")
+def export_config(output):
+    """Export configuration to JSON."""
+    config = load_config()
+    json.dump(config, output, indent=2, sort_keys=True)
+    output.write("\n")
+    if output.name != "<stdout>":
+        click.echo(f"Exported to {output.name}", err=True)
+
+
+if __name__ == "__main__":
+    cli()
+```
+
+</Exercise>
+
+<MiniProject title="DevOps CLI Toolkit">
+
+Build a multi-command CLI tool with server, deploy, and config subcommand groups — a single entry point for common DevOps operations.
+
+```python
+#!/usr/bin/env python3
+"""
+DevOps CLI Toolkit
+A comprehensive CLI tool for common DevOps tasks: server management,
+deployments, and configuration.
+"""
+
+import click
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+
+# --- Shared State ---
+
+INVENTORY = {
+    "web-01": {"ip": "10.0.1.10", "env": "prod", "role": "web", "status": "running"},
+    "web-02": {"ip": "10.0.1.11", "env": "prod", "role": "web", "status": "running"},
+    "api-01": {"ip": "10.0.2.10", "env": "prod", "role": "api", "status": "running"},
+    "db-01": {"ip": "10.0.3.10", "env": "prod", "role": "database", "status": "running"},
+    "web-staging": {"ip": "10.1.1.10", "env": "staging", "role": "web", "status": "running"},
+    "db-staging": {"ip": "10.1.3.10", "env": "staging", "role": "database", "status": "stopped"},
+}
+
+
+# --- Main CLI Group ---
+
+@click.group()
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output.")
+@click.option("--quiet", "-q", is_flag=True, help="Suppress non-essential output.")
+@click.version_option(version="1.0.0", prog_name="devops")
+@click.pass_context
+def cli(ctx, verbose, quiet):
+    """DevOps CLI Toolkit -- manage servers, deployments, and configuration."""
+    ctx.ensure_object(dict)
+    ctx.obj["VERBOSE"] = verbose
+    ctx.obj["QUIET"] = quiet
+
+
+# === Server Commands ===
+
+@cli.group()
+@click.pass_context
+def server(ctx):
+    """Manage servers and infrastructure."""
+    pass
+
+
+@server.command("list")
+@click.option("--env", "-e", type=click.Choice(["dev", "staging", "prod"]))
+@click.option("--role", "-r", help="Filter by role.")
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+@click.pass_context
+def server_list(ctx, env, role, fmt):
+    """List all servers."""
+    filtered = {
+        name: info for name, info in INVENTORY.items()
+        if (not env or info["env"] == env)
+        and (not role or info["role"] == role)
+    }
+
+    if fmt == "json":
+        click.echo(json.dumps(filtered, indent=2))
+        return
+
+    if not filtered:
+        click.secho("No servers match filters.", fg="yellow")
+        return
+
+    click.echo(f"\n  {'NAME':15s} {'IP':16s} {'ENV':10s} {'ROLE':10s} {'STATUS'}")
+    click.echo(f"  {'-' * 65}")
+
+    for name in sorted(filtered):
+        info = filtered[name]
+        color = "green" if info["status"] == "running" else "red"
+        status = click.style(info["status"], fg=color)
+        click.echo(f"  {name:15s} {info['ip']:16s} {info['env']:10s} {info['role']:10s} {status}")
+
+    if not ctx.obj.get("QUIET"):
+        click.echo(f"\n  {len(filtered)} server(s)")
+
+
+@server.command()
+@click.argument("name")
+def info(name):
+    """Show detailed server information."""
+    if name not in INVENTORY:
+        raise click.ClickException(f"Server not found: {name}")
+
+    s = INVENTORY[name]
+    click.secho(f"\n  Server: {name}", bold=True)
+    for key, value in s.items():
+        if key == "status":
+            color = "green" if value == "running" else "red"
+            click.echo(f"  {key:12s}: {click.style(value, fg=color)}")
+        else:
+            click.echo(f"  {key:12s}: {value}")
+
+
+@server.command()
+@click.argument("names", nargs=-1, required=True)
+@click.option("--command", "-c", required=True, help="Command to run.")
+def exec(names, command):
+    """Execute a command on servers."""
+    for name in names:
+        if name not in INVENTORY:
+            click.secho(f"  [{name}] NOT FOUND", fg="red")
+            continue
+        if INVENTORY[name]["status"] != "running":
+            click.secho(f"  [{name}] SKIPPED (not running)", fg="yellow")
+            continue
+        click.echo(f"  [{name}] $ {command}")
+        click.secho(f"  [{name}] OK", fg="green")
+
+
+# === Deploy Commands ===
+
+@cli.group()
+@click.pass_context
+def deploy(ctx):
+    """Manage deployments."""
+    pass
+
+
+@deploy.command("app")
+@click.argument("app_name")
+@click.option("--image", "-i", required=True, help="Docker image to deploy.")
+@click.option("--env", "-e", type=click.Choice(["staging", "prod"]), default="staging")
+@click.option("--replicas", "-r", default=2, type=click.IntRange(1, 20))
+@click.option("--dry-run", is_flag=True, help="Preview the deployment.")
+@click.pass_context
+def deploy_app(ctx, app_name, image, env, replicas, dry_run):
+    """Deploy an application."""
+    prefix = "[DRY RUN] " if dry_run else ""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    click.secho(f"\n  {prefix}Deploying {app_name}", bold=True)
+    click.echo(f"  Image:     {image}")
+    click.echo(f"  Env:       {env}")
+    click.echo(f"  Replicas:  {replicas}")
+    click.echo(f"  Timestamp: {timestamp}")
+
+    if dry_run:
+        click.secho("\n  Dry run complete. No changes made.", fg="yellow")
+        return
+
+    # Simulate deployment steps
+    steps = [
+        "Pulling image",
+        "Running pre-deploy checks",
+        "Updating deployment",
+        "Waiting for rollout",
+        "Running health checks",
+        "Updating load balancer",
+    ]
+
+    click.echo()
+    with click.progressbar(steps, label="  Deploying", show_pos=True) as bar:
+        for step in bar:
+            time.sleep(0.3)
+
+    click.secho(f"\n  Deployment complete: {app_name} ({image})", fg="green", bold=True)
+
+
+@deploy.command()
+@click.argument("app_name")
+@click.option("--revision", "-r", help="Revision to roll back to.")
+def rollback(app_name, revision):
+    """Roll back a deployment."""
+    target = revision or "previous"
+    click.echo(f"  Rolling back {app_name} to {target}...")
+    time.sleep(0.5)
+    click.secho(f"  Rollback complete: {app_name}", fg="green")
+
+
+@deploy.command("status")
+@click.argument("app_name", required=False)
+@click.option("--env", "-e", type=click.Choice(["staging", "prod"]))
+def deploy_status(app_name, env):
+    """Show deployment status."""
+    apps = [
+        {"name": "web-app", "env": "prod", "image": "web:v2.1.0", "replicas": "3/3", "status": "running"},
+        {"name": "api-server", "env": "prod", "image": "api:v1.8.3", "replicas": "2/2", "status": "running"},
+        {"name": "worker", "env": "prod", "image": "worker:v1.2.0", "replicas": "1/2", "status": "degraded"},
+        {"name": "web-app", "env": "staging", "image": "web:v2.2.0-rc1", "replicas": "1/1", "status": "running"},
+    ]
+
+    filtered = [
+        a for a in apps
+        if (not app_name or a["name"] == app_name)
+        and (not env or a["env"] == env)
+    ]
+
+    click.echo(f"\n  {'APP':15s} {'ENV':10s} {'IMAGE':20s} {'REPLICAS':10s} {'STATUS'}")
+    click.echo(f"  {'-' * 70}")
+
+    for app in filtered:
+        color_map = {"running": "green", "degraded": "yellow", "down": "red"}
+        color = color_map.get(app["status"], "white")
+        status = click.style(app["status"], fg=color)
+        click.echo(f"  {app['name']:15s} {app['env']:10s} {app['image']:20s} {app['replicas']:10s} {status}")
+    click.echo()
+
+
+# === Config Commands ===
+
+@cli.group("config")
+@click.pass_context
+def config_group(ctx):
+    """Manage tool configuration."""
+    pass
+
+
+@config_group.command("get")
+@click.argument("key")
+def config_get(key):
+    """Get a config value."""
+    defaults = {
+        "deploy.timeout": "300",
+        "deploy.strategy": "rolling",
+        "server.ssh_user": "admin",
+        "server.ssh_key": "~/.ssh/id_rsa",
+        "alerts.slack_channel": "#ops",
+    }
+    value = defaults.get(key)
+    if value:
+        click.echo(f"  {key} = {value}")
+    else:
+        raise click.ClickException(f"Key not found: {key}")
+
+
+@config_group.command("set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key, value):
+    """Set a config value."""
+    click.echo(f"  Set: {key} = {value}")
+
+
+@config_group.command("list")
+def config_list():
+    """List all configuration."""
+    defaults = {
+        "deploy.timeout": "300",
+        "deploy.strategy": "rolling",
+        "server.ssh_user": "admin",
+        "server.ssh_key": "~/.ssh/id_rsa",
+        "alerts.slack_channel": "#ops",
+        "alerts.pagerduty_key": "****",
+    }
+    click.echo("\n  Current configuration:\n")
+    for key in sorted(defaults):
+        click.echo(f"  {key:30s} = {defaults[key]}")
+    click.echo()
+
+
+# === Quick Commands (top level) ===
+
+@cli.command()
+@click.pass_context
+def status(ctx):
+    """Quick status overview of all systems."""
+    click.secho("\n  System Status Overview", bold=True)
+    click.echo(f"  {'-' * 40}")
+
+    checks = [
+        ("Web Servers", "ok", "2/2 running"),
+        ("API Servers", "ok", "1/1 running"),
+        ("Database", "ok", "Primary + replica"),
+        ("Cache", "warning", "1/2 running"),
+        ("Deployments", "ok", "All current"),
+        ("Certificates", "ok", "Valid (43 days)"),
+    ]
+
+    for name, state, detail in checks:
+        color_map = {"ok": "green", "warning": "yellow", "error": "red"}
+        color = color_map.get(state, "white")
+        indicator = click.style(f"[{state.upper():7s}]", fg=color, bold=True)
+        click.echo(f"  {indicator}  {name:20s}  {detail}")
+
+    click.echo()
+
+
+if __name__ == "__main__":
+    cli()
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- Click uses decorators (`@click.command`, `@click.option`, `@click.argument`) to turn functions into CLI commands
+- Use `@click.group()` for subcommands — this is how `git`, `docker`, and `kubectl` organize their CLIs
+- `click.echo()` and `click.secho()` handle output safely across platforms and when piped
+- Type validation (`click.Choice`, `click.IntRange`, `click.Path`) prevents bad input before your code runs
+- Use `click.ClickException` for clean error messages instead of raw Python tracebacks
+- `click.pass_context` shares state (verbose flag, config) between parent groups and child commands
+- Progress bars (`click.progressbar`) make long operations feel responsive
+- Package CLI tools with `pyproject.toml` entry points so users install with `pip install` and get a command
+- Test CLI tools with `CliRunner` — it captures output and exit codes without subprocess overhead
+
+## What's Next
+
+You now know how to build professional CLI tools. In **Testing Automation Scripts**, you will learn to test your automation before it reaches production — using pytest for unit testing, mocking external services, and the testing patterns that prevent 3AM pages.

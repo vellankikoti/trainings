@@ -408,7 +408,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-106: Create Python Automation module — Fundamentals (Lessons 01-12)
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-101 (shell scripting provides foundation)
 - **Estimated effort:** XL (multi-session)
@@ -442,7 +442,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-107: Create Python Automation — Advanced Lessons (13-20)
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-106
 - **Estimated effort:** XL

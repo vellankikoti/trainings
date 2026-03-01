@@ -1,0 +1,720 @@
+---
+title: "Data Structures"
+description: "Master Python's data structures for DevOps. Lists for server inventories, dictionaries for configs, sets for deduplication, and tuples for immutable data."
+order: 4
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 03-python-basics
+objectives:
+  - Use lists for ordered collections like server inventories
+  - Use dictionaries for key-value data like configurations
+  - Use sets for deduplication and membership testing
+  - Choose the right data structure for each DevOps task
+tags:
+  - python
+  - lists
+  - dictionaries
+  - data-structures
+---
+
+<Callout type="story" title="The Story">
+You need to track 200 servers across 5 regions. Each server has a hostname, IP, role, region, and status. You start with nested lists, and within an hour, you're lost in index numbers. "What's index 3 again — the region or the role?" You refactor to dictionaries, and suddenly everything is clear: `server["region"]` instead of `server[3]`. Data structures aren't academic — they're the difference between code that works and code that's maintainable.
+</Callout>
+
+## Lists — Ordered Collections
+
+Lists are Python's most versatile data structure. In DevOps, they represent server inventories, command sequences, log entries, and anything that has an order.
+
+### Creating and Accessing Lists
+
+```python
+# Server lists
+servers = ["web-01", "web-02", "web-03", "api-01", "api-02"]
+ports = [80, 443, 8080, 3000, 5432]
+empty_list = []
+
+# Indexing (0-based)
+first = servers[0]       # "web-01"
+last = servers[-1]       # "api-02"
+second_last = servers[-2] # "api-01"
+
+# Slicing
+web_servers = servers[0:3]   # ["web-01", "web-02", "web-03"]
+api_servers = servers[3:]    # ["api-01", "api-02"]
+all_but_last = servers[:-1]  # ["web-01", "web-02", "web-03", "api-01"]
+
+# Length
+count = len(servers)     # 5
+```
+
+### Modifying Lists
+
+```python
+servers = ["web-01", "web-02", "web-03"]
+
+# Add elements
+servers.append("web-04")           # Add to end
+servers.insert(0, "web-00")        # Add at position
+servers.extend(["api-01", "api-02"])  # Add multiple
+
+# Remove elements
+servers.remove("web-00")           # Remove by value
+last = servers.pop()               # Remove and return last
+second = servers.pop(1)            # Remove and return by index
+del servers[0]                     # Delete by index
+
+# Modify in place
+servers[0] = "web-primary"         # Replace element
+servers.sort()                     # Sort alphabetically
+servers.reverse()                  # Reverse order
+
+# Check membership
+if "web-01" in servers:
+    print("web-01 is in the fleet")
+```
+
+### List Comprehensions — Powerful One-Liners
+
+List comprehensions are Python's killer feature for data transformation:
+
+```python
+# Basic comprehension: transform every element
+servers = ["web-01", "web-02", "api-01", "api-02", "db-01"]
+
+# Get all hostnames in uppercase
+upper_servers = [s.upper() for s in servers]
+# ['WEB-01', 'WEB-02', 'API-01', 'API-02', 'DB-01']
+
+# Filter: only web servers
+web_servers = [s for s in servers if s.startswith("web")]
+# ['web-01', 'web-02']
+
+# Transform + filter: FQDNs for API servers only
+api_fqdns = [f"{s}.prod.example.com" for s in servers if s.startswith("api")]
+# ['api-01.prod.example.com', 'api-02.prod.example.com']
+
+# Build port mappings
+ports = [8080 + i for i in range(5)]
+# [8080, 8081, 8082, 8083, 8084]
+
+# Flatten nested data
+server_groups = [["web-01", "web-02"], ["api-01"], ["db-01", "db-02"]]
+all_servers = [s for group in server_groups for s in group]
+# ['web-01', 'web-02', 'api-01', 'db-01', 'db-02']
+```
+
+<Callout type="tip" title="Comprehension Readability">
+List comprehensions are powerful, but if they span more than one line or have nested conditions, use a regular for loop instead. Readability always wins — especially in scripts someone will debug at 3 AM.
+</Callout>
+
+### Sorting Lists
+
+```python
+# Sort server names
+servers = ["web-03", "web-01", "api-02", "web-02", "api-01"]
+servers.sort()                    # In-place: ['api-01', 'api-02', 'web-01', 'web-02', 'web-03']
+
+# Sort without modifying original
+sorted_servers = sorted(servers)  # Returns new list
+
+# Sort by custom key
+server_data = [
+    {"name": "web-01", "cpu": 85},
+    {"name": "api-01", "cpu": 45},
+    {"name": "db-01", "cpu": 92},
+]
+by_cpu = sorted(server_data, key=lambda s: s["cpu"], reverse=True)
+# db-01 (92%), web-01 (85%), api-01 (45%)
+```
+
+## Dictionaries — Key-Value Mappings
+
+Dictionaries map keys to values. In DevOps, they represent configurations, server metadata, API responses, and structured data.
+
+### Creating and Accessing Dictionaries
+
+```python
+# Server configuration
+server = {
+    "hostname": "web-01",
+    "ip": "10.0.1.10",
+    "port": 8080,
+    "role": "web",
+    "region": "us-east-1",
+    "is_primary": True,
+    "tags": ["production", "frontend"],
+}
+
+# Access values
+name = server["hostname"]       # "web-01"
+ip = server["ip"]               # "10.0.1.10"
+
+# Safe access with .get() (returns None or default if key missing)
+owner = server.get("owner")              # None (key doesn't exist)
+owner = server.get("owner", "unassigned")  # "unassigned"
+
+# NEVER access potentially missing keys with []
+# server["owner"]  ← raises KeyError!
+```
+
+<Callout type="warning" title="Always Use .get() for Optional Keys">
+Use `server["key"]` only when you're certain the key exists. For optional or dynamic keys, always use `server.get("key", default)` to avoid crashes in production scripts.
+</Callout>
+
+### Modifying Dictionaries
+
+```python
+server = {"hostname": "web-01", "port": 8080}
+
+# Add or update
+server["ip"] = "10.0.1.10"         # Add new key
+server["port"] = 9090               # Update existing key
+server.update({"region": "us-east-1", "role": "web"})  # Add multiple
+
+# Remove
+del server["role"]                   # Delete key (raises KeyError if missing)
+port = server.pop("port", None)      # Remove and return (safe with default)
+
+# Check key existence
+if "ip" in server:
+    print(f"IP: {server['ip']}")
+
+# Get all keys, values, or items
+keys = list(server.keys())          # ['hostname', 'ip', 'region']
+values = list(server.values())      # ['web-01', '10.0.1.10', 'us-east-1']
+items = list(server.items())        # [('hostname', 'web-01'), ...]
+```
+
+### Nested Dictionaries
+
+DevOps configurations are almost always nested:
+
+```python
+# Infrastructure configuration
+infrastructure = {
+    "production": {
+        "us-east-1": {
+            "web": ["web-01", "web-02", "web-03"],
+            "api": ["api-01", "api-02"],
+            "db": ["db-01"],
+        },
+        "eu-west-1": {
+            "web": ["web-04", "web-05"],
+            "api": ["api-03"],
+        },
+    },
+    "staging": {
+        "us-east-1": {
+            "web": ["stg-web-01"],
+            "api": ["stg-api-01"],
+            "db": ["stg-db-01"],
+        },
+    },
+}
+
+# Navigate nested dicts
+prod_web_east = infrastructure["production"]["us-east-1"]["web"]
+# ['web-01', 'web-02', 'web-03']
+
+# Safe navigation of nested dicts
+staging_eu = infrastructure.get("staging", {}).get("eu-west-1", {}).get("web", [])
+# [] — doesn't crash even though the path doesn't exist
+```
+
+### Dictionary Comprehensions
+
+```python
+# Create a dict from two lists
+server_names = ["web-01", "web-02", "web-03"]
+server_ips = ["10.0.1.10", "10.0.1.11", "10.0.1.12"]
+
+ip_map = {name: ip for name, ip in zip(server_names, server_ips)}
+# {'web-01': '10.0.1.10', 'web-02': '10.0.1.11', 'web-03': '10.0.1.12'}
+
+# Filter a dict
+server_metrics = {"web-01": 85, "web-02": 45, "api-01": 92, "db-01": 30}
+
+high_cpu = {name: cpu for name, cpu in server_metrics.items() if cpu > 80}
+# {'web-01': 85, 'api-01': 92}
+
+# Transform values
+metrics_pct = {name: f"{cpu}%" for name, cpu in server_metrics.items()}
+# {'web-01': '85%', 'web-02': '45%', 'api-01': '92%', 'db-01': '30%'}
+```
+
+### Merging Dictionaries
+
+```python
+# Default config + environment overrides
+defaults = {
+    "port": 8080,
+    "debug": False,
+    "log_level": "WARNING",
+    "workers": 4,
+}
+
+overrides = {
+    "port": 9090,
+    "debug": True,
+    "log_level": "DEBUG",
+}
+
+# Python 3.9+ merge operator
+config = defaults | overrides
+# {'port': 9090, 'debug': True, 'log_level': 'DEBUG', 'workers': 4}
+
+# Python 3.5+ unpacking
+config = {**defaults, **overrides}
+# Same result — overrides win for duplicate keys
+```
+
+## Sets — Unique Collections
+
+Sets store unique elements and support mathematical set operations. Perfect for deduplication and membership testing.
+
+### Creating and Using Sets
+
+```python
+# Unique server roles
+roles = {"web", "api", "db", "cache", "web"}  # "web" appears once
+print(roles)  # {'web', 'api', 'db', 'cache'}
+
+# Deduplicate a list
+all_ips = ["10.0.1.1", "10.0.1.2", "10.0.1.1", "10.0.1.3", "10.0.1.2"]
+unique_ips = list(set(all_ips))
+# ['10.0.1.1', '10.0.1.2', '10.0.1.3']
+
+# Fast membership testing (O(1) vs O(n) for lists)
+allowed_ips = {"10.0.1.1", "10.0.1.2", "10.0.1.3", "10.0.1.4"}
+if "10.0.1.5" not in allowed_ips:
+    print("Access denied: IP not in allowlist")
+```
+
+### Set Operations
+
+```python
+# Server sets by role
+all_servers = {"web-01", "web-02", "api-01", "api-02", "db-01"}
+monitored = {"web-01", "web-02", "api-01", "db-01"}
+patched = {"web-01", "api-01", "api-02"}
+
+# Union: all servers that are monitored OR patched
+covered = monitored | patched
+# {'web-01', 'web-02', 'api-01', 'api-02', 'db-01'}
+
+# Intersection: servers that are both monitored AND patched
+both = monitored & patched
+# {'web-01', 'api-01'}
+
+# Difference: monitored but NOT patched
+needs_patching = monitored - patched
+# {'web-02', 'db-01'}
+
+# Symmetric difference: in one set but not both
+only_one = monitored ^ patched
+# {'web-02', 'db-01', 'api-02'}
+
+# Subset/superset checks
+print(monitored <= all_servers)   # True — monitored is subset of all
+print(all_servers >= monitored)   # True — all is superset of monitored
+```
+
+<Callout type="tip" title="Sets for Diff Operations">
+Set operations are perfect for infrastructure drift detection: compare desired state vs actual state using set difference. `desired - actual` gives you what needs to be created, and `actual - desired` gives you what needs to be removed.
+</Callout>
+
+## Tuples — Immutable Sequences
+
+Tuples are like lists but cannot be modified after creation. Use them for data that should not change.
+
+### Using Tuples
+
+```python
+# Fixed configuration values
+SUPPORTED_REGIONS = ("us-east-1", "us-west-2", "eu-west-1")
+DEFAULT_PORTS = (80, 443, 8080)
+
+# Tuple unpacking — clean variable assignment
+server_info = ("web-01", "10.0.1.10", 8080)
+hostname, ip, port = server_info
+
+# Swap variables
+a, b = b, a
+
+# Return multiple values from functions
+def get_server_status(hostname):
+    """Return (status_code, message) tuple."""
+    return (200, "healthy")
+
+code, message = get_server_status("web-01")
+
+# Named tuples — when you want named fields
+from collections import namedtuple
+
+Server = namedtuple("Server", ["hostname", "ip", "port", "role"])
+
+web1 = Server("web-01", "10.0.1.10", 8080, "frontend")
+print(web1.hostname)    # "web-01"
+print(web1.port)        # 8080
+
+# Named tuples are immutable — good for configuration
+# web1.port = 9090  ← TypeError! Can't modify
+```
+
+## Choosing the Right Data Structure
+
+| Need | Use | Example |
+|---|---|---|
+| Ordered collection | `list` | Server inventory, command queue |
+| Key-value mapping | `dict` | Config, API response, metadata |
+| Unique elements | `set` | IP allowlist, deduplicated hosts |
+| Immutable record | `tuple` | Coordinates, fixed config, function returns |
+| Named immutable record | `namedtuple` | Server record, DB row |
+
+```python
+# Decision guide in practice:
+
+# "I need to iterate over servers in order" → list
+deploy_order = ["db-01", "api-01", "api-02", "web-01", "web-02"]
+
+# "I need to look up a value by name" → dict
+config = {"max_retries": 3, "timeout": 30, "env": "production"}
+
+# "I need to track unique items" → set
+processed_hosts = set()
+processed_hosts.add("web-01")  # Won't duplicate
+
+# "This data should never change" → tuple
+VALID_ENVIRONMENTS = ("production", "staging", "development")
+```
+
+<Exercise number={1} title="Server Fleet Data Operations">
+
+Practice working with lists and dictionaries for a server fleet:
+
+```python
+#!/usr/bin/env python3
+"""Server fleet data operations practice."""
+
+# Server fleet
+fleet = [
+    {"hostname": "web-01", "ip": "10.0.1.10", "role": "web", "region": "us-east-1", "cpu": 72},
+    {"hostname": "web-02", "ip": "10.0.1.11", "role": "web", "region": "us-east-1", "cpu": 45},
+    {"hostname": "web-03", "ip": "10.0.1.12", "role": "web", "region": "eu-west-1", "cpu": 88},
+    {"hostname": "api-01", "ip": "10.0.2.10", "role": "api", "region": "us-east-1", "cpu": 92},
+    {"hostname": "api-02", "ip": "10.0.2.11", "role": "api", "region": "eu-west-1", "cpu": 35},
+    {"hostname": "db-01",  "ip": "10.0.3.10", "role": "db",  "region": "us-east-1", "cpu": 68},
+    {"hostname": "db-02",  "ip": "10.0.3.11", "role": "db",  "region": "eu-west-1", "cpu": 55},
+]
+
+# 1. Get all hostnames
+hostnames = [s["hostname"] for s in fleet]
+print("All servers:", hostnames)
+
+# 2. Get servers with CPU > 80%
+hot_servers = [s["hostname"] for s in fleet if s["cpu"] > 80]
+print("High CPU:", hot_servers)
+
+# 3. Group servers by role
+by_role = {}
+for server in fleet:
+    role = server["role"]
+    if role not in by_role:
+        by_role[role] = []
+    by_role[role].append(server["hostname"])
+print("By role:", by_role)
+
+# 4. Group by region using dict comprehension + filter
+regions = set(s["region"] for s in fleet)
+by_region = {
+    region: [s["hostname"] for s in fleet if s["region"] == region]
+    for region in regions
+}
+print("By region:", by_region)
+
+# 5. Create hostname-to-IP mapping
+ip_lookup = {s["hostname"]: s["ip"] for s in fleet}
+print("IP of api-01:", ip_lookup["api-01"])
+
+# 6. Average CPU by role
+for role in sorted(by_role.keys()):
+    role_servers = [s for s in fleet if s["role"] == role]
+    avg_cpu = sum(s["cpu"] for s in role_servers) / len(role_servers)
+    print(f"  {role}: avg CPU = {avg_cpu:.1f}%")
+
+# 7. Sort fleet by CPU (descending)
+by_cpu = sorted(fleet, key=lambda s: s["cpu"], reverse=True)
+print("\nServers by CPU (descending):")
+for s in by_cpu:
+    print(f"  {s['hostname']:<10} {s['cpu']}%")
+```
+
+</Exercise>
+
+<Exercise number={2} title="Set Operations for Infrastructure Drift">
+
+Use set operations to detect infrastructure drift between desired and actual state:
+
+```python
+#!/usr/bin/env python3
+"""Detect infrastructure drift using set operations."""
+
+# Desired state (from Terraform/config)
+desired_servers = {"web-01", "web-02", "web-03", "api-01", "api-02", "db-01"}
+desired_security_groups = {"sg-web", "sg-api", "sg-db", "sg-monitoring"}
+desired_dns_records = {"web.example.com", "api.example.com", "db.internal.example.com"}
+
+# Actual state (from cloud API)
+actual_servers = {"web-01", "web-02", "api-01", "api-02", "db-01", "legacy-app-01"}
+actual_security_groups = {"sg-web", "sg-api", "sg-db", "sg-old-app"}
+actual_dns_records = {"web.example.com", "api.example.com", "old.example.com"}
+
+# Detect drift
+print("=== Infrastructure Drift Report ===\n")
+
+# Servers
+missing_servers = desired_servers - actual_servers
+extra_servers = actual_servers - desired_servers
+print("Servers:")
+print(f"  Missing (need to create): {missing_servers or 'none'}")
+print(f"  Extra (need to remove):   {extra_servers or 'none'}")
+print(f"  In sync:                  {desired_servers & actual_servers}")
+
+# Security groups
+missing_sgs = desired_security_groups - actual_security_groups
+extra_sgs = actual_security_groups - desired_security_groups
+print(f"\nSecurity Groups:")
+print(f"  Missing: {missing_sgs or 'none'}")
+print(f"  Extra:   {extra_sgs or 'none'}")
+
+# DNS records
+missing_dns = desired_dns_records - actual_dns_records
+extra_dns = actual_dns_records - desired_dns_records
+print(f"\nDNS Records:")
+print(f"  Missing: {missing_dns or 'none'}")
+print(f"  Extra:   {extra_dns or 'none'}")
+
+# Overall drift score
+total_desired = len(desired_servers) + len(desired_security_groups) + len(desired_dns_records)
+total_drift = len(missing_servers) + len(extra_servers) + len(missing_sgs) + len(extra_sgs) + len(missing_dns) + len(extra_dns)
+drift_score = (total_drift / total_desired) * 100 if total_desired > 0 else 0
+
+print(f"\n{'=' * 40}")
+print(f"Drift Score: {drift_score:.1f}% ({total_drift} issues)")
+if drift_score == 0:
+    print("Status: IN SYNC")
+elif drift_score < 20:
+    print("Status: MINOR DRIFT")
+else:
+    print("Status: SIGNIFICANT DRIFT — remediation needed")
+```
+
+</Exercise>
+
+<MiniProject title="Infrastructure Inventory Manager">
+
+Build a complete CRUD (Create, Read, Update, Delete) inventory manager using dictionaries and lists:
+
+```python
+#!/usr/bin/env python3
+"""inventory_manager.py — CRUD operations on server inventory.
+
+A practical tool for managing server inventory data using
+Python's core data structures.
+"""
+
+import json
+import sys
+from datetime import datetime
+from collections import defaultdict
+
+# In-memory inventory (in production, this would be a database or file)
+inventory = {}
+
+def add_server(hostname, ip, role, region, tags=None):
+    """Add a server to the inventory."""
+    if hostname in inventory:
+        print(f"  Error: Server '{hostname}' already exists")
+        return False
+
+    inventory[hostname] = {
+        "ip": ip,
+        "role": role,
+        "region": region,
+        "tags": tags or [],
+        "status": "active",
+        "added": datetime.now().isoformat(),
+        "updated": datetime.now().isoformat(),
+    }
+    print(f"  Added: {hostname} ({ip}) [{role}] in {region}")
+    return True
+
+def remove_server(hostname):
+    """Remove a server from the inventory."""
+    if hostname not in inventory:
+        print(f"  Error: Server '{hostname}' not found")
+        return False
+
+    server = inventory.pop(hostname)
+    print(f"  Removed: {hostname} ({server['ip']}) [{server['role']}]")
+    return True
+
+def update_server(hostname, **updates):
+    """Update server properties."""
+    if hostname not in inventory:
+        print(f"  Error: Server '{hostname}' not found")
+        return False
+
+    valid_fields = {"ip", "role", "region", "status", "tags"}
+    for key, value in updates.items():
+        if key in valid_fields:
+            inventory[hostname][key] = value
+            print(f"  Updated: {hostname}.{key} = {value}")
+        else:
+            print(f"  Warning: Unknown field '{key}' — skipped")
+
+    inventory[hostname]["updated"] = datetime.now().isoformat()
+    return True
+
+def get_server(hostname):
+    """Get a single server's details."""
+    server = inventory.get(hostname)
+    if server is None:
+        print(f"  Server '{hostname}' not found")
+        return None
+    return {hostname: server}
+
+def list_servers(role=None, region=None, status=None, tag=None):
+    """List servers with optional filters."""
+    results = {}
+    for hostname, data in inventory.items():
+        if role and data["role"] != role:
+            continue
+        if region and data["region"] != region:
+            continue
+        if status and data["status"] != status:
+            continue
+        if tag and tag not in data["tags"]:
+            continue
+        results[hostname] = data
+    return results
+
+def print_inventory(servers, title="Inventory"):
+    """Print servers in a formatted table."""
+    print(f"\n{'=' * 75}")
+    print(f"  {title} ({len(servers)} servers)")
+    print(f"{'=' * 75}")
+
+    if not servers:
+        print("  (empty)")
+        return
+
+    print(f"  {'Hostname':<15} {'IP':<16} {'Role':<8} {'Region':<15} {'Status':<10} {'Tags'}")
+    print(f"  {'-' * 70}")
+
+    for hostname in sorted(servers.keys()):
+        data = servers[hostname]
+        tags = ", ".join(data["tags"]) if data["tags"] else "-"
+        print(f"  {hostname:<15} {data['ip']:<16} {data['role']:<8} "
+              f"{data['region']:<15} {data['status']:<10} {tags}")
+
+def get_summary():
+    """Generate inventory summary statistics."""
+    if not inventory:
+        return "Inventory is empty"
+
+    # Count by role
+    by_role = defaultdict(int)
+    by_region = defaultdict(int)
+    by_status = defaultdict(int)
+
+    for data in inventory.values():
+        by_role[data["role"]] += 1
+        by_region[data["region"]] += 1
+        by_status[data["status"]] += 1
+
+    lines = ["\n  === Inventory Summary ==="]
+    lines.append(f"  Total servers: {len(inventory)}")
+    lines.append(f"\n  By Role:")
+    for role, count in sorted(by_role.items()):
+        lines.append(f"    {role:<12} {count}")
+    lines.append(f"\n  By Region:")
+    for region, count in sorted(by_region.items()):
+        lines.append(f"    {region:<20} {count}")
+    lines.append(f"\n  By Status:")
+    for status, count in sorted(by_status.items()):
+        lines.append(f"    {status:<12} {count}")
+
+    return "\n".join(lines)
+
+
+def main():
+    """Demonstrate the inventory manager."""
+    print("Infrastructure Inventory Manager")
+    print("=" * 40)
+
+    # CREATE — Add servers
+    print("\n[1] Adding servers...")
+    add_server("web-01", "10.0.1.10", "web", "us-east-1", ["production", "frontend"])
+    add_server("web-02", "10.0.1.11", "web", "us-east-1", ["production", "frontend"])
+    add_server("web-03", "10.0.1.12", "web", "eu-west-1", ["production", "frontend"])
+    add_server("api-01", "10.0.2.10", "api", "us-east-1", ["production", "backend"])
+    add_server("api-02", "10.0.2.11", "api", "eu-west-1", ["production", "backend"])
+    add_server("db-01",  "10.0.3.10", "db",  "us-east-1", ["production", "primary"])
+    add_server("db-02",  "10.0.3.11", "db",  "eu-west-1", ["production", "replica"])
+    add_server("cache-01", "10.0.4.10", "cache", "us-east-1", ["production"])
+
+    # Duplicate test
+    add_server("web-01", "10.0.1.99", "web", "us-east-1")
+
+    # READ — List and filter
+    print("\n[2] Reading inventory...")
+    print_inventory(list_servers(), "All Servers")
+    print_inventory(list_servers(role="web"), "Web Servers")
+    print_inventory(list_servers(region="eu-west-1"), "EU West Servers")
+    print_inventory(list_servers(tag="backend"), "Backend Servers")
+
+    # UPDATE — Modify servers
+    print("\n[3] Updating servers...")
+    update_server("web-03", status="maintenance")
+    update_server("db-02", tags=["production", "replica", "read-only"])
+    update_server("nonexistent", status="active")
+
+    # Show updated
+    print_inventory(list_servers(status="maintenance"), "Servers in Maintenance")
+
+    # DELETE — Remove servers
+    print("\n[4] Removing servers...")
+    remove_server("cache-01")
+    remove_server("nonexistent")
+
+    # SUMMARY
+    print(get_summary())
+
+    # JSON export
+    print("\n[5] JSON export:")
+    print(json.dumps(inventory, indent=2, default=str))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+This script demonstrates every data structure concept in a practical DevOps context. The inventory pattern is the foundation for tools like Ansible's inventory, Terraform's state, and custom CMDBs.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Lists are ordered, mutable collections — use for server inventories, command sequences
+- Dictionaries map keys to values — use for configurations, metadata, API responses
+- Sets store unique elements and support mathematical operations — use for deduplication and drift detection
+- Tuples are immutable — use for fixed data, function returns, and named records
+- List comprehensions are concise but must remain readable
+- Use `.get()` with dictionaries to safely handle missing keys
+- Choose the right structure: ordered data = list, lookup by name = dict, unique items = set
+
+## What's Next
+
+You have data structures down. In **Control Flow**, you'll learn if/elif/else, for and while loops, comprehensions, and exception handling — all with DevOps examples. You'll write logic that makes decisions about your infrastructure.

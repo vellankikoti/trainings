@@ -1,0 +1,846 @@
+---
+title: "Control Flow"
+description: "Write logic in Python. Master if/elif/else, for/while loops, comprehensions, and exception basics — with DevOps-focused examples throughout."
+order: 5
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 04-data-structures
+objectives:
+  - Write conditional logic with if/elif/else for infrastructure decisions
+  - Iterate over data with for loops, enumerate, and zip
+  - Use comprehensions for concise data transformations
+  - Handle exceptions to build resilient automation scripts
+tags:
+  - python
+  - control-flow
+  - loops
+  - conditions
+---
+
+<Callout type="story" title="The Story">
+Your deployment script needs to make decisions: Is this production or staging? Which servers need updating? Should we roll back? You also need to iterate: check every server, process every log line, validate every config entry. Control flow is where your scripts go from "run these commands" to "make intelligent decisions about infrastructure." Without it, you're just running commands in sequence. With it, you're building automation that thinks.
+</Callout>
+
+## Conditional Logic: if/elif/else
+
+### Basic Conditions
+
+```python
+# Simple if/else
+cpu_usage = 87.5
+
+if cpu_usage > 90:
+    print("CRITICAL: CPU above 90%")
+    # trigger pager alert
+elif cpu_usage > 70:
+    print("WARNING: CPU above 70%")
+    # send Slack notification
+elif cpu_usage > 50:
+    print("INFO: CPU moderate")
+else:
+    print("OK: CPU normal")
+```
+
+### Truthiness
+
+Python has a concept of "truthy" and "falsy" values. This matters when checking configurations and API responses:
+
+```python
+# Falsy values: False, None, 0, 0.0, "", [], {}, set()
+# Everything else is truthy
+
+# Check if a list has elements
+servers = get_servers()
+if servers:  # Truthy if list is not empty
+    print(f"Found {len(servers)} servers")
+else:
+    print("No servers found")
+
+# Check if a string is non-empty
+api_key = os.environ.get("API_KEY", "")
+if not api_key:
+    print("ERROR: API_KEY is not set")
+    sys.exit(1)
+
+# Check if a config value exists
+config = load_config()
+timeout = config.get("timeout")
+if timeout is not None:  # Explicit None check — 0 is a valid timeout
+    print(f"Timeout: {timeout}s")
+```
+
+<Callout type="warning" title="None vs Falsy">
+Be careful with `if value:` when `0`, `""`, or `[]` are valid values. `if value is not None:` only rejects `None`, while `if value:` also rejects `0`, empty strings, and empty lists.
+</Callout>
+
+### Ternary Operator
+
+```python
+# One-line conditional — great for simple assignments
+env = "production"
+log_level = "ERROR" if env == "production" else "DEBUG"
+
+# Setting defaults
+port = config.get("port") or 8080  # Use 8080 if port is None/0/""
+
+# Status labels
+status_label = "HEALTHY" if health_check() else "UNHEALTHY"
+```
+
+### Complex Conditions
+
+```python
+# Multiple conditions for deployment decisions
+env = "production"
+tests_passed = True
+approval = True
+current_hour = 14
+
+# Deploy only if safe
+can_deploy = (
+    tests_passed
+    and approval
+    and env != "production" or (
+        env == "production"
+        and 9 <= current_hour <= 17  # Business hours only
+    )
+)
+
+if can_deploy:
+    print("Deploying...")
+else:
+    print("Deployment blocked")
+
+# Guard clauses — exit early instead of deep nesting
+def deploy(service, env):
+    """Deploy a service with guard clause pattern."""
+    if not service:
+        print("Error: No service specified")
+        return False
+
+    if env not in ("staging", "production"):
+        print(f"Error: Invalid environment '{env}'")
+        return False
+
+    if env == "production" and not has_approval():
+        print("Error: Production deploys require approval")
+        return False
+
+    # Main logic — not deeply nested
+    print(f"Deploying {service} to {env}...")
+    return True
+```
+
+## For Loops
+
+### Iterating Over Common DevOps Data
+
+```python
+# Iterate over a list of servers
+servers = ["web-01", "web-02", "web-03"]
+for server in servers:
+    print(f"Checking {server}...")
+
+# Iterate over dictionary items
+config = {"port": 8080, "debug": False, "workers": 4}
+for key, value in config.items():
+    print(f"  {key} = {value}")
+
+# Iterate over dictionary keys only
+for key in config:
+    print(key)
+
+# Iterate over lines in a file
+with open("/var/log/syslog") as f:
+    for line in f:
+        if "error" in line.lower():
+            print(line.strip())
+```
+
+### enumerate() — Index + Value
+
+```python
+# When you need both position and value
+servers = ["web-01", "web-02", "web-03"]
+
+for index, server in enumerate(servers):
+    print(f"  [{index}] {server}")
+# [0] web-01
+# [1] web-02
+# [2] web-03
+
+# Start from 1 (for human-readable output)
+for num, server in enumerate(servers, start=1):
+    print(f"  Server {num}: {server}")
+# Server 1: web-01
+# Server 2: web-02
+# Server 3: web-03
+```
+
+### zip() — Parallel Iteration
+
+```python
+# Iterate over multiple lists in parallel
+hostnames = ["web-01", "web-02", "web-03"]
+ips = ["10.0.1.10", "10.0.1.11", "10.0.1.12"]
+ports = [8080, 8081, 8082]
+
+for hostname, ip, port in zip(hostnames, ips, ports):
+    print(f"  {hostname}: {ip}:{port}")
+
+# Build a dict from two lists
+server_map = dict(zip(hostnames, ips))
+# {'web-01': '10.0.1.10', 'web-02': '10.0.1.11', 'web-03': '10.0.1.12'}
+```
+
+### range() — Numeric Sequences
+
+```python
+# Retry logic
+max_retries = 5
+for attempt in range(1, max_retries + 1):
+    print(f"  Attempt {attempt}/{max_retries}")
+    # try the operation...
+
+# Batch processing
+servers = [f"server-{i:03d}" for i in range(1, 101)]  # server-001 to server-100
+
+# Process in batches of 10
+batch_size = 10
+for i in range(0, len(servers), batch_size):
+    batch = servers[i:i + batch_size]
+    print(f"Processing batch: {batch[0]} to {batch[-1]}")
+```
+
+## While Loops
+
+```python
+# Wait for a service to become ready
+import time
+
+max_wait = 60
+waited = 0
+interval = 5
+
+while waited < max_wait:
+    if check_service_health("web-01"):
+        print(f"Service ready after {waited}s")
+        break
+    print(f"Waiting for service... ({waited}s/{max_wait}s)")
+    time.sleep(interval)
+    waited += interval
+else:
+    # 'else' on while runs if the loop completed without break
+    print(f"TIMEOUT: Service not ready after {max_wait}s")
+    sys.exit(1)
+```
+
+<Callout type="tip" title="while/else Pattern">
+The `else` block on a `while` loop runs only if the loop completed without hitting `break`. This is perfect for timeout patterns — the `else` means "we timed out."
+</Callout>
+
+### break and continue
+
+```python
+# break — stop the loop entirely
+for server in servers:
+    status = check_health(server)
+    if status == "critical":
+        print(f"CRITICAL: {server} is down! Stopping deployment.")
+        break  # Don't continue deploying
+
+# continue — skip this iteration
+log_lines = open("/var/log/app.log").readlines()
+for line in log_lines:
+    # Skip empty lines and comments
+    if not line.strip() or line.startswith("#"):
+        continue
+    process_log_line(line)
+```
+
+## Comprehensions — Concise Data Transformation
+
+### List Comprehensions
+
+```python
+# Filter and transform in one line
+servers = ["web-01", "web-02", "api-01", "api-02", "db-01"]
+
+# Extract web servers
+web_servers = [s for s in servers if s.startswith("web")]
+
+# Build connection strings
+connections = [f"ssh admin@{s}.example.com" for s in servers]
+
+# Parse log levels from log lines
+log_lines = [
+    "2024-03-15 10:30:45 ERROR Connection failed",
+    "2024-03-15 10:30:46 INFO Retrying...",
+    "2024-03-15 10:30:47 ERROR Timeout",
+    "2024-03-15 10:30:48 INFO Connected",
+]
+errors = [line for line in log_lines if "ERROR" in line]
+```
+
+### Dict Comprehensions
+
+```python
+# Build lookup tables
+server_status = {
+    server: check_health(server)
+    for server in servers
+}
+
+# Filter a dictionary
+healthy = {
+    host: status
+    for host, status in server_status.items()
+    if status == "healthy"
+}
+
+# Transform environment variables
+import os
+app_config = {
+    key.replace("APP_", "").lower(): value
+    for key, value in os.environ.items()
+    if key.startswith("APP_")
+}
+# APP_PORT=8080 → {"port": "8080"}
+# APP_DEBUG=true → {"debug": "true"}
+```
+
+### Set Comprehensions
+
+```python
+# Unique regions from server list
+fleet = [
+    {"hostname": "web-01", "region": "us-east-1"},
+    {"hostname": "web-02", "region": "us-east-1"},
+    {"hostname": "api-01", "region": "eu-west-1"},
+]
+regions = {server["region"] for server in fleet}
+# {'us-east-1', 'eu-west-1'}
+```
+
+## Nested Loops
+
+```python
+# Check all servers across all regions
+regions = {
+    "us-east-1": ["web-01", "web-02", "api-01"],
+    "eu-west-1": ["web-03", "api-02"],
+}
+
+for region, servers in regions.items():
+    print(f"\nRegion: {region}")
+    for server in servers:
+        status = "healthy"  # check_health(server) in production
+        print(f"  {server}: {status}")
+
+# Matrix: check every service on every server
+services = ["nginx", "postgres", "redis"]
+for server in ["web-01", "web-02"]:
+    for service in services:
+        print(f"  Checking {service} on {server}")
+```
+
+## The Walrus Operator (:=)
+
+Python 3.8+ introduced the walrus operator for assignment expressions — assign and use a value in one step:
+
+```python
+# Without walrus operator
+line = input("Enter command: ")
+while line != "quit":
+    process(line)
+    line = input("Enter command: ")
+
+# With walrus operator — cleaner
+while (line := input("Enter command: ")) != "quit":
+    process(line)
+
+# Practical: filter and use a value
+import re
+
+log_lines = [
+    "2024-03-15 ERROR disk full on /dev/sda1",
+    "2024-03-15 INFO backup completed",
+    "2024-03-15 ERROR connection timeout to db-01",
+]
+
+pattern = re.compile(r"ERROR (.+)")
+errors = [
+    match.group(1)
+    for line in log_lines
+    if (match := pattern.search(line))
+]
+# ['disk full on /dev/sda1', 'connection timeout to db-01']
+```
+
+## match/case (Python 3.10+)
+
+Structural pattern matching — Python's answer to switch/case:
+
+```python
+# Dispatch based on deployment action
+def handle_deploy_event(event):
+    match event["action"]:
+        case "deploy":
+            start_deployment(event["service"], event["version"])
+        case "rollback":
+            rollback(event["service"], event.get("to_version"))
+        case "scale":
+            scale_service(event["service"], event["replicas"])
+        case "restart":
+            restart_service(event["service"])
+        case _:
+            print(f"Unknown action: {event['action']}")
+
+# Match with guards
+def categorize_response(status_code):
+    match status_code:
+        case 200 | 201 | 204:
+            return "success"
+        case 301 | 302:
+            return "redirect"
+        case 400 | 401 | 403 | 404:
+            return "client_error"
+        case code if 500 <= code <= 599:
+            return "server_error"
+        case _:
+            return "unknown"
+```
+
+## Exception Handling Basics
+
+Exceptions are how Python handles errors. In DevOps scripts, proper exception handling is the difference between a script that crashes at 3 AM and one that handles problems gracefully.
+
+```python
+# Basic try/except
+try:
+    config = json.loads(config_string)
+except json.JSONDecodeError as e:
+    print(f"Invalid JSON: {e}")
+    config = {}
+
+# Multiple exception types
+try:
+    response = requests.get(url, timeout=5)
+    response.raise_for_status()
+    data = response.json()
+except requests.ConnectionError:
+    print(f"Cannot connect to {url}")
+except requests.Timeout:
+    print(f"Request to {url} timed out")
+except requests.HTTPError as e:
+    print(f"HTTP error: {e}")
+except json.JSONDecodeError:
+    print(f"Invalid JSON response from {url}")
+
+# try/except/else/finally
+try:
+    f = open("config.yml")
+    config = yaml.safe_load(f)
+except FileNotFoundError:
+    print("Config file not found — using defaults")
+    config = DEFAULT_CONFIG
+else:
+    # Runs only if no exception was raised
+    print(f"Config loaded: {len(config)} keys")
+finally:
+    # Always runs — cleanup
+    print("Config loading complete")
+```
+
+<Exercise number={1} title="Deployment Decision Engine">
+
+Build a deployment decision engine that evaluates multiple conditions:
+
+```python
+#!/usr/bin/env python3
+"""Deployment decision engine — should we deploy?"""
+
+from datetime import datetime
+
+def evaluate_deployment(service, environment, test_results, approvals,
+                       current_time=None):
+    """Evaluate whether a deployment should proceed.
+
+    Returns (allowed: bool, reasons: list[str])
+    """
+    reasons = []
+    current_time = current_time or datetime.now()
+    hour = current_time.hour
+    weekday = current_time.weekday()  # 0=Monday, 6=Sunday
+
+    # Check test results
+    if not test_results.get("unit_tests_passed"):
+        reasons.append("Unit tests failed")
+    if not test_results.get("integration_tests_passed"):
+        reasons.append("Integration tests failed")
+    if test_results.get("coverage", 0) < 80:
+        reasons.append(f"Code coverage {test_results['coverage']}% < 80% minimum")
+
+    # Environment-specific rules
+    if environment == "production":
+        # Production needs explicit approval
+        if "tech_lead" not in approvals:
+            reasons.append("Missing tech lead approval")
+        if "qa" not in approvals:
+            reasons.append("Missing QA approval")
+
+        # No production deploys on weekends
+        if weekday >= 5:
+            reasons.append("No production deploys on weekends")
+
+        # No production deploys outside business hours
+        if hour < 9 or hour > 16:
+            reasons.append(f"Outside deploy window (9-16, current: {hour})")
+
+        # No Friday afternoon deploys
+        if weekday == 4 and hour >= 14:
+            reasons.append("No Friday afternoon production deploys")
+
+    elif environment == "staging":
+        if "developer" not in approvals:
+            reasons.append("Missing developer approval")
+
+    # Service-specific rules
+    critical_services = {"payment-api", "auth-service", "database"}
+    if service in critical_services and environment == "production":
+        if "cto" not in approvals:
+            reasons.append(f"Critical service '{service}' needs CTO approval")
+
+    allowed = len(reasons) == 0
+    return allowed, reasons
+
+# Test the engine
+print("=== Deployment Decision Engine ===\n")
+
+scenarios = [
+    {
+        "service": "web-frontend",
+        "environment": "staging",
+        "test_results": {"unit_tests_passed": True, "integration_tests_passed": True, "coverage": 85},
+        "approvals": {"developer"},
+    },
+    {
+        "service": "web-frontend",
+        "environment": "production",
+        "test_results": {"unit_tests_passed": True, "integration_tests_passed": True, "coverage": 92},
+        "approvals": {"tech_lead", "qa"},
+        "current_time": datetime(2024, 3, 13, 14, 0),  # Wednesday 2PM
+    },
+    {
+        "service": "payment-api",
+        "environment": "production",
+        "test_results": {"unit_tests_passed": True, "integration_tests_passed": False, "coverage": 75},
+        "approvals": {"tech_lead", "qa"},
+        "current_time": datetime(2024, 3, 15, 15, 0),  # Friday 3PM
+    },
+    {
+        "service": "auth-service",
+        "environment": "production",
+        "test_results": {"unit_tests_passed": True, "integration_tests_passed": True, "coverage": 95},
+        "approvals": {"tech_lead", "qa", "cto"},
+        "current_time": datetime(2024, 3, 12, 11, 0),  # Tuesday 11AM
+    },
+]
+
+for i, scenario in enumerate(scenarios, 1):
+    current_time = scenario.pop("current_time", None)
+    allowed, reasons = evaluate_deployment(**scenario, current_time=current_time)
+
+    status = "APPROVED" if allowed else "BLOCKED"
+    print(f"Scenario {i}: {scenario['service']} → {scenario['environment']}")
+    print(f"  Decision: {status}")
+    if reasons:
+        for reason in reasons:
+            print(f"  - {reason}")
+    print()
+```
+
+</Exercise>
+
+<Exercise number={2} title="Log Line Processor with Loops">
+
+Process log data using various loop patterns:
+
+```python
+#!/usr/bin/env python3
+"""Process log data using Python loop patterns."""
+
+from collections import Counter, defaultdict
+from datetime import datetime
+
+# Simulated log data
+log_data = """2024-03-15 10:30:01 INFO  [auth] User admin logged in from 10.0.1.5
+2024-03-15 10:30:15 ERROR [db] Connection pool exhausted
+2024-03-15 10:30:16 ERROR [db] Query timeout after 30s
+2024-03-15 10:30:20 WARN  [api] Rate limit approaching for client api-key-42
+2024-03-15 10:30:25 INFO  [web] Request completed in 250ms
+2024-03-15 10:30:30 ERROR [auth] Failed login from 192.168.1.100
+2024-03-15 10:30:35 INFO  [web] Request completed in 180ms
+2024-03-15 10:30:40 ERROR [auth] Failed login from 192.168.1.100
+2024-03-15 10:30:45 WARN  [api] Slow response: 2500ms
+2024-03-15 10:30:50 ERROR [auth] Failed login from 192.168.1.100
+2024-03-15 10:30:55 INFO  [web] Health check passed
+2024-03-15 10:31:00 ERROR [db] Connection refused
+2024-03-15 10:31:05 INFO  [auth] User deploy-bot logged in from 10.0.2.1
+2024-03-15 10:31:10 WARN  [disk] Partition /var/log at 85%
+2024-03-15 10:31:15 ERROR [web] 502 Bad Gateway"""
+
+lines = log_data.strip().split("\n")
+
+# 1. Count log levels using Counter
+levels = [line.split()[2] for line in lines]
+level_counts = Counter(levels)
+print("Log Level Distribution:")
+for level, count in level_counts.most_common():
+    bar = "#" * (count * 3)
+    print(f"  {level:<6} {count:>3} {bar}")
+
+# 2. Group errors by component using defaultdict
+print("\nErrors by Component:")
+errors_by_component = defaultdict(list)
+for line in lines:
+    parts = line.split()
+    if parts[2] == "ERROR":
+        component = parts[3].strip("[]")
+        message = " ".join(parts[4:])
+        errors_by_component[component].append(message)
+
+for component, errors in sorted(errors_by_component.items()):
+    print(f"\n  [{component}] ({len(errors)} errors)")
+    for error in errors:
+        print(f"    - {error}")
+
+# 3. Detect brute force attempts using enumerate and counting
+print("\nSecurity Analysis:")
+failed_logins = defaultdict(int)
+for line in lines:
+    if "Failed login from" in line:
+        ip = line.split("from ")[-1]
+        failed_logins[ip] += 1
+
+for ip, count in failed_logins.items():
+    if count >= 3:
+        print(f"  ALERT: Possible brute force from {ip} ({count} attempts)")
+
+# 4. Performance analysis with list comprehension
+print("\nPerformance Analysis:")
+response_times = []
+for line in lines:
+    if "completed in" in line:
+        time_str = line.split("completed in ")[1].replace("ms", "")
+        response_times.append(int(time_str))
+
+if response_times:
+    avg_time = sum(response_times) / len(response_times)
+    max_time = max(response_times)
+    min_time = min(response_times)
+    print(f"  Requests: {len(response_times)}")
+    print(f"  Avg response time: {avg_time:.0f}ms")
+    print(f"  Min: {min_time}ms, Max: {max_time}ms")
+
+# 5. Summary using all patterns
+print(f"\n{'=' * 50}")
+print("Log Summary:")
+print(f"  Total entries:  {len(lines)}")
+print(f"  Errors:         {level_counts.get('ERROR', 0)}")
+print(f"  Warnings:       {level_counts.get('WARN', 0)}")
+print(f"  Info:           {level_counts.get('INFO', 0)}")
+print(f"  Components:     {len(errors_by_component)} with errors")
+print(f"  Security:       {sum(1 for c in failed_logins.values() if c >= 3)} brute force alerts")
+```
+
+</Exercise>
+
+<MiniProject title="Service Health Checker">
+
+Build a service health checker that checks multiple services and categorizes them by status:
+
+```python
+#!/usr/bin/env python3
+"""service_health.py — Check multiple services and report health status.
+
+Demonstrates control flow patterns: conditionals, loops, exception handling,
+comprehensions, and the while/break pattern for retries.
+"""
+
+import socket
+import time
+import sys
+import json
+from datetime import datetime
+from collections import defaultdict
+
+# Service definitions: (name, host, port, protocol, timeout)
+SERVICES = [
+    {"name": "SSH",        "host": "localhost", "port": 22,   "critical": True},
+    {"name": "HTTP",       "host": "localhost", "port": 80,   "critical": True},
+    {"name": "HTTPS",      "host": "localhost", "port": 443,  "critical": True},
+    {"name": "PostgreSQL", "host": "localhost", "port": 5432, "critical": True},
+    {"name": "Redis",      "host": "localhost", "port": 6379, "critical": False},
+    {"name": "Prometheus", "host": "localhost", "port": 9090, "critical": False},
+    {"name": "Grafana",    "host": "localhost", "port": 3000, "critical": False},
+    {"name": "App Server", "host": "localhost", "port": 8080, "critical": False},
+]
+
+def check_port(host, port, timeout=3):
+    """Check if a TCP port is accepting connections."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            return result == 0
+    except socket.error:
+        return False
+
+def check_service_with_retry(service, max_retries=2, retry_delay=1):
+    """Check a service with retries. Returns (is_up, attempts, response_time_ms)."""
+    name = service["name"]
+
+    for attempt in range(1, max_retries + 1):
+        start = time.time()
+        is_up = check_port(service["host"], service["port"])
+        elapsed_ms = (time.time() - start) * 1000
+
+        if is_up:
+            return True, attempt, elapsed_ms
+
+        if attempt < max_retries:
+            time.sleep(retry_delay)
+
+    return False, max_retries, elapsed_ms
+
+def categorize_status(is_up, is_critical):
+    """Categorize service status for alerting."""
+    if is_up:
+        return "healthy"
+    elif is_critical:
+        return "critical"
+    else:
+        return "degraded"
+
+def run_health_check(services):
+    """Run health checks on all services and return results."""
+    results = []
+
+    for service in services:
+        is_up, attempts, response_ms = check_service_with_retry(service)
+        status = categorize_status(is_up, service["critical"])
+
+        results.append({
+            "name": service["name"],
+            "host": service["host"],
+            "port": service["port"],
+            "is_up": is_up,
+            "status": status,
+            "critical": service["critical"],
+            "attempts": attempts,
+            "response_ms": round(response_ms, 2),
+            "checked_at": datetime.now().isoformat(),
+        })
+
+    return results
+
+def print_report(results):
+    """Print a formatted health check report."""
+    # Group by status
+    by_status = defaultdict(list)
+    for r in results:
+        by_status[r["status"]].append(r)
+
+    healthy_count = len(by_status["healthy"])
+    critical_count = len(by_status["critical"])
+    degraded_count = len(by_status["degraded"])
+    total = len(results)
+
+    # Overall status
+    if critical_count > 0:
+        overall = "CRITICAL"
+    elif degraded_count > 0:
+        overall = "DEGRADED"
+    else:
+        overall = "HEALTHY"
+
+    # Header
+    print(f"\n{'=' * 65}")
+    print(f"  Service Health Report — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Overall Status: {overall}")
+    print(f"  {healthy_count}/{total} healthy, {critical_count} critical, {degraded_count} degraded")
+    print(f"{'=' * 65}\n")
+
+    # Service table
+    print(f"  {'Service':<15} {'Endpoint':<25} {'Status':<10} {'Time':<10} {'Priority'}")
+    print(f"  {'-' * 60}")
+
+    # Sort: critical first, then degraded, then healthy
+    status_order = {"critical": 0, "degraded": 1, "healthy": 2}
+    sorted_results = sorted(results, key=lambda r: status_order.get(r["status"], 3))
+
+    for r in sorted_results:
+        endpoint = f"{r['host']}:{r['port']}"
+        status_symbol = {
+            "healthy": "  OK ",
+            "degraded": " WARN",
+            "critical": " CRIT",
+        }.get(r["status"], " ??? ")
+
+        priority = "CRITICAL" if r["critical"] else "normal"
+        time_str = f"{r['response_ms']:.0f}ms"
+
+        # Color coding via symbols
+        prefix = "+" if r["is_up"] else "!"
+        retry_info = f" ({r['attempts']} tries)" if r["attempts"] > 1 else ""
+
+        print(f"  [{prefix}]{status_symbol} {r['name']:<13} {endpoint:<23} {time_str:<10} {priority}{retry_info}")
+
+    # Alerts section
+    if critical_count > 0 or degraded_count > 0:
+        print(f"\n  {'--- Alerts ---':^60}")
+        for r in sorted_results:
+            if r["status"] == "critical":
+                print(f"  [CRITICAL] {r['name']} is DOWN — immediate attention required")
+            elif r["status"] == "degraded":
+                print(f"  [WARNING]  {r['name']} is DOWN — non-critical, monitor")
+
+    # Summary
+    print(f"\n{'=' * 65}")
+    return 1 if critical_count > 0 else 0
+
+def main():
+    """Run the health check and output results."""
+    results = run_health_check(SERVICES)
+
+    if "--json" in sys.argv:
+        print(json.dumps(results, indent=2))
+        critical = any(r["status"] == "critical" for r in results)
+        return 1 if critical else 0
+    else:
+        return print_report(results)
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+This health checker demonstrates every control flow concept: conditionals for status categorization, for loops for iteration, while-like retry logic, comprehensions for grouping, exception handling for network errors, and the guard clause pattern for clean logic.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Use guard clauses (early returns) to avoid deep nesting in functions
+- `if value:` checks truthiness — use `if value is not None:` when 0 or empty string are valid
+- `enumerate()` gives you index + value; `zip()` pairs elements from multiple lists
+- Comprehensions are concise but should stay readable — one line, one concept
+- The walrus operator `:=` assigns and uses a value in one expression (Python 3.8+)
+- `match/case` is Python's pattern matching for clean dispatch logic (Python 3.10+)
+- The `while/else` pattern is perfect for timeout loops
+- Always handle exceptions in scripts that touch the network, files, or external services
+
+## What's Next
+
+You can make decisions and iterate over data. In **Functions and Modules**, you'll learn to write reusable functions with type hints, create decorators for cross-cutting concerns like retry logic and timing, and organize code into importable modules — the building blocks of professional automation libraries.
