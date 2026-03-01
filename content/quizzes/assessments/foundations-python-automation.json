@@ -1,0 +1,868 @@
+{
+  "id": "assessment-foundations-python-automation",
+  "title": "Python for Automation Assessment",
+  "description": "Comprehensive assessment covering all Python Automation fundamentals across 20 lessons. Pass this to earn your Python Automation Foundations certificate.",
+  "lessonSlug": "_assessment",
+  "moduleSlug": "python-automation",
+  "pathSlug": "foundations",
+  "passingScore": 80,
+  "timeLimit": 2700,
+  "isAssessment": true,
+  "xpRewards": {
+    "pass": 200,
+    "perfect": 300,
+    "retry": 50
+  },
+  "questions": [
+    {
+      "id": "a-pa-q1",
+      "type": "multiple_choice",
+      "question": "Why is Python widely preferred over Bash for complex DevOps automation tasks?",
+      "options": [
+        "A) Python is the only language that can interact with cloud APIs",
+        "B) Python offers better error handling, rich standard libraries, third-party ecosystem, and cross-platform support",
+        "C) Python scripts execute faster than compiled C programs",
+        "D) Python has replaced Bash entirely in modern Linux distributions"
+      ],
+      "correctAnswer": "B) Python offers better error handling, rich standard libraries, third-party ecosystem, and cross-platform support",
+      "explanation": "Python excels for complex automation because it provides robust error handling with try/except, an extensive standard library (os, subprocess, json, etc.), a rich ecosystem of third-party packages (boto3, paramiko, docker), and works consistently across operating systems.",
+      "difficulty": "beginner",
+      "lessonRef": "01-why-python-for-devops"
+    },
+    {
+      "id": "a-pa-q2",
+      "type": "true_false",
+      "question": "Python is only suitable for web development and cannot effectively replace shell scripts for system administration tasks.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "Python is extremely effective for system administration. Modules like os, subprocess, shutil, and pathlib provide comprehensive system interaction capabilities. Many organizations use Python for configuration management, log analysis, deployment automation, and infrastructure provisioning.",
+      "difficulty": "beginner",
+      "lessonRef": "01-why-python-for-devops"
+    },
+    {
+      "id": "a-pa-q3",
+      "type": "multiple_choice",
+      "question": "Which tool is recommended for creating isolated Python environments to avoid dependency conflicts between projects?",
+      "options": [
+        "A) pip install --global",
+        "B) python -m venv",
+        "C) apt-get install python-env",
+        "D) conda create --system"
+      ],
+      "correctAnswer": "B) python -m venv",
+      "explanation": "The 'python -m venv' command creates a lightweight virtual environment with its own Python binary and pip, isolating project dependencies. This is part of the Python standard library (since Python 3.3) and is the recommended approach for creating virtual environments.",
+      "difficulty": "beginner",
+      "lessonRef": "02-installation-and-setup"
+    },
+    {
+      "id": "a-pa-q4",
+      "type": "code_completion",
+      "question": "Complete the command to create and activate a Python virtual environment:\n\npython3 -m venv .venv\nsource _____",
+      "options": [
+        "A) .venv/bin/activate",
+        "B) .venv/scripts/activate",
+        "C) .venv/env/activate",
+        "D) .venv/python/activate"
+      ],
+      "correctAnswer": "A) .venv/bin/activate",
+      "explanation": "On Linux and macOS, the activation script is located at .venv/bin/activate. On Windows, it would be .venv\\Scripts\\activate. The source command runs the script in the current shell session, modifying the PATH to use the virtual environment's Python.",
+      "difficulty": "beginner",
+      "lessonRef": "02-installation-and-setup"
+    },
+    {
+      "id": "a-pa-q5",
+      "type": "multiple_choice",
+      "question": "What is the output of the following Python code?\n\nx = [1, 2, 3]\ny = x\ny.append(4)\nprint(len(x))",
+      "options": [
+        "A) 3",
+        "B) 4",
+        "C) TypeError",
+        "D) [1, 2, 3, 4]"
+      ],
+      "correctAnswer": "B) 4",
+      "explanation": "In Python, lists are mutable objects and assignment creates a reference, not a copy. When y = x is executed, both variables point to the same list object. Appending to y also modifies x, so len(x) returns 4.",
+      "difficulty": "beginner",
+      "lessonRef": "03-python-basics"
+    },
+    {
+      "id": "a-pa-q6",
+      "type": "code_completion",
+      "question": "Complete the f-string to format a deployment message:\n\nserver = 'web-01'\nstatus = 'deployed'\nprint(f'Server {server} has been _____')",
+      "options": [
+        "A) {status}",
+        "B) ${status}",
+        "C) (status)",
+        "D) status"
+      ],
+      "correctAnswer": "A) {status}",
+      "explanation": "In Python f-strings (formatted string literals), variables are embedded using curly braces {variable_name}. This is different from shell scripting which uses ${variable}. The f prefix before the string enables this interpolation.",
+      "difficulty": "beginner",
+      "lessonRef": "03-python-basics"
+    },
+    {
+      "id": "a-pa-q7",
+      "type": "multiple_choice",
+      "question": "Which method removes and returns a key-value pair from a dictionary while providing a default if the key is missing?",
+      "options": [
+        "A) dict.remove(key)",
+        "B) dict.pop(key, default)",
+        "C) dict.delete(key)",
+        "D) dict.discard(key)"
+      ],
+      "correctAnswer": "B) dict.pop(key, default)",
+      "explanation": "The dict.pop(key, default) method removes and returns the value for the given key. If the key does not exist, it returns the default value instead of raising a KeyError. This is particularly useful in DevOps scripts for safely extracting configuration values.",
+      "difficulty": "beginner",
+      "lessonRef": "04-data-structures"
+    },
+    {
+      "id": "a-pa-q8",
+      "type": "multiple_choice",
+      "question": "What does the following dictionary comprehension produce?\n\nenv_vars = {'DB_HOST': 'localhost', 'DB_PORT': '5432', 'APP_NAME': 'myapp'}\ndb_vars = {k: v for k, v in env_vars.items() if k.startswith('DB_')}",
+      "options": [
+        "A) {'DB_HOST': 'localhost', 'DB_PORT': '5432', 'APP_NAME': 'myapp'}",
+        "B) {'DB_HOST': 'localhost', 'DB_PORT': '5432'}",
+        "C) ['DB_HOST', 'DB_PORT']",
+        "D) {'localhost', '5432'}"
+      ],
+      "correctAnswer": "B) {'DB_HOST': 'localhost', 'DB_PORT': '5432'}",
+      "explanation": "The dictionary comprehension filters key-value pairs where the key starts with 'DB_'. This pattern is common in DevOps for extracting environment-specific configuration from a larger set of variables.",
+      "difficulty": "intermediate",
+      "lessonRef": "04-data-structures"
+    },
+    {
+      "id": "a-pa-q9",
+      "type": "code_completion",
+      "question": "Complete the list comprehension to extract IP addresses from a list of server dictionaries:\n\nservers = [{'name': 'web1', 'ip': '10.0.0.1'}, {'name': 'web2', 'ip': '10.0.0.2'}]\nips = [_____ for s in servers]",
+      "options": [
+        "A) s['ip']",
+        "B) s.ip",
+        "C) s.get['ip']",
+        "D) s[ip]"
+      ],
+      "correctAnswer": "A) s['ip']",
+      "explanation": "Dictionary values are accessed using bracket notation with the key as a string: s['ip']. The dot notation (s.ip) does not work for dictionary access in Python. s.get('ip') would also work but uses parentheses, not brackets.",
+      "difficulty": "beginner",
+      "lessonRef": "04-data-structures"
+    },
+    {
+      "id": "a-pa-q10",
+      "type": "multiple_choice",
+      "question": "What is the purpose of the 'enumerate()' function when iterating in a DevOps script?",
+      "options": [
+        "A) It counts the total number of items in a collection",
+        "B) It provides both an index counter and the value during iteration",
+        "C) It sorts the collection before iterating",
+        "D) It removes duplicate items from the collection"
+      ],
+      "correctAnswer": "B) It provides both an index counter and the value during iteration",
+      "explanation": "enumerate() adds a counter to an iterable, returning (index, value) tuples. This is useful in DevOps scripts when you need to track progress: for i, server in enumerate(servers): print(f'Processing server {i+1}/{len(servers)}: {server}').",
+      "difficulty": "beginner",
+      "lessonRef": "05-control-flow"
+    },
+    {
+      "id": "a-pa-q11",
+      "type": "true_false",
+      "question": "In Python, the 'for/else' construct executes the 'else' block only when the loop completes without encountering a 'break' statement.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "Python's for/else is unique: the else block runs only if the loop finishes normally (without break). This is useful for search patterns, e.g., checking if any server is unhealthy and breaking, with the else block confirming all servers are healthy.",
+      "difficulty": "intermediate",
+      "lessonRef": "05-control-flow"
+    },
+    {
+      "id": "a-pa-q12",
+      "type": "code_completion",
+      "question": "Complete the health check loop with a retry mechanism:\n\nfor attempt in range(3):\n    if check_health(server):\n        print('Server is healthy')\n        _____\nelse:\n    print('Server failed all health checks')",
+      "options": [
+        "A) break",
+        "B) continue",
+        "C) return",
+        "D) pass"
+      ],
+      "correctAnswer": "A) break",
+      "explanation": "The 'break' statement exits the loop when the health check succeeds. Because 'break' was used, the 'else' block will NOT execute. If all 3 attempts fail (no break), the else block runs, indicating total failure. This is a common retry pattern in DevOps automation.",
+      "difficulty": "beginner",
+      "lessonRef": "05-control-flow"
+    },
+    {
+      "id": "a-pa-q13",
+      "type": "multiple_choice",
+      "question": "What is the difference between *args and **kwargs in a Python function definition?",
+      "options": [
+        "A) *args collects positional arguments as a tuple; **kwargs collects keyword arguments as a dictionary",
+        "B) *args collects keyword arguments; **kwargs collects positional arguments",
+        "C) *args accepts only strings; **kwargs accepts only integers",
+        "D) *args and **kwargs are interchangeable aliases"
+      ],
+      "correctAnswer": "A) *args collects positional arguments as a tuple; **kwargs collects keyword arguments as a dictionary",
+      "explanation": "*args allows a function to accept any number of positional arguments, collected into a tuple. **kwargs accepts any number of keyword arguments, collected into a dictionary. This is widely used in DevOps wrapper functions that need to pass through variable arguments.",
+      "difficulty": "intermediate",
+      "lessonRef": "06-functions-and-modules"
+    },
+    {
+      "id": "a-pa-q14",
+      "type": "code_completion",
+      "question": "Complete the decorator function that logs execution time of DevOps tasks:\n\nimport time\nimport functools\n\ndef timer(func):\n    @functools.wraps(func)\n    def wrapper(*args, **kwargs):\n        start = time.time()\n        result = _____()\n        elapsed = time.time() - start\n        print(f'{func.__name__} took {elapsed:.2f}s')\n        return result\n    return wrapper",
+      "options": [
+        "A) func(*args, **kwargs)",
+        "B) func.call(args, kwargs)",
+        "C) func.execute()",
+        "D) wrapper(*args, **kwargs)"
+      ],
+      "correctAnswer": "A) func(*args, **kwargs)",
+      "explanation": "Inside the wrapper, the original function must be called with the same arguments that were passed in. func(*args, **kwargs) unpacks and forwards all positional and keyword arguments. The functools.wraps decorator preserves the original function's metadata.",
+      "difficulty": "advanced",
+      "lessonRef": "06-functions-and-modules"
+    },
+    {
+      "id": "a-pa-q15",
+      "type": "multiple_choice",
+      "question": "Which approach is best for importing only a specific function from a module in a DevOps script?",
+      "options": [
+        "A) import os.path.exists",
+        "B) from os.path import exists",
+        "C) import os; use os.path.exists()",
+        "D) Both B and C are valid, but C is preferred for clarity in larger scripts"
+      ],
+      "correctAnswer": "D) Both B and C are valid, but C is preferred for clarity in larger scripts",
+      "explanation": "While 'from os.path import exists' works and reduces typing, 'import os' with 'os.path.exists()' is often preferred in larger scripts as it makes the module origin explicit. This improves readability and avoids name collisions, which is important in complex automation codebases.",
+      "difficulty": "intermediate",
+      "lessonRef": "06-functions-and-modules"
+    },
+    {
+      "id": "a-pa-q16",
+      "type": "multiple_choice",
+      "question": "What advantage does pathlib.Path offer over os.path for file operations in Python?",
+      "options": [
+        "A) pathlib.Path is faster at reading files",
+        "B) pathlib.Path provides an object-oriented interface with operator overloading (/) for path joining",
+        "C) pathlib.Path is the only way to handle Windows paths",
+        "D) pathlib.Path automatically compresses files"
+      ],
+      "correctAnswer": "B) pathlib.Path provides an object-oriented interface with operator overloading (/) for path joining",
+      "explanation": "pathlib.Path offers a cleaner, object-oriented API for path manipulation. Path('/etc') / 'nginx' / 'nginx.conf' is more readable than os.path.join('/etc', 'nginx', 'nginx.conf'). It also provides convenient methods like .read_text(), .exists(), .glob(), and .iterdir().",
+      "difficulty": "intermediate",
+      "lessonRef": "07-file-operations"
+    },
+    {
+      "id": "a-pa-q17",
+      "type": "code_completion",
+      "question": "Complete the code to safely read a configuration file using a context manager:\n\n_____ open('/etc/app/config.ini', 'r') as f:\n    config_data = f.read()",
+      "options": [
+        "A) with",
+        "B) using",
+        "C) try",
+        "D) open"
+      ],
+      "correctAnswer": "A) with",
+      "explanation": "The 'with' statement is a context manager that ensures the file is properly closed after the block completes, even if an exception occurs. This prevents file descriptor leaks, which is critical in long-running DevOps scripts and automation daemons.",
+      "difficulty": "intermediate",
+      "lessonRef": "07-file-operations"
+    },
+    {
+      "id": "a-pa-q18",
+      "type": "multiple_choice",
+      "question": "Which shutil function would you use to recursively copy a directory tree including all metadata?",
+      "options": [
+        "A) shutil.copy()",
+        "B) shutil.copy2()",
+        "C) shutil.copytree()",
+        "D) shutil.move()"
+      ],
+      "correctAnswer": "C) shutil.copytree()",
+      "explanation": "shutil.copytree(src, dst) recursively copies an entire directory tree from src to dst, including all files, subdirectories, and metadata. shutil.copy() copies single files without metadata, shutil.copy2() copies single files with metadata, and shutil.move() moves rather than copies.",
+      "difficulty": "intermediate",
+      "lessonRef": "07-file-operations"
+    },
+    {
+      "id": "a-pa-q19",
+      "type": "multiple_choice",
+      "question": "What is the correct way to load a YAML configuration file in Python?",
+      "options": [
+        "A) yaml.load(f, Loader=yaml.FullLoader)",
+        "B) yaml.parse(f.read())",
+        "C) yaml.decode(f)",
+        "D) yaml.from_file(f)"
+      ],
+      "correctAnswer": "A) yaml.load(f, Loader=yaml.FullLoader)",
+      "explanation": "PyYAML's yaml.load() requires a Loader parameter to prevent arbitrary code execution vulnerabilities. yaml.FullLoader is recommended for untrusted input (or yaml.safe_load() as a shortcut for yaml.load(f, Loader=yaml.SafeLoader)). Never use yaml.load() without specifying a Loader.",
+      "difficulty": "beginner",
+      "lessonRef": "08-working-with-json-yaml"
+    },
+    {
+      "id": "a-pa-q20",
+      "type": "code_completion",
+      "question": "Complete the code to write a Python dictionary as a formatted JSON file:\n\nimport json\n\nconfig = {'database': {'host': 'db.example.com', 'port': 5432}}\nwith open('config.json', 'w') as f:\n    json._____(config, f, indent=2)",
+      "options": [
+        "A) dump",
+        "B) dumps",
+        "C) write",
+        "D) encode"
+      ],
+      "correctAnswer": "A) dump",
+      "explanation": "json.dump() serializes a Python object and writes it directly to a file object. json.dumps() returns a string instead. The indent=2 parameter formats the output with 2-space indentation for human readability, which is important for configuration files.",
+      "difficulty": "beginner",
+      "lessonRef": "08-working-with-json-yaml"
+    },
+    {
+      "id": "a-pa-q21",
+      "type": "true_false",
+      "question": "When using json.dumps(), the default parameter can be set to a function that handles serialization of objects that are not natively JSON-serializable, such as datetime objects.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "The default parameter accepts a callable that is invoked for objects that cannot be serialized. For example: json.dumps(data, default=str) converts non-serializable objects to strings, and custom functions can handle datetime, Decimal, or other types.",
+      "difficulty": "intermediate",
+      "lessonRef": "08-working-with-json-yaml"
+    },
+    {
+      "id": "a-pa-q22",
+      "type": "multiple_choice",
+      "question": "What is the key difference between subprocess.run() and subprocess.Popen()?",
+      "options": [
+        "A) subprocess.run() is deprecated; Popen() is the modern API",
+        "B) subprocess.run() waits for the command to complete; Popen() provides more control over the running process",
+        "C) subprocess.Popen() can only run shell commands; run() can run any executable",
+        "D) subprocess.run() only works on Linux; Popen() is cross-platform"
+      ],
+      "correctAnswer": "B) subprocess.run() waits for the command to complete; Popen() provides more control over the running process",
+      "explanation": "subprocess.run() is a high-level convenience function that blocks until the process completes. subprocess.Popen() is lower-level and provides fine-grained control: you can interact with stdin/stdout streams, poll for completion, and manage processes asynchronously.",
+      "difficulty": "intermediate",
+      "lessonRef": "09-os-and-subprocess"
+    },
+    {
+      "id": "a-pa-q23",
+      "type": "multiple_choice",
+      "question": "What is the safest way to pass a command to subprocess.run() to avoid shell injection vulnerabilities?",
+      "options": [
+        "A) Pass the command as a single string with shell=True",
+        "B) Pass the command as a list of strings without shell=True, e.g., ['df', '-h', '/']",
+        "C) Pass the command through os.system() first",
+        "D) Escape the command string with repr() before passing it"
+      ],
+      "correctAnswer": "B) Pass the command as a list of strings without shell=True, e.g., ['df', '-h', '/']",
+      "explanation": "Passing commands as a list of strings without shell=True avoids shell injection vulnerabilities because arguments are passed directly to the OS exec call, not interpreted by a shell. This prevents attackers from injecting commands via special characters like semicolons or pipes.",
+      "difficulty": "intermediate",
+      "lessonRef": "09-os-and-subprocess"
+    },
+    {
+      "id": "a-pa-q24",
+      "type": "true_false",
+      "question": "Using subprocess.run() with shell=True is considered safe for automation scripts even when incorporating user-provided input into the command string.",
+      "options": ["True", "False"],
+      "correctAnswer": "False",
+      "explanation": "Using shell=True with user input is a major security risk as it enables shell injection attacks. An attacker could inject commands like '; rm -rf /'. Always use a list of arguments without shell=True, or use shlex.quote() if shell=True is absolutely necessary.",
+      "difficulty": "intermediate",
+      "lessonRef": "09-os-and-subprocess"
+    },
+    {
+      "id": "a-pa-q26",
+      "type": "multiple_choice",
+      "question": "What does the requests.Response.raise_for_status() method do?",
+      "options": [
+        "A) It returns the HTTP status code as an integer",
+        "B) It raises an HTTPError exception if the response status code indicates a client or server error (4xx or 5xx)",
+        "C) It sets the response status to 200 OK",
+        "D) It logs the response status to stderr"
+      ],
+      "correctAnswer": "B) It raises an HTTPError exception if the response status code indicates a client or server error (4xx or 5xx)",
+      "explanation": "raise_for_status() inspects the response status code and raises requests.exceptions.HTTPError for 4xx client errors or 5xx server errors. This is essential in automation scripts to fail fast on API errors rather than silently processing error responses.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-http-requests"
+    },
+    {
+      "id": "a-pa-q27",
+      "type": "multiple_choice",
+      "question": "Which HTTP header format is correct for authenticating API requests with an OAuth 2.0 bearer token?",
+      "options": [
+        "A) Authorization: Bearer <token>",
+        "B) Authorization: Token <token>",
+        "C) X-Auth-Token: <token>",
+        "D) Authentication: Bearer <token>"
+      ],
+      "correctAnswer": "A) Authorization: Bearer <token>",
+      "explanation": "The standard OAuth 2.0 bearer token format is 'Authorization: Bearer <token>'. In Python requests: headers = {'Authorization': f'Bearer {token}'}. 'Basic' is used for username:password (base64 encoded). Other header names are non-standard.",
+      "difficulty": "intermediate",
+      "lessonRef": "10-http-requests"
+    },
+    {
+      "id": "a-pa-q28",
+      "type": "multiple_choice",
+      "question": "When using requests.Session(), what is the primary benefit for DevOps automation scripts that make multiple API calls?",
+      "options": [
+        "A) It encrypts all request data automatically",
+        "B) It persists settings (headers, cookies, auth) across requests and reuses TCP connections for better performance",
+        "C) It automatically retries all failed requests",
+        "D) It caches all responses to disk"
+      ],
+      "correctAnswer": "B) It persists settings (headers, cookies, auth) across requests and reuses TCP connections for better performance",
+      "explanation": "requests.Session() maintains cookies, headers, and authentication across multiple requests. It also reuses the underlying TCP connection (connection pooling), reducing overhead when making many requests to the same host -- a common pattern in API automation.",
+      "difficulty": "advanced",
+      "lessonRef": "10-http-requests"
+    },
+    {
+      "id": "a-pa-q29",
+      "type": "multiple_choice",
+      "question": "Which exception hierarchy is correct for catching errors from most specific to most general in a Python automation script?",
+      "options": [
+        "A) Exception -> FileNotFoundError -> OSError",
+        "B) FileNotFoundError -> OSError -> Exception",
+        "C) OSError -> FileNotFoundError -> Exception",
+        "D) BaseException -> FileNotFoundError -> OSError"
+      ],
+      "correctAnswer": "B) FileNotFoundError -> OSError -> Exception",
+      "explanation": "Python exceptions should be caught from most specific to most general. FileNotFoundError is a subclass of OSError, which is a subclass of Exception. Catching in this order ensures specific errors get specific handling before falling through to more general handlers.",
+      "difficulty": "advanced",
+      "lessonRef": "11-error-handling-logging"
+    },
+    {
+      "id": "a-pa-q30",
+      "type": "code_completion",
+      "question": "Complete the logging configuration for a production automation script:\n\nimport logging\n\nlogging.basicConfig(\n    level=logging._____,\n    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',\n    filename='/var/log/automation.log'\n)",
+      "options": [
+        "A) INFO",
+        "B) PRINT",
+        "C) STDOUT",
+        "D) LOG"
+      ],
+      "correctAnswer": "A) INFO",
+      "explanation": "Python's logging module defines standard levels: DEBUG, INFO, WARNING, ERROR, and CRITICAL. INFO is commonly used in production to log operational messages without the verbosity of DEBUG. The format string uses LogRecord attributes to structure log entries.",
+      "difficulty": "intermediate",
+      "lessonRef": "11-error-handling-logging"
+    },
+    {
+      "id": "a-pa-q31",
+      "type": "true_false",
+      "question": "In Python, the 'finally' block in a try/except/finally construct executes regardless of whether an exception was raised or not, making it ideal for cleanup operations like closing connections.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "The 'finally' block always executes, whether the try block succeeds, an exception is caught, or an exception propagates. This makes it ideal for cleanup: closing database connections, releasing file handles, or restoring system state in automation scripts.",
+      "difficulty": "beginner",
+      "lessonRef": "11-error-handling-logging"
+    },
+    {
+      "id": "a-pa-q32",
+      "type": "multiple_choice",
+      "question": "What does the following regex pattern match?\n\nimport re\npattern = r'^(\\d{1,3}\\.){3}\\d{1,3}$'",
+      "options": [
+        "A) MAC addresses",
+        "B) IPv4 addresses (basic format validation)",
+        "C) Domain names",
+        "D) File paths"
+      ],
+      "correctAnswer": "B) IPv4 addresses (basic format validation)",
+      "explanation": "The pattern matches strings like '192.168.1.1': it starts (^) with 1-3 digits followed by a dot, repeated 3 times, then ends ($) with 1-3 digits. Note: this is basic validation and would also match invalid IPs like '999.999.999.999'.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-regex-text-processing"
+    },
+    {
+      "id": "a-pa-q33",
+      "type": "code_completion",
+      "question": "Complete the regex to extract all email addresses from a log file:\n\nimport re\n\nlog_content = open('app.log').read()\nemails = re._____(r'[\\w.+-]+@[\\w-]+\\.[\\w.-]+', log_content)",
+      "options": [
+        "A) findall",
+        "B) match",
+        "C) search",
+        "D) split"
+      ],
+      "correctAnswer": "A) findall",
+      "explanation": "re.findall() returns all non-overlapping matches as a list of strings, which is ideal for extracting multiple occurrences. re.match() only checks the beginning of the string, re.search() returns only the first match, and re.split() splits the string by the pattern.",
+      "difficulty": "intermediate",
+      "lessonRef": "12-regex-text-processing"
+    },
+    {
+      "id": "a-pa-q34",
+      "type": "multiple_choice",
+      "question": "When parsing log files, what does the re.MULTILINE flag change about the behavior of ^ and $ anchors?",
+      "options": [
+        "A) ^ and $ match at the start and end of each line instead of the entire string",
+        "B) The regex becomes case-insensitive",
+        "C) The dot (.) matches newline characters",
+        "D) The regex engine processes the string in reverse"
+      ],
+      "correctAnswer": "A) ^ and $ match at the start and end of each line instead of the entire string",
+      "explanation": "By default, ^ and $ match only at the start and end of the entire string. With re.MULTILINE, they match at the start and end of each line. This is essential for parsing log files where you need to match patterns at the beginning of individual log entries.",
+      "difficulty": "advanced",
+      "lessonRef": "12-regex-text-processing"
+    },
+    {
+      "id": "a-pa-q35",
+      "type": "multiple_choice",
+      "question": "Which boto3 method is used to list all S3 buckets in an AWS account?",
+      "options": [
+        "A) s3.get_buckets()",
+        "B) s3.list_buckets()",
+        "C) s3.describe_buckets()",
+        "D) s3.show_buckets()"
+      ],
+      "correctAnswer": "B) s3.list_buckets()",
+      "explanation": "The boto3 S3 client uses list_buckets() to return all S3 buckets. AWS APIs follow naming conventions: 'list_' for collections, 'describe_' for detailed info (used more by EC2), 'get_' for individual resources, and 'create_/delete_' for resource lifecycle.",
+      "difficulty": "intermediate",
+      "lessonRef": "13-boto3-aws-basics"
+    },
+    {
+      "id": "a-pa-q36",
+      "type": "code_completion",
+      "question": "Complete the boto3 code to create an EC2 client with a specific region:\n\nimport boto3\n\nec2 = boto3._____('ec2', region_name='us-west-2')",
+      "options": [
+        "A) client",
+        "B) resource",
+        "C) service",
+        "D) connect"
+      ],
+      "correctAnswer": "A) client",
+      "explanation": "boto3.client() creates a low-level service client that maps directly to AWS API operations. boto3.resource() creates a higher-level, object-oriented interface. For EC2 operations like describe_instances() or run_instances(), client() provides direct API access.",
+      "difficulty": "intermediate",
+      "lessonRef": "13-boto3-aws-basics"
+    },
+    {
+      "id": "a-pa-q37",
+      "type": "multiple_choice",
+      "question": "What is a boto3 paginator used for?",
+      "options": [
+        "A) Dividing large file uploads into chunks",
+        "B) Automatically handling API responses that span multiple pages when results exceed a single response limit",
+        "C) Creating pagination for web interfaces",
+        "D) Splitting requests across multiple AWS regions"
+      ],
+      "correctAnswer": "B) Automatically handling API responses that span multiple pages when results exceed a single response limit",
+      "explanation": "Many AWS APIs return truncated results when the number of items exceeds a limit (e.g., 1000 objects per S3 list_objects call). Paginators automatically make subsequent API calls using continuation tokens and yield all results, eliminating manual pagination logic.",
+      "difficulty": "advanced",
+      "lessonRef": "13-boto3-aws-basics"
+    },
+    {
+      "id": "a-pa-q38",
+      "type": "multiple_choice",
+      "question": "What is the correct way to establish an SSH connection using Paramiko?",
+      "options": [
+        "A) paramiko.connect('host', user='root')",
+        "B) Create an SSHClient instance, set the host key policy, then call connect() with hostname, username, and credentials",
+        "C) paramiko.SSH('host').login('root', 'password')",
+        "D) paramiko.session.open('host', 22)"
+      ],
+      "correctAnswer": "B) Create an SSHClient instance, set the host key policy, then call connect() with hostname, username, and credentials",
+      "explanation": "Paramiko requires: 1) Create SSHClient(), 2) Set host key policy (e.g., AutoAddPolicy for lab environments, or load system host keys for production), 3) Call client.connect(hostname, username, password/key_filename). This provides secure SSH connections for remote automation.",
+      "difficulty": "advanced",
+      "lessonRef": "14-paramiko-ssh"
+    },
+    {
+      "id": "a-pa-q39",
+      "type": "code_completion",
+      "question": "Complete the Paramiko code to execute a remote command and read the output:\n\nimport paramiko\n\nclient = paramiko.SSHClient()\nclient.set_missing_host_key_policy(paramiko.AutoAddPolicy())\nclient.connect('10.0.0.5', username='admin', key_filename='/home/admin/.ssh/id_rsa')\n\nstdin, stdout, stderr = client._____(\"df -h\")\nprint(stdout.read().decode())\nclient.close()",
+      "options": [
+        "A) exec_command",
+        "B) run_command",
+        "C) execute",
+        "D) send_command"
+      ],
+      "correctAnswer": "A) exec_command",
+      "explanation": "exec_command() executes a command on the remote server and returns three file-like objects: stdin (for sending input), stdout (command output), and stderr (error output). The output must be read with .read() and decoded from bytes to string.",
+      "difficulty": "intermediate",
+      "lessonRef": "14-paramiko-ssh"
+    },
+    {
+      "id": "a-pa-q40",
+      "type": "true_false",
+      "question": "Paramiko's SFTPClient allows you to transfer files over SSH and supports operations like put(), get(), listdir(), and stat() for remote file management.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "Paramiko's SFTPClient provides full SFTP functionality over SSH. sftp.put(local, remote) uploads files, sftp.get(remote, local) downloads them, sftp.listdir() lists remote directories, and sftp.stat() gets file metadata. It is obtained via client.open_sftp().",
+      "difficulty": "intermediate",
+      "lessonRef": "14-paramiko-ssh"
+    },
+    {
+      "id": "a-pa-q41",
+      "type": "multiple_choice",
+      "question": "How do you list all running Docker containers using the Docker SDK for Python?",
+      "options": [
+        "A) docker.containers.running()",
+        "B) client.containers.list()",
+        "C) docker.list_containers(status='running')",
+        "D) client.ps()"
+      ],
+      "correctAnswer": "B) client.containers.list()",
+      "explanation": "The Docker SDK uses client.containers.list() to return running containers by default. To include stopped containers, pass all=True. The client is created with docker.from_env() which reads Docker configuration from environment variables and the default socket.",
+      "difficulty": "advanced",
+      "lessonRef": "15-docker-sdk"
+    },
+    {
+      "id": "a-pa-q42",
+      "type": "multiple_choice",
+      "question": "Which Docker SDK method pulls an image, creates a container, and starts it in a single call?",
+      "options": [
+        "A) client.containers.run()",
+        "B) client.containers.create()",
+        "C) client.containers.start()",
+        "D) client.images.run()"
+      ],
+      "correctAnswer": "A) client.containers.run()",
+      "explanation": "client.containers.run() pulls the image (if needed), creates a container, and starts it. With detach=True, it runs in the background and returns the Container object. client.containers.create() only creates without starting. The ports dict maps container ports to host ports.",
+      "difficulty": "advanced",
+      "lessonRef": "15-docker-sdk"
+    },
+    {
+      "id": "a-pa-q43",
+      "type": "multiple_choice",
+      "question": "What does client.images.build(path='.', tag='myapp:v1') do in the Docker SDK?",
+      "options": [
+        "A) Downloads the myapp:v1 image from Docker Hub",
+        "B) Builds a Docker image from the Dockerfile in the current directory and tags it as myapp:v1",
+        "C) Creates a container from an existing myapp:v1 image",
+        "D) Exports the myapp:v1 image to a tar file"
+      ],
+      "correctAnswer": "B) Builds a Docker image from the Dockerfile in the current directory and tags it as myapp:v1",
+      "explanation": "client.images.build() builds an image from a Dockerfile. The path parameter specifies the build context directory (containing the Dockerfile), and tag assigns a name and version. This returns a tuple of (Image, build_logs) for programmatic build automation.",
+      "difficulty": "advanced",
+      "lessonRef": "15-docker-sdk"
+    },
+    {
+      "id": "a-pa-q44",
+      "type": "multiple_choice",
+      "question": "How do you load the Kubernetes configuration from the default kubeconfig file using the Python client?",
+      "options": [
+        "A) kubernetes.config.load()",
+        "B) kubernetes.config.load_kube_config()",
+        "C) kubernetes.connect()",
+        "D) kubernetes.client.Configuration()"
+      ],
+      "correctAnswer": "B) kubernetes.config.load_kube_config()",
+      "explanation": "kubernetes.config.load_kube_config() loads configuration from ~/.kube/config by default. For in-cluster use (when running inside a pod), use load_incluster_config() instead, which reads the service account token and cluster CA from the mounted secrets.",
+      "difficulty": "intermediate",
+      "lessonRef": "16-kubernetes-client"
+    },
+    {
+      "id": "a-pa-q45",
+      "type": "code_completion",
+      "question": "Complete the code to list all pods in a specific Kubernetes namespace:\n\nfrom kubernetes import client, config\n\nconfig.load_kube_config()\nv1 = client.CoreV1Api()\n\npods = v1._____(namespace='production')\nfor pod in pods.items:\n    print(f'{pod.metadata.name}: {pod.status.phase}')",
+      "options": [
+        "A) list_namespaced_pod",
+        "B) get_pods",
+        "C) list_pods",
+        "D) describe_pods"
+      ],
+      "correctAnswer": "A) list_namespaced_pod",
+      "explanation": "The Kubernetes Python client follows the API naming convention: list_namespaced_<resource> for namespace-scoped resources. CoreV1Api handles core resources like pods, services, and configmaps. The response's .items attribute contains the list of pod objects.",
+      "difficulty": "advanced",
+      "lessonRef": "16-kubernetes-client"
+    },
+    {
+      "id": "a-pa-q46",
+      "type": "multiple_choice",
+      "question": "Which Kubernetes Python client API class is used to work with Deployments?",
+      "options": [
+        "A) client.CoreV1Api()",
+        "B) client.AppsV1Api()",
+        "C) client.DeploymentApi()",
+        "D) client.ExtensionsV1Api()"
+      ],
+      "correctAnswer": "B) client.AppsV1Api()",
+      "explanation": "Deployments, StatefulSets, DaemonSets, and ReplicaSets are part of the apps/v1 API group, accessed through client.AppsV1Api(). CoreV1Api handles pods, services, configmaps, and secrets. The API classes mirror the Kubernetes API groups.",
+      "difficulty": "advanced",
+      "lessonRef": "16-kubernetes-client"
+    },
+    {
+      "id": "a-pa-q47",
+      "type": "true_false",
+      "question": "The Kubernetes Python client's watch module allows you to stream real-time events from the cluster, such as pod creation, deletion, and status changes.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "The watch.Watch() class provides a stream() method that wraps list API calls into a streaming interface. This uses the Kubernetes watch API to receive real-time notifications, which is essential for building monitoring tools and custom controllers.",
+      "difficulty": "advanced",
+      "lessonRef": "16-kubernetes-client"
+    },
+    {
+      "id": "a-pa-q48",
+      "type": "multiple_choice",
+      "question": "What is the purpose of the @click.command() decorator in the Click framework?",
+      "options": [
+        "A) It registers a function as a CLI command that can parse arguments and options",
+        "B) It makes a function run asynchronously",
+        "C) It adds logging to the function",
+        "D) It restricts the function to command-line usage only"
+      ],
+      "correctAnswer": "A) It registers a function as a CLI command that can parse arguments and options",
+      "explanation": "The @click.command() decorator transforms a Python function into a CLI command. Combined with @click.option() and @click.argument() decorators, it provides automatic argument parsing, help text generation, type validation, and error handling.",
+      "difficulty": "intermediate",
+      "lessonRef": "17-click-cli-tools"
+    },
+    {
+      "id": "a-pa-q49",
+      "type": "code_completion",
+      "question": "Complete the Click CLI tool that accepts a required server name and an optional port:\n\nimport click\n\n@click.command()\n@click.argument('server')\n@click._____(\"--port\", '-p', default=22, help='SSH port number')\ndef deploy(server, port):\n    click.echo(f'Deploying to {server}:{port}')",
+      "options": [
+        "A) option",
+        "B) param",
+        "C) flag",
+        "D) input"
+      ],
+      "correctAnswer": "A) option",
+      "explanation": "@click.option() defines optional CLI parameters with -- prefix. Options support defaults, help text, type conversion, and short flags (-p). @click.argument() is for required positional parameters. This separation makes CLIs intuitive and self-documenting.",
+      "difficulty": "beginner",
+      "lessonRef": "17-click-cli-tools"
+    },
+    {
+      "id": "a-pa-q50",
+      "type": "multiple_choice",
+      "question": "How does @click.group() enable building multi-command CLI tools?",
+      "options": [
+        "A) It groups multiple options into a single option",
+        "B) It creates a parent command that can have subcommands attached via @group.command()",
+        "C) It runs multiple commands in parallel",
+        "D) It groups log messages by category"
+      ],
+      "correctAnswer": "B) It creates a parent command that can have subcommands attached via @group.command()",
+      "explanation": "@click.group() creates a CLI group that serves as a parent for subcommands (like 'git commit', 'git push'). Subcommands are added using @group.command(). Groups can be nested for complex tools (e.g., 'aws ec2 describe-instances').",
+      "difficulty": "advanced",
+      "lessonRef": "17-click-cli-tools"
+    },
+    {
+      "id": "a-pa-q51",
+      "type": "multiple_choice",
+      "question": "What is the purpose of pytest fixtures?",
+      "options": [
+        "A) They fix broken tests automatically",
+        "B) They provide reusable setup/teardown logic and test dependencies through dependency injection",
+        "C) They permanently store test results in a database",
+        "D) They compile Python code before testing"
+      ],
+      "correctAnswer": "B) They provide reusable setup/teardown logic and test dependencies through dependency injection",
+      "explanation": "Pytest fixtures are functions decorated with @pytest.fixture that provide test dependencies. Tests request fixtures by including them as parameters. Fixtures handle setup and teardown (using yield), can be scoped (function, class, module, session), and support composition.",
+      "difficulty": "intermediate",
+      "lessonRef": "18-testing-automation"
+    },
+    {
+      "id": "a-pa-q52",
+      "type": "code_completion",
+      "question": "Complete the pytest test that verifies a function raises a specific exception:\n\nimport pytest\n\ndef test_invalid_config():\n    with pytest._____(ValueError):\n        parse_config('invalid: [broken')",
+      "options": [
+        "A) raises",
+        "B) throws",
+        "C) expects",
+        "D) catches"
+      ],
+      "correctAnswer": "A) raises",
+      "explanation": "pytest.raises() is a context manager that asserts that the code within the block raises the specified exception. If the exception is not raised, the test fails. You can also inspect the exception details using 'as exc_info' to verify the error message.",
+      "difficulty": "intermediate",
+      "lessonRef": "18-testing-automation"
+    },
+    {
+      "id": "a-pa-q53",
+      "type": "multiple_choice",
+      "question": "What does the unittest.mock.patch() decorator do when testing automation scripts?",
+      "options": [
+        "A) It patches security vulnerabilities in the code",
+        "B) It temporarily replaces an object with a mock during the test, restoring the original after",
+        "C) It applies code patches from a diff file",
+        "D) It updates pip packages before running tests"
+      ],
+      "correctAnswer": "B) It temporarily replaces an object with a mock during the test, restoring the original after",
+      "explanation": "mock.patch() replaces specified objects (functions, classes, methods) with Mock objects during the test scope. This is critical for testing automation scripts without actually connecting to AWS, SSH servers, or Docker daemons. The original is restored after the test.",
+      "difficulty": "advanced",
+      "lessonRef": "18-testing-automation"
+    },
+    {
+      "id": "a-pa-q54",
+      "type": "true_false",
+      "question": "The @pytest.mark.parametrize decorator allows running the same test function with multiple sets of input data and expected results.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "@pytest.mark.parametrize('input,expected', [(1, 2), (2, 4)]) runs the test once for each tuple. This reduces code duplication when testing a function with various inputs, and each parameterized case is reported as a separate test result.",
+      "difficulty": "advanced",
+      "lessonRef": "18-testing-automation"
+    },
+    {
+      "id": "a-pa-q55",
+      "type": "multiple_choice",
+      "question": "In a monitoring script, what is the advantage of using Python's 'schedule' library over a simple while/sleep loop?",
+      "options": [
+        "A) The schedule library uses less memory",
+        "B) It provides a human-readable API for defining recurring jobs with precise timing control and avoids time drift",
+        "C) It is built into the Python standard library",
+        "D) It runs tasks in separate processes automatically"
+      ],
+      "correctAnswer": "B) It provides a human-readable API for defining recurring jobs with precise timing control and avoids time drift",
+      "explanation": "The schedule library offers readable syntax like schedule.every(5).minutes.do(check_health) and handles timing drift that accumulates with simple sleep loops. While not in the stdlib, it simplifies cron-like scheduling within Python monitoring scripts.",
+      "difficulty": "advanced",
+      "lessonRef": "19-monitoring-scripts"
+    },
+    {
+      "id": "a-pa-q56",
+      "type": "code_completion",
+      "question": "Complete the monitoring script that sends alerts when disk usage exceeds a threshold:\n\nimport shutil\n\ndef check_disk(path='/', threshold=80):\n    usage = shutil._____(path)\n    percent = (usage.used / usage.total) * 100\n    if percent > threshold:\n        send_alert(f'Disk usage at {percent:.1f}%')\n    return percent",
+      "options": [
+        "A) disk_usage",
+        "B) disk_stats",
+        "C) get_disk_info",
+        "D) statvfs"
+      ],
+      "correctAnswer": "A) disk_usage",
+      "explanation": "shutil.disk_usage(path) returns a named tuple with total, used, and free attributes (in bytes). This is a cross-platform way to check disk space in Python monitoring scripts, as opposed to parsing 'df' command output.",
+      "difficulty": "advanced",
+      "lessonRef": "19-monitoring-scripts"
+    },
+    {
+      "id": "a-pa-q57",
+      "type": "true_false",
+      "question": "Python's psutil library can monitor CPU usage, memory consumption, disk I/O, network statistics, and running processes, making it a comprehensive tool for system monitoring scripts.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "psutil (process and system utilities) provides cross-platform access to system metrics: psutil.cpu_percent(), psutil.virtual_memory(), psutil.disk_io_counters(), psutil.net_io_counters(), and psutil.process_iter(). It is the go-to library for Python monitoring scripts.",
+      "difficulty": "intermediate",
+      "lessonRef": "19-monitoring-scripts"
+    },
+    {
+      "id": "a-pa-q58",
+      "type": "multiple_choice",
+      "question": "What is the recommended approach for handling secrets and credentials in production Python automation scripts?",
+      "options": [
+        "A) Hard-code credentials directly in the script for simplicity",
+        "B) Store credentials in a .py config file imported by the main script",
+        "C) Use environment variables, secret managers (e.g., AWS Secrets Manager, HashiCorp Vault), or encrypted configuration files",
+        "D) Store credentials in a JSON file with read permissions for all users"
+      ],
+      "correctAnswer": "C) Use environment variables, secret managers (e.g., AWS Secrets Manager, HashiCorp Vault), or encrypted configuration files",
+      "explanation": "Production scripts should never contain hard-coded credentials. Best practices include: environment variables for simple cases, cloud secret managers (AWS Secrets Manager, Azure Key Vault) for cloud deployments, HashiCorp Vault for enterprise use, and encrypted files with restricted access.",
+      "difficulty": "advanced",
+      "lessonRef": "20-production-automation"
+    },
+    {
+      "id": "a-pa-q59",
+      "type": "multiple_choice",
+      "question": "Which pattern is recommended for making production Python automation scripts idempotent?",
+      "options": [
+        "A) Always delete and recreate resources on every run",
+        "B) Check the current state before making changes, and only apply changes if the desired state differs from the current state",
+        "C) Run every script exactly once and never retry",
+        "D) Use random resource names to avoid conflicts"
+      ],
+      "correctAnswer": "B) Check the current state before making changes, and only apply changes if the desired state differs from the current state",
+      "explanation": "Idempotent scripts produce the same result whether run once or multiple times. This means checking if a resource exists before creating it, comparing current vs desired configuration before updating, and using conditional logic throughout. This is critical for reliability in CI/CD pipelines.",
+      "difficulty": "advanced",
+      "lessonRef": "20-production-automation"
+    },
+    {
+      "id": "a-pa-q60",
+      "type": "multiple_choice",
+      "question": "What is the purpose of implementing graceful shutdown handling using Python's signal module in production automation scripts?",
+      "options": [
+        "A) To make the script run faster by ignoring termination signals",
+        "B) To catch termination signals (SIGTERM, SIGINT) and perform cleanup operations before exiting, such as closing connections and saving state",
+        "C) To prevent the script from being terminated under any circumstances",
+        "D) To automatically restart the script when it crashes"
+      ],
+      "correctAnswer": "B) To catch termination signals (SIGTERM, SIGINT) and perform cleanup operations before exiting, such as closing connections and saving state",
+      "explanation": "Production scripts should handle SIGTERM (sent by systemd/Kubernetes during shutdown) and SIGINT (Ctrl+C) gracefully using signal.signal(signal.SIGTERM, handler). The handler should close database connections, flush logs, release locks, and save state before exiting cleanly.",
+      "difficulty": "advanced",
+      "lessonRef": "20-production-automation"
+    },
+    {
+      "id": "a-pa-q61",
+      "type": "true_false",
+      "question": "In production Python automation, using 'if __name__ == \"__main__\"' is important because it prevents the script's main logic from executing when the module is imported by other scripts or test suites.",
+      "options": ["True", "False"],
+      "correctAnswer": "True",
+      "explanation": "The 'if __name__ == \"__main__\"' guard ensures that the main execution block only runs when the script is invoked directly, not when it is imported as a module. This is essential for production automation because it allows functions to be reused and tested independently.",
+      "difficulty": "beginner",
+      "lessonRef": "20-production-automation"
+    }
+  ]
+}

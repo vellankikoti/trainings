@@ -1,0 +1,1242 @@
+---
+title: "Writing Dockerfiles"
+description: "Master Dockerfile syntax and best practices. Learn every instruction — FROM, RUN, COPY, CMD, ENTRYPOINT — and build optimized images for real applications."
+order: 7
+xpReward: 50
+estimatedMinutes: 60
+prerequisites:
+  - 06-docker-images
+objectives:
+  - Write Dockerfiles using all core instructions
+  - Choose appropriate base images for different applications
+  - Understand the difference between CMD and ENTRYPOINT
+  - Optimize builds with layer caching and .dockerignore
+  - Apply best practices for smaller, faster, more secure images
+  - Build and tag custom images with docker build
+tags:
+  - docker
+  - dockerfile
+  - build
+  - devops
+  - containers
+  - images
+---
+
+<Callout type="story" title="The Story">
+Your team has a Node.js API that runs perfectly on a developer's laptop but crashes in staging. "It works on my machine" is the refrain. Your tech lead says, "Containerize it. Write a Dockerfile so it runs the same everywhere." You open your editor, type `FROM node:20`, and then freeze. What comes next? How do you structure the file so builds are fast, images are small, and deployments are reliable? This lesson teaches you everything you need to write production-grade Dockerfiles.
+</Callout>
+
+## What Is a Dockerfile?
+
+A Dockerfile is a **plain text file** containing a sequence of instructions that Docker uses to build an image. Each instruction creates a new layer in the image. Think of it as a recipe — each step adds ingredients (files, packages, configuration) to create the final dish (your container image).
+
+```dockerfile
+# A simple Dockerfile
+FROM node:20-slim
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+### How Docker Build Works
+
+```
+  Dockerfile              Docker Build Engine           Image
+  ┌──────────┐           ┌──────────────────┐        ┌──────────┐
+  │ FROM     │──────────▶│ Pull base image  │───────▶│ Layer 1  │
+  │ WORKDIR  │──────────▶│ Set metadata     │───────▶│ Layer 2  │
+  │ COPY     │──────────▶│ Copy files       │───────▶│ Layer 3  │
+  │ RUN      │──────────▶│ Execute command  │───────▶│ Layer 4  │
+  │ COPY     │──────────▶│ Copy files       │───────▶│ Layer 5  │
+  │ EXPOSE   │──────────▶│ Set metadata     │───────▶│ Layer 6  │
+  │ CMD      │──────────▶│ Set metadata     │───────▶│ Layer 7  │
+  └──────────┘           └──────────────────┘        └──────────┘
+                                                          │
+                                                     Final Image
+                                                     (all layers
+                                                      stacked)
+```
+
+## FROM — Choosing Your Base Image
+
+Every Dockerfile starts with `FROM`. It specifies the **base image** — the foundation your image builds upon.
+
+```dockerfile
+# Official Node.js image
+FROM node:20-slim
+
+# Python with specific version
+FROM python:3.12-alpine
+
+# Minimal Linux base
+FROM alpine:3.19
+
+# Ubuntu base
+FROM ubuntu:22.04
+
+# Empty base (for statically compiled binaries)
+FROM scratch
+```
+
+### Choosing the Right Base Image
+
+| Base | Size | Package Manager | Best For |
+|---|---|---|---|
+| `ubuntu:22.04` | ~78 MB | apt | Applications needing many system packages |
+| `debian:bookworm-slim` | ~74 MB | apt | General purpose, slim variant |
+| `alpine:3.19` | ~7 MB | apk | Minimal footprint, static binaries |
+| `scratch` | 0 MB | none | Statically compiled Go/Rust binaries |
+| `node:20` | ~1.1 GB | apt + npm | Development with native build tools |
+| `node:20-slim` | ~243 MB | apt + npm | Production Node.js apps |
+| `node:20-alpine` | ~135 MB | apk + npm | Minimal Node.js apps |
+
+<Callout type="tip" title="Start Slim, Add What You Need">
+Start with a `-slim` or `-alpine` variant and add packages as needed. It's easier to add a few packages to a small image than to remove bloat from a large one.
+</Callout>
+
+## RUN — Executing Commands During Build
+
+`RUN` executes commands inside the image during the build process. Each `RUN` creates a new layer.
+
+```dockerfile
+# Install packages
+RUN apt-get update && apt-get install -y curl wget
+
+# Create directories
+RUN mkdir -p /app/logs
+
+# Download files
+RUN curl -fsSL https://example.com/setup.sh | bash
+
+# Run multiple commands
+RUN apt-get update && \
+    apt-get install -y \
+      curl \
+      wget \
+      git \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+### Shell Form vs Exec Form
+
+```dockerfile
+# Shell form — runs through /bin/sh -c
+RUN apt-get update && apt-get install -y curl
+
+# Exec form — runs directly without a shell
+RUN ["apt-get", "update"]
+RUN ["apt-get", "install", "-y", "curl"]
+```
+
+The shell form supports pipes, redirects, and variable expansion. The exec form is more explicit and avoids shell processing.
+
+<Callout type="warning" title="Combine RUN Commands">
+Each `RUN` instruction creates a new layer. Too many layers increase image size because even if you delete a file in a later layer, it still exists in the previous layer.
+
+```dockerfile
+# BAD — 3 layers, deleted files still take space
+RUN apt-get update
+RUN apt-get install -y curl wget git
+RUN rm -rf /var/lib/apt/lists/*
+
+# GOOD — 1 layer, cleanup happens in the same layer
+RUN apt-get update && \
+    apt-get install -y curl wget git && \
+    rm -rf /var/lib/apt/lists/*
+```
+</Callout>
+
+## COPY and ADD — Adding Files to Your Image
+
+### COPY — The Straightforward Choice
+
+`COPY` copies files and directories from the **build context** (your local filesystem) into the image:
+
+```dockerfile
+# Copy a single file
+COPY package.json /app/package.json
+
+# Copy multiple files with a wildcard
+COPY package*.json /app/
+
+# Copy an entire directory
+COPY src/ /app/src/
+
+# Copy everything from the build context
+COPY . /app/
+
+# Copy with ownership (no need for separate chown)
+COPY --chown=node:node . /app/
+```
+
+### ADD — COPY with Superpowers (Use Sparingly)
+
+`ADD` does everything `COPY` does, plus:
+- Automatically extracts tar archives
+- Can download files from URLs
+
+```dockerfile
+# Auto-extract a tar file
+ADD app.tar.gz /app/
+
+# Download from URL (prefer curl in a RUN instead)
+ADD https://example.com/config.json /app/config.json
+```
+
+<Callout type="info" title="COPY vs ADD">
+Docker's official best practices recommend using `COPY` unless you specifically need `ADD`'s tar extraction feature. `COPY` is more transparent — it does exactly what it says and nothing more.
+
+```dockerfile
+# Prefer COPY
+COPY requirements.txt /app/
+
+# Only use ADD for tar extraction
+ADD archive.tar.gz /app/
+
+# For downloading files, use RUN + curl instead of ADD
+RUN curl -fsSL https://example.com/file.txt -o /app/file.txt
+```
+</Callout>
+
+## WORKDIR — Setting the Working Directory
+
+`WORKDIR` sets the working directory for all subsequent `RUN`, `CMD`, `ENTRYPOINT`, `COPY`, and `ADD` instructions:
+
+```dockerfile
+# Set the working directory
+WORKDIR /app
+
+# Now all paths are relative to /app
+COPY package.json ./          # Copies to /app/package.json
+RUN npm install               # Runs in /app
+COPY . .                      # Copies everything to /app
+
+# WORKDIR creates the directory if it doesn't exist
+WORKDIR /app/src/components   # Creates all intermediate directories
+
+# You can use WORKDIR multiple times
+WORKDIR /app
+RUN npm install
+WORKDIR /app/client
+RUN npm run build
+```
+
+<Callout type="warning" title="Always Use WORKDIR Instead of cd">
+Never use `RUN cd /some/path && command`. Each `RUN` starts fresh in the working directory. Use `WORKDIR` to change the directory persistently.
+
+```dockerfile
+# BAD — cd has no effect on the next RUN
+RUN cd /app
+RUN npm install    # This runs in /, not /app!
+
+# GOOD — WORKDIR persists
+WORKDIR /app
+RUN npm install    # This runs in /app
+```
+</Callout>
+
+## ENV — Environment Variables
+
+`ENV` sets environment variables that are available during build and at runtime:
+
+```dockerfile
+# Set a single variable
+ENV NODE_ENV=production
+
+# Set multiple variables
+ENV APP_PORT=3000 \
+    APP_HOST=0.0.0.0 \
+    LOG_LEVEL=info
+
+# Use variables in subsequent instructions
+ENV APP_DIR=/app
+WORKDIR $APP_DIR
+COPY . $APP_DIR
+```
+
+### ENV vs ARG
+
+| Feature | `ENV` | `ARG` |
+|---|---|---|
+| Available during build | Yes | Yes |
+| Available at runtime | Yes | No |
+| Can be overridden at run | `docker run -e` | `docker build --build-arg` |
+| Persists in image | Yes | No |
+| Use case | Runtime config | Build-time config |
+
+```dockerfile
+# ARG for build-time configuration
+ARG NODE_VERSION=20
+FROM node:${NODE_VERSION}-slim
+
+# ENV for runtime configuration
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# Combine: pass build arg to env var
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION:-1.0.0}
+```
+
+```bash
+# Override ARG at build time
+docker build --build-arg NODE_VERSION=18 --build-arg APP_VERSION=2.0.0 -t myapp .
+
+# Override ENV at run time
+docker run -e PORT=8080 -e NODE_ENV=development myapp
+```
+
+## EXPOSE — Documenting Ports
+
+`EXPOSE` documents which ports the container listens on. It does **not** actually publish the port — it's metadata for humans and tools:
+
+```dockerfile
+# Expose a single port
+EXPOSE 3000
+
+# Expose multiple ports
+EXPOSE 80 443
+
+# Expose UDP port
+EXPOSE 53/udp
+
+# Expose both TCP and UDP
+EXPOSE 8080/tcp 8080/udp
+```
+
+<Callout type="info" title="EXPOSE Is Documentation Only">
+`EXPOSE` alone does nothing to make a port accessible. You still need `-p` when running the container:
+
+```bash
+# EXPOSE 3000 in Dockerfile, but you still need:
+docker run -p 3000:3000 myapp
+
+# Or publish all exposed ports with random host ports:
+docker run -P myapp
+```
+</Callout>
+
+## CMD vs ENTRYPOINT — Runtime Commands
+
+This is one of the most confusing parts of Dockerfiles. Let's break it down clearly.
+
+### CMD — Default Command
+
+`CMD` specifies the **default command** to run when a container starts. It can be overridden by the user:
+
+```dockerfile
+# Exec form (preferred)
+CMD ["node", "server.js"]
+
+# Shell form
+CMD node server.js
+
+# Used as default arguments to ENTRYPOINT
+CMD ["--port", "3000"]
+```
+
+```bash
+# CMD ["node", "server.js"] runs by default
+docker run myapp
+# Runs: node server.js
+
+# User can override CMD entirely
+docker run myapp node worker.js
+# Runs: node worker.js (CMD is replaced)
+```
+
+### ENTRYPOINT — Fixed Command
+
+`ENTRYPOINT` sets the **fixed command** that always runs. CMD provides default arguments that can be overridden:
+
+```dockerfile
+# ENTRYPOINT is always executed
+ENTRYPOINT ["python", "app.py"]
+
+# CMD provides default arguments
+CMD ["--port", "5000"]
+```
+
+```bash
+# Default: python app.py --port 5000
+docker run myapp
+
+# Override CMD arguments: python app.py --port 8080 --debug
+docker run myapp --port 8080 --debug
+
+# Override ENTRYPOINT itself (rare)
+docker run --entrypoint /bin/bash myapp
+```
+
+### CMD vs ENTRYPOINT Decision Matrix
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                  CMD vs ENTRYPOINT                           │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Container always runs the same executable?                  │
+│  ├── YES → Use ENTRYPOINT                                   │
+│  │         CMD provides default flags                        │
+│  │                                                           │
+│  │   ENTRYPOINT ["nginx"]                                    │
+│  │   CMD ["-g", "daemon off;"]                               │
+│  │                                                           │
+│  └── NO → Use CMD only                                       │
+│           User can replace the entire command                 │
+│                                                              │
+│           CMD ["python", "manage.py", "runserver"]           │
+│                                                              │
+├──────────────────────────────────────────────────────────────┤
+│  Common Patterns:                                            │
+│                                                              │
+│  Web server:    ENTRYPOINT ["nginx"]                         │
+│                 CMD ["-g", "daemon off;"]                     │
+│                                                              │
+│  CLI tool:      ENTRYPOINT ["aws"]                           │
+│                 CMD ["--help"]                                │
+│                                                              │
+│  App server:    CMD ["gunicorn", "app:app"]                  │
+│                                                              │
+│  Dev image:     CMD ["/bin/bash"]                            │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Shell Form vs Exec Form: The Critical Difference
+
+```dockerfile
+# Exec form — process runs as PID 1, receives signals properly
+CMD ["node", "server.js"]
+ENTRYPOINT ["python", "app.py"]
+
+# Shell form — wraps in /bin/sh -c, signals go to shell, not your app
+CMD node server.js
+ENTRYPOINT python app.py
+```
+
+<Callout type="warning" title="Always Use Exec Form for CMD and ENTRYPOINT">
+Shell form wraps your command in `/bin/sh -c "..."`. This means your application is NOT PID 1 and will NOT receive `SIGTERM` signals for graceful shutdown. Always use exec form (JSON array syntax) in production.
+
+```dockerfile
+# BAD — node runs under sh, won't get SIGTERM
+CMD node server.js
+
+# GOOD — node is PID 1, handles signals properly
+CMD ["node", "server.js"]
+```
+</Callout>
+
+## Build Context and .dockerignore
+
+### Build Context
+
+When you run `docker build`, Docker sends the **build context** (all files in the specified directory) to the Docker daemon. If your project has large files that aren't needed in the image, this slows down every build.
+
+```bash
+# The "." is the build context — everything in the current directory
+docker build -t myapp .
+
+# Specify a different context directory
+docker build -t myapp ./src
+
+# Use a Dockerfile from a different location
+docker build -t myapp -f docker/Dockerfile.prod .
+```
+
+### .dockerignore
+
+Create a `.dockerignore` file to exclude files from the build context — just like `.gitignore`:
+
+```bash
+# .dockerignore
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.env.*
+*.md
+LICENSE
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+.vscode
+.idea
+coverage
+.nyc_output
+dist
+build
+__pycache__
+*.pyc
+.pytest_cache
+*.egg-info
+```
+
+<Callout type="tip" title="Always Create a .dockerignore">
+Without `.dockerignore`, a Node.js project sends the entire `node_modules` directory (often 500+ MB) to the Docker daemon on every build — even though `npm install` inside the container recreates it. A good `.dockerignore` can reduce build context from gigabytes to kilobytes.
+
+```bash
+# Before .dockerignore
+Sending build context to Docker daemon  542MB
+
+# After .dockerignore
+Sending build context to Docker daemon  4.2kB
+```
+</Callout>
+
+## Building Images with `docker build`
+
+### Basic Build Commands
+
+```bash
+# Build from current directory
+docker build -t myapp .
+
+# Build with a specific tag
+docker build -t myapp:1.0 .
+
+# Build with multiple tags
+docker build -t myapp:1.0 -t myapp:latest .
+
+# Build with a specific Dockerfile
+docker build -f Dockerfile.prod -t myapp:prod .
+
+# Build without cache (fresh build)
+docker build --no-cache -t myapp .
+
+# Build with build arguments
+docker build --build-arg NODE_ENV=production -t myapp .
+
+# Build and show full output (not collapsed)
+docker build --progress=plain -t myapp .
+```
+
+### Understanding Build Output
+
+```bash
+$ docker build -t myapp:1.0 .
+[+] Building 45.2s (10/10) FINISHED
+ => [internal] load build definition from Dockerfile              0.0s
+ => [internal] load .dockerignore                                 0.0s
+ => [internal] load metadata for docker.io/library/node:20-slim   1.2s
+ => [1/5] FROM docker.io/library/node:20-slim@sha256:abc123...    8.3s
+ => [2/5] WORKDIR /app                                            0.1s
+ => [3/5] COPY package*.json ./                                   0.1s
+ => [4/5] RUN npm install                                        30.2s
+ => [5/5] COPY . .                                                0.3s
+ => exporting to image                                            5.0s
+ => => writing image sha256:def456...                             0.0s
+ => => naming to docker.io/library/myapp:1.0                      0.0s
+```
+
+Each step shows whether it was cached (`CACHED`) or executed fresh. Cached steps complete instantly.
+
+## Layer Caching — Making Builds Fast
+
+Docker caching is the key to fast builds. Understanding how it works helps you write Dockerfiles that build in seconds instead of minutes.
+
+### How Caching Works
+
+Docker checks each instruction against its cache:
+1. Is the instruction identical to a previous build?
+2. Have the input files changed (for `COPY`/`ADD`)?
+3. Has any previous layer been invalidated?
+
+If all checks pass, Docker uses the cached layer. If any check fails, that layer and **all subsequent layers** are rebuilt.
+
+```
+Layer 1: FROM node:20-slim           ✓ Cached (base image unchanged)
+Layer 2: WORKDIR /app                ✓ Cached (instruction unchanged)
+Layer 3: COPY package.json ./        ✓ Cached (file unchanged)
+Layer 4: RUN npm install             ✓ Cached (previous layers cached)
+Layer 5: COPY . .                    ✗ CHANGED (source code modified)
+Layer 6: CMD ["node", "server.js"]   ✗ Rebuilt (cache busted by layer 5)
+```
+
+### Optimizing for Cache Hits
+
+The golden rule: **order layers from least frequently changed to most frequently changed.**
+
+```dockerfile
+# BAD — Changing any source file busts the npm install cache
+FROM node:20-slim
+WORKDIR /app
+COPY . .                    # All files copied — any change busts cache
+RUN npm install             # Reinstalls every time any file changes
+CMD ["node", "server.js"]
+
+# GOOD — npm install is only re-run when package.json changes
+FROM node:20-slim
+WORKDIR /app
+COPY package.json package-lock.json ./    # Only dependency files
+RUN npm install                           # Cached unless deps change
+COPY . .                                  # Source code (changes often)
+CMD ["node", "server.js"]
+```
+
+```
+With optimized ordering:
+─────────────────────────────────────────────
+  Code change only:    Rebuild layers 5-6    (~2 seconds)
+  Dependency change:   Rebuild layers 3-6    (~35 seconds)
+  Base image change:   Rebuild all layers    (~60 seconds)
+```
+
+### Cache-Friendly Patterns for Different Languages
+
+**Python:**
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+
+# Install dependencies first (cached unless requirements change)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code last
+COPY . .
+CMD ["python", "app.py"]
+```
+
+**Go:**
+
+```dockerfile
+FROM golang:1.22-alpine
+WORKDIR /app
+
+# Download dependencies first
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source and build
+COPY . .
+RUN go build -o /app/server .
+CMD ["/app/server"]
+```
+
+**Java (Maven):**
+
+```dockerfile
+FROM maven:3.9-eclipse-temurin-21
+WORKDIR /app
+
+# Download dependencies first
+COPY pom.xml .
+RUN mvn dependency:go-offline
+
+# Copy source and build
+COPY src ./src
+RUN mvn package -DskipTests
+CMD ["java", "-jar", "target/app.jar"]
+```
+
+## Dockerfile Best Practices
+
+### 1. Use Specific Base Image Tags
+
+```dockerfile
+# BAD
+FROM node:latest
+
+# GOOD
+FROM node:20.11-slim
+```
+
+### 2. Create a Non-Root User
+
+```dockerfile
+FROM node:20-slim
+WORKDIR /app
+
+# Create a non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+COPY --chown=appuser:appuser . .
+RUN npm install
+
+# Switch to non-root user
+USER appuser
+
+CMD ["node", "server.js"]
+```
+
+### 3. Combine and Clean Up in a Single RUN
+
+```dockerfile
+# Install packages and clean up in one layer
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      curl \
+      ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+### 4. Use LABEL for Metadata
+
+```dockerfile
+LABEL maintainer="team@example.com"
+LABEL version="1.0"
+LABEL description="Production API server"
+LABEL org.opencontainers.image.source="https://github.com/org/repo"
+```
+
+### 5. Use HEALTHCHECK
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+```
+
+### 6. Pin Package Versions
+
+```dockerfile
+# BAD — version can change between builds
+RUN apt-get install -y curl
+
+# GOOD — pinned version for reproducibility
+RUN apt-get install -y curl=7.88.1-10+deb12u5
+```
+
+### Summary of Best Practices
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                 Dockerfile Best Practices Checklist            │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  ☐ Use specific base image tags (never :latest)               │
+│  ☐ Use .dockerignore to exclude unnecessary files             │
+│  ☐ Order layers: least changing → most changing               │
+│  ☐ Combine RUN commands and clean up in the same layer        │
+│  ☐ Copy dependency files before source code (cache deps)      │
+│  ☐ Use --no-install-recommends with apt-get                   │
+│  ☐ Remove package manager cache (rm -rf /var/lib/apt/lists/*) │
+│  ☐ Run as non-root user (USER instruction)                    │
+│  ☐ Use exec form for CMD and ENTRYPOINT                       │
+│  ☐ Add HEALTHCHECK for production images                      │
+│  ☐ Add LABEL for image metadata                               │
+│  ☐ Use COPY instead of ADD (unless you need tar extraction)   │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+<Exercise title="Build a Node.js Application Image" difficulty="beginner" xpReward={35} estimatedMinutes={20}
+  objectives={["Write a Dockerfile for a Node.js Express application", "Use proper layer ordering for caching", "Build and test the image locally"]}
+  hints={["Start with node:20-slim as the base", "Copy package.json first, then npm install, then copy the rest of the source", "Use WORKDIR to set /app as the working directory", "Expose port 3000 and use CMD in exec form"]}
+  validationCriteria={[
+    "Create a project directory with a package.json, server.js, and .dockerignore",
+    "Write a Dockerfile that uses node:20-slim base, sets WORKDIR /app, copies package.json first, runs npm install, copies remaining source, exposes port 3000, and runs with CMD exec form",
+    "Build the image with docker build -t node-app:1.0 .",
+    "Run the container with docker run -d -p 3000:3000 --name node-test node-app:1.0",
+    "Verify the app responds with curl http://localhost:3000",
+    "Clean up with docker stop node-test && docker rm node-test"
+  ]}
+>
+
+Create a complete Node.js application and containerize it with a well-structured Dockerfile.
+
+**Step 1: Create the project**
+
+```bash
+mkdir -p ~/docker-node-app && cd ~/docker-node-app
+```
+
+**Step 2: Create package.json**
+
+```bash
+cat > package.json << 'EOF'
+{
+  "name": "docker-node-app",
+  "version": "1.0.0",
+  "description": "A containerized Node.js app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
+EOF
+```
+
+**Step 3: Create server.js**
+
+```bash
+cat > server.js << 'EOF'
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Hello from Docker!',
+    hostname: require('os').hostname(),
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy' });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+});
+EOF
+```
+
+**Step 4: Create .dockerignore**
+
+```bash
+cat > .dockerignore << 'EOF'
+node_modules
+npm-debug.log
+.git
+.gitignore
+*.md
+Dockerfile
+.dockerignore
+EOF
+```
+
+**Step 5: Write the Dockerfile**
+
+```dockerfile
+FROM node:20-slim
+
+WORKDIR /app
+
+# Copy dependency files first for layer caching
+COPY package.json package-lock.json* ./
+
+# Install dependencies
+RUN npm install --production
+
+# Copy application source
+COPY . .
+
+# Document the port
+EXPOSE 3000
+
+# Start the application
+CMD ["node", "server.js"]
+```
+
+**Step 6: Build and test**
+
+```bash
+# Build the image
+docker build -t node-app:1.0 .
+
+# Run the container
+docker run -d -p 3000:3000 --name node-test node-app:1.0
+
+# Test it
+curl http://localhost:3000
+curl http://localhost:3000/health
+
+# Check logs
+docker logs node-test
+
+# Clean up
+docker stop node-test && docker rm node-test
+```
+
+</Exercise>
+
+<Exercise title="Build a Python Flask Application Image" difficulty="intermediate" xpReward={35} estimatedMinutes={20}
+  objectives={["Write a Dockerfile for a Python Flask application", "Use a virtual environment inside the container", "Create a non-root user for security"]}
+  hints={["Use python:3.12-slim as the base image", "Install dependencies with pip install --no-cache-dir", "Create a non-root user with useradd and switch with USER", "Flask needs to bind to 0.0.0.0 to be accessible outside the container"]}
+  validationCriteria={[
+    "Create a project directory with app.py, requirements.txt, and .dockerignore",
+    "Write a Dockerfile that uses python:3.12-slim, creates a non-root user, copies requirements first, installs deps with pip, copies source, and runs with gunicorn or flask",
+    "Build the image with docker build -t flask-app:1.0 .",
+    "Run the container with docker run -d -p 5000:5000 --name flask-test flask-app:1.0",
+    "Verify the app responds with curl http://localhost:5000",
+    "Inspect the running container to verify it is not running as root",
+    "Clean up with docker stop flask-test && docker rm flask-test"
+  ]}
+>
+
+Create a Python Flask API and containerize it with security best practices.
+
+**Step 1: Create the project**
+
+```bash
+mkdir -p ~/docker-flask-app && cd ~/docker-flask-app
+```
+
+**Step 2: Create requirements.txt**
+
+```bash
+cat > requirements.txt << 'EOF'
+flask==3.0.0
+gunicorn==21.2.0
+EOF
+```
+
+**Step 3: Create app.py**
+
+```bash
+cat > app.py << 'EOF'
+from flask import Flask, jsonify
+import os
+import socket
+from datetime import datetime
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return jsonify({
+        'message': 'Hello from Dockerized Flask!',
+        'hostname': socket.gethostname(),
+        'python_version': os.sys.version,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy'})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+EOF
+```
+
+**Step 4: Create .dockerignore**
+
+```bash
+cat > .dockerignore << 'EOF'
+__pycache__
+*.pyc
+.git
+.gitignore
+*.md
+Dockerfile
+.dockerignore
+.env
+venv
+.venv
+EOF
+```
+
+**Step 5: Write the Dockerfile**
+
+```dockerfile
+FROM python:3.12-slim
+
+# Create a non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
+WORKDIR /app
+
+# Install dependencies first for caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY --chown=appuser:appuser . .
+
+# Switch to non-root user
+USER appuser
+
+EXPOSE 5000
+
+# Use gunicorn for production
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "app:app"]
+```
+
+**Step 6: Build and test**
+
+```bash
+# Build the image
+docker build -t flask-app:1.0 .
+
+# Run the container
+docker run -d -p 5000:5000 --name flask-test flask-app:1.0
+
+# Test it
+curl http://localhost:5000
+curl http://localhost:5000/health
+
+# Verify it's running as non-root
+docker exec flask-test whoami
+# Should output: appuser
+
+docker exec flask-test id
+# Should show non-root uid
+
+# Check image size
+docker images flask-app:1.0
+
+# Clean up
+docker stop flask-test && docker rm flask-test
+```
+
+</Exercise>
+
+<MiniProject title="Multi-Language Dockerfile Workshop" difficulty="intermediate" xpReward={50} estimatedMinutes={30}
+  objectives={["Write optimized Dockerfiles for multiple languages", "Apply all best practices: layer caching, non-root user, health checks", "Compare image sizes between different approaches"]}
+  hints={["Build all images and compare sizes with docker images", "Use docker history to find which layers are largest", "Try building twice to verify caching works properly"]}
+  validationCriteria={[
+    "Create three applications: a Node.js API, a Python CLI tool, and a static HTML site served by nginx",
+    "Each Dockerfile must use specific base image tags (not latest)",
+    "Each Dockerfile must have a .dockerignore file",
+    "Each Dockerfile must order layers for optimal caching (dependency files before source code)",
+    "The Node.js and Python Dockerfiles must create and use a non-root user",
+    "The Node.js Dockerfile must include a HEALTHCHECK instruction",
+    "Build all three images and compare their sizes",
+    "Modify only the source code (not dependencies), rebuild, and verify that the dependency installation layer was cached"
+  ]}
+>
+
+Build optimized Docker images for three different application types. Apply every best practice from this lesson.
+
+**Project 1: Node.js Express API**
+
+```bash
+mkdir -p ~/dockerfile-workshop/node-api && cd ~/dockerfile-workshop/node-api
+
+# Create the application
+cat > package.json << 'PKGJSON'
+{
+  "name": "node-api",
+  "version": "1.0.0",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
+PKGJSON
+
+cat > server.js << 'SERVERJS'
+const express = require('express');
+const cors = require('cors');
+const app = express();
+app.use(cors());
+app.get('/', (req, res) => res.json({ service: 'node-api', status: 'running' }));
+app.get('/health', (req, res) => res.json({ healthy: true }));
+app.listen(3000, '0.0.0.0', () => console.log('Node API on :3000'));
+SERVERJS
+
+cat > .dockerignore << 'IGNORE'
+node_modules
+.git
+*.md
+Dockerfile
+.dockerignore
+IGNORE
+
+cat > Dockerfile << 'DOCKERFILE'
+FROM node:20.11-slim
+
+LABEL maintainer="workshop@example.com"
+LABEL version="1.0"
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install --production && npm cache clean --force
+
+COPY --chown=appuser:appuser . .
+
+USER appuser
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"
+
+CMD ["node", "server.js"]
+DOCKERFILE
+
+docker build -t workshop-node:1.0 .
+```
+
+**Project 2: Python CLI Tool**
+
+```bash
+mkdir -p ~/dockerfile-workshop/python-cli && cd ~/dockerfile-workshop/python-cli
+
+cat > requirements.txt << 'REQS'
+click==8.1.7
+rich==13.7.0
+REQS
+
+cat > cli.py << 'CLIPY'
+import click
+from rich.console import Console
+from rich.table import Table
+
+console = Console()
+
+@click.group()
+def cli():
+    """A containerized CLI tool."""
+    pass
+
+@cli.command()
+@click.argument('name')
+def greet(name):
+    """Greet someone with style."""
+    console.print(f"[bold green]Hello, {name}![/bold green]")
+
+@cli.command()
+def info():
+    """Show system information."""
+    import platform, os
+    table = Table(title="System Info")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("OS", platform.system())
+    table.add_row("Hostname", platform.node())
+    table.add_row("Python", platform.python_version())
+    table.add_row("User", os.getenv("USER", "unknown"))
+    console.print(table)
+
+if __name__ == '__main__':
+    cli()
+CLIPY
+
+cat > .dockerignore << 'IGNORE'
+__pycache__
+*.pyc
+.git
+*.md
+Dockerfile
+.dockerignore
+IGNORE
+
+cat > Dockerfile << 'DOCKERFILE'
+FROM python:3.12-slim
+
+LABEL maintainer="workshop@example.com"
+
+RUN groupadd -r cliuser && useradd -r -g cliuser cliuser
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY --chown=cliuser:cliuser . .
+
+USER cliuser
+
+ENTRYPOINT ["python", "cli.py"]
+CMD ["--help"]
+DOCKERFILE
+
+docker build -t workshop-cli:1.0 .
+```
+
+**Project 3: Static Website with Nginx**
+
+```bash
+mkdir -p ~/dockerfile-workshop/static-site/html && cd ~/dockerfile-workshop/static-site
+
+cat > html/index.html << 'HTML'
+<!DOCTYPE html>
+<html>
+<head><title>Dockerized Site</title></head>
+<body>
+  <h1>Hello from Docker!</h1>
+  <p>This static site is served by nginx in a container.</p>
+</body>
+</html>
+HTML
+
+cat > nginx.conf << 'NGINXCONF'
+server {
+    listen 80;
+    server_name localhost;
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+    }
+    location /health {
+        return 200 'OK';
+        add_header Content-Type text/plain;
+    }
+}
+NGINXCONF
+
+cat > .dockerignore << 'IGNORE'
+.git
+*.md
+Dockerfile
+.dockerignore
+IGNORE
+
+cat > Dockerfile << 'DOCKERFILE'
+FROM nginx:1.25-alpine
+
+LABEL maintainer="workshop@example.com"
+
+# Remove default nginx config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Add custom config
+COPY nginx.conf /etc/nginx/conf.d/
+
+# Add static content
+COPY html/ /usr/share/nginx/html/
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://localhost/health || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]
+DOCKERFILE
+
+docker build -t workshop-static:1.0 .
+```
+
+**Compare Results:**
+
+```bash
+# Compare all image sizes
+docker images workshop-*
+echo ""
+echo "--- Layer Analysis ---"
+docker history workshop-node:1.0 --format "table {{.Size}}\t{{.CreatedBy}}" | head -8
+echo ""
+docker history workshop-cli:1.0 --format "table {{.Size}}\t{{.CreatedBy}}" | head -8
+echo ""
+docker history workshop-static:1.0 --format "table {{.Size}}\t{{.CreatedBy}}" | head -8
+
+# Test caching: modify source code only, rebuild, and verify cache
+echo "// updated" >> ~/dockerfile-workshop/node-api/server.js
+cd ~/dockerfile-workshop/node-api && docker build -t workshop-node:1.0 .
+# You should see "CACHED" for the npm install step
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- A Dockerfile is a **recipe** for building images — each instruction creates a layer
+- `FROM` sets the base image — use specific tags, prefer `-slim` or `-alpine` variants
+- `RUN` executes commands — combine multiple commands in one `RUN` and clean up in the same layer
+- `COPY` adds files — prefer it over `ADD` unless you need tar extraction
+- `WORKDIR` sets the working directory — never use `RUN cd`
+- `CMD` sets the default command (overridable); `ENTRYPOINT` sets the fixed command
+- Always use **exec form** `["cmd", "arg"]` for CMD and ENTRYPOINT in production
+- **Layer ordering** is critical — put rarely-changing layers first, frequently-changing layers last
+- `.dockerignore` keeps your build context small and your builds fast
+- Run containers as a **non-root user** with `USER` for security
+- Add `HEALTHCHECK` for production images
+
+## What's Next
+
+Your Dockerfiles work, but your production images are larger than they need to be. In **Multi-Stage Builds**, you'll learn how to use multiple FROM statements to separate build-time dependencies from runtime artifacts — shrinking images from gigabytes to megabytes.

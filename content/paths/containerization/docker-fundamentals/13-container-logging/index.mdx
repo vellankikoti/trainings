@@ -1,0 +1,1298 @@
+---
+title: "Container Logging and Monitoring"
+description: "Master Docker logging architecture, configure logging drivers, set up log rotation, monitor container resources, and implement health checks."
+order: 13
+xpReward: 40
+estimatedMinutes: 50
+prerequisites:
+  - 12-environment-variables
+objectives:
+  - Understand Docker's logging architecture and how STDOUT/STDERR are captured
+  - Use docker logs with filtering options to debug running containers
+  - Configure logging drivers at the daemon and container level
+  - Set up log rotation to prevent disk space exhaustion
+  - Monitor container resource usage with docker stats and system commands
+  - Implement HEALTHCHECK instructions for automatic container health monitoring
+tags:
+  - docker
+  - logging
+  - monitoring
+  - health-checks
+  - observability
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your team deployed a new API version on Friday afternoon. (Yes, that was the first mistake.) By Monday morning, the server's disk is 100% full and the application is completely down. Users are furious. You SSH in and discover that one container has been writing 47 GB of log data in an infinite error loop. Nobody configured log rotation, and nobody was monitoring disk usage. The fix takes five minutes, but the damage takes days to repair. Today you learn the logging and monitoring practices that prevent this exact scenario.
+</Callout>
+
+## Docker Logging Architecture
+
+Docker captures everything a container writes to **STDOUT** (standard output) and **STDERR** (standard error). This is the fundamental logging mechanism in Docker.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Container                             │
+│                                                         │
+│  Application                                            │
+│  ├── console.log("User logged in")  ──> STDOUT ─┐      │
+│  ├── console.error("DB timeout")    ──> STDERR ─┤      │
+│  └── fs.writeFile("/var/log/app")   ──> File    │      │
+│       (Docker does NOT capture this)       │     │      │
+│                                            │     │      │
+└────────────────────────────────────────────┼─────┼──────┘
+                                             │     │
+                                        ┌────┴─────┴────┐
+                                        │ Docker Daemon  │
+                                        │                │
+                                        │ Logging Driver │
+                                        │ (json-file)    │
+                                        └───────┬────────┘
+                                                │
+                                     ┌──────────┴──────────┐
+                                     │  /var/lib/docker/    │
+                                     │  containers/<id>/    │
+                                     │  <id>-json.log      │
+                                     └─────────────────────┘
+```
+
+<Callout type="info" title="Log to STDOUT, Not Files">
+Docker is designed to capture STDOUT and STDERR. If your application writes logs to files inside the container (like `/var/log/app.log`), Docker cannot see them. The best practice is to configure your application to log to STDOUT/STDERR. Most modern frameworks support this, and it is the default for most containerized applications.
+</Callout>
+
+### Why STDOUT/STDERR?
+
+| Traditional Logging | Docker Logging |
+|---|---|
+| Write to `/var/log/app.log` | Write to STDOUT/STDERR |
+| Manage log rotation in app | Docker handles rotation |
+| Different file paths per app | Unified `docker logs` command |
+| Need SSH access to read logs | Accessible via Docker API |
+| Hard to aggregate | Easy to ship to centralized logging |
+
+### What Gets Captured
+
+```bash
+# This output IS captured by Docker:
+echo "Hello from my app"                    # STDOUT
+echo "Error: something broke" >&2           # STDERR
+node -e "console.log('info message')"       # STDOUT
+node -e "console.error('error message')"    # STDERR
+python3 -c "print('log entry')"             # STDOUT
+
+# This output is NOT captured by Docker:
+# Anything written to files inside the container
+# /var/log/app.log, /tmp/debug.log, etc.
+```
+
+## Using docker logs
+
+The `docker logs` command is your primary tool for viewing container output.
+
+### Basic Usage
+
+```bash
+# View all logs from a container
+docker logs mycontainer
+
+# View logs from a Compose service
+docker compose logs api
+
+# Example output:
+# 2024-01-15T10:30:00.123Z [INFO]  Server starting on port 3000
+# 2024-01-15T10:30:00.456Z [INFO]  Connected to database
+# 2024-01-15T10:30:01.789Z [INFO]  Ready to accept requests
+# 2024-01-15T10:30:15.012Z [WARN]  Slow query detected: 2340ms
+# 2024-01-15T10:31:00.345Z [ERROR] Connection reset by peer
+```
+
+### Filtering and Following
+
+```bash
+# Follow logs in real-time (like tail -f)
+docker logs -f mycontainer
+
+# Show only the last N lines
+docker logs --tail 50 mycontainer
+
+# Show logs since a specific time
+docker logs --since 2024-01-15T10:30:00 mycontainer
+
+# Show logs from the last 30 minutes
+docker logs --since 30m mycontainer
+
+# Show logs from the last 2 hours
+docker logs --since 2h mycontainer
+
+# Show logs until a specific time
+docker logs --until 2024-01-15T11:00:00 mycontainer
+
+# Combine: last 100 lines, then follow
+docker logs --tail 100 -f mycontainer
+
+# Show timestamps with each line
+docker logs -t mycontainer
+# 2024-01-15T10:30:00.123456789Z Server starting on port 3000
+
+# Show only STDERR (errors)
+docker logs mycontainer 2>&1 1>/dev/null
+
+# Show only STDOUT (non-errors)
+docker logs mycontainer 2>/dev/null
+```
+
+### Docker Compose Logs
+
+```bash
+# View logs from all services
+docker compose logs
+
+# Follow all services
+docker compose logs -f
+
+# Follow specific services
+docker compose logs -f api db
+
+# Last 20 lines from each service
+docker compose logs --tail 20
+
+# Since a specific time
+docker compose logs --since 10m
+
+# Combine with grep for searching
+docker compose logs api 2>&1 | grep "ERROR"
+docker compose logs --tail 1000 api 2>&1 | grep -i "timeout"
+```
+
+<Callout type="tip" title="Color-Coded Compose Logs">
+When following logs from multiple Compose services, Docker color-codes each service's output so you can tell them apart. Each service name is prefixed to its log lines. This makes it easy to follow interleaved logs from multiple containers simultaneously.
+</Callout>
+
+## Logging Drivers
+
+Docker supports pluggable logging drivers that determine where container logs are sent.
+
+### Available Logging Drivers
+
+| Driver | Description | Use Case |
+|--------|-------------|----------|
+| `json-file` | Default. Writes JSON to local files | Development, simple setups |
+| `local` | Optimized local file storage | Production single-host |
+| `syslog` | Sends to syslog daemon | Linux syslog integration |
+| `journald` | Sends to systemd journal | systemd-based systems |
+| `fluentd` | Sends to Fluentd collector | Centralized logging |
+| `awslogs` | Sends to AWS CloudWatch | AWS deployments |
+| `gcplogs` | Sends to Google Cloud Logging | GCP deployments |
+| `splunk` | Sends to Splunk | Enterprise logging |
+| `none` | Discard all logs | When logging is not needed |
+
+### json-file Driver (Default)
+
+The default driver writes JSON-formatted log lines to files on the host:
+
+```bash
+# View the actual log file location
+docker inspect mycontainer --format '{{.LogPath}}'
+# /var/lib/docker/containers/abc123.../abc123...-json.log
+
+# View raw log file content
+sudo cat /var/lib/docker/containers/abc123.../abc123...-json.log
+# {"log":"Server starting on port 3000\n","stream":"stdout","time":"2024-01-15T10:30:00.123Z"}
+# {"log":"Connected to database\n","stream":"stdout","time":"2024-01-15T10:30:00.456Z"}
+# {"log":"Error: connection timeout\n","stream":"stderr","time":"2024-01-15T10:31:00.789Z"}
+```
+
+### Configuring Logging Drivers
+
+#### Per-Container Configuration
+
+```bash
+# Use a specific logging driver
+docker run -d \
+  --log-driver json-file \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
+  nginx:alpine
+
+# Disable logging for a container
+docker run -d --log-driver none nginx:alpine
+
+# Use syslog driver
+docker run -d \
+  --log-driver syslog \
+  --log-opt syslog-address=udp://logserver:514 \
+  --log-opt tag="{{.Name}}" \
+  nginx:alpine
+```
+
+#### Docker Compose Configuration
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"     # Max size per log file
+        max-file: "3"       # Keep 3 rotated files
+        tag: "{{.Name}}"    # Tag logs with container name
+
+  worker:
+    image: myapp:latest
+    logging:
+      driver: local
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  sidecar:
+    image: helper:latest
+    logging:
+      driver: none          # No logging needed
+```
+
+#### Daemon-Level Configuration
+
+Set the default logging driver for ALL containers on the host:
+
+```bash
+# Edit /etc/docker/daemon.json
+sudo tee /etc/docker/daemon.json << 'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3",
+    "labels": "production_status",
+    "env": "os,customer"
+  }
+}
+EOF
+
+# Restart Docker daemon to apply
+sudo systemctl restart docker
+```
+
+<Callout type="warning" title="Changing Daemon Log Driver Affects New Containers Only">
+When you change the daemon-level logging configuration, it only affects newly created containers. Existing containers keep their original logging driver. To apply the new configuration to existing containers, you must recreate them.
+</Callout>
+
+## Log Rotation
+
+Without log rotation, container logs grow indefinitely until they fill the disk. This is one of the most common causes of production outages.
+
+### The Problem
+
+```bash
+# Check log file sizes for all containers
+sudo du -sh /var/lib/docker/containers/*/
+
+# Example output (bad situation):
+# 47G    /var/lib/docker/containers/abc123.../
+# 12G    /var/lib/docker/containers/def456.../
+# 890M   /var/lib/docker/containers/ghi789.../
+
+# Check overall Docker disk usage
+docker system df
+# TYPE            TOTAL   ACTIVE  SIZE      RECLAIMABLE
+# Images          15      8       3.2GB     1.1GB (34%)
+# Containers      12      8       52.3GB    52.3GB (100%)  <-- logs!
+# Local Volumes   6       4       890MB     200MB (22%)
+```
+
+### The Solution: Log Rotation Configuration
+
+```yaml
+# docker-compose.yml — ALWAYS configure log rotation
+services:
+  api:
+    image: myapp:latest
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"      # Rotate when file reaches 10 MB
+        max-file: "3"        # Keep at most 3 rotated files
+        compress: "true"     # Compress rotated files (local driver)
+
+  # Result: max disk usage per container = 10m * 3 = 30 MB
+```
+
+### Recommended Log Rotation Settings
+
+| Environment | max-size | max-file | Max Disk per Container |
+|------------|----------|----------|----------------------|
+| Development | 10m | 3 | 30 MB |
+| Staging | 50m | 5 | 250 MB |
+| Production | 100m | 5 | 500 MB |
+| High-volume | 200m | 10 | 2 GB |
+
+<Callout type="tip" title="Set Log Rotation Globally">
+Instead of configuring log rotation per container, set it at the daemon level so every container gets rotation by default:
+
+```json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+```
+
+Then you only need per-container overrides for services that produce unusually high or low log volumes.
+</Callout>
+
+### Emergency Log Cleanup
+
+If a container has already filled the disk:
+
+```bash
+# Find the largest log files
+sudo find /var/lib/docker/containers/ -name "*-json.log" -exec du -sh {} + | sort -rh | head
+
+# Truncate a specific container's log file (preserves the file, removes content)
+sudo truncate -s 0 /var/lib/docker/containers/<container-id>/<container-id>-json.log
+
+# NEVER delete the log file — truncate it instead
+# Deleting can cause Docker to lose track of the file descriptor
+```
+
+## Container Resource Monitoring
+
+### docker stats
+
+Monitor CPU, memory, network, and disk I/O in real-time:
+
+```bash
+# Live stats for all running containers
+docker stats
+
+# Example output:
+# CONTAINER ID   NAME        CPU %   MEM USAGE / LIMIT     MEM %   NET I/O         BLOCK I/O       PIDS
+# abc123def456   api-1       2.34%   128.5MiB / 512MiB     25.10%  1.2MB / 890kB   12MB / 4MB      15
+# def456ghi789   db-1        0.89%   256.3MiB / 1GiB       25.03%  890kB / 1.5MB   45MB / 120MB    28
+# ghi789jkl012   redis-1     0.12%   12.4MiB / 128MiB      9.69%   450kB / 320kB   0B / 0B         4
+
+# Stats for specific containers
+docker stats api-1 db-1
+
+# One-time snapshot (no live updates)
+docker stats --no-stream
+
+# Custom format
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+# NAME        CPU %   MEM USAGE / LIMIT
+# api-1       2.34%   128.5MiB / 512MiB
+# db-1        0.89%   256.3MiB / 1GiB
+# redis-1     0.12%   12.4MiB / 128MiB
+
+# JSON format for scripting
+docker stats --no-stream --format '{{json .}}' | python3 -m json.tool
+```
+
+### Understanding the Metrics
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ docker stats                                                      │
+├──────────────┬───────────────────────────────────────────────────┤
+│ CPU %        │ Percentage of host CPU used by this container     │
+│              │ Can exceed 100% on multi-core systems             │
+├──────────────┼───────────────────────────────────────────────────┤
+│ MEM USAGE    │ Current memory usage / memory limit               │
+│              │ If no limit set, shows total host memory          │
+├──────────────┼───────────────────────────────────────────────────┤
+│ MEM %        │ Percentage of memory limit (or host RAM) used     │
+├──────────────┼───────────────────────────────────────────────────┤
+│ NET I/O      │ Network bytes received / sent                     │
+├──────────────┼───────────────────────────────────────────────────┤
+│ BLOCK I/O    │ Disk bytes read / written                         │
+├──────────────┼───────────────────────────────────────────────────┤
+│ PIDS         │ Number of processes/threads in the container      │
+└──────────────┴───────────────────────────────────────────────────┘
+```
+
+### docker system df
+
+Check disk usage by Docker objects:
+
+```bash
+docker system df
+
+# TYPE            TOTAL   ACTIVE  SIZE      RECLAIMABLE
+# Images          25      10      4.2GB     2.1GB (50%)
+# Containers      15      8       890MB     150MB (16%)
+# Local Volumes   8       5       1.2GB     400MB (33%)
+# Build Cache     0       0       0B        0B
+
+# Verbose mode — see every object
+docker system df -v
+```
+
+### docker system events
+
+Watch real-time events from the Docker daemon:
+
+```bash
+# Watch all events
+docker system events
+
+# Example output when starting a container:
+# 2024-01-15T10:30:00.000 container create abc123 (image=nginx:alpine, name=web-1)
+# 2024-01-15T10:30:00.100 container attach abc123 (image=nginx:alpine, name=web-1)
+# 2024-01-15T10:30:00.200 network connect bridge abc123 (container=abc123, name=bridge)
+# 2024-01-15T10:30:00.300 container start abc123 (image=nginx:alpine, name=web-1)
+
+# Filter by event type
+docker system events --filter type=container
+docker system events --filter event=start
+docker system events --filter event=die
+
+# Filter by container
+docker system events --filter container=web-1
+
+# Time-bounded events
+docker system events --since 10m --until 5m
+```
+
+### docker top
+
+View processes running inside a container:
+
+```bash
+# List processes in a container
+docker top mycontainer
+
+# Example output:
+# UID   PID    PPID   C  STIME  TTY  TIME      CMD
+# root  12345  12300  0  10:30  ?    00:00:05  node server.js
+# root  12350  12345  0  10:30  ?    00:00:01  /usr/bin/node worker.js
+
+# With custom ps format
+docker top mycontainer -o pid,user,%cpu,%mem,command
+```
+
+## Health Checks
+
+Health checks let Docker automatically monitor whether your application is actually working, not just whether the container process is running.
+
+### The Problem Health Checks Solve
+
+```
+Without health check:
+┌─────────────────────────────┐
+│ Container Status: Running   │ <-- Docker only checks if PID 1 is alive
+│                             │
+│ Application: CRASHED        │ <-- App threw exception, stuck in loop
+│ Database: DISCONNECTED      │ <-- Can't reach database
+│ Serving traffic: NO         │ <-- Not handling any requests
+│                             │
+│ Docker thinks: Everything   │
+│ is fine!                    │
+└─────────────────────────────┘
+
+With health check:
+┌─────────────────────────────┐
+│ Container Status: Unhealthy │ <-- Docker detected the problem
+│                             │
+│ Health check: curl /health  │
+│ Result: Connection refused  │
+│                             │
+│ Docker knows: Something is  │
+│ wrong! Take action.         │
+└─────────────────────────────┘
+```
+
+### HEALTHCHECK in Dockerfile
+
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+COPY . .
+RUN npm ci --only=production
+
+EXPOSE 3000
+
+# Health check configuration
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+CMD ["node", "server.js"]
+```
+
+### Health Check Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--interval` | 30s | Time between health checks |
+| `--timeout` | 30s | Max time to wait for check to complete |
+| `--start-period` | 0s | Grace period for container startup |
+| `--retries` | 3 | Consecutive failures before marking "unhealthy" |
+
+```
+Timeline of health check:
+
+ Container    Start     First        Second       Third       Status
+ Start        Period    Check        Check        Check       Change
+   │           │         │            │            │            │
+   ├───40s────►├──30s──►├───30s────►├───30s────►│            │
+   │  (grace)  │  (int)  │  (int)     │  (int)     │            │
+   │           │         │            │            │            │
+   │           │         │ PASS ✓     │            │            │
+   │           │         │ → healthy  │            │            │
+   │           │                      │            │            │
+   │           │         │ FAIL ✗     │ FAIL ✗     │ FAIL ✗    │
+   │           │         │ retry 1    │ retry 2    │ retry 3   │
+   │           │         │            │            │→ unhealthy│
+```
+
+### Health Check Examples
+
+```dockerfile
+# HTTP health check (most common)
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+# TCP port check (when curl isn't available)
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD nc -z localhost 3000 || exit 1
+
+# Database health check (PostgreSQL)
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
+  CMD pg_isready -U postgres || exit 1
+
+# Redis health check
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+  CMD redis-cli ping | grep PONG || exit 1
+
+# Custom script health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD /app/healthcheck.sh || exit 1
+
+# Disable health check (override parent image)
+HEALTHCHECK NONE
+```
+
+### Health Checks in Docker Compose
+
+```yaml
+services:
+  api:
+    build: ./api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+```
+
+### Checking Health Status
+
+```bash
+# View container health status
+docker ps
+# CONTAINER ID  IMAGE        STATUS                    PORTS
+# abc123        myapp        Up 5 min (healthy)        0.0.0.0:3000->3000/tcp
+# def456        myapp        Up 2 min (health: starting)  0.0.0.0:3001->3000/tcp
+# ghi789        myapp        Up 10 min (unhealthy)     0.0.0.0:3002->3000/tcp
+
+# Detailed health information
+docker inspect mycontainer --format '{{json .State.Health}}' | python3 -m json.tool
+# {
+#   "Status": "healthy",
+#   "FailingStreak": 0,
+#   "Log": [
+#     {
+#       "Start": "2024-01-15T10:30:00.000Z",
+#       "End": "2024-01-15T10:30:00.150Z",
+#       "ExitCode": 0,
+#       "Output": "{\"status\":\"ok\"}"
+#     }
+#   ]
+# }
+
+# Filter containers by health status
+docker ps --filter health=healthy
+docker ps --filter health=unhealthy
+```
+
+<Callout type="tip" title="Writing Good Health Endpoints">
+A good `/health` endpoint should check the essential dependencies your application needs to function:
+
+```javascript
+// Good health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    // Check database connection
+    await db.query('SELECT 1');
+    // Check Redis connection
+    await redis.ping();
+
+    res.status(200).json({ status: 'healthy' });
+  } catch (err) {
+    res.status(503).json({ status: 'unhealthy', error: err.message });
+  }
+});
+```
+
+Keep health checks lightweight and fast. Do not run expensive queries or business logic. The check should answer one question: "Can this service handle requests right now?"
+</Callout>
+
+<Exercise number={1} title="Configure Logging Drivers and Log Rotation">
+
+Set up a Docker Compose stack with proper logging configuration:
+
+1. Create three services: an API, a worker, and a database
+2. Configure the API with `json-file` logging driver, 10 MB max size, and 3 rotated files
+3. Configure the worker with the `local` logging driver
+4. Disable logging for a utility sidecar container
+5. Generate some log output, then verify the log configuration
+
+<CollapsibleSolution>
+
+```bash
+# Create project directory
+mkdir -p ~/logging-demo
+
+# Create a simple app that generates logs
+cat > ~/logging-demo/app.js << 'EOF'
+const http = require('http');
+
+// Generate periodic log output
+setInterval(() => {
+  const level = Math.random() > 0.8 ? 'ERROR' : Math.random() > 0.5 ? 'WARN' : 'INFO';
+  const messages = {
+    INFO: ['Request processed successfully', 'Cache hit', 'User authenticated', 'Health check passed'],
+    WARN: ['Slow query detected: 1200ms', 'Cache miss rate high', 'Connection pool near limit'],
+    ERROR: ['Database connection timeout', 'Failed to process payment', 'Out of memory warning']
+  };
+  const msg = messages[level][Math.floor(Math.random() * messages[level].length)];
+  const timestamp = new Date().toISOString();
+
+  if (level === 'ERROR') {
+    console.error(`${timestamp} [${level}] ${msg}`);
+  } else {
+    console.log(`${timestamp} [${level}] ${msg}`);
+  }
+}, 1000);
+
+const server = http.createServer((req, res) => {
+  console.log(`${new Date().toISOString()} [INFO] ${req.method} ${req.url}`);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ status: 'ok' }));
+});
+
+server.listen(3000, () => console.log('Log demo server on port 3000'));
+EOF
+
+# Create Dockerfile
+cat > ~/logging-demo/Dockerfile << 'EOF'
+FROM node:20-alpine
+WORKDIR /app
+COPY app.js .
+CMD ["node", "app.js"]
+EOF
+
+# Create docker-compose.yml with logging configuration
+cat > ~/logging-demo/docker-compose.yml << 'EOF'
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}/{{.ID}}"
+
+  worker:
+    build: .
+    command: ["node", "-e", "setInterval(() => console.log(new Date().toISOString() + ' [WORKER] Processing job...'), 2000)"]
+    logging:
+      driver: local
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: demo
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  sidecar:
+    image: alpine
+    command: ["sh", "-c", "while true; do echo 'heartbeat'; sleep 5; done"]
+    logging:
+      driver: none
+EOF
+
+# Start the stack
+cd ~/logging-demo
+docker compose up -d --build
+
+# Wait for some logs to generate
+sleep 10
+
+# View logs from the API
+docker compose logs --tail 20 api
+
+# View logs from the worker
+docker compose logs --tail 10 worker
+
+# Verify sidecar has no logs
+docker compose logs sidecar
+# Should show nothing or an error about no logging
+
+# Check the logging driver of each container
+echo "--- API logging config ---"
+docker inspect logging-demo-api-1 --format '{{.HostConfig.LogConfig.Type}}'
+docker inspect logging-demo-api-1 --format '{{json .HostConfig.LogConfig.Config}}'
+
+echo "--- Worker logging config ---"
+docker inspect logging-demo-worker-1 --format '{{.HostConfig.LogConfig.Type}}'
+
+echo "--- Sidecar logging config ---"
+docker inspect logging-demo-sidecar-1 --format '{{.HostConfig.LogConfig.Type}}'
+
+# Check the actual log file location and size (API uses json-file)
+LOG_PATH=$(docker inspect logging-demo-api-1 --format '{{.LogPath}}')
+echo "Log file: $LOG_PATH"
+sudo ls -lh "$LOG_PATH"
+
+# View raw JSON log content
+sudo head -5 "$LOG_PATH"
+
+# Check overall Docker disk usage
+docker system df
+
+# Clean up
+docker compose down
+```
+
+This exercise demonstrates three different logging configurations in one stack: `json-file` with rotation for the API, `local` driver for the worker, and `none` for the sidecar. The `json-file` driver stores logs in JSON format that `docker logs` can read. The `local` driver is more efficient but with slightly different internal format. The `none` driver discards all output.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise number={2} title="Implement Health Checks">
+
+Create a Docker Compose stack with comprehensive health checks:
+
+1. Build a Node.js API with a `/health` endpoint that checks database connectivity
+2. Configure PostgreSQL with a health check using `pg_isready`
+3. Configure Redis with a health check using `redis-cli ping`
+4. Make the API wait for both database and Redis to be healthy before starting
+5. Simulate a health failure and observe Docker's behavior
+
+<CollapsibleSolution>
+
+```bash
+# Create project directory
+mkdir -p ~/healthcheck-demo
+
+# Create the API with health endpoint
+cat > ~/healthcheck-demo/server.js << 'SERVEREOF'
+const http = require('http');
+const { Pool } = require('pg');
+const { createClient } = require('redis');
+
+// Track connection status
+let dbConnected = false;
+let redisConnected = false;
+
+// PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgres://demo:demo@db:5432/demo'
+});
+
+pool.on('connect', () => { dbConnected = true; });
+pool.on('error', () => { dbConnected = false; });
+
+// Redis
+const redis = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
+redis.on('connect', () => { redisConnected = true; });
+redis.on('error', () => { redisConnected = false; });
+redis.connect().catch(console.error);
+
+// Simulate a failure (toggle with endpoint)
+let simulateFailure = false;
+
+const server = http.createServer(async (req, res) => {
+  if (req.url === '/health') {
+    try {
+      if (simulateFailure) throw new Error('Simulated failure');
+
+      // Check database
+      await pool.query('SELECT 1');
+      // Check Redis
+      await redis.ping();
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        status: 'healthy',
+        checks: {
+          database: 'connected',
+          redis: 'connected',
+        },
+        uptime: process.uptime()
+      }));
+    } catch (err) {
+      res.writeHead(503);
+      res.end(JSON.stringify({
+        status: 'unhealthy',
+        error: err.message,
+        checks: {
+          database: dbConnected ? 'connected' : 'disconnected',
+          redis: redisConnected ? 'connected' : 'disconnected',
+        }
+      }));
+    }
+  } else if (req.url === '/fail') {
+    simulateFailure = true;
+    res.writeHead(200);
+    res.end(JSON.stringify({ message: 'Failure simulation enabled' }));
+  } else if (req.url === '/recover') {
+    simulateFailure = false;
+    res.writeHead(200);
+    res.end(JSON.stringify({ message: 'Failure simulation disabled' }));
+  } else {
+    res.writeHead(200);
+    res.end(JSON.stringify({ message: 'Health Check Demo API' }));
+  }
+});
+
+server.listen(3000, () => console.log('Health check demo on port 3000'));
+SERVEREOF
+
+# Create package.json
+cat > ~/healthcheck-demo/package.json << 'EOF'
+{
+  "name": "healthcheck-demo",
+  "dependencies": {
+    "pg": "^8.11.0",
+    "redis": "^4.6.0"
+  }
+}
+EOF
+
+# Create Dockerfile with health check
+cat > ~/healthcheck-demo/Dockerfile << 'EOF'
+FROM node:20-alpine
+
+RUN apk add --no-cache curl
+
+WORKDIR /app
+COPY package.json .
+RUN npm install
+COPY server.js .
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+CMD ["node", "server.js"]
+EOF
+
+# Create docker-compose.yml
+cat > ~/healthcheck-demo/docker-compose.yml << 'EOF'
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://demo:demo@db:5432/demo
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: demo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+EOF
+
+# Start the stack
+cd ~/healthcheck-demo
+docker compose up -d --build
+
+# Watch services come up (notice the health status progression)
+echo "Watching services start up..."
+sleep 5
+docker compose ps
+
+sleep 15
+docker compose ps
+
+# Check health status of each container
+echo "--- API Health ---"
+docker inspect healthcheck-demo-api-1 --format '{{.State.Health.Status}}'
+
+echo "--- DB Health ---"
+docker inspect healthcheck-demo-db-1 --format '{{.State.Health.Status}}'
+
+echo "--- Redis Health ---"
+docker inspect healthcheck-demo-redis-1 --format '{{.State.Health.Status}}'
+
+# Test the health endpoint
+curl -s http://localhost:3000/health | python3 -m json.tool
+
+# Simulate a failure
+echo "Triggering failure simulation..."
+curl -s http://localhost:3000/fail
+
+# Wait for health checks to detect the failure
+sleep 40
+
+# Check status — should be unhealthy after 3 failed checks
+docker compose ps
+docker inspect healthcheck-demo-api-1 --format '{{.State.Health.Status}}'
+
+# View health check log
+docker inspect healthcheck-demo-api-1 --format '{{json .State.Health}}' | python3 -m json.tool
+
+# Recover
+curl -s http://localhost:3000/recover
+sleep 20
+docker compose ps
+
+# Clean up
+docker compose down
+```
+
+This exercise shows health checks in action. The API's health endpoint verifies real connectivity to PostgreSQL and Redis. When you simulate a failure via `/fail`, the health check starts returning 503, and after 3 consecutive failures (30 seconds at 10-second intervals), Docker marks the container as unhealthy. The `depends_on: condition: service_healthy` ensures the API does not start until its dependencies pass their health checks.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Observable Application Stack">
+
+Build a Docker Compose stack with comprehensive logging and monitoring:
+
+1. A Node.js API that produces structured JSON logs
+2. PostgreSQL with health checks
+3. Proper log rotation on all services
+4. A monitoring script that checks container health and resource usage
+5. A log aggregation setup using a simple approach
+
+```bash
+# Create project structure
+mkdir -p ~/observable-app/{api,scripts}
+
+# Create structured logging API
+cat > ~/observable-app/api/server.js << 'APIEOF'
+const http = require('http');
+
+// Structured JSON logger
+function log(level, message, meta = {}) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    service: 'api',
+    pid: process.pid,
+    ...meta
+  };
+  const output = JSON.stringify(entry);
+  if (level === 'error') {
+    process.stderr.write(output + '\n');
+  } else {
+    process.stdout.write(output + '\n');
+  }
+}
+
+let requestCount = 0;
+
+const server = http.createServer((req, res) => {
+  const start = Date.now();
+  requestCount++;
+
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'healthy', uptime: process.uptime() }));
+    return;
+  }
+
+  if (req.url === '/metrics') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      requests_total: requestCount,
+      uptime_seconds: Math.floor(process.uptime()),
+      memory_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    }));
+    log('info', 'Metrics endpoint accessed', { endpoint: '/metrics' });
+    return;
+  }
+
+  // Simulate varying response times
+  const delay = Math.random() * 200;
+  setTimeout(() => {
+    const duration = Date.now() - start;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ message: 'ok', request_id: requestCount }));
+
+    log('info', 'Request handled', {
+      method: req.method,
+      path: req.url,
+      status: 200,
+      duration_ms: duration,
+      request_id: requestCount,
+    });
+
+    // Log slow requests as warnings
+    if (duration > 100) {
+      log('warn', 'Slow request detected', {
+        path: req.url,
+        duration_ms: duration,
+        threshold_ms: 100,
+      });
+    }
+  }, delay);
+});
+
+// Periodic status log
+setInterval(() => {
+  const mem = process.memoryUsage();
+  log('info', 'Status report', {
+    requests_total: requestCount,
+    memory_heap_mb: Math.round(mem.heapUsed / 1024 / 1024),
+    memory_rss_mb: Math.round(mem.rss / 1024 / 1024),
+    uptime_seconds: Math.floor(process.uptime()),
+  });
+}, 30000);
+
+server.listen(3000, () => {
+  log('info', 'Server started', { port: 3000, node_version: process.version });
+});
+APIEOF
+
+# Create API Dockerfile
+cat > ~/observable-app/api/Dockerfile << 'EOF'
+FROM node:20-alpine
+RUN apk add --no-cache curl
+WORKDIR /app
+COPY server.js .
+EXPOSE 3000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+CMD ["node", "server.js"]
+EOF
+
+# Create monitoring script
+cat > ~/observable-app/scripts/monitor.sh << 'SCRIPTEOF'
+#!/bin/sh
+# Container monitoring script
+# Checks health status and resource usage
+
+echo "=================================="
+echo "  Container Health & Resource Report"
+echo "  $(date)"
+echo "=================================="
+echo ""
+
+echo "--- Container Status ---"
+docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
+
+echo ""
+echo "--- Resource Usage ---"
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.PIDs}}" 2>/dev/null
+
+echo ""
+echo "--- Health Check Status ---"
+for container in $(docker compose ps -q 2>/dev/null); do
+  NAME=$(docker inspect $container --format '{{.Name}}' | sed 's/^\///')
+  HEALTH=$(docker inspect $container --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no healthcheck{{end}}')
+  echo "  $NAME: $HEALTH"
+done
+
+echo ""
+echo "--- Disk Usage ---"
+docker system df 2>/dev/null
+
+echo ""
+echo "--- Log File Sizes ---"
+for container in $(docker compose ps -q 2>/dev/null); do
+  NAME=$(docker inspect $container --format '{{.Name}}' | sed 's/^\///')
+  LOG_PATH=$(docker inspect $container --format '{{.LogPath}}')
+  if [ -n "$LOG_PATH" ] && [ -f "$LOG_PATH" ]; then
+    SIZE=$(du -sh "$LOG_PATH" 2>/dev/null | cut -f1)
+    echo "  $NAME: $SIZE"
+  else
+    echo "  $NAME: no log file (driver may not be json-file)"
+  fi
+done
+
+echo ""
+echo "=================================="
+echo "  Report complete"
+echo "=================================="
+SCRIPTEOF
+
+chmod +x ~/observable-app/scripts/monitor.sh
+
+# Create docker-compose.yml
+cat > ~/observable-app/docker-compose.yml << 'EOF'
+services:
+  api:
+    build: ./api
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "api"
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: monitor
+      POSTGRES_PASSWORD: monitorpass
+      POSTGRES_DB: observable
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  loadgen:
+    image: alpine
+    command: >
+      sh -c "apk add --no-cache curl > /dev/null 2>&1 &&
+             echo 'Starting load generator...' &&
+             while true; do
+               curl -s http://api:3000/ > /dev/null
+               curl -s http://api:3000/metrics > /dev/null
+               sleep 2
+             done"
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    restart: unless-stopped
+
+volumes:
+  db-data:
+EOF
+
+# Start the stack
+cd ~/observable-app
+docker compose up -d --build
+
+# Wait for everything to be healthy
+echo "Waiting for services to become healthy..."
+sleep 20
+
+# Run the monitoring script
+sudo bash ./scripts/monitor.sh
+
+# View structured JSON logs from the API
+echo ""
+echo "--- Recent API Logs (structured JSON) ---"
+docker compose logs --tail 10 api
+
+# Parse specific fields from JSON logs
+echo ""
+echo "--- Slow Requests ---"
+docker compose logs api 2>&1 | grep '"level":"warn"' | head -5
+
+# Check the metrics endpoint
+echo ""
+echo "--- Application Metrics ---"
+curl -s http://localhost:3000/metrics | python3 -m json.tool
+
+# Generate more load and watch stats
+echo ""
+echo "--- Live Stats (5 seconds) ---"
+timeout 5 docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" || true
+
+# Clean up
+docker compose down -v
+```
+
+This mini project creates a fully observable stack. The API produces structured JSON logs that are easy to parse and search. Every service has log rotation configured. Health checks ensure Docker knows the real status of each service. The monitoring script provides a dashboard-like view of container health, resource usage, and log file sizes. The load generator creates realistic traffic so you can see the monitoring in action.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Docker captures STDOUT and STDERR from containers — always configure your application to log to these streams, not to files inside the container
+- Use `docker logs --tail N -f` for real-time debugging; combine with `--since` to filter by time
+- Always configure log rotation (`max-size` and `max-file`) to prevent disk exhaustion — set it at the daemon level as a safety net
+- `docker stats` provides real-time CPU, memory, network, and disk I/O metrics for all running containers
+- Health checks distinguish between "container is running" and "application is working" — use `HEALTHCHECK` in Dockerfiles and `healthcheck` in Compose files
+- A good health endpoint checks real dependencies (database, cache) and responds quickly
+- Use `docker system df` and `docker system events` to monitor overall Docker resource consumption and activity
+
+## What's Next
+
+In the next lesson, **Docker Security Fundamentals**, you will learn how to secure your containers using namespaces, capabilities, and non-root users. You will scan images for vulnerabilities, apply resource limits, and follow a security best practices checklist. Security is not optional — it is a fundamental part of running containers responsibly.

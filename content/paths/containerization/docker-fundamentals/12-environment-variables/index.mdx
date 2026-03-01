@@ -1,0 +1,1283 @@
+---
+title: "Environment Variables and Configuration"
+description: "Master application configuration in Docker using environment variables, .env files, Docker secrets, and the 12-Factor App methodology."
+order: 12
+xpReward: 40
+estimatedMinutes: 50
+prerequisites:
+  - 11-docker-compose
+objectives:
+  - Understand the 12-Factor App configuration principle and why it matters
+  - Use ENV in Dockerfiles and pass runtime variables with docker run
+  - Configure services in Docker Compose with environment, env_file, and variable substitution
+  - Manage sensitive data with Docker secrets
+  - Apply configuration best practices to avoid leaking credentials
+tags:
+  - docker
+  - environment-variables
+  - configuration
+  - secrets
+  - twelve-factor
+  - devops
+---
+
+<Callout type="story" title="The Story">
+It is 2 AM and your pager goes off. The production API is returning 500 errors. You SSH into the server and check the logs: "Connection refused: database at localhost:5432." Someone deployed the development configuration to production. The app is trying to connect to a database that does not exist on the production server. The database URL, API keys, and feature flags were all hardcoded in the application. This is the nightmare scenario that proper configuration management prevents. After tonight, you vow: configuration will NEVER be baked into the image again.
+</Callout>
+
+## The 12-Factor App: Configuration Principle
+
+The [12-Factor App](https://12factor.net) methodology defines best practices for building modern applications. Factor III states:
+
+> **Store config in the environment.**
+
+Configuration is everything that varies between deployments — database URLs, API keys, feature flags, log levels. Code does not change between environments, but configuration does.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Same Docker Image                      │
+│                     myapp:v2.1.0                          │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  Development          Staging           Production       │
+│  ┌────────────┐    ┌────────────┐    ┌────────────┐     │
+│  │DB=localhost │    │DB=staging- │    │DB=prod-db. │     │
+│  │PORT=3000   │    │  db.intern │    │  aws.com   │     │
+│  │DEBUG=true  │    │PORT=3000   │    │PORT=3000   │     │
+│  │LOG=debug   │    │DEBUG=false │    │DEBUG=false │     │
+│  └────────────┘    │LOG=info    │    │LOG=warn    │     │
+│                    └────────────┘    └────────────┘     │
+│                                                          │
+│  One image. Three environments. Only config changes.     │
+└──────────────────────────────────────────────────────────┘
+```
+
+<Callout type="info" title="Why Not Config Files?">
+Hardcoding configuration in files inside the image means you need a different image for each environment. Environment variables let you build once, deploy everywhere. The same image binary runs in dev, staging, and production with different settings injected at runtime.
+</Callout>
+
+## ENV Instruction in Dockerfiles
+
+The `ENV` instruction in a Dockerfile sets environment variables that persist in the built image and are available at runtime.
+
+### Setting Default Values
+
+```dockerfile
+FROM node:20-alpine
+
+# Set environment variables with defaults
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV LOG_LEVEL=info
+ENV APP_NAME="My Application"
+
+WORKDIR /app
+COPY . .
+RUN npm ci --only=production
+
+EXPOSE $PORT
+
+CMD ["node", "server.js"]
+```
+
+When you run this image, `NODE_ENV`, `PORT`, `LOG_LEVEL`, and `APP_NAME` are available inside the container:
+
+```bash
+# Run with default values
+docker run myapp
+# NODE_ENV=production, PORT=3000
+
+# Override at runtime
+docker run -e NODE_ENV=development -e PORT=8080 myapp
+# NODE_ENV=development, PORT=8080
+```
+
+### ENV vs ARG
+
+A common source of confusion is `ENV` vs `ARG`:
+
+```dockerfile
+# ARG — only available during build
+ARG NODE_VERSION=20
+
+# ENV — available during build AND at runtime
+ENV NODE_ENV=production
+
+FROM node:${NODE_VERSION}-alpine
+
+# ARG values are NOT available here unless re-declared
+# ENV values ARE available here and in the running container
+```
+
+| Feature | `ARG` | `ENV` |
+|---------|-------|-------|
+| Available during build | Yes | Yes |
+| Available at runtime | No | Yes |
+| Set from command line | `--build-arg` | `-e` / `--env` |
+| Persists in image layers | No | Yes |
+| Use case | Build-time configuration | Runtime configuration |
+| Visible in image history | Yes (security risk!) | Yes |
+
+<Callout type="warning" title="Never Put Secrets in ARG or ENV">
+Both `ARG` and `ENV` values are visible in the image layer history via `docker history`. Never use them for passwords, API keys, or other secrets during the build process. Use multi-stage builds or Docker BuildKit secrets instead.
+
+```bash
+# Anyone can see your ARG/ENV values:
+docker history myapp
+# STEP 3: ENV DATABASE_PASSWORD=supersecret   <-- exposed!
+```
+</Callout>
+
+### Best Practices for ENV in Dockerfiles
+
+```dockerfile
+# GOOD: Set sensible defaults that work for most environments
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV LOG_LEVEL=info
+
+# GOOD: Use ENV for non-sensitive configuration
+ENV APP_VERSION=2.1.0
+ENV TZ=UTC
+
+# BAD: Never put secrets in ENV
+# ENV DATABASE_PASSWORD=mysecret     # Don't do this!
+# ENV API_KEY=sk-abc123              # Don't do this!
+
+# BAD: Don't set environment-specific values
+# ENV DATABASE_URL=postgres://prod-server:5432/mydb  # Don't do this!
+```
+
+## Runtime Environment Variables
+
+### With docker run
+
+Pass environment variables when starting a container:
+
+```bash
+# Using -e flag (one variable at a time)
+docker run -d \
+  -e NODE_ENV=production \
+  -e DATABASE_URL="postgres://user:pass@db:5432/myapp" \
+  -e REDIS_URL="redis://redis:6379" \
+  -e LOG_LEVEL=warn \
+  myapp:latest
+
+# Using --env (same as -e)
+docker run -d \
+  --env NODE_ENV=production \
+  --env DATABASE_URL="postgres://user:pass@db:5432/myapp" \
+  myapp:latest
+
+# Pass a variable from your host shell
+export API_KEY="sk-abc123"
+docker run -d -e API_KEY myapp:latest
+# The container gets API_KEY=sk-abc123 from the host environment
+```
+
+### With --env-file
+
+Load variables from a file:
+
+```bash
+# Create an env file
+cat > app.env << 'EOF'
+NODE_ENV=production
+DATABASE_URL=postgres://user:pass@db:5432/myapp
+REDIS_URL=redis://redis:6379
+LOG_LEVEL=warn
+API_KEY=sk-abc123
+EOF
+
+# Pass the file to docker run
+docker run -d --env-file app.env myapp:latest
+
+# Multiple env files
+docker run -d \
+  --env-file common.env \
+  --env-file production.env \
+  myapp:latest
+```
+
+### Inspecting Environment Variables
+
+```bash
+# See environment variables of a running container
+docker exec mycontainer env
+
+# Output:
+# PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# NODE_ENV=production
+# DATABASE_URL=postgres://user:pass@db:5432/myapp
+# REDIS_URL=redis://redis:6379
+# LOG_LEVEL=warn
+
+# Or inspect the container configuration
+docker inspect mycontainer --format '{{range .Config.Env}}{{println .}}{{end}}'
+
+# Check a specific variable
+docker exec mycontainer printenv DATABASE_URL
+```
+
+<Callout type="warning" title="Environment Variables Are Visible">
+Anyone with access to `docker inspect` or `docker exec` can see all environment variables. This includes secrets passed via `-e`. For highly sensitive data in production, consider Docker secrets or a secrets manager like HashiCorp Vault.
+</Callout>
+
+## Docker Compose Environment Configuration
+
+Compose provides several ways to configure environment variables for services.
+
+### The environment Key
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    environment:
+      # Map syntax (recommended — cleaner)
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: info
+      DATABASE_URL: postgres://user:pass@db:5432/myapp
+
+  api-alt:
+    image: myapp:latest
+    environment:
+      # List syntax (also valid)
+      - NODE_ENV=production
+      - PORT=3000
+      - LOG_LEVEL=info
+      - DATABASE_URL=postgres://user:pass@db:5432/myapp
+```
+
+### The env_file Key
+
+Load variables from external files:
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    env_file:
+      - .env              # Shared defaults
+      - .env.production   # Environment-specific overrides
+
+  worker:
+    image: myapp:latest
+    env_file:
+      - .env
+      - .env.worker       # Worker-specific settings
+```
+
+```bash
+# .env
+NODE_ENV=production
+LOG_LEVEL=info
+TZ=UTC
+
+# .env.production
+DATABASE_URL=postgres://produser:prodpass@prod-db:5432/myapp
+REDIS_URL=redis://prod-redis:6379
+API_KEY=sk-production-key
+
+# .env.worker
+WORKER_CONCURRENCY=4
+WORKER_QUEUE=high,medium,low
+```
+
+### Variable Substitution
+
+Compose can interpolate variables from your shell or `.env` file:
+
+```yaml
+services:
+  db:
+    image: postgres:${POSTGRES_VERSION:-16}   # Default to 16 if not set
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+
+  api:
+    image: myapp:${APP_VERSION}
+    environment:
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+```
+
+```bash
+# .env (loaded automatically by Compose)
+POSTGRES_VERSION=16
+DB_USER=appuser
+DB_PASSWORD=secret123
+DB_NAME=myapp
+DB_PORT=5432
+APP_VERSION=2.1.0
+```
+
+<Callout type="info" title="Compose .env File">
+Docker Compose automatically loads a file named `.env` from the project directory (where `docker-compose.yml` is). These variables are available for substitution in the Compose file itself. This is different from `env_file`, which loads variables into the container.
+
+```
+.env file    -->  Variable substitution in docker-compose.yml
+env_file     -->  Environment variables inside the container
+```
+</Callout>
+
+### Variable Substitution Syntax
+
+```yaml
+services:
+  app:
+    image: myapp:${VERSION}              # Required — fails if not set
+    environment:
+      PORT: ${PORT:-3000}                # Default: use 3000 if PORT not set
+      HOST: ${HOST:-0.0.0.0}            # Default: use 0.0.0.0 if HOST not set
+      DB: ${DATABASE_URL:?Database URL required}  # Error if not set
+```
+
+| Syntax | Meaning |
+|--------|---------|
+| `${VAR}` | Value of VAR, empty string if not set |
+| `${VAR:-default}` | Value of VAR, or "default" if not set or empty |
+| `${VAR-default}` | Value of VAR, or "default" if not set (allows empty) |
+| `${VAR:?error message}` | Value of VAR, or exit with error if not set or empty |
+| `${VAR?error message}` | Value of VAR, or exit with error if not set |
+
+## .env File Best Practices
+
+### Syntax Rules
+
+```bash
+# .env file syntax
+
+# Simple key=value
+DATABASE_URL=postgres://user:pass@localhost:5432/mydb
+
+# Quoted values (for spaces or special characters)
+APP_NAME="My Application"
+GREETING='Hello World'
+
+# No spaces around =
+GOOD=value
+# BAD = value      <-- This breaks
+
+# Comments start with #
+# This is a comment
+PORT=3000   # Inline comments are NOT supported in all parsers
+
+# Empty values
+EMPTY_VAR=
+# This sets EMPTY_VAR to an empty string
+
+# Multi-line values (with quotes)
+PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA...
+-----END RSA PRIVATE KEY-----"
+```
+
+### Managing Multiple Environments
+
+```
+project/
+├── docker-compose.yml
+├── .env                    # Default/shared values (committed to git)
+├── .env.example            # Template with placeholder values (committed)
+├── .env.local              # Local overrides (NOT committed — in .gitignore)
+├── .env.development        # Development settings
+├── .env.staging            # Staging settings
+└── .env.production         # Production settings (NOT committed)
+```
+
+```bash
+# .env.example (committed to version control)
+DATABASE_URL=postgres://user:password@localhost:5432/dbname
+REDIS_URL=redis://localhost:6379
+API_KEY=your-api-key-here
+SECRET_KEY=generate-a-random-key
+
+# .gitignore
+.env.local
+.env.production
+.env*.local
+```
+
+<Callout type="tip" title="Always Commit .env.example">
+Create a `.env.example` file with placeholder values and commit it to version control. This documents what environment variables your application needs without exposing real credentials. New developers copy it: `cp .env.example .env.local` and fill in their values.
+</Callout>
+
+### Priority Order
+
+When the same variable is defined in multiple places, Compose uses this priority (highest to lowest):
+
+```
+1. Environment variables from the shell (export VAR=value)
+2. Variables in the .env file
+3. Variables in env_file
+4. Variables in environment key
+5. ENV instruction in the Dockerfile
+```
+
+```bash
+# Example: PORT is defined everywhere
+# Dockerfile:           ENV PORT=3000
+# docker-compose.yml:   environment: PORT=4000
+# .env file:            PORT=5000
+# Shell:                export PORT=6000
+
+# Result: PORT=6000 (shell wins)
+```
+
+## Docker Secrets
+
+For sensitive data in production, Docker provides a secrets mechanism that is more secure than environment variables.
+
+### Why Secrets Instead of Environment Variables?
+
+| Feature | Environment Variables | Docker Secrets |
+|---------|----------------------|---------------|
+| Visible in `docker inspect` | Yes | No |
+| Visible in process list | Sometimes | No |
+| Stored on disk | In container config | Encrypted (Swarm) or tmpfs |
+| Access method | `$VAR` | Read file from `/run/secrets/` |
+| Rotation | Restart required | Can update without restart |
+
+### Using Secrets with Docker Compose
+
+```yaml
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: myapp
+    secrets:
+      - db_password
+
+  api:
+    build: ./api
+    environment:
+      DATABASE_PASSWORD_FILE: /run/secrets/db_password
+      API_KEY_FILE: /run/secrets/api_key
+    secrets:
+      - db_password
+      - api_key
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt    # Read from a local file
+  api_key:
+    file: ./secrets/api_key.txt
+```
+
+```bash
+# Create secrets directory
+mkdir -p secrets
+
+# Create secret files
+echo -n "supersecretpassword" > secrets/db_password.txt
+echo -n "sk-api-key-12345" > secrets/api_key.txt
+
+# Add to .gitignore
+echo "secrets/" >> .gitignore
+```
+
+<Callout type="info" title="The _FILE Convention">
+Many official Docker images (PostgreSQL, MySQL, MariaDB) support the `_FILE` suffix convention. Instead of `POSTGRES_PASSWORD=mysecret`, you use `POSTGRES_PASSWORD_FILE=/run/secrets/db_password`. The entrypoint script reads the file and sets the variable. This way, the secret never appears in environment variables.
+</Callout>
+
+### Reading Secrets in Your Application
+
+Inside the container, secrets are mounted as files at `/run/secrets/<secret_name>`:
+
+```bash
+# Inside the container
+cat /run/secrets/db_password
+# Output: supersecretpassword
+
+ls -la /run/secrets/
+# -r--r--r-- 1 root root 19 Jan 15 10:00 db_password
+# -r--r--r-- 1 root root 16 Jan 15 10:00 api_key
+```
+
+Your application needs to read from files instead of environment variables:
+
+```javascript
+// Node.js — reading secrets
+const fs = require('fs');
+
+function getSecret(name) {
+  const secretPath = `/run/secrets/${name}`;
+  try {
+    return fs.readFileSync(secretPath, 'utf8').trim();
+  } catch (err) {
+    // Fall back to environment variable
+    return process.env[name.toUpperCase()];
+  }
+}
+
+const dbPassword = getSecret('db_password');
+const apiKey = getSecret('api_key');
+```
+
+```python
+# Python — reading secrets
+import os
+
+def get_secret(name):
+    secret_path = f"/run/secrets/{name}"
+    try:
+        with open(secret_path, 'r') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return os.environ.get(name.upper())
+
+db_password = get_secret('db_password')
+api_key = get_secret('api_key')
+```
+
+## Configuration Patterns
+
+### Pattern 1: Environment Variables for Simple Config
+
+Best for: non-sensitive settings, feature flags, log levels.
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: warn
+      FEATURE_NEW_UI: "true"
+      MAX_UPLOAD_SIZE: "10MB"
+```
+
+### Pattern 2: Config Files for Complex Configuration
+
+Best for: Nginx configs, application config files, complex structured data.
+
+```yaml
+services:
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+```
+
+### Pattern 3: Secrets for Sensitive Data
+
+Best for: passwords, API keys, TLS certificates, private keys.
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    secrets:
+      - db_password
+      - api_key
+      - tls_cert
+      - tls_key
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  api_key:
+    file: ./secrets/api_key.txt
+  tls_cert:
+    file: ./certs/server.crt
+  tls_key:
+    file: ./certs/server.key
+```
+
+### Pattern 4: Combining All Three
+
+```yaml
+services:
+  api:
+    build: ./api
+    # Non-sensitive config as environment variables
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: warn
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: myapp
+    # Sensitive data as secrets
+    secrets:
+      - db_password
+      - jwt_secret
+    # Complex config as mounted files
+    volumes:
+      - ./config/app.yml:/app/config/app.yml:ro
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+```
+
+## Sensitive Data Handling
+
+### What Counts as Sensitive?
+
+| Sensitive (Use Secrets) | Not Sensitive (Use ENV) |
+|------------------------|------------------------|
+| Database passwords | Database host/port |
+| API keys / tokens | Log level |
+| TLS private keys | Application port |
+| JWT signing secrets | Feature flags |
+| OAuth client secrets | Timezone |
+| Encryption keys | Environment name |
+| Cloud credentials | Max upload size |
+
+### Common Mistakes to Avoid
+
+```dockerfile
+# MISTAKE 1: Hardcoding secrets in Dockerfile
+ENV DATABASE_PASSWORD=mysecretpass
+# Fix: Pass at runtime with -e or use secrets
+
+# MISTAKE 2: Copying .env into the image
+COPY .env /app/.env
+# Fix: Mount at runtime or use env_file in Compose
+
+# MISTAKE 3: Using ARG for secrets (visible in history)
+ARG GITHUB_TOKEN
+RUN git clone https://${GITHUB_TOKEN}@github.com/private/repo.git
+# Fix: Use BuildKit secrets
+
+# MISTAKE 4: Logging secrets
+RUN echo "Password is $DB_PASSWORD"
+# Fix: Never echo secrets, even in build steps
+```
+
+### Using BuildKit Secrets for Build-Time Secrets
+
+When you need a secret during the Docker build (like accessing a private registry or repository):
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+FROM node:20-alpine
+WORKDIR /app
+
+# Mount the secret only during this RUN step — never stored in a layer
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc \
+    npm ci --only=production
+
+COPY . .
+CMD ["node", "server.js"]
+```
+
+```bash
+# Build with the secret
+docker build --secret id=npmrc,src=$HOME/.npmrc -t myapp .
+
+# The .npmrc file is available during build but NOT in the final image
+docker history myapp   # No trace of the secret
+```
+
+<Callout type="tip" title="Always Scan for Leaked Secrets">
+Use tools like `trufflehog`, `git-secrets`, or `docker scan` to check your images and repositories for accidentally committed secrets. Add a pre-commit hook to catch secrets before they reach version control.
+</Callout>
+
+<Exercise number={1} title="Configure an Application with Environment Variables">
+
+Create a Docker Compose setup that demonstrates proper environment variable management:
+
+1. Create a simple Node.js app that reads configuration from environment variables and displays it
+2. Set up a Compose file with three environments: default values in the Dockerfile, overrides in `.env`, and service-level settings
+3. Demonstrate the priority order by having the same variable defined in multiple places
+
+Requirements:
+- The app should display its configuration on a web page
+- Use at least 5 environment variables
+- Show how `.env` file values override Dockerfile defaults
+- Show how Compose `environment` overrides `.env` values
+
+<CollapsibleSolution>
+
+```bash
+# Create project directory
+mkdir -p ~/env-demo
+
+# Create the Node.js app
+cat > ~/env-demo/server.js << 'EOF'
+const http = require('http');
+
+const config = {
+  NODE_ENV: process.env.NODE_ENV || 'not set',
+  PORT: process.env.PORT || 'not set',
+  LOG_LEVEL: process.env.LOG_LEVEL || 'not set',
+  APP_NAME: process.env.APP_NAME || 'not set',
+  APP_VERSION: process.env.APP_VERSION || 'not set',
+  DATABASE_HOST: process.env.DATABASE_HOST || 'not set',
+  FEATURE_FLAG: process.env.FEATURE_FLAG || 'not set',
+};
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <html>
+    <body>
+      <h1>Environment Variable Demo</h1>
+      <table border="1" cellpadding="8">
+        <tr><th>Variable</th><th>Value</th><th>Source</th></tr>
+        ${Object.entries(config).map(([key, value]) =>
+          `<tr><td>${key}</td><td><strong>${value}</strong></td><td>See notes</td></tr>`
+        ).join('')}
+      </table>
+      <h2>Priority Order (highest to lowest):</h2>
+      <ol>
+        <li>Shell environment (export VAR=value)</li>
+        <li>.env file (Compose substitution)</li>
+        <li>env_file directive</li>
+        <li>environment key in Compose</li>
+        <li>ENV in Dockerfile</li>
+      </ol>
+    </body>
+    </html>
+  `);
+});
+
+const port = process.env.PORT || 3000;
+server.listen(port, () => {
+  console.log(`Config demo running on port ${port}`);
+  console.log('Current configuration:', JSON.stringify(config, null, 2));
+});
+EOF
+
+# Create Dockerfile with ENV defaults
+cat > ~/env-demo/Dockerfile << 'EOF'
+FROM node:20-alpine
+WORKDIR /app
+
+# Defaults set in Dockerfile (lowest priority)
+ENV NODE_ENV=development
+ENV PORT=3000
+ENV LOG_LEVEL=debug
+ENV APP_NAME="Default App"
+ENV APP_VERSION=0.0.1
+ENV DATABASE_HOST=localhost
+ENV FEATURE_FLAG=false
+
+COPY server.js .
+EXPOSE 3000
+CMD ["node", "server.js"]
+EOF
+
+# Create .env file (overrides Dockerfile ENV)
+cat > ~/env-demo/.env << 'EOF'
+APP_NAME=EnvDemo App
+APP_VERSION=2.0.0
+LOG_LEVEL=info
+EOF
+
+# Create docker-compose.yml
+cat > ~/env-demo/docker-compose.yml << 'EOF'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      # These override both Dockerfile ENV and .env
+      NODE_ENV: production
+      DATABASE_HOST: db.production.internal
+      FEATURE_FLAG: "true"
+      # These use variable substitution from .env
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      LOG_LEVEL: ${LOG_LEVEL}
+EOF
+
+# Build and run
+cd ~/env-demo
+docker compose up -d --build
+
+# Check the configuration
+curl http://localhost:3000
+
+# View the actual environment inside the container
+docker compose exec app env | sort
+
+# Now override from the shell (highest priority)
+APP_NAME="Shell Override" docker compose up -d --build
+curl http://localhost:3000
+
+# Clean up
+docker compose down
+```
+
+The output demonstrates the priority chain: `NODE_ENV` comes from the Compose `environment` key (overriding the Dockerfile default of `development`), `APP_NAME` and `APP_VERSION` come from `.env` via variable substitution, and `DATABASE_HOST` is set directly in the Compose file. If you export a variable from your shell, it takes the highest priority.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise number={2} title="Implement Docker Secrets Management">
+
+Build a Compose stack that uses Docker secrets to manage sensitive data:
+
+1. Create a web API that connects to PostgreSQL using credentials from Docker secrets
+2. Use the `_FILE` convention for the PostgreSQL container
+3. Create a helper function in your app that reads secrets from `/run/secrets/`
+4. Verify that secrets are NOT visible in `docker inspect`
+
+Requirements:
+- At least 3 secrets: database password, API key, JWT secret
+- The secrets must be stored in separate files
+- The application should have a `/config` endpoint that shows which config sources are in use (without revealing actual secret values)
+
+<CollapsibleSolution>
+
+```bash
+# Create project structure
+mkdir -p ~/secrets-demo/{api,secrets}
+
+# Create secret files
+echo -n "db-super-secret-pass" > ~/secrets-demo/secrets/db_password.txt
+echo -n "sk-api-key-98765" > ~/secrets-demo/secrets/api_key.txt
+echo -n "jwt-signing-secret-xyz" > ~/secrets-demo/secrets/jwt_secret.txt
+
+# Create .gitignore (always do this!)
+cat > ~/secrets-demo/.gitignore << 'EOF'
+secrets/
+.env.local
+.env.production
+EOF
+
+# Create the API server
+cat > ~/secrets-demo/api/server.js << 'SERVEREOF'
+const http = require('http');
+const fs = require('fs');
+
+// Helper function to read secrets
+function getSecret(name) {
+  const secretPath = `/run/secrets/${name}`;
+  try {
+    const value = fs.readFileSync(secretPath, 'utf8').trim();
+    console.log(`Secret '${name}' loaded from ${secretPath}`);
+    return { value, source: 'docker-secret' };
+  } catch (err) {
+    const envValue = process.env[name.toUpperCase()];
+    if (envValue) {
+      console.log(`Secret '${name}' loaded from environment variable`);
+      return { value: envValue, source: 'environment-variable' };
+    }
+    console.warn(`Secret '${name}' not found!`);
+    return { value: null, source: 'not-found' };
+  }
+}
+
+// Load all secrets at startup
+const secrets = {
+  db_password: getSecret('db_password'),
+  api_key: getSecret('api_key'),
+  jwt_secret: getSecret('jwt_secret'),
+};
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+
+  if (req.url === '/config') {
+    // Show sources WITHOUT revealing values
+    const config = {};
+    for (const [key, info] of Object.entries(secrets)) {
+      config[key] = {
+        source: info.source,
+        loaded: info.value !== null,
+        length: info.value ? info.value.length : 0,
+        // Never show the actual value!
+      };
+    }
+    res.end(JSON.stringify({ config }, null, 2));
+  } else if (req.url === '/health') {
+    res.end(JSON.stringify({
+      status: 'healthy',
+      secrets_loaded: Object.values(secrets).every(s => s.value !== null)
+    }));
+  } else {
+    res.end(JSON.stringify({ message: 'Secrets Demo API' }));
+  }
+});
+
+server.listen(3000, () => console.log('Secrets demo API on port 3000'));
+SERVEREOF
+
+# Create API Dockerfile
+cat > ~/secrets-demo/api/Dockerfile << 'EOF'
+FROM node:20-alpine
+WORKDIR /app
+COPY server.js .
+EXPOSE 3000
+CMD ["node", "server.js"]
+EOF
+
+# Create docker-compose.yml
+cat > ~/secrets-demo/docker-compose.yml << 'EOF'
+services:
+  api:
+    build: ./api
+    ports:
+      - "3000:3000"
+    secrets:
+      - db_password
+      - api_key
+      - jwt_secret
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: secretsdb
+    secrets:
+      - db_password
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  api_key:
+    file: ./secrets/api_key.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+
+volumes:
+  db-data:
+EOF
+
+# Start the stack
+cd ~/secrets-demo
+docker compose up -d --build
+
+# Check that secrets are loaded
+curl http://localhost:3000/config | python3 -m json.tool
+
+# Expected output:
+# {
+#     "config": {
+#         "db_password": {
+#             "source": "docker-secret",
+#             "loaded": true,
+#             "length": 20
+#         },
+#         "api_key": {
+#             "source": "docker-secret",
+#             "loaded": true,
+#             "length": 16
+#         },
+#         "jwt_secret": {
+#             "source": "docker-secret",
+#             "loaded": true,
+#             "length": 22
+#         }
+#     }
+# }
+
+# Verify secrets are NOT in docker inspect
+docker inspect secrets-demo-api-1 --format '{{range .Config.Env}}{{println .}}{{end}}'
+# You should NOT see db_password, api_key, or jwt_secret here
+
+# Verify secrets exist as files inside the container
+docker compose exec api ls -la /run/secrets/
+# -r--r--r-- 1 root root 20 ... db_password
+# -r--r--r-- 1 root root 16 ... api_key
+# -r--r--r-- 1 root root 22 ... jwt_secret
+
+# Clean up
+docker compose down -v
+```
+
+The key takeaway is that secrets appear as files in `/run/secrets/`, not as environment variables. They are not visible in `docker inspect`, which makes them more secure than using `-e` flags. The `/config` endpoint demonstrates how to confirm secrets are loaded without ever exposing their values.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Multi-Environment Configuration System">
+
+Build a Docker Compose application that supports three environments (development, staging, production) with proper configuration management:
+
+1. A Node.js API that behaves differently based on its environment
+2. A PostgreSQL database with environment-specific credentials
+3. Separate `.env` files for each environment
+4. Docker secrets for production sensitive data
+5. A Compose override pattern for environment switching
+
+```bash
+# Create project structure
+mkdir -p ~/multi-env/{api,secrets,config}
+
+# Create the API server
+cat > ~/multi-env/api/server.js << 'APIEOF'
+const http = require('http');
+const fs = require('fs');
+
+// Read secret from file or fall back to env var
+function getSecret(name) {
+  try {
+    return fs.readFileSync(`/run/secrets/${name}`, 'utf8').trim();
+  } catch {
+    return process.env[name.toUpperCase()] || 'not-configured';
+  }
+}
+
+const config = {
+  env: process.env.NODE_ENV || 'development',
+  port: parseInt(process.env.PORT || '3000'),
+  logLevel: process.env.LOG_LEVEL || 'debug',
+  dbHost: process.env.DB_HOST || 'localhost',
+  dbName: process.env.DB_NAME || 'app_dev',
+  dbPassword: getSecret('db_password'),
+  apiKey: getSecret('api_key'),
+  features: {
+    debugMode: process.env.DEBUG_MODE === 'true',
+    rateLimit: parseInt(process.env.RATE_LIMIT || '0'),
+    corsOrigin: process.env.CORS_ORIGIN || '*',
+  }
+};
+
+const server = http.createServer((req, res) => {
+  // Log based on level
+  if (config.logLevel === 'debug') {
+    console.log(`[DEBUG] ${req.method} ${req.url}`);
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+
+  if (req.url === '/health') {
+    res.end(JSON.stringify({ status: 'ok', environment: config.env }));
+  } else if (req.url === '/config') {
+    res.end(JSON.stringify({
+      environment: config.env,
+      port: config.port,
+      logLevel: config.logLevel,
+      database: {
+        host: config.dbHost,
+        name: config.dbName,
+        passwordSet: config.dbPassword !== 'not-configured',
+      },
+      features: config.features,
+      apiKeySet: config.apiKey !== 'not-configured',
+    }, null, 2));
+  } else {
+    res.end(JSON.stringify({
+      message: `Hello from ${config.env}!`,
+      timestamp: new Date().toISOString(),
+    }));
+  }
+});
+
+server.listen(config.port, () => {
+  console.log(`[${config.env.toUpperCase()}] Server on port ${config.port}`);
+  console.log(`  Log level: ${config.logLevel}`);
+  console.log(`  Database: ${config.dbHost}/${config.dbName}`);
+  console.log(`  Debug mode: ${config.features.debugMode}`);
+});
+APIEOF
+
+# Create Dockerfile
+cat > ~/multi-env/api/Dockerfile << 'EOF'
+FROM node:20-alpine
+WORKDIR /app
+
+ENV NODE_ENV=development
+ENV PORT=3000
+ENV LOG_LEVEL=debug
+
+COPY server.js .
+EXPOSE 3000
+CMD ["node", "server.js"]
+EOF
+
+# Create base docker-compose.yml
+cat > ~/multi-env/docker-compose.yml << 'EOF'
+services:
+  api:
+    build: ./api
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-appuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpass}
+      POSTGRES_DB: ${DB_NAME:-app_dev}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-appuser}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db-data:
+EOF
+
+# Create development override (auto-loaded)
+cat > ~/multi-env/docker-compose.override.yml << 'EOF'
+services:
+  api:
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      DEBUG_MODE: "true"
+      RATE_LIMIT: "0"
+      CORS_ORIGIN: "*"
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-app_dev}
+      DB_PASSWORD: ${DB_PASSWORD:-devpass}
+    volumes:
+      - ./api:/app    # Hot-reload source code
+
+  db:
+    ports:
+      - "5432:5432"   # Expose for local tools
+EOF
+
+# Create staging override
+cat > ~/multi-env/docker-compose.staging.yml << 'EOF'
+services:
+  api:
+    environment:
+      NODE_ENV: staging
+      LOG_LEVEL: info
+      DEBUG_MODE: "false"
+      RATE_LIMIT: "100"
+      CORS_ORIGIN: "https://staging.example.com"
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    restart: unless-stopped
+
+  db:
+    restart: unless-stopped
+    # No exposed ports in staging
+EOF
+
+# Create production override
+cat > ~/multi-env/docker-compose.prod.yml << 'EOF'
+services:
+  api:
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: warn
+      DEBUG_MODE: "false"
+      RATE_LIMIT: "50"
+      CORS_ORIGIN: "https://app.example.com"
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+    secrets:
+      - db_password
+      - api_key
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  db:
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  api_key:
+    file: ./secrets/api_key.txt
+EOF
+
+# Create environment-specific .env files
+cat > ~/multi-env/.env << 'EOF'
+# Default values (shared)
+DB_USER=appuser
+API_PORT=3000
+EOF
+
+cat > ~/multi-env/.env.development << 'EOF'
+DB_PASSWORD=devpass
+DB_NAME=app_dev
+EOF
+
+cat > ~/multi-env/.env.staging << 'EOF'
+DB_PASSWORD=staging-pass-456
+DB_NAME=app_staging
+EOF
+
+# Create production secrets
+echo -n "prod-ultra-secure-pass-789" > ~/multi-env/secrets/db_password.txt
+echo -n "sk-prod-api-key-xyz" > ~/multi-env/secrets/api_key.txt
+
+# --- Running Each Environment ---
+
+cd ~/multi-env
+
+# DEVELOPMENT (uses docker-compose.yml + docker-compose.override.yml)
+docker compose up -d --build
+curl http://localhost:3000/config
+docker compose down
+
+# STAGING
+docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+  --env-file .env --env-file .env.staging up -d --build
+curl http://localhost:3000/config
+docker compose -f docker-compose.yml -f docker-compose.staging.yml down
+
+# PRODUCTION
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  --env-file .env up -d --build
+curl http://localhost:3000/config
+docker compose -f docker-compose.yml -f docker-compose.prod.yml down -v
+```
+
+This project demonstrates the full configuration lifecycle: Dockerfile defaults for sensible base values, `.env` files for environment-specific non-sensitive config, Compose overrides for environment-specific service behavior, and Docker secrets for production credentials. Each environment gets exactly the configuration it needs, from the same base image.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Follow the 12-Factor App principle: store configuration in the environment, never in the code or image
+- Use `ENV` in Dockerfiles for sensible defaults, override them at runtime with `-e` or Compose `environment`
+- Docker Compose loads `.env` automatically for variable substitution in the Compose file; `env_file` loads variables into containers
+- Environment variable priority: shell > `.env` file > `env_file` > Compose `environment` > Dockerfile `ENV`
+- Never bake secrets into images — use Docker secrets, the `_FILE` convention, or a secrets manager
+- Always commit a `.env.example` with placeholder values; add real `.env` files to `.gitignore`
+- Use Compose override files (`docker-compose.override.yml`, `docker-compose.prod.yml`) to manage per-environment differences from a single base configuration
+
+## What's Next
+
+In the next lesson, **Container Logging and Monitoring**, you will learn how Docker captures application output, how to configure logging drivers, set up log rotation, monitor container resource usage, and implement health checks. Proper observability is essential for knowing what your containers are doing in production.

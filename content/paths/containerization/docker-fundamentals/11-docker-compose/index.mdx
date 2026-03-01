@@ -1,0 +1,1569 @@
+---
+title: "Docker Compose"
+description: "Define and manage multi-container applications with Docker Compose. Learn docker-compose.yml structure, service configuration, scaling, and profiles."
+order: 11
+xpReward: 50
+estimatedMinutes: 60
+prerequisites:
+  - 10-docker-networking
+objectives:
+  - Understand what Docker Compose is and why multi-container apps need it
+  - Write docker-compose.yml files to define services, networks, and volumes
+  - Use docker compose commands to manage the full application lifecycle
+  - Scale services and use profiles for different environments
+  - Build a complete full-stack application with Compose
+tags:
+  - docker
+  - docker-compose
+  - multi-container
+  - orchestration
+  - devops
+---
+
+<Callout type="story" title="The Story">
+Your team is building an e-commerce platform. The application has a React frontend, a Node.js API, a PostgreSQL database, and a Redis cache. Every developer on the team needs to run all four services locally. Right now, each person has a README with 47 steps: "run this docker command, then this one, then create this network, then this volume..." Someone always forgets a step. New developers take half a day to get the environment running. There has to be a better way. There is. One file. One command. Everything starts. Welcome to Docker Compose.
+</Callout>
+
+## What Is Docker Compose?
+
+Docker Compose is a tool for defining and running multi-container Docker applications. Instead of running multiple `docker run` commands with long lists of flags, you describe your entire application stack in a single YAML file called `docker-compose.yml`.
+
+```
+Without Compose (what you've been doing):
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│  $ docker network create myapp                                   │
+│  $ docker volume create db-data                                  │
+│  $ docker run -d --name db --network myapp -v db-data:/var/...  │
+│  $ docker run -d --name redis --network myapp redis:7            │
+│  $ docker run -d --name api --network myapp -p 3000:3000 ...    │
+│  $ docker run -d --name web --network myapp -p 80:80 ...        │
+│                                                                  │
+│  4 commands, dozens of flags, easy to make mistakes              │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+
+With Compose:
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│  $ docker compose up -d                                          │
+│                                                                  │
+│  1 command. Everything starts. Networks and volumes created      │
+│  automatically.                                                  │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+<Callout type="info" title="Compose V2 vs V1">
+Docker Compose V2 is integrated directly into the Docker CLI as `docker compose` (with a space). The older V1 was a separate binary called `docker-compose` (with a hyphen). V1 is deprecated. This lesson uses the modern V2 syntax: `docker compose`.
+</Callout>
+
+### Why Use Docker Compose?
+
+| Problem | Compose Solution |
+|---------|-----------------|
+| Running multiple `docker run` commands | Single `docker compose up` |
+| Remembering complex flags | Declared in YAML file |
+| Creating networks manually | Automatic default network |
+| Managing volume lifecycle | Volumes declared and created automatically |
+| Ensuring services start in order | `depends_on` directive |
+| Sharing setup across team | Commit `docker-compose.yml` to version control |
+| Environment consistency | Everyone runs the same stack |
+
+## The docker-compose.yml File
+
+The Compose file is a YAML file that defines your entire application stack. Let us start with the structure.
+
+### Basic Structure
+
+```yaml
+# docker-compose.yml
+
+services:
+  # Define each container as a service
+  web:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+
+  api:
+    build: ./api
+    ports:
+      - "3000:3000"
+
+  db:
+    image: postgres:16
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+# Named volumes
+volumes:
+  db-data:
+
+# Custom networks (optional — Compose creates a default)
+networks:
+  frontend:
+  backend:
+```
+
+<Callout type="info" title="No More 'version' Key">
+In Compose V2, the top-level `version` key is no longer required. Older Compose files used `version: '3.8'` or similar, but this is now obsolete. You can safely omit it. If present, it is ignored.
+</Callout>
+
+### Top-Level Keys
+
+```
+docker-compose.yml
+├── services:      # Required. Define your containers here
+│   ├── web:       # Service name (becomes the hostname on the network)
+│   ├── api:       # Another service
+│   └── db:        # Another service
+├── volumes:       # Optional. Named volumes for persistent data
+│   └── db-data:
+├── networks:      # Optional. Custom networks
+│   ├── frontend:
+│   └── backend:
+├── secrets:       # Optional. Sensitive data
+│   └── db-pass:
+└── configs:       # Optional. Configuration files
+    └── nginx-conf:
+```
+
+## Service Configuration Deep Dive
+
+Each service in the `services` block defines a container. Here are the most important configuration options.
+
+### Image vs Build
+
+You either pull an existing image or build one from a Dockerfile:
+
+```yaml
+services:
+  # Use an existing image from a registry
+  redis:
+    image: redis:7-alpine
+
+  # Build from a Dockerfile
+  api:
+    build: ./api                    # Path to directory containing Dockerfile
+
+  # Build with more control
+  api-advanced:
+    build:
+      context: ./api               # Build context directory
+      dockerfile: Dockerfile.prod  # Custom Dockerfile name
+      args:                        # Build arguments
+        NODE_ENV: production
+        APP_VERSION: "2.1.0"
+      target: production           # Multi-stage build target
+    image: mycompany/api:latest    # Tag the built image
+```
+
+### Ports
+
+Map container ports to host ports:
+
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "80:80"           # HOST:CONTAINER
+      - "443:443"         # HTTPS
+      - "8080:80"         # Map container 80 to host 8080
+      - "127.0.0.1:3000:3000"  # Bind only to localhost
+```
+
+<Callout type="warning" title="Quote Your Ports">
+Always quote port mappings in YAML. Without quotes, YAML may interpret `80:80` as a base-60 number. Use `"80:80"` to be safe.
+</Callout>
+
+### Environment Variables
+
+Set environment variables for a service:
+
+```yaml
+services:
+  api:
+    image: node:20-alpine
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://user:pass@db:5432/myapp
+      - REDIS_URL=redis://redis:6379
+
+    # Or use the map syntax:
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://user:pass@db:5432/myapp
+      REDIS_URL: redis://redis:6379
+
+    # Or load from a file:
+    env_file:
+      - .env
+      - .env.local
+```
+
+### Volumes
+
+Mount volumes for persistent data or development file sharing:
+
+```yaml
+services:
+  db:
+    image: postgres:16
+    volumes:
+      # Named volume (persistent data)
+      - db-data:/var/lib/postgresql/data
+
+      # Bind mount (share host files with container)
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+      # Read-only bind mount
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+
+  api:
+    build: ./api
+    volumes:
+      # Bind mount source code for development
+      - ./api/src:/app/src
+
+      # Anonymous volume to preserve node_modules
+      - /app/node_modules
+
+volumes:
+  db-data:              # Declare the named volume
+    driver: local       # Default driver
+```
+
+### Networking
+
+Services can communicate by name on shared networks:
+
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    networks:
+      - frontend
+
+  api:
+    build: ./api
+    networks:
+      - frontend      # Web can reach API
+      - backend       # API can reach DB
+
+  db:
+    image: postgres:16
+    networks:
+      - backend       # Only API can reach DB
+
+networks:
+  frontend:
+  backend:
+```
+
+```
+┌─────────────────────────────────────────────────┐
+│           frontend network                       │
+│                                                  │
+│  ┌─────────┐         ┌─────────┐                │
+│  │   web   │ ──────> │   api   │                │
+│  │ (nginx) │         │ (node)  │                │
+│  └─────────┘         └────┬────┘                │
+│                           │                      │
+└───────────────────────────┼──────────────────────┘
+                            │
+┌───────────────────────────┼──────────────────────┐
+│           backend network │                       │
+│                           │                       │
+│                      ┌────┴────┐                 │
+│                      │   api   │                 │
+│                      │ (node)  │                 │
+│                      └────┬────┘                 │
+│                           │                      │
+│                      ┌────┴────┐                 │
+│                      │   db    │                 │
+│                      │(postgres)│                │
+│                      └─────────┘                 │
+│                                                  │
+└──────────────────────────────────────────────────┘
+```
+
+### depends_on
+
+Control startup order:
+
+```yaml
+services:
+  web:
+    build: ./web
+    depends_on:
+      - api
+
+  api:
+    build: ./api
+    depends_on:
+      db:
+        condition: service_healthy     # Wait for health check to pass
+      redis:
+        condition: service_started     # Just wait for container to start
+
+  db:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+```
+
+<Callout type="warning" title="depends_on Does Not Wait for 'Ready'">
+By default, `depends_on` only waits for the container to start, not for the application inside to be ready. A PostgreSQL container might start in 1 second, but the database takes 5 seconds to accept connections. Use `condition: service_healthy` with a `healthcheck` to wait for actual readiness.
+</Callout>
+
+### Restart Policies
+
+```yaml
+services:
+  api:
+    image: myapp/api:latest
+    restart: unless-stopped   # Restart unless manually stopped
+
+  # Options:
+  # restart: "no"            # Never restart (default)
+  # restart: always          # Always restart
+  # restart: on-failure      # Only restart on non-zero exit
+  # restart: unless-stopped  # Restart unless explicitly stopped
+```
+
+## Essential Compose Commands
+
+Here is every command you need to manage your Compose application.
+
+### Starting and Stopping
+
+```bash
+# Start all services (foreground — see logs)
+docker compose up
+
+# Start all services (detached — background)
+docker compose up -d
+
+# Start specific services only
+docker compose up -d api db
+
+# Stop all services (containers stop but are preserved)
+docker compose stop
+
+# Stop and REMOVE containers, networks
+docker compose down
+
+# Stop, remove containers, AND delete volumes (destroys data!)
+docker compose down -v
+
+# Stop, remove containers, AND delete images
+docker compose down --rmi all
+```
+
+### Viewing Status
+
+```bash
+# List running services
+docker compose ps
+
+# Example output:
+# NAME                  IMAGE          COMMAND                  STATUS          PORTS
+# myapp-api-1           myapp/api      "node server.js"         Up 2 minutes    0.0.0.0:3000->3000/tcp
+# myapp-db-1            postgres:16    "docker-entrypoint..."   Up 2 minutes    5432/tcp
+# myapp-redis-1         redis:7        "docker-entrypoint..."   Up 2 minutes    6379/tcp
+
+# View logs from all services
+docker compose logs
+
+# Follow logs from a specific service
+docker compose logs -f api
+
+# View last 50 lines from a service
+docker compose logs --tail 50 api
+```
+
+### Running Commands in Services
+
+```bash
+# Execute a command in a running service container
+docker compose exec api sh
+
+# Run a one-off command (creates a new container)
+docker compose run api npm test
+
+# Run database migrations
+docker compose exec api npx prisma migrate deploy
+```
+
+### Building and Updating
+
+```bash
+# Build or rebuild service images
+docker compose build
+
+# Build without cache
+docker compose build --no-cache
+
+# Build a specific service
+docker compose build api
+
+# Pull latest images for services using image:
+docker compose pull
+
+# Rebuild and restart
+docker compose up -d --build
+```
+
+<Callout type="tip" title="Use --build When Code Changes">
+If you change your application code but the Compose file has not changed, `docker compose up -d` will NOT rebuild the image. Always use `docker compose up -d --build` during development to ensure your latest code changes are included.
+</Callout>
+
+## Building with Compose
+
+### Using Custom Dockerfiles
+
+```yaml
+# Directory structure:
+# project/
+# ├── docker-compose.yml
+# ├── api/
+# │   ├── Dockerfile
+# │   ├── Dockerfile.dev
+# │   └── src/
+# └── web/
+#     ├── Dockerfile
+#     └── src/
+
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev     # Use development Dockerfile
+    volumes:
+      - ./api/src:/app/src           # Mount source for hot-reload
+    environment:
+      - NODE_ENV=development
+
+  web:
+    build:
+      context: ./web
+      target: development            # Multi-stage build target
+    volumes:
+      - ./web/src:/app/src
+    ports:
+      - "3000:3000"
+```
+
+### Development vs Production Compose Files
+
+Use multiple Compose files to override settings:
+
+```yaml
+# docker-compose.yml (base)
+services:
+  api:
+    build: ./api
+    environment:
+      - DATABASE_URL=postgres://user:pass@db:5432/myapp
+
+  db:
+    image: postgres:16
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:
+```
+
+```yaml
+# docker-compose.override.yml (auto-loaded for development)
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./api/src:/app/src       # Hot-reload source code
+    ports:
+      - "3000:3000"
+      - "9229:9229"             # Debug port
+    environment:
+      - DEBUG=true
+
+  db:
+    ports:
+      - "5432:5432"             # Expose DB port for local tools
+```
+
+```yaml
+# docker-compose.prod.yml (explicitly loaded for production)
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+```
+
+```bash
+# Development (auto-loads docker-compose.yml + docker-compose.override.yml)
+docker compose up -d
+
+# Production (explicitly specify files)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+## Scaling Services
+
+Docker Compose lets you run multiple instances of a service:
+
+```bash
+# Scale the API to 3 instances
+docker compose up -d --scale api=3
+
+# Check running instances
+docker compose ps
+# NAME                  IMAGE          STATUS          PORTS
+# myapp-api-1           myapp/api      Up 2 minutes    3000/tcp
+# myapp-api-2           myapp/api      Up 2 minutes    3000/tcp
+# myapp-api-3           myapp/api      Up 2 minutes    3000/tcp
+# myapp-db-1            postgres:16    Up 2 minutes    5432/tcp
+```
+
+<Callout type="warning" title="Scaling and Port Conflicts">
+If a service has a fixed host port mapping like `"3000:3000"`, you cannot scale it because the host port can only be used by one container. Remove the host port or use a range:
+
+```yaml
+services:
+  api:
+    build: ./api
+    # Instead of "3000:3000", use:
+    ports:
+      - "3000-3010:3000"    # Each instance gets a unique host port
+    # Or expose without host binding:
+    expose:
+      - "3000"               # Accessible only to other services
+```
+
+In practice, you would put a load balancer (like Nginx or Traefik) in front of scaled services.
+</Callout>
+
+### Load Balancing Scaled Services
+
+```yaml
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+
+  api:
+    build: ./api
+    expose:
+      - "3000"
+    # No host port — only accessible through nginx
+
+  db:
+    image: postgres:16
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:
+```
+
+```nginx
+# nginx.conf
+upstream api_servers {
+    server myapp-api-1:3000;
+    server myapp-api-2:3000;
+    server myapp-api-3:3000;
+}
+
+server {
+    listen 80;
+
+    location /api/ {
+        proxy_pass http://api_servers;
+    }
+}
+```
+
+## Compose Profiles
+
+Profiles let you selectively start services based on the environment or use case:
+
+```yaml
+services:
+  api:
+    build: ./api
+    ports:
+      - "3000:3000"
+
+  db:
+    image: postgres:16
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  # Only start in development
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    profiles:
+      - debug
+
+  # Only start when running tests
+  test-runner:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.test
+    profiles:
+      - testing
+
+  # Monitoring tools — only in staging/prod
+  prometheus:
+    image: prom/prometheus
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana
+    profiles:
+      - monitoring
+
+volumes:
+  db-data:
+```
+
+```bash
+# Start only services WITHOUT a profile (api, db)
+docker compose up -d
+
+# Start default services + debug profile
+docker compose --profile debug up -d
+
+# Start default services + monitoring
+docker compose --profile monitoring up -d
+
+# Start multiple profiles
+docker compose --profile debug --profile monitoring up -d
+```
+
+<Callout type="tip" title="Profiles for Optional Tools">
+Profiles are perfect for optional services like database admin UIs, monitoring dashboards, test runners, or debug tools. The core application starts clean, and developers enable additional tools as needed.
+</Callout>
+
+## Real Example: Full-Stack Application
+
+Let us build a complete application with React frontend, Node.js API, PostgreSQL database, and Redis cache.
+
+### Project Structure
+
+```
+fullstack-app/
+├── docker-compose.yml
+├── .env
+├── api/
+│   ├── Dockerfile
+│   ├── package.json
+│   └── server.js
+├── web/
+│   ├── Dockerfile
+│   ├── package.json
+│   └── src/
+│       └── index.html
+├── nginx/
+│   └── nginx.conf
+└── db/
+    └── init.sql
+```
+
+### The Compose File
+
+```yaml
+# docker-compose.yml
+services:
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+      - api
+    restart: unless-stopped
+
+  # React frontend
+  web:
+    build:
+      context: ./web
+      target: development
+    volumes:
+      - ./web/src:/app/src
+    expose:
+      - "5173"
+    environment:
+      - VITE_API_URL=http://localhost/api
+
+  # Node.js API
+  api:
+    build: ./api
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./api/src:/app/src
+    restart: unless-stopped
+
+  # PostgreSQL database
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  # Database admin (debug profile only)
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    profiles:
+      - debug
+
+volumes:
+  db-data:
+    driver: local
+  redis-data:
+    driver: local
+```
+
+### The .env File
+
+```bash
+# .env
+DB_USER=appuser
+DB_PASSWORD=secretpassword123
+DB_NAME=fullstack_app
+```
+
+### The Nginx Config
+
+```nginx
+# nginx/nginx.conf
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream web_app {
+        server web:5173;
+    }
+
+    upstream api_app {
+        server api:3000;
+    }
+
+    server {
+        listen 80;
+
+        location / {
+            proxy_pass http://web_app;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+
+        location /api/ {
+            rewrite ^/api/(.*) /$1 break;
+            proxy_pass http://api_app;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+}
+```
+
+### The API Dockerfile
+
+```dockerfile
+# api/Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]
+```
+
+### The API Server
+
+```javascript
+// api/server.js
+const http = require('http');
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    message: 'API is running',
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  }));
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`API server listening on port ${PORT}`);
+});
+```
+
+### The Database Init Script
+
+```sql
+-- db/init.sql
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    price DECIMAL(10, 2) NOT NULL,
+    stock INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO users (email, name) VALUES
+    ('admin@example.com', 'Admin User'),
+    ('user@example.com', 'Regular User');
+
+INSERT INTO products (name, price, stock) VALUES
+    ('Widget A', 19.99, 100),
+    ('Widget B', 29.99, 50),
+    ('Widget C', 9.99, 200);
+```
+
+### Running the Full Stack
+
+```bash
+# Start everything
+docker compose up -d
+
+# Output:
+# [+] Running 6/6
+#  ✔ Network fullstack-app_default  Created
+#  ✔ Volume "fullstack-app_db-data" Created
+#  ✔ Volume "fullstack-app_redis-data" Created
+#  ✔ Container fullstack-app-redis-1  Started
+#  ✔ Container fullstack-app-db-1     Started
+#  ✔ Container fullstack-app-api-1    Started
+#  ✔ Container fullstack-app-web-1    Started
+#  ✔ Container fullstack-app-nginx-1  Started
+
+# Check status
+docker compose ps
+
+# View API logs
+docker compose logs -f api
+
+# Connect to the database
+docker compose exec db psql -U appuser -d fullstack_app
+
+# Test the API
+curl http://localhost/api/
+
+# Stop everything
+docker compose down
+
+# Stop and destroy all data
+docker compose down -v
+```
+
+<Exercise number={1} title="Create a Docker Compose Stack">
+
+Build a Docker Compose setup for a blog application with three services:
+
+1. **web** - An Nginx container serving static HTML on port 80
+2. **api** - A simple Python Flask API on port 5000
+3. **db** - A PostgreSQL 16 database with persistent data
+
+Requirements:
+- The API should depend on the database being healthy
+- The database should use a named volume for data persistence
+- Environment variables for database credentials should be defined in the Compose file
+- Nginx should be accessible on host port 8080
+
+Create the project structure with all necessary files.
+
+<CollapsibleSolution>
+
+```bash
+# Create the project structure
+mkdir -p ~/compose-blog/{api,web,db}
+
+# Create the Flask API
+cat > ~/compose-blog/api/app.py << 'EOF'
+from flask import Flask, jsonify
+import os
+
+app = Flask(__name__)
+
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy"})
+
+@app.route('/posts')
+def posts():
+    return jsonify({
+        "posts": [
+            {"id": 1, "title": "Hello Docker Compose", "author": "DevOps Learner"},
+            {"id": 2, "title": "Multi-Container Apps", "author": "Docker Fan"}
+        ]
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+EOF
+
+# Create the API Dockerfile
+cat > ~/compose-blog/api/Dockerfile << 'EOF'
+FROM python:3.12-slim
+WORKDIR /app
+RUN pip install flask psycopg2-binary
+COPY app.py .
+EXPOSE 5000
+CMD ["python", "app.py"]
+EOF
+
+# Create the static HTML page
+cat > ~/compose-blog/web/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head><title>Blog</title></head>
+<body>
+    <h1>Docker Compose Blog</h1>
+    <p>This page is served by Nginx in a Docker Compose stack.</p>
+</body>
+</html>
+EOF
+
+# Create Nginx config
+cat > ~/compose-blog/web/nginx.conf << 'EOF'
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location /api/ {
+        rewrite ^/api/(.*) /$1 break;
+        proxy_pass http://api:5000;
+    }
+}
+EOF
+
+# Create the database init script
+cat > ~/compose-blog/db/init.sql << 'EOF'
+CREATE TABLE posts (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    content TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO posts (title, content) VALUES
+('First Post', 'Welcome to the blog!');
+EOF
+
+# Create the docker-compose.yml
+cat > ~/compose-blog/docker-compose.yml << 'EOF'
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./web/index.html:/usr/share/nginx/html/index.html:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    expose:
+      - "5000"
+    environment:
+      - DATABASE_URL=postgres://bloguser:blogpass@db:5432/blogdb
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bloguser
+      POSTGRES_PASSWORD: blogpass
+      POSTGRES_DB: blogdb
+    volumes:
+      - blog-db-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bloguser"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  blog-db-data:
+EOF
+
+# Start the stack
+cd ~/compose-blog
+docker compose up -d
+
+# Verify everything is running
+docker compose ps
+
+# Test the web page
+curl http://localhost:8080/
+
+# Test the API
+curl http://localhost:8080/api/posts
+```
+
+This solution creates a three-service stack where Nginx serves static content and proxies API requests to Flask, which connects to PostgreSQL. The `depends_on` with `service_healthy` ensures the database is accepting connections before the API starts. The named volume `blog-db-data` persists database data across restarts.
+
+</CollapsibleSolution>
+</Exercise>
+
+## Docker Compose Configuration Reference
+
+Here is a comprehensive reference of commonly used service options:
+
+```yaml
+services:
+  myservice:
+    # Image or build
+    image: nginx:alpine                    # Use existing image
+    build:                                 # Or build from Dockerfile
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "1.0"
+      target: production
+
+    # Container settings
+    container_name: my-custom-name         # Override auto-generated name
+    hostname: myhost                       # Set hostname inside container
+    command: ["npm", "start"]              # Override CMD
+    entrypoint: ["/entrypoint.sh"]         # Override ENTRYPOINT
+    working_dir: /app                      # Set working directory
+    user: "1000:1000"                      # Run as specific user
+
+    # Networking
+    ports:
+      - "8080:80"                          # Expose port
+    expose:
+      - "3000"                             # Internal-only port
+    networks:
+      - frontend
+    dns:
+      - 8.8.8.8
+
+    # Storage
+    volumes:
+      - data:/app/data                     # Named volume
+      - ./local:/container/path            # Bind mount
+      - ./config.yml:/app/config.yml:ro    # Read-only
+    tmpfs:
+      - /tmp                               # In-memory filesystem
+
+    # Environment
+    environment:
+      KEY: value
+    env_file:
+      - .env
+
+    # Dependencies
+    depends_on:
+      db:
+        condition: service_healthy
+
+    # Health and lifecycle
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Profiles
+    profiles:
+      - debug
+```
+
+<Exercise number={2} title="Manage a Multi-Service Application">
+
+You have been given a running Compose stack. Practice the full management lifecycle:
+
+1. Start the stack with build
+2. View the status of all services
+3. Check the logs of the API service
+4. Execute a command inside the database container
+5. Scale the API to 3 instances
+6. View resource usage of all containers
+7. Stop a single service without stopping others
+8. Restart the stack after making a code change
+9. Tear everything down including volumes
+
+Use the blog application from Exercise 1 (or any Compose stack you have).
+
+<CollapsibleSolution>
+
+```bash
+# Navigate to your project
+cd ~/compose-blog
+
+# 1. Start with build (forces rebuild of custom images)
+docker compose up -d --build
+
+# 2. View status of all services
+docker compose ps
+
+# Expected output:
+# NAME                    IMAGE              STATUS          PORTS
+# compose-blog-api-1      compose-blog-api   Up 30 seconds   5000/tcp
+# compose-blog-db-1       postgres:16        Up 30 seconds   5432/tcp
+# compose-blog-web-1      nginx:alpine       Up 30 seconds   0.0.0.0:8080->80/tcp
+
+# 3. Check logs of the API service (last 20 lines, follow mode)
+docker compose logs --tail 20 -f api
+# Press Ctrl+C to stop following
+
+# 4. Execute a command inside the database container
+docker compose exec db psql -U bloguser -d blogdb -c "SELECT * FROM posts;"
+
+# 5. Scale the API to 3 instances
+# First, remove the fixed port from web's proxy (if needed)
+docker compose up -d --scale api=3
+
+# Check the scaled instances
+docker compose ps
+
+# 6. View resource usage
+docker compose top       # Show running processes
+docker stats --no-stream # Show CPU/memory usage (one-shot)
+
+# 7. Stop only the database without stopping others
+docker compose stop db
+
+# Verify — db is stopped, others still running
+docker compose ps
+
+# Restart it
+docker compose start db
+
+# 8. Restart after code changes (rebuild + restart)
+docker compose up -d --build
+
+# 9. Tear everything down including volumes
+docker compose down -v
+
+# Verify — everything is gone
+docker compose ps
+docker volume ls
+```
+
+Each of these commands is part of the daily workflow when developing with Docker Compose. The key pattern is: `up --build` for starting with changes, `logs -f` for debugging, `exec` for inspecting running containers, and `down -v` for a clean slate.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Full-Stack Task Manager with Docker Compose">
+
+Build a complete task management application using Docker Compose with four services:
+
+1. **Frontend** - Nginx serving a static HTML page with JavaScript that talks to the API
+2. **API** - A Node.js Express server with REST endpoints for tasks
+3. **Database** - PostgreSQL storing tasks
+4. **Redis** - Caching layer for task queries
+
+Requirements:
+- Use a `.env` file for database credentials
+- The database must have a health check
+- Use named volumes for both PostgreSQL and Redis data
+- Include a `profiles: [debug]` service for Adminer (database GUI)
+- The API should wait for both database and Redis before starting
+
+```bash
+# Create project structure
+mkdir -p ~/task-manager/{api,web,db,nginx}
+
+# Create .env file
+cat > ~/task-manager/.env << 'EOF'
+DB_USER=taskuser
+DB_PASSWORD=taskpass123
+DB_NAME=taskmanager
+REDIS_URL=redis://redis:6379
+EOF
+
+# Create database init script
+cat > ~/task-manager/db/init.sql << 'EOF'
+CREATE TABLE tasks (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    priority VARCHAR(10) DEFAULT 'medium',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO tasks (title, description, status, priority) VALUES
+('Set up Docker Compose', 'Learn multi-container orchestration', 'completed', 'high'),
+('Build REST API', 'Create CRUD endpoints for tasks', 'in_progress', 'high'),
+('Add Redis caching', 'Cache frequently accessed task lists', 'pending', 'medium'),
+('Write tests', 'Add unit and integration tests', 'pending', 'low');
+EOF
+
+# Create API package.json
+cat > ~/task-manager/api/package.json << 'EOF'
+{
+  "name": "task-api",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "pg": "^8.11.0",
+    "redis": "^4.6.0",
+    "cors": "^2.8.5"
+  }
+}
+EOF
+
+# Create API server
+cat > ~/task-manager/api/server.js << 'APIEOF'
+const express = require('express');
+const cors = require('cors');
+const { Pool } = require('pg');
+const { createClient } = require('redis');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// PostgreSQL connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+// Redis connection
+const redis = createClient({ url: process.env.REDIS_URL });
+redis.connect().catch(console.error);
+
+// Health check
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'healthy', database: 'connected' });
+  } catch (err) {
+    res.status(500).json({ status: 'unhealthy', error: err.message });
+  }
+});
+
+// Get all tasks (with Redis caching)
+app.get('/tasks', async (req, res) => {
+  try {
+    const cached = await redis.get('tasks:all');
+    if (cached) {
+      return res.json({ source: 'cache', tasks: JSON.parse(cached) });
+    }
+
+    const result = await pool.query('SELECT * FROM tasks ORDER BY created_at DESC');
+    await redis.setEx('tasks:all', 60, JSON.stringify(result.rows));
+    res.json({ source: 'database', tasks: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create a task
+app.post('/tasks', async (req, res) => {
+  const { title, description, priority } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO tasks (title, description, priority) VALUES ($1, $2, $3) RETURNING *',
+      [title, description || '', priority || 'medium']
+    );
+    await redis.del('tasks:all');
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Task API running on port ${PORT}`));
+APIEOF
+
+# Create API Dockerfile
+cat > ~/task-manager/api/Dockerfile << 'EOF'
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["npm", "start"]
+EOF
+
+# Create frontend HTML
+cat > ~/task-manager/web/index.html << 'HTMLEOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Task Manager</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; }
+        .task { border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .task h3 { margin: 0 0 5px; }
+        .status { padding: 2px 8px; border-radius: 3px; font-size: 12px; }
+        .completed { background: #d4edda; }
+        .in_progress { background: #fff3cd; }
+        .pending { background: #f8d7da; }
+    </style>
+</head>
+<body>
+    <h1>Task Manager</h1>
+    <div id="tasks">Loading tasks...</div>
+    <script>
+        fetch('/api/tasks')
+            .then(r => r.json())
+            .then(data => {
+                const container = document.getElementById('tasks');
+                container.innerHTML = data.tasks.map(t =>
+                    '<div class="task">' +
+                    '<h3>' + t.title + '</h3>' +
+                    '<p>' + t.description + '</p>' +
+                    '<span class="status ' + t.status + '">' + t.status + '</span>' +
+                    '</div>'
+                ).join('');
+            });
+    </script>
+</body>
+</html>
+HTMLEOF
+
+# Create Nginx config
+cat > ~/task-manager/nginx/nginx.conf << 'EOF'
+events { worker_connections 1024; }
+
+http {
+    include /etc/nginx/mime.types;
+
+    server {
+        listen 80;
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+        }
+
+        location /api/ {
+            rewrite ^/api/(.*) /$1 break;
+            proxy_pass http://api:3000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+}
+EOF
+
+# Create docker-compose.yml
+cat > ~/task-manager/docker-compose.yml << 'EOF'
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./web:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    expose:
+      - "3000"
+    environment:
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      REDIS_URL: ${REDIS_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - task-db-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    volumes:
+      - task-redis-data:/data
+    restart: unless-stopped
+
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    profiles:
+      - debug
+    depends_on:
+      - db
+
+volumes:
+  task-db-data:
+  task-redis-data:
+EOF
+
+# Launch the full stack
+cd ~/task-manager
+docker compose up -d --build
+
+# Verify all services
+docker compose ps
+
+# Test the API health endpoint
+curl http://localhost/api/health
+
+# Test retrieving tasks
+curl http://localhost/api/tasks
+
+# Create a new task
+curl -X POST http://localhost/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Deploy to production", "description": "Ship it!", "priority": "high"}'
+
+# Launch the debug profile for Adminer
+docker compose --profile debug up -d
+
+# View logs
+docker compose logs -f api
+
+# Clean up when done
+docker compose --profile debug down -v
+```
+
+This mini project demonstrates a production-like Compose setup: a reverse proxy handles routing, the API connects to both PostgreSQL and Redis, data persists in named volumes, the database has a health check, environment variables are sourced from `.env`, and optional tooling is available through profiles.
+
+</MiniProject>
+
+## Key Takeaways
+
+- Docker Compose defines multi-container applications in a single YAML file, replacing many `docker run` commands with one `docker compose up`
+- The Compose file uses top-level `services`, `volumes`, and `networks` keys to organize your application stack
+- Services communicate by name on the default Compose network (the service name IS the hostname)
+- Use `depends_on` with `condition: service_healthy` and `healthcheck` to ensure services start in the right order
+- `docker compose up -d --build` is your go-to command during development to rebuild and restart
+- Profiles let you define optional services (debug tools, monitoring) that only start when explicitly requested
+- Multiple Compose files (`docker-compose.yml` + `docker-compose.override.yml`) support different environments without duplication
+
+## What's Next
+
+In the next lesson, **Environment Variables and Configuration**, you will learn how to properly manage application configuration across different environments. You will explore the 12-Factor App methodology, `.env` files, Docker secrets, and the critical practice of never baking sensitive data into your images.
