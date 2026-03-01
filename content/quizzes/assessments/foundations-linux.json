@@ -234,6 +234,281 @@
       "correctAnswer": 1,
       "explanation": "'>>' appends output to the end of a file. '>' overwrites the file. '<' redirects input from a file. '|' pipes output to another command.",
       "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q21",
+      "type": "multiple_choice",
+      "question": "What is the first process that starts during Linux boot (PID 1)?",
+      "options": ["bash", "kernel", "systemd (or init)", "grub"],
+      "correctAnswer": 2,
+      "explanation": "systemd (or init on older systems) is the first user-space process started by the kernel. It has PID 1 and is the parent of all other processes.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q22",
+      "type": "multiple_choice",
+      "question": "What is the correct command to add a user to a supplementary group without removing them from existing groups?",
+      "options": ["usermod -G docker john", "usermod -aG docker john", "groupadd john docker", "useradd -G docker john"],
+      "correctAnswer": 1,
+      "explanation": "The -a (append) flag with -G is critical. Without -a, usermod -G replaces ALL supplementary groups. Always use -aG together.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q23",
+      "type": "true_false",
+      "question": "A symbolic link (symlink) still works after the original target file is deleted.",
+      "correctAnswer": false,
+      "explanation": "When the target of a symlink is deleted, the symlink becomes a 'broken' or 'dangling' link. Hard links, on the other hand, continue to work because they share the same inode.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q24",
+      "type": "multiple_choice",
+      "question": "What does the SUID bit (set on an executable file) do?",
+      "options": [
+        "Makes the file read-only",
+        "Runs the program with the permissions of the file owner",
+        "Prevents the file from being deleted",
+        "Encrypts the file contents"
+      ],
+      "correctAnswer": 1,
+      "explanation": "SUID (Set User ID) causes the program to run with the permissions of the file's owner, not the user who executes it. The classic example is /usr/bin/passwd which runs as root.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q25",
+      "type": "multiple_choice",
+      "question": "What is the numeric permission value for chmod that gives owner rwx, group rx, and others no access?",
+      "options": ["755", "750", "700", "644"],
+      "correctAnswer": 1,
+      "explanation": "r=4, w=2, x=1. Owner: 4+2+1=7, Group: 4+0+1=5, Others: 0+0+0=0. So 750 means rwxr-x---.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q26",
+      "type": "multiple_choice",
+      "question": "Which file stores password hashes on Linux?",
+      "options": ["/etc/passwd", "/etc/shadow", "/etc/group", "/etc/login.defs"],
+      "correctAnswer": 1,
+      "explanation": "/etc/shadow stores encrypted password hashes and is readable only by root. /etc/passwd stores user account information but no longer contains actual passwords.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q27",
+      "type": "multiple_choice",
+      "question": "Which systemctl command starts a service AND enables it to start on boot?",
+      "options": [
+        "systemctl start --boot service",
+        "systemctl enable --now service",
+        "systemctl activate service",
+        "systemctl run service"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The --now flag combined with enable both enables the service for future boots and starts it immediately. This is equivalent to running 'enable' and 'start' separately.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q28",
+      "type": "true_false",
+      "question": "The 'kill -9' signal can be caught and handled by the target process.",
+      "correctAnswer": false,
+      "explanation": "SIGKILL (signal 9) cannot be caught, blocked, or handled by a process. It's an immediate, forceful termination by the kernel. Always try SIGTERM (15) first.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q29",
+      "type": "multiple_choice",
+      "question": "In the 'free -h' command output, which column best represents memory available for new processes?",
+      "options": ["free", "used", "available", "buff/cache"],
+      "correctAnswer": 2,
+      "explanation": "The 'available' column shows memory that can be used by new processes, including reclaimable cache. The 'free' column only shows completely unused RAM, which is misleading because Linux uses free RAM for caching.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q30",
+      "type": "multiple_choice",
+      "question": "Which command shows systemd journal logs for a specific service?",
+      "options": [
+        "cat /var/log/service.log",
+        "journalctl -u service-name",
+        "systemctl logs service-name",
+        "dmesg -u service-name"
+      ],
+      "correctAnswer": 1,
+      "explanation": "journalctl -u filters journal entries by systemd unit (service). Add -f to follow in real-time, --since for time filtering, and -p for priority filtering.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q31",
+      "type": "multiple_choice",
+      "question": "What does the sticky bit on a directory prevent?",
+      "options": [
+        "Anyone from reading files in the directory",
+        "New files from being created",
+        "Users from deleting other users' files",
+        "The directory from being modified"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The sticky bit on a directory (like /tmp) means only the file owner or root can delete or rename files, even if others have write permission to the directory.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q32",
+      "type": "multiple_choice",
+      "question": "What does LVM stand for and what is its main advantage?",
+      "options": [
+        "Linux Version Manager — manages kernel versions",
+        "Logical Volume Manager — allows flexible disk volume resizing",
+        "Local Virtual Machine — runs lightweight VMs",
+        "Log Volume Monitor — monitors disk logs"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Logical Volume Manager adds a flexible layer between physical disks and filesystems. Its main advantage is live resizing of volumes without downtime.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q33",
+      "type": "true_false",
+      "question": "In /etc/fstab, it is recommended to use UUID instead of device paths like /dev/sdb1.",
+      "correctAnswer": true,
+      "explanation": "Device names (like /dev/sdb) can change between reboots if disks are added or reordered. UUIDs are unique and persistent identifiers that always point to the same filesystem.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q34",
+      "type": "multiple_choice",
+      "question": "Which command shows listening TCP ports along with the process name?",
+      "options": ["ss -tlnp", "netstat -r", "ip route", "ping -l"],
+      "correctAnswer": 0,
+      "explanation": "ss -tlnp shows TCP (-t) listening (-l) ports in numeric format (-n) with process names (-p). This is the go-to command for checking which services are running on which ports.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q35",
+      "type": "multiple_choice",
+      "question": "What is the recommended order for sending signals to stop a process?",
+      "options": [
+        "SIGKILL first, then SIGTERM",
+        "SIGTERM first, wait, then SIGKILL if needed",
+        "SIGHUP first, then SIGQUIT",
+        "SIGSTOP first, then SIGTERM"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Always send SIGTERM (15) first to allow graceful shutdown. Only use SIGKILL (9) as a last resort, because it prevents the process from cleaning up resources.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q36",
+      "type": "multiple_choice",
+      "question": "Which section of a systemd unit file defines the 'Restart=on-failure' directive?",
+      "options": ["[Unit]", "[Service]", "[Install]", "[Timer]"],
+      "correctAnswer": 1,
+      "explanation": "The [Service] section defines how the service runs, including ExecStart, Restart policy, User, WorkingDirectory, and environment variables.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q37",
+      "type": "multiple_choice",
+      "question": "What does the command 'find / -perm -4000 -type f' search for?",
+      "options": [
+        "Files larger than 4000 bytes",
+        "Files with SUID bit set",
+        "Files modified in the last 4000 minutes",
+        "Files owned by user ID 4000"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The permission mask 4000 corresponds to the SUID bit. This command finds all regular files with SUID set, which is important for security auditing.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q38",
+      "type": "true_false",
+      "question": "The umask value is subtracted from the default permissions to determine the actual permissions of newly created files.",
+      "correctAnswer": true,
+      "explanation": "Files default to 666 and directories to 777. With umask 022, new files get 644 (666-022) and new directories get 755 (777-022).",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q39",
+      "type": "multiple_choice",
+      "question": "In awk, what does '$NF' refer to?",
+      "options": [
+        "The number of fields in the current line",
+        "The last field in the current line",
+        "A null field",
+        "The next file to process"
+      ],
+      "correctAnswer": 1,
+      "explanation": "NF is the number of fields. $NF accesses the field at that position, which is the last field. For example, if a line has 5 fields, $NF equals $5.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q40",
+      "type": "multiple_choice",
+      "question": "What does the cron schedule '0 2 * * 0' mean?",
+      "options": [
+        "Every day at 2:00 AM",
+        "Every Sunday at 2:00 AM",
+        "Every 2 hours",
+        "February 1st at midnight"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Cron format: minute(0) hour(2) day(*) month(*) day-of-week(0=Sunday). So this runs at 2:00 AM every Sunday.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q41",
+      "type": "multiple_choice",
+      "question": "Which sed command removes all empty lines from a file?",
+      "options": ["sed '/^$/d' file", "sed 's/^$//' file", "sed -n '/./p' file", "Both the first and third options"],
+      "correctAnswer": 3,
+      "explanation": "sed '/^$/d' deletes lines matching the empty pattern (^$). sed -n '/./p' prints only lines containing at least one character. Both effectively remove empty lines.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q42",
+      "type": "multiple_choice",
+      "question": "What is the primary purpose of SSH key-based authentication over password authentication?",
+      "options": [
+        "It's faster to type",
+        "It's immune to brute-force attacks and doesn't transmit secrets",
+        "It works without network access",
+        "It allows multiple users to share one account"
+      ],
+      "correctAnswer": 1,
+      "explanation": "SSH keys use asymmetric cryptography. The private key never leaves your machine, making it immune to brute-force attacks and network sniffing. Keys are also much stronger than passwords.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q43",
+      "type": "true_false",
+      "question": "The 'df -i' command checks inode usage, which can be exhausted even when disk space is available.",
+      "correctAnswer": true,
+      "explanation": "Each file requires an inode. A filesystem can run out of inodes (e.g., millions of tiny files) while still having free disk space. df -i checks inode usage.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q44",
+      "type": "multiple_choice",
+      "question": "When load average exceeds the number of CPU cores, what does it indicate?",
+      "options": [
+        "The system is idle",
+        "Processes are waiting in queue for CPU time",
+        "Memory is full",
+        "Disk I/O is bottlenecked"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Load average represents the number of processes wanting CPU time. When it exceeds the core count, processes must wait in queue, indicating CPU contention.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "a-lx-q45",
+      "type": "multiple_choice",
+      "question": "Which tool should you always use to edit /etc/sudoers?",
+      "options": ["vim", "nano", "visudo", "sed"],
+      "correctAnswer": 2,
+      "explanation": "visudo validates the syntax before saving. A syntax error in /etc/sudoers can lock you out of sudo entirely. Never edit it directly with a regular text editor.",
+      "difficulty": "medium"
     }
   ]
 }

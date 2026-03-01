@@ -176,7 +176,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-097: Create Linux module assessment quiz
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-096
 - **Estimated effort:** L
@@ -196,7 +196,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-098: Create Linux Docker lab configurations
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-046, TASK-092
 - **Estimated effort:** L

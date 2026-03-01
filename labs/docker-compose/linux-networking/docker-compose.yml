@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  server-a:
+    image: ubuntu:22.04
+    container_name: devops-net-server-a
+    hostname: server-a
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq iproute2 iputils-ping curl dnsutils net-tools netcat-openbsd nginx python3 vim >/dev/null 2>&1 &&
+        echo 'Hello from Server A' > /var/www/html/index.html &&
+        nginx &&
+        echo 'Server A ready (nginx running on port 80)' &&
+        /bin/bash
+      "
+    networks:
+      lab-net:
+        ipv4_address: 172.20.0.10
+    environment:
+      - TERM=xterm-256color
+
+  server-b:
+    image: ubuntu:22.04
+    container_name: devops-net-server-b
+    hostname: server-b
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq iproute2 iputils-ping curl dnsutils net-tools netcat-openbsd python3 vim >/dev/null 2>&1 &&
+        echo 'Server B ready' &&
+        /bin/bash
+      "
+    networks:
+      lab-net:
+        ipv4_address: 172.20.0.20
+    environment:
+      - TERM=xterm-256color
+
+networks:
+  lab-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+          gateway: 172.20.0.1

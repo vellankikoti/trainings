@@ -1,0 +1,99 @@
+name: linux-admin
+title: "Linux Administration Lab"
+description: "Practice package management, process control, service management, system monitoring, and log analysis in a full Ubuntu environment."
+lesson_ref: foundations/linux/11-package-management
+difficulty: medium
+duration: 45
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: admin-ex-1
+    title: "Install a package"
+    description: "Install the 'jq' package using apt."
+    hints:
+      - "Update the package index first with 'apt update'"
+      - "Then run 'apt install -y jq'"
+    validation:
+      type: command
+      command: "which jq"
+      expected_output: "/usr/bin/jq"
+
+  - id: admin-ex-2
+    title: "Query package info"
+    description: "Find out which package provides the file /usr/bin/vim."
+    hints:
+      - "Use dpkg -S with the file path"
+      - "Try: dpkg -S /usr/bin/vim"
+    validation:
+      type: command
+      command: "dpkg -S /usr/bin/vim 2>/dev/null | head -1 | grep -o '^[^:]*'"
+      expected_output: "vim"
+
+  - id: admin-ex-3
+    title: "Manage a background process"
+    description: "Start a sleep 600 process in the background and save its PID to /root/bg-pid.txt."
+    hints:
+      - "Use 'sleep 600 &' and then 'echo $!' to get the PID"
+      - "Try: sleep 600 & echo $! > /root/bg-pid.txt"
+    validation:
+      type: command
+      command: "cat /root/bg-pid.txt | xargs ps -p >/dev/null 2>&1 && echo 'running'"
+      expected_output: "running"
+
+  - id: admin-ex-4
+    title: "Kill a process gracefully"
+    description: "Send SIGTERM to the background sleep process you started."
+    hints:
+      - "Use 'kill' with the PID from bg-pid.txt"
+      - "Try: kill $(cat /root/bg-pid.txt)"
+    validation:
+      type: command
+      command: "cat /root/bg-pid.txt | xargs ps -p >/dev/null 2>&1 && echo 'still running' || echo 'terminated'"
+      expected_output: "terminated"
+
+  - id: admin-ex-5
+    title: "Create a user and group"
+    description: "Create a group called 'devops' and a user called 'deployer' who belongs to it."
+    hints:
+      - "Use 'groupadd devops' then 'useradd -m -G devops deployer'"
+      - "Verify with 'id deployer'"
+    validation:
+      type: command
+      command: "id deployer 2>/dev/null | grep -o 'devops'"
+      expected_output: "devops"
+
+  - id: admin-ex-6
+    title: "Set permissions"
+    description: "Create /opt/app/config.yaml with permissions 640 (owner rw, group r, others none)."
+    hints:
+      - "Create the directory and file, then set permissions"
+      - "Try: mkdir -p /opt/app && touch /opt/app/config.yaml && chmod 640 /opt/app/config.yaml"
+    validation:
+      type: command
+      command: "stat -c '%a' /opt/app/config.yaml"
+      expected_output: "640"
+
+  - id: admin-ex-7
+    title: "Check system resources"
+    description: "Write the total available memory (in MB) to /root/mem-available.txt."
+    hints:
+      - "Use 'free' and 'awk' to extract available memory"
+      - "Try: free -m | awk '/Mem:/ {print $7}' > /root/mem-available.txt"
+    validation:
+      type: command
+      command: "test -s /root/mem-available.txt && echo 'has content'"
+      expected_output: "has content"
+
+  - id: admin-ex-8
+    title: "Set up a cron job"
+    description: "Add a cron job that runs 'echo health-ok >> /var/log/health.log' every 5 minutes."
+    hints:
+      - "Use 'crontab -e' or pipe to crontab"
+      - "Try: (crontab -l 2>/dev/null; echo '*/5 * * * * echo health-ok >> /var/log/health.log') | crontab -"
+    validation:
+      type: command
+      command: "crontab -l 2>/dev/null | grep 'health-ok'"
+      expected_output: "*/5 * * * * echo health-ok >> /var/log/health.log"
