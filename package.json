@@ -1,0 +1,33 @@
+{
+  "name": "devops-engineers",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The DevOps Engineering Bible — Training 1 Million Engineers",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "keywords": [
+    "devops",
+    "learning-platform",
+    "kubernetes",
+    "docker",
+    "terraform",
+    "aws",
+    "sre"
+  ],
+  "author": "DEVOPS ENGINEERS Community",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@10.29.3",
+  "devDependencies": {
+    "turbo": "^2.8.12"
+  }
+}
