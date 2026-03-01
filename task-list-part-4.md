@@ -283,7 +283,7 @@
 
 ### TASK-130: Create database backup strategy
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-129
 - **Estimated effort:** M
@@ -328,7 +328,7 @@
 
 ### TASK-132: Create operations runbook
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-127, TASK-129
 - **Estimated effort:** L
@@ -477,7 +477,7 @@
 
 ### TASK-137: Write CHANGELOG and release notes
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-135
 - **Estimated effort:** S
@@ -730,7 +730,7 @@
 
 ### TASK-149: Implement database migrations workflow
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-012
 - **Estimated effort:** M
