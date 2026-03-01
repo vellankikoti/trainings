@@ -6,15 +6,23 @@
   "description": "Transform repetitive tasks into automated scripts. Learn Bash scripting from variables to complex automation workflows.",
   "order": 3,
   "estimatedHours": 45,
-  "lessonsCount": 30,
+  "lessonsCount": 16,
   "lessons": [
-    { "slug": "first-script", "title": "Your First Shell Script", "order": 1 },
-    { "slug": "variables-types", "title": "Variables & Data Types", "order": 2 },
-    { "slug": "conditionals", "title": "Conditionals & Control Flow", "order": 3 },
-    { "slug": "loops", "title": "Loops & Iteration", "order": 4 },
-    { "slug": "functions", "title": "Functions & Modular Scripts", "order": 5 },
-    { "slug": "string-manipulation", "title": "String Manipulation", "order": 6 },
-    { "slug": "arrays", "title": "Arrays & Data Structures", "order": 7 },
-    { "slug": "error-handling", "title": "Error Handling & Debugging", "order": 8 }
+    { "slug": "01-why-shell-scripting", "title": "Why Shell Scripting?", "order": 1 },
+    { "slug": "02-first-script", "title": "Your First Shell Script", "order": 2 },
+    { "slug": "03-variables", "title": "Variables and Data Types", "order": 3 },
+    { "slug": "04-user-input", "title": "User Input and Arguments", "order": 4 },
+    { "slug": "05-conditionals", "title": "Conditionals and Control Flow", "order": 5 },
+    { "slug": "06-loops", "title": "Loops and Iteration", "order": 6 },
+    { "slug": "07-functions", "title": "Functions and Modular Scripts", "order": 7 },
+    { "slug": "08-arrays-strings", "title": "Arrays and String Manipulation", "order": 8 },
+    { "slug": "09-file-operations", "title": "File Operations in Scripts", "order": 9 },
+    { "slug": "10-text-processing", "title": "Text Processing with sed and awk", "order": 10 },
+    { "slug": "11-error-handling", "title": "Error Handling and Exit Codes", "order": 11 },
+    { "slug": "12-debugging-scripts", "title": "Debugging Shell Scripts", "order": 12 },
+    { "slug": "13-process-management", "title": "Process Management in Scripts", "order": 13 },
+    { "slug": "14-advanced-patterns", "title": "Advanced Scripting Patterns", "order": 14 },
+    { "slug": "15-real-world-scripts", "title": "Real-World Automation Scripts", "order": 15 },
+    { "slug": "16-production-scripting", "title": "Production-Grade Scripting", "order": 16 }
   ]
 }

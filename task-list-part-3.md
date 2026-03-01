@@ -27,7 +27,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-091: Migrate Linux content — Plan lesson breakdown
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-070
 - **Estimated effort:** M
@@ -49,7 +49,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-092: Create Linux Lesson 01 — The Linux Story
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-091, TASK-034 (sample lesson validates components work)
 - **Estimated effort:** L
@@ -76,7 +76,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-093: Create Linux Lessons 02-05 — Architecture & Boot Process
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-092
 - **Estimated effort:** XL
@@ -223,7 +223,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-099: Migrate Shell Scripting content — Plan lesson breakdown
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-070
 - **Estimated effort:** M
@@ -295,7 +295,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-102: Migrate Git content — Plan lesson breakdown
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-070
 - **Estimated effort:** M
