@@ -1,0 +1,1192 @@
+{
+  "id": "foundations-path",
+  "title": "Foundations Path Assessment",
+  "description": "Comprehensive assessment covering Linux, Shell Scripting, Git, Networking, and Python Automation",
+  "passingScore": 80,
+  "timeLimit": 60,
+  "questionsPerAttempt": 40,
+  "isAssessment": true,
+  "xpReward": { "pass": 1000, "fail": 0 },
+  "questions": [
+    {
+      "id": "a-found-q1",
+      "type": "multiple_choice",
+      "question": "Which directory in the Linux filesystem hierarchy contains system-wide configuration files?",
+      "options": ["A) /var", "B) /etc", "C) /opt", "D) /usr"],
+      "correctAnswer": "B) /etc",
+      "explanation": "/etc (Editable Text Configuration) stores system-wide configuration files such as /etc/passwd, /etc/fstab, and /etc/ssh/sshd_config.",
+      "difficulty": "beginner",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q2",
+      "type": "multiple_choice",
+      "question": "What does the command 'chmod 644 file.txt' set as permissions?",
+      "options": [
+        "A) Owner: read/write, Group: read, Others: read",
+        "B) Owner: read/write/execute, Group: read, Others: read",
+        "C) Owner: read, Group: read/write, Others: read/write",
+        "D) Owner: read/write, Group: read/write, Others: none"
+      ],
+      "correctAnswer": "A) Owner: read/write, Group: read, Others: read",
+      "explanation": "6=rw- (4+2), 4=r-- (4), 4=r-- (4). So 644 gives the owner read/write, and group and others read-only.",
+      "difficulty": "beginner",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q3",
+      "type": "true_false",
+      "question": "The 'find' command searches for files based on name, type, size, and other attributes, while 'grep' searches inside file contents.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "'find' locates files by their metadata (name, permissions, modification time, etc.), while 'grep' searches for text patterns within file contents.",
+      "difficulty": "beginner",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q4",
+      "type": "multiple_choice",
+      "question": "Which command safely adds a user to a supplementary group without removing them from existing groups?",
+      "options": [
+        "A) usermod -G docker alice",
+        "B) usermod -aG docker alice",
+        "C) groupadd alice docker",
+        "D) useradd -g docker alice"
+      ],
+      "correctAnswer": "B) usermod -aG docker alice",
+      "explanation": "The -a (append) flag with -G is critical. Without -a, 'usermod -G' replaces all supplementary groups. Always use -aG together to add without removing.",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q5",
+      "type": "multiple_choice",
+      "question": "What does the command 'ps aux | grep nginx | grep -v grep' accomplish?",
+      "options": [
+        "A) Installs nginx and verifies the installation",
+        "B) Lists all nginx processes, excluding the grep process itself",
+        "C) Starts the nginx service in the background",
+        "D) Searches for the nginx configuration file"
+      ],
+      "correctAnswer": "B) Lists all nginx processes, excluding the grep process itself",
+      "explanation": "'ps aux' lists all processes, the first grep filters for nginx, and 'grep -v grep' excludes the grep command itself from appearing in results.",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q6",
+      "type": "multiple_choice",
+      "question": "Which systemctl command enables a service to start at boot AND starts it immediately?",
+      "options": [
+        "A) systemctl start --enable service",
+        "B) systemctl enable --now service",
+        "C) systemctl activate service",
+        "D) systemctl boot service"
+      ],
+      "correctAnswer": "B) systemctl enable --now service",
+      "explanation": "The --now flag combined with enable both creates the symlink for boot startup and starts the service immediately, equivalent to running 'enable' and 'start' separately.",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q7",
+      "type": "multiple_choice",
+      "question": "What is the purpose of the /proc filesystem in Linux?",
+      "options": [
+        "A) Storing user documents and files",
+        "B) A virtual filesystem that exposes kernel and process information",
+        "C) A backup directory for system recovery",
+        "D) A mount point for removable storage devices"
+      ],
+      "correctAnswer": "B) A virtual filesystem that exposes kernel and process information",
+      "explanation": "/proc is a pseudo-filesystem that provides an interface to kernel data structures. Files like /proc/cpuinfo, /proc/meminfo, and /proc/[pid]/ expose runtime system information.",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q8",
+      "type": "multiple_choice",
+      "question": "What does the SUID bit do when set on an executable file?",
+      "options": [
+        "A) Prevents the file from being executed",
+        "B) Runs the program with the permissions of the file owner",
+        "C) Encrypts the file contents at rest",
+        "D) Allows only the group to execute the file"
+      ],
+      "correctAnswer": "B) Runs the program with the permissions of the file owner",
+      "explanation": "SUID (Set User ID) causes the program to execute with the file owner's permissions rather than the invoking user's. A classic example is /usr/bin/passwd, which runs as root to modify /etc/shadow.",
+      "difficulty": "advanced",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q9",
+      "type": "true_false",
+      "question": "When the system load average exceeds the number of CPU cores, it means processes are waiting in queue for CPU time.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "Load average represents the average number of processes in a runnable or uninterruptible state. When it exceeds the core count, processes must queue for CPU, indicating contention.",
+      "difficulty": "advanced",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q10",
+      "type": "multiple_choice",
+      "question": "Which awk expression refers to the last field of the current line?",
+      "options": ["A) $0", "B) $1", "C) $NF", "D) $NR"],
+      "correctAnswer": "C) $NF",
+      "explanation": "NF is the number of fields in the current record. $NF accesses the value at that position, which is the last field. $0 is the entire line, $1 is the first field, and NR is the record number.",
+      "difficulty": "advanced",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q11",
+      "type": "multiple_choice",
+      "question": "What does the cron expression '*/15 * * * *' mean?",
+      "options": [
+        "A) Run every 15 hours",
+        "B) Run every 15 minutes",
+        "C) Run at 15:00 every day",
+        "D) Run on the 15th of every month"
+      ],
+      "correctAnswer": "B) Run every 15 minutes",
+      "explanation": "The */15 in the minute field means 'every 15 minutes'. The asterisks in the remaining fields (hour, day, month, day-of-week) mean 'every'.",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q12",
+      "type": "multiple_choice",
+      "question": "Which command shows disk usage of the current directory, sorted by size in human-readable format?",
+      "options": [
+        "A) df -h .",
+        "B) du -sh * | sort -rh",
+        "C) ls -lhS",
+        "D) stat -f ."
+      ],
+      "correctAnswer": "B) du -sh * | sort -rh",
+      "explanation": "'du -sh *' shows the size of each item in the current directory in human-readable format. Piping to 'sort -rh' sorts by human-readable sizes in reverse (largest first).",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q13",
+      "type": "multiple_choice",
+      "question": "What happens to a symbolic link when its target file is deleted?",
+      "options": [
+        "A) The symlink is automatically deleted too",
+        "B) The symlink becomes a broken (dangling) link",
+        "C) The symlink continues to work with cached data",
+        "D) The symlink redirects to /dev/null"
+      ],
+      "correctAnswer": "B) The symlink becomes a broken (dangling) link",
+      "explanation": "Symbolic links point to a path, not an inode. When the target is deleted, the symlink still exists but points to nothing, becoming a broken or dangling link. Hard links, by contrast, share inodes and survive deletion of the original.",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q14",
+      "type": "multiple_choice",
+      "question": "Which file should you always edit with 'visudo' rather than a regular text editor?",
+      "options": [
+        "A) /etc/passwd",
+        "B) /etc/sudoers",
+        "C) /etc/fstab",
+        "D) /etc/hosts"
+      ],
+      "correctAnswer": "B) /etc/sudoers",
+      "explanation": "visudo validates /etc/sudoers syntax before saving. A syntax error in this file can lock you out of sudo entirely, potentially requiring single-user mode recovery.",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q15",
+      "type": "multiple_choice",
+      "question": "What does 'journalctl -u nginx -f --since \"1 hour ago\"' do?",
+      "options": [
+        "A) Restarts nginx and shows startup logs",
+        "B) Shows and follows nginx journal logs from the last hour",
+        "C) Exports nginx logs to a file for the last hour",
+        "D) Clears nginx logs older than one hour"
+      ],
+      "correctAnswer": "B) Shows and follows nginx journal logs from the last hour",
+      "explanation": "-u filters by systemd unit (nginx), -f follows in real-time (like tail -f), and --since filters entries from the specified time. This is essential for real-time service debugging.",
+      "difficulty": "intermediate",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q16",
+      "type": "true_false",
+      "question": "In Linux, the umask value is subtracted from default permissions (666 for files, 777 for directories) to determine the permissions of newly created files and directories.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "With a umask of 022, new files get 644 (666-022) and new directories get 755 (777-022). The umask masks out (removes) the specified permission bits.",
+      "difficulty": "advanced",
+      "module": "linux"
+    },
+    {
+      "id": "a-found-q17",
+      "type": "multiple_choice",
+      "question": "What is the correct shebang line for a Bash script?",
+      "options": [
+        "A) #!bash",
+        "B) #!/bin/bash",
+        "C) //bin/bash",
+        "D) @!/bin/bash"
+      ],
+      "correctAnswer": "B) #!/bin/bash",
+      "explanation": "The shebang (#!) must be the first two characters of the file, followed by the path to the interpreter. #!/bin/bash tells the OS to execute the script using the Bash shell.",
+      "difficulty": "beginner",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q18",
+      "type": "multiple_choice",
+      "question": "What does 'set -euo pipefail' do at the top of a Bash script?",
+      "options": [
+        "A) Enables verbose logging and debug mode",
+        "B) Exits on error (-e), errors on undefined variables (-u), and fails on any pipe failure (-o pipefail)",
+        "C) Sets environment variables for the script",
+        "D) Enables compatibility mode with POSIX shells"
+      ],
+      "correctAnswer": "B) Exits on error (-e), errors on undefined variables (-u), and fails on any pipe failure (-o pipefail)",
+      "explanation": "-e exits immediately if any command fails, -u treats unset variables as errors, and -o pipefail causes a pipeline to fail if any command in it fails (not just the last one).",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q19",
+      "type": "multiple_choice",
+      "question": "What is the difference between single quotes and double quotes in Bash?",
+      "options": [
+        "A) There is no difference; they are interchangeable",
+        "B) Single quotes preserve literal text; double quotes allow variable expansion and command substitution",
+        "C) Double quotes preserve literal text; single quotes allow expansion",
+        "D) Single quotes are for strings; double quotes are for numbers"
+      ],
+      "correctAnswer": "B) Single quotes preserve literal text; double quotes allow variable expansion and command substitution",
+      "explanation": "In single quotes, everything is literal: '$VAR' prints $VAR. In double quotes, variables are expanded: \"$VAR\" prints the value of VAR. Double quotes also allow command substitution with $(...).",
+      "difficulty": "beginner",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q20",
+      "type": "multiple_choice",
+      "question": "Which test operator checks if a file exists and is a regular file in Bash?",
+      "options": ["A) -e", "B) -f", "C) -d", "D) -r"],
+      "correctAnswer": "B) -f",
+      "explanation": "-f tests if the path exists AND is a regular file (not a directory or device). -e checks existence only, -d checks for directories, and -r checks read permission.",
+      "difficulty": "beginner",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q21",
+      "type": "multiple_choice",
+      "question": "What does the special variable '$?' represent in a shell script?",
+      "options": [
+        "A) The process ID of the current script",
+        "B) The number of arguments passed to the script",
+        "C) The exit status of the last executed command",
+        "D) The name of the current script"
+      ],
+      "correctAnswer": "C) The exit status of the last executed command",
+      "explanation": "$? holds the exit code of the most recently executed command. 0 means success, and non-zero indicates failure. It is fundamental for error checking in scripts.",
+      "difficulty": "beginner",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q22",
+      "type": "multiple_choice",
+      "question": "What is the correct syntax for iterating over lines in a file using a while loop?",
+      "options": [
+        "A) while read line; do echo $line; done < file.txt",
+        "B) for line in file.txt; do echo $line; done",
+        "C) while cat file.txt; do echo $line; done",
+        "D) loop line file.txt; do echo $line; done"
+      ],
+      "correctAnswer": "A) while read line; do echo $line; done < file.txt",
+      "explanation": "Redirecting a file into a while-read loop is the idiomatic way to process a file line by line. Using 'for line in $(cat file)' splits on all whitespace, not just newlines.",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q23",
+      "type": "true_false",
+      "question": "In Bash, the 'local' keyword restricts a variable's scope to the function in which it is declared.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "Without 'local', variables in functions are global by default in Bash. The 'local' keyword limits the variable's scope to the current function and its children.",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q24",
+      "type": "multiple_choice",
+      "question": "What does '${variable:-default}' do in parameter expansion?",
+      "options": [
+        "A) Assigns 'default' to variable permanently",
+        "B) Returns 'default' if variable is unset or empty, without modifying variable",
+        "C) Removes 'default' from the variable's value",
+        "D) Appends 'default' to the variable's value"
+      ],
+      "correctAnswer": "B) Returns 'default' if variable is unset or empty, without modifying variable",
+      "explanation": "${var:-default} provides a fallback value without modifying the variable. Use ${var:=default} to also assign the default. This is essential for providing sensible defaults in scripts.",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q25",
+      "type": "multiple_choice",
+      "question": "How do you declare and access an associative array in Bash?",
+      "options": [
+        "A) array=(one two three); echo ${array[0]}",
+        "B) declare -A map; map[key]=\"value\"; echo ${map[key]}",
+        "C) map={key: value}; echo $map.key",
+        "D) dict key=value; echo $dict[key]"
+      ],
+      "correctAnswer": "B) declare -A map; map[key]=\"value\"; echo ${map[key]}",
+      "explanation": "Associative arrays require 'declare -A' and use string keys. Option A is an indexed array. Bash 4+ is required for associative arrays.",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q26",
+      "type": "multiple_choice",
+      "question": "What does the 'trap' command do in a Bash script?",
+      "options": [
+        "A) Catches and handles errors in try/catch style",
+        "B) Registers commands to run when specific signals or events (like EXIT) are received",
+        "C) Pauses script execution until a signal arrives",
+        "D) Prevents the script from being interrupted"
+      ],
+      "correctAnswer": "B) Registers commands to run when specific signals or events (like EXIT) are received",
+      "explanation": "trap 'cleanup_function' EXIT ensures cleanup runs when the script exits, regardless of how. trap '' SIGINT ignores Ctrl+C. It is essential for robust scripts that manage temporary files or locks.",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q27",
+      "type": "multiple_choice",
+      "question": "Which sed command replaces all occurrences of 'http' with 'https' in a file in-place?",
+      "options": [
+        "A) sed 's/http/https/' file.txt",
+        "B) sed -i 's/http/https/g' file.txt",
+        "C) sed 'replace http https' file.txt",
+        "D) sed -i 's/http/https/' file.txt"
+      ],
+      "correctAnswer": "B) sed -i 's/http/https/g' file.txt",
+      "explanation": "The -i flag edits in-place, 's/old/new/g' substitutes globally (all occurrences per line). Without 'g', only the first occurrence on each line is replaced. Without -i, output goes to stdout.",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q28",
+      "type": "multiple_choice",
+      "question": "What is wrong with the script: for f in $(ls *.txt); do rm \"$f\"; done?",
+      "options": [
+        "A) Nothing; this is correct and recommended",
+        "B) Parsing ls output breaks on filenames with spaces; use 'for f in *.txt' instead",
+        "C) The rm command needs the -f flag",
+        "D) The for loop syntax is wrong"
+      ],
+      "correctAnswer": "B) Parsing ls output breaks on filenames with spaces; use 'for f in *.txt' instead",
+      "explanation": "Parsing ls output is a classic Bash antipattern. Filenames with spaces, newlines, or special characters cause word splitting issues. Globbing directly (for f in *.txt) is safe and correct.",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q29",
+      "type": "multiple_choice",
+      "question": "How do you implement a retry loop that attempts a command up to 3 times?",
+      "options": [
+        "A) retry 3 command",
+        "B) for i in 1 2 3; do command && break; sleep 2; done",
+        "C) while command; do retry; done",
+        "D) command || command || command"
+      ],
+      "correctAnswer": "B) for i in 1 2 3; do command && break; sleep 2; done",
+      "explanation": "This loop tries the command, breaks on success (&& break), and sleeps before retrying. Option D works but lacks delay between retries, which can overwhelm services.",
+      "difficulty": "advanced",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q30",
+      "type": "true_false",
+      "question": "In Bash, [[ $string =~ ^[0-9]+$ ]] uses extended regular expressions to test if the variable contains only digits.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "The =~ operator inside [[ ]] performs regex matching. ^[0-9]+$ matches strings containing one or more digits from start to end. Note: the regex must not be quoted on the right side.",
+      "difficulty": "advanced",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q31",
+      "type": "multiple_choice",
+      "question": "What does the following construct do: exec 3>&1 1>&2 2>&3 3>&-",
+      "options": [
+        "A) Closes all file descriptors",
+        "B) Swaps stdout and stderr",
+        "C) Duplicates stdout three times",
+        "D) Redirects all output to /dev/null"
+      ],
+      "correctAnswer": "B) Swaps stdout and stderr",
+      "explanation": "This is the file descriptor swap pattern: save stdout to fd3, redirect stdout to stderr, redirect stderr to saved fd3, then close fd3. It effectively swaps stdout and stderr streams.",
+      "difficulty": "advanced",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q32",
+      "type": "multiple_choice",
+      "question": "What does 'case' provide that a chain of if/elif cannot?",
+      "options": [
+        "A) Better performance through jump tables",
+        "B) Cleaner pattern matching syntax with glob patterns and multiple patterns per branch",
+        "C) The ability to test numeric conditions",
+        "D) Automatic variable scoping"
+      ],
+      "correctAnswer": "B) Cleaner pattern matching syntax with glob patterns and multiple patterns per branch",
+      "explanation": "case statements support glob patterns (*.txt), character classes ([yY]), and multiple patterns per branch (yes|y|Y). They produce cleaner, more readable code than long if/elif chains for string matching.",
+      "difficulty": "intermediate",
+      "module": "shell-scripting"
+    },
+    {
+      "id": "a-found-q33",
+      "type": "multiple_choice",
+      "question": "What is the key architectural difference between Git and centralized VCS like SVN?",
+      "options": [
+        "A) Git uses a graphical interface; SVN is command-line only",
+        "B) Every Git clone is a full repository with complete history; SVN clients only have a working copy",
+        "C) Git requires GitHub to function; SVN works with any server",
+        "D) SVN supports branching but Git does not"
+      ],
+      "correctAnswer": "B) Every Git clone is a full repository with complete history; SVN clients only have a working copy",
+      "explanation": "Git is a distributed VCS where every clone contains the full repository history. This enables offline work, fast local operations, and peer-to-peer collaboration without a central server.",
+      "difficulty": "beginner",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q34",
+      "type": "multiple_choice",
+      "question": "What are the three main areas (states) that a file moves through in Git?",
+      "options": [
+        "A) Local, Remote, Cloud",
+        "B) Working Directory, Staging Area (Index), Repository",
+        "C) Draft, Review, Published",
+        "D) Untracked, Cached, Pushed"
+      ],
+      "correctAnswer": "B) Working Directory, Staging Area (Index), Repository",
+      "explanation": "Files move from the working directory (where you edit) to the staging area (where you prepare commits with 'git add') to the repository (where commits are permanently stored).",
+      "difficulty": "beginner",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q35",
+      "type": "multiple_choice",
+      "question": "What does 'git diff --staged' show?",
+      "options": [
+        "A) Changes between working directory and last commit",
+        "B) Changes that are staged and will be included in the next commit",
+        "C) Differences between two branches",
+        "D) Changes since the repository was created"
+      ],
+      "correctAnswer": "B) Changes that are staged and will be included in the next commit",
+      "explanation": "'git diff --staged' (or --cached) shows the diff between the staging area and the last commit. Plain 'git diff' shows unstaged changes in the working directory.",
+      "difficulty": "beginner",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q36",
+      "type": "true_false",
+      "question": "A Git branch is a lightweight movable pointer to a specific commit, not a copy of the entire codebase.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "Git branches are simply pointers (refs) to commit SHA hashes. Creating a branch just creates a 41-byte file, making branching virtually free compared to systems that copy entire directories.",
+      "difficulty": "beginner",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q37",
+      "type": "multiple_choice",
+      "question": "What is the difference between 'git merge' and 'git rebase'?",
+      "options": [
+        "A) They produce identical results",
+        "B) Merge creates a merge commit preserving branch history; rebase replays commits onto the target creating linear history",
+        "C) Rebase is safer because it never causes conflicts",
+        "D) Merge only works with remote branches"
+      ],
+      "correctAnswer": "B) Merge creates a merge commit preserving branch history; rebase replays commits onto the target creating linear history",
+      "explanation": "Merge preserves the complete branching history with a merge commit. Rebase moves commits to a new base, creating a clean linear history but rewriting commit hashes. Never rebase shared/public branches.",
+      "difficulty": "intermediate",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q38",
+      "type": "multiple_choice",
+      "question": "You accidentally committed a file with secrets. Which Git command rewrites history to remove it from ALL commits?",
+      "options": [
+        "A) git rm --cached secrets.env",
+        "B) git revert HEAD",
+        "C) git filter-branch or git filter-repo to rewrite history",
+        "D) git reset --soft HEAD~1"
+      ],
+      "correctAnswer": "C) git filter-branch or git filter-repo to rewrite history",
+      "explanation": "'git rm --cached' only removes from the current tree; the file remains in history. 'git revert' adds a new commit. Only filter-branch/filter-repo can rewrite all historical commits to completely purge a file.",
+      "difficulty": "advanced",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q39",
+      "type": "multiple_choice",
+      "question": "What does 'git stash' do?",
+      "options": [
+        "A) Permanently deletes uncommitted changes",
+        "B) Saves uncommitted changes to a temporary stack and reverts the working directory to a clean state",
+        "C) Creates a new branch from current changes",
+        "D) Pushes changes to a remote staging area"
+      ],
+      "correctAnswer": "B) Saves uncommitted changes to a temporary stack and reverts the working directory to a clean state",
+      "explanation": "'git stash' temporarily shelves changes so you can work on something else. Use 'git stash pop' to reapply the most recent stash, or 'git stash list' to see all stashed changes.",
+      "difficulty": "intermediate",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q40",
+      "type": "multiple_choice",
+      "question": "What is the purpose of 'git bisect'?",
+      "options": [
+        "A) To split a large commit into smaller ones",
+        "B) To binary search through commit history to find which commit introduced a bug",
+        "C) To merge two branches at their midpoint",
+        "D) To divide a repository into two separate repos"
+      ],
+      "correctAnswer": "B) To binary search through commit history to find which commit introduced a bug",
+      "explanation": "git bisect performs a binary search across commits. You mark commits as 'good' or 'bad', and Git efficiently narrows down the exact commit that introduced the regression.",
+      "difficulty": "intermediate",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q41",
+      "type": "multiple_choice",
+      "question": "What does 'git cherry-pick <commit-hash>' do?",
+      "options": [
+        "A) Deletes the specified commit",
+        "B) Applies the changes from a specific commit onto the current branch as a new commit",
+        "C) Marks the commit as a favorite",
+        "D) Reverts the specified commit"
+      ],
+      "correctAnswer": "B) Applies the changes from a specific commit onto the current branch as a new commit",
+      "explanation": "cherry-pick copies the changes introduced by a single commit and applies them to your current branch. It creates a new commit with a different hash but the same changes. Useful for backporting fixes.",
+      "difficulty": "intermediate",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q42",
+      "type": "true_false",
+      "question": "'git reset --hard HEAD~1' permanently removes the last commit and all its changes from the working directory.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "'git reset --hard HEAD~1' moves the branch pointer back one commit and discards all changes. The commit can still be recovered via 'git reflog' within the reflog retention period (typically 90 days).",
+      "difficulty": "intermediate",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q43",
+      "type": "multiple_choice",
+      "question": "What is a Git hook?",
+      "options": [
+        "A) A way to link two repositories together",
+        "B) A script that runs automatically at specific points in the Git workflow (e.g., pre-commit, pre-push)",
+        "C) A branch naming convention",
+        "D) A merge conflict resolution tool"
+      ],
+      "correctAnswer": "B) A script that runs automatically at specific points in the Git workflow (e.g., pre-commit, pre-push)",
+      "explanation": "Git hooks are scripts in .git/hooks/ that trigger on events like commit, push, or receive. Pre-commit hooks commonly run linters and tests. They can be shared via tools like Husky or pre-commit framework.",
+      "difficulty": "intermediate",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q44",
+      "type": "multiple_choice",
+      "question": "What is the correct Git workflow for contributing to an open-source project?",
+      "options": [
+        "A) Clone, commit to main, push directly",
+        "B) Fork, clone your fork, create a feature branch, push to your fork, open a pull request",
+        "C) Download ZIP, make changes, email the maintainer",
+        "D) Clone, create a tag, push the tag"
+      ],
+      "correctAnswer": "B) Fork, clone your fork, create a feature branch, push to your fork, open a pull request",
+      "explanation": "The fork-and-pull model is the standard open-source workflow. You fork the upstream repo, work in a feature branch on your fork, then open a PR for the maintainers to review and merge.",
+      "difficulty": "beginner",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q45",
+      "type": "multiple_choice",
+      "question": "What does 'git reflog' show that 'git log' does not?",
+      "options": [
+        "A) Remote commits not yet fetched",
+        "B) All reference updates including resets, rebases, and other operations that move HEAD, even for commits no longer in any branch",
+        "C) Commit messages in reverse order",
+        "D) Only merge commits"
+      ],
+      "correctAnswer": "B) All reference updates including resets, rebases, and other operations that move HEAD, even for commits no longer in any branch",
+      "explanation": "reflog records every change to HEAD and branch tips, including destructive operations. It is your safety net for recovering from bad resets, rebases, or accidental branch deletions.",
+      "difficulty": "advanced",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q46",
+      "type": "multiple_choice",
+      "question": "What does the 'git rebase --onto main feature bugfix' command do?",
+      "options": [
+        "A) Merges bugfix into main",
+        "B) Replays commits from bugfix (that are not in feature) onto main",
+        "C) Creates a new branch called bugfix from main",
+        "D) Deletes the feature branch"
+      ],
+      "correctAnswer": "B) Replays commits from bugfix (that are not in feature) onto main",
+      "explanation": "'rebase --onto' allows rebasing a subset of commits. It takes commits reachable from bugfix but not from feature, and replays them onto main. This is powerful for transplanting commit ranges.",
+      "difficulty": "advanced",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q47",
+      "type": "multiple_choice",
+      "question": "In a GitHub Actions workflow, what does 'on: pull_request' trigger on by default?",
+      "options": [
+        "A) Only when a PR is merged",
+        "B) When a PR is opened, synchronized (new push), or reopened",
+        "C) Only when a PR is created",
+        "D) On every commit to any branch"
+      ],
+      "correctAnswer": "B) When a PR is opened, synchronized (new push), or reopened",
+      "explanation": "The pull_request event triggers on opened, synchronize, and reopened activity types by default. You can customize this with the 'types' key to add or restrict which activities trigger the workflow.",
+      "difficulty": "advanced",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q48",
+      "type": "true_false",
+      "question": "Signed Git commits (using GPG or SSH keys) cryptographically verify the identity of the commit author.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "Git commit signing uses cryptographic keys to verify authorship. Without signing, anyone can set any name/email in git config. GitHub shows a 'Verified' badge on signed commits.",
+      "difficulty": "intermediate",
+      "module": "git"
+    },
+    {
+      "id": "a-found-q49",
+      "type": "multiple_choice",
+      "question": "Which layer of the OSI model do routers primarily operate at?",
+      "options": [
+        "A) Layer 1 - Physical",
+        "B) Layer 2 - Data Link",
+        "C) Layer 3 - Network",
+        "D) Layer 4 - Transport"
+      ],
+      "correctAnswer": "C) Layer 3 - Network",
+      "explanation": "Routers operate at Layer 3 (Network) using IP addresses to route packets between networks. Switches operate at Layer 2 (Data Link) using MAC addresses. Hubs operate at Layer 1 (Physical).",
+      "difficulty": "beginner",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q50",
+      "type": "multiple_choice",
+      "question": "What is the CIDR notation for a subnet mask of 255.255.255.0?",
+      "options": ["A) /8", "B) /16", "C) /24", "D) /32"],
+      "correctAnswer": "C) /24",
+      "explanation": "255.255.255.0 has 24 bits set to 1 (three octets of 8 bits each). /24 means 256 addresses (254 usable hosts). /8 = 255.0.0.0, /16 = 255.255.0.0, /32 = single host.",
+      "difficulty": "beginner",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q51",
+      "type": "multiple_choice",
+      "question": "What is the primary difference between TCP and UDP?",
+      "options": [
+        "A) TCP is faster; UDP is slower",
+        "B) TCP provides reliable, ordered delivery with connection state; UDP is connectionless with no delivery guarantee",
+        "C) TCP is for web traffic only; UDP is for all other traffic",
+        "D) UDP encrypts data; TCP does not"
+      ],
+      "correctAnswer": "B) TCP provides reliable, ordered delivery with connection state; UDP is connectionless with no delivery guarantee",
+      "explanation": "TCP (Transmission Control Protocol) uses a three-way handshake, sequence numbers, and acknowledgments for reliable delivery. UDP (User Datagram Protocol) sends datagrams without connection setup or delivery confirmation, trading reliability for speed.",
+      "difficulty": "beginner",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q52",
+      "type": "multiple_choice",
+      "question": "Which DNS record type maps a domain name to an IPv4 address?",
+      "options": ["A) CNAME", "B) MX", "C) A", "D) TXT"],
+      "correctAnswer": "C) A",
+      "explanation": "An A record maps a hostname to an IPv4 address. AAAA maps to IPv6. CNAME creates an alias. MX specifies mail servers. TXT holds arbitrary text data (used for SPF, DKIM, verification).",
+      "difficulty": "beginner",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q53",
+      "type": "true_false",
+      "question": "HTTPS uses TLS (Transport Layer Security) to encrypt HTTP traffic, operating on port 443 by default.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "HTTPS is HTTP over TLS. It uses port 443 by default (HTTP uses port 80). TLS provides encryption, authentication (via certificates), and data integrity.",
+      "difficulty": "beginner",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q54",
+      "type": "multiple_choice",
+      "question": "What does an HTTP 301 status code indicate?",
+      "options": [
+        "A) OK - Request succeeded",
+        "B) Moved Permanently - Resource has a new URL",
+        "C) Not Found - Resource does not exist",
+        "D) Internal Server Error"
+      ],
+      "correctAnswer": "B) Moved Permanently - Resource has a new URL",
+      "explanation": "301 is a permanent redirect. The browser should use the new URL for future requests. 302 is temporary redirect. 200 is OK. 404 is Not Found. 500 is Internal Server Error.",
+      "difficulty": "beginner",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q55",
+      "type": "multiple_choice",
+      "question": "What command would you use to query DNS records for a domain?",
+      "options": [
+        "A) ping example.com",
+        "B) dig example.com",
+        "C) curl example.com",
+        "D) traceroute example.com"
+      ],
+      "correctAnswer": "B) dig example.com",
+      "explanation": "'dig' (Domain Information Groper) queries DNS servers and displays detailed DNS record information. You can query specific record types: 'dig example.com MX' for mail records, 'dig example.com ANY' for all records.",
+      "difficulty": "beginner",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q56",
+      "type": "multiple_choice",
+      "question": "Which private IP address range belongs to the Class C private range?",
+      "options": [
+        "A) 10.0.0.0/8",
+        "B) 172.16.0.0/12",
+        "C) 192.168.0.0/16",
+        "D) 169.254.0.0/16"
+      ],
+      "correctAnswer": "C) 192.168.0.0/16",
+      "explanation": "RFC 1918 defines three private ranges: 10.0.0.0/8 (Class A), 172.16.0.0/12 (Class B), 192.168.0.0/16 (Class C). 169.254.0.0/16 is the APIPA link-local range, not a private range.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q57",
+      "type": "multiple_choice",
+      "question": "What does NAT (Network Address Translation) do?",
+      "options": [
+        "A) Encrypts network traffic between two hosts",
+        "B) Translates private IP addresses to public IP addresses for internet communication",
+        "C) Assigns IP addresses to devices automatically",
+        "D) Resolves domain names to IP addresses"
+      ],
+      "correctAnswer": "B) Translates private IP addresses to public IP addresses for internet communication",
+      "explanation": "NAT allows multiple devices with private IPs to share a single public IP for internet access. The NAT device (typically a router) rewrites source/destination addresses in packet headers.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q58",
+      "type": "multiple_choice",
+      "question": "What is the TCP three-way handshake sequence?",
+      "options": [
+        "A) ACK, SYN, FIN",
+        "B) SYN, SYN-ACK, ACK",
+        "C) HELLO, OK, START",
+        "D) SYN, ACK, DATA"
+      ],
+      "correctAnswer": "B) SYN, SYN-ACK, ACK",
+      "explanation": "The client sends SYN (synchronize), the server responds with SYN-ACK (synchronize-acknowledge), and the client completes with ACK (acknowledge). This establishes sequence numbers and connection state.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q59",
+      "type": "multiple_choice",
+      "question": "Which command captures and analyzes network packets on a Linux system?",
+      "options": [
+        "A) netstat",
+        "B) tcpdump",
+        "C) nslookup",
+        "D) ifconfig"
+      ],
+      "correctAnswer": "B) tcpdump",
+      "explanation": "tcpdump is a packet capture and analysis tool. Example: 'tcpdump -i eth0 port 80' captures HTTP traffic on eth0. Wireshark provides a GUI alternative for packet analysis.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q60",
+      "type": "true_false",
+      "question": "A firewall rule that uses 'iptables -A INPUT -p tcp --dport 22 -j DROP' will block all incoming SSH connections.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "This rule appends (-A) to the INPUT chain, matching TCP packets destined for port 22 (SSH) and drops them. However, existing established connections may not be affected depending on connection tracking rules.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q61",
+      "type": "multiple_choice",
+      "question": "How many usable host addresses are in a /28 subnet?",
+      "options": ["A) 14", "B) 16", "C) 28", "D) 30"],
+      "correctAnswer": "A) 14",
+      "explanation": "A /28 subnet has 32-28=4 host bits, giving 2^4=16 addresses. Subtract 2 for the network address and broadcast address, leaving 14 usable host addresses.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q62",
+      "type": "multiple_choice",
+      "question": "What does the 'traceroute' (or 'tracepath') command show?",
+      "options": [
+        "A) Active TCP connections on the local machine",
+        "B) The path packets take from source to destination, showing each hop and its latency",
+        "C) DNS resolution history for a domain",
+        "D) Open ports on a remote host"
+      ],
+      "correctAnswer": "B) The path packets take from source to destination, showing each hop and its latency",
+      "explanation": "traceroute sends packets with incrementing TTL values. Each router decrements the TTL and sends back a time-exceeded message when it hits zero, revealing the network path hop by hop.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q63",
+      "type": "multiple_choice",
+      "question": "Which HTTP method is idempotent and used to update or replace an entire resource?",
+      "options": ["A) POST", "B) PATCH", "C) PUT", "D) DELETE"],
+      "correctAnswer": "C) PUT",
+      "explanation": "PUT replaces the entire resource and is idempotent (multiple identical requests have the same effect). POST creates resources and is not idempotent. PATCH partially updates. DELETE is also idempotent.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q64",
+      "type": "multiple_choice",
+      "question": "What is the purpose of a reverse proxy like Nginx in front of an application server?",
+      "options": [
+        "A) To replace the application server entirely",
+        "B) To provide SSL termination, load balancing, caching, and protection for backend servers",
+        "C) To compile application code before deployment",
+        "D) To store database backups"
+      ],
+      "correctAnswer": "B) To provide SSL termination, load balancing, caching, and protection for backend servers",
+      "explanation": "A reverse proxy sits between clients and backend servers. It handles SSL/TLS, distributes traffic across multiple servers, caches responses, and hides internal infrastructure from the internet.",
+      "difficulty": "advanced",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q65",
+      "type": "multiple_choice",
+      "question": "What is the correct order of DNS resolution steps when you type 'example.com' in a browser?",
+      "options": [
+        "A) Root server > TLD server > Authoritative server",
+        "B) Browser cache > OS cache > Resolver > Root > TLD > Authoritative",
+        "C) ISP > Browser > Application",
+        "D) TLD server > Root server > Local cache"
+      ],
+      "correctAnswer": "B) Browser cache > OS cache > Resolver > Root > TLD > Authoritative",
+      "explanation": "DNS resolution checks caches first (browser, then OS), then queries the recursive resolver, which contacts root servers (.com), TLD servers (example.com), then authoritative nameservers for the final IP.",
+      "difficulty": "advanced",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q66",
+      "type": "multiple_choice",
+      "question": "In the context of network troubleshooting, what does a 'connection refused' error typically indicate versus a 'connection timed out' error?",
+      "options": [
+        "A) Both mean the server is down",
+        "B) 'Refused' means the host is reachable but no service is listening on that port; 'timed out' means the host is unreachable or a firewall is silently dropping packets",
+        "C) 'Refused' is a DNS error; 'timed out' is a routing error",
+        "D) They are the same error with different names"
+      ],
+      "correctAnswer": "B) 'Refused' means the host is reachable but no service is listening on that port; 'timed out' means the host is unreachable or a firewall is silently dropping packets",
+      "explanation": "Connection refused (RST packet) means the host received the SYN but nothing is listening. Timeout means packets are not getting through at all, usually due to a firewall DROP rule or network issue.",
+      "difficulty": "advanced",
+      "module": "networking"
+    },
+    {
+      "id": "a-found-q67",
+      "type": "multiple_choice",
+      "question": "What is the correct way to read a file in Python using a context manager?",
+      "options": [
+        "A) f = open('file.txt'); data = f.read()",
+        "B) with open('file.txt', 'r') as f: data = f.read()",
+        "C) data = read('file.txt')",
+        "D) import file; data = file.load('file.txt')"
+      ],
+      "correctAnswer": "B) with open('file.txt', 'r') as f: data = f.read()",
+      "explanation": "The 'with' statement (context manager) ensures the file is properly closed even if an exception occurs. Option A works but risks resource leaks if you forget to call f.close().",
+      "difficulty": "beginner",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q68",
+      "type": "multiple_choice",
+      "question": "Which Python module is recommended for filesystem path manipulation?",
+      "options": [
+        "A) os.path",
+        "B) pathlib",
+        "C) sys",
+        "D) shutil"
+      ],
+      "correctAnswer": "B) pathlib",
+      "explanation": "pathlib (introduced in Python 3.4) provides an object-oriented interface for paths. Path objects support / operator for joining, .exists(), .read_text(), and more. It is preferred over os.path for new code.",
+      "difficulty": "beginner",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q69",
+      "type": "multiple_choice",
+      "question": "What does the following Python code do: json.dumps(data, indent=2)?",
+      "options": [
+        "A) Reads JSON from a file",
+        "B) Converts a Python object to a formatted JSON string with 2-space indentation",
+        "C) Parses a JSON string into a Python dictionary",
+        "D) Validates that data is valid JSON"
+      ],
+      "correctAnswer": "B) Converts a Python object to a formatted JSON string with 2-space indentation",
+      "explanation": "json.dumps() serializes a Python object to a JSON string. The 'indent' parameter adds pretty-printing. json.loads() does the reverse (string to object). json.dump()/json.load() work with file objects.",
+      "difficulty": "beginner",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q70",
+      "type": "multiple_choice",
+      "question": "How do you make an HTTP GET request with error handling using the requests library?",
+      "options": [
+        "A) requests.get(url).json()",
+        "B) response = requests.get(url); response.raise_for_status()",
+        "C) urllib.open(url)",
+        "D) http.get(url, verify=True)"
+      ],
+      "correctAnswer": "B) response = requests.get(url); response.raise_for_status()",
+      "explanation": "response.raise_for_status() raises an HTTPError for 4xx/5xx responses. Without it, bad status codes pass silently. Always check status codes or use raise_for_status() in production code.",
+      "difficulty": "beginner",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q71",
+      "type": "multiple_choice",
+      "question": "What is the recommended way to run external commands from Python?",
+      "options": [
+        "A) os.system('command')",
+        "B) subprocess.run(['command', 'arg'], capture_output=True, text=True, check=True)",
+        "C) exec('command')",
+        "D) os.popen('command').read()"
+      ],
+      "correctAnswer": "B) subprocess.run(['command', 'arg'], capture_output=True, text=True, check=True)",
+      "explanation": "subprocess.run() is the modern, recommended approach. Using a list avoids shell injection. capture_output captures stdout/stderr, text=True returns strings, check=True raises on non-zero exit.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q72",
+      "type": "true_false",
+      "question": "In Python, using 'except Exception as e' is preferred over bare 'except:' because bare except catches SystemExit and KeyboardInterrupt, making the program hard to terminate.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "Bare 'except:' catches all exceptions including SystemExit (raised by sys.exit()) and KeyboardInterrupt (Ctrl+C). 'except Exception' catches all normal errors while allowing the program to be terminated properly.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q73",
+      "type": "multiple_choice",
+      "question": "Which Python regex function finds ALL non-overlapping matches in a string?",
+      "options": [
+        "A) re.match()",
+        "B) re.search()",
+        "C) re.findall()",
+        "D) re.split()"
+      ],
+      "correctAnswer": "C) re.findall()",
+      "explanation": "re.findall() returns a list of all non-overlapping matches. re.match() only checks at the start of the string. re.search() finds the first match anywhere. re.finditer() returns match objects for iteration.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q74",
+      "type": "multiple_choice",
+      "question": "What is the correct way to read a CSV file into a list of dictionaries in Python?",
+      "options": [
+        "A) csv.reader(open('data.csv'))",
+        "B) with open('data.csv') as f: rows = list(csv.DictReader(f))",
+        "C) pandas.read_csv('data.csv').to_list()",
+        "D) open('data.csv').readlines().split(',')"
+      ],
+      "correctAnswer": "B) with open('data.csv') as f: rows = list(csv.DictReader(f))",
+      "explanation": "csv.DictReader uses the first row as headers and returns each row as a dictionary. This gives you rows like {'name': 'Alice', 'age': '30'}, making field access clear and maintainable.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q75",
+      "type": "multiple_choice",
+      "question": "How do you list all S3 buckets using boto3?",
+      "options": [
+        "A) boto3.s3.list()",
+        "B) s3 = boto3.client('s3'); s3.list_buckets()",
+        "C) aws.s3.get_buckets()",
+        "D) boto3.resource('s3').all_buckets()"
+      ],
+      "correctAnswer": "B) s3 = boto3.client('s3'); s3.list_buckets()",
+      "explanation": "boto3 has two interfaces: client (low-level, maps to AWS API calls) and resource (high-level, object-oriented). list_buckets() on the client returns all S3 buckets with metadata.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q76",
+      "type": "multiple_choice",
+      "question": "What does the Click decorator @click.option('--count', default=1, help='Number of runs') do?",
+      "options": [
+        "A) Creates a required positional argument",
+        "B) Adds an optional command-line flag with a default value and help text",
+        "C) Defines an environment variable",
+        "D) Creates a configuration file entry"
+      ],
+      "correctAnswer": "B) Adds an optional command-line flag with a default value and help text",
+      "explanation": "Click's @click.option decorator defines optional CLI parameters. 'default=1' makes it optional with a fallback. 'help' provides documentation shown with --help. Click handles type conversion and validation.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q77",
+      "type": "multiple_choice",
+      "question": "What is the correct way to use Python's logging module instead of print statements?",
+      "options": [
+        "A) print('Error:', error)",
+        "B) logging.basicConfig(level=logging.INFO); logging.info('message')",
+        "C) sys.stderr.write('error')",
+        "D) log = open('app.log', 'w'); log.write('message')"
+      ],
+      "correctAnswer": "B) logging.basicConfig(level=logging.INFO); logging.info('message')",
+      "explanation": "The logging module provides severity levels (DEBUG, INFO, WARNING, ERROR, CRITICAL), configurable outputs, formatting, and filtering. It is far superior to print() for production code.",
+      "difficulty": "beginner",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q78",
+      "type": "true_false",
+      "question": "In pytest, functions prefixed with 'test_' are automatically discovered and run as test cases without any registration.",
+      "options": ["A) True", "B) False"],
+      "correctAnswer": "A) True",
+      "explanation": "pytest discovers tests by convention: files named test_*.py or *_test.py, and functions/methods prefixed with test_. No test suite registration, decorators, or base classes are needed.",
+      "difficulty": "beginner",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q79",
+      "type": "multiple_choice",
+      "question": "What does 'subprocess.run(cmd, check=True)' do when the command exits with a non-zero status?",
+      "options": [
+        "A) Returns None",
+        "B) Prints a warning but continues",
+        "C) Raises a CalledProcessError exception",
+        "D) Retries the command automatically"
+      ],
+      "correctAnswer": "C) Raises a CalledProcessError exception",
+      "explanation": "check=True causes subprocess.run() to raise subprocess.CalledProcessError if the process returns a non-zero exit code. Without check=True, failures pass silently, which is a common source of bugs.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q80",
+      "type": "multiple_choice",
+      "question": "Which Python library provides a high-level interface for interacting with Docker containers?",
+      "options": [
+        "A) dockerpy",
+        "B) docker (Docker SDK for Python)",
+        "C) container-lib",
+        "D) pycontainer"
+      ],
+      "correctAnswer": "B) docker (Docker SDK for Python)",
+      "explanation": "The 'docker' package (Docker SDK for Python) provides docker.from_env() to connect, client.containers.run() to start containers, and full API access for images, networks, and volumes.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q81",
+      "type": "multiple_choice",
+      "question": "How do you safely load a YAML configuration file in Python?",
+      "options": [
+        "A) yaml.load(f)",
+        "B) yaml.safe_load(f)",
+        "C) yaml.parse(f)",
+        "D) yaml.read(f)"
+      ],
+      "correctAnswer": "B) yaml.safe_load(f)",
+      "explanation": "yaml.safe_load() only parses standard YAML tags and is safe from code execution attacks. yaml.load() without a Loader can execute arbitrary Python code embedded in YAML, making it a serious security risk.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q82",
+      "type": "multiple_choice",
+      "question": "What does Path('/app/logs').glob('**/*.log') return?",
+      "options": [
+        "A) A single file path matching the pattern",
+        "B) A generator of all .log files recursively under /app/logs",
+        "C) A string with the glob pattern expanded",
+        "D) The count of matching files"
+      ],
+      "correctAnswer": "B) A generator of all .log files recursively under /app/logs",
+      "explanation": "pathlib's glob() with ** performs recursive matching. It returns a generator of Path objects for all .log files in /app/logs and all its subdirectories. Use rglob('*.log') as a shorthand.",
+      "difficulty": "intermediate",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q83",
+      "type": "multiple_choice",
+      "question": "What is the purpose of a pytest fixture?",
+      "options": [
+        "A) To fix broken test files",
+        "B) To provide reusable setup/teardown logic and test data that is injected into test functions automatically",
+        "C) To skip tests that are not ready",
+        "D) To format test output"
+      ],
+      "correctAnswer": "B) To provide reusable setup/teardown logic and test data that is injected into test functions automatically",
+      "explanation": "Fixtures are functions decorated with @pytest.fixture that provide test dependencies. pytest injects them by matching parameter names. They support scopes (function, class, module, session) and automatic teardown via yield.",
+      "difficulty": "advanced",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q84",
+      "type": "multiple_choice",
+      "question": "What does the Python expression 're.sub(r'\\s+', ' ', text).strip()' accomplish?",
+      "options": [
+        "A) Removes all whitespace from text",
+        "B) Collapses multiple whitespace characters into single spaces and trims leading/trailing whitespace",
+        "C) Adds spaces between words",
+        "D) Converts tabs to spaces"
+      ],
+      "correctAnswer": "B) Collapses multiple whitespace characters into single spaces and trims leading/trailing whitespace",
+      "explanation": "re.sub(r'\\s+', ' ', text) replaces one or more whitespace characters (spaces, tabs, newlines) with a single space. .strip() removes leading and trailing whitespace. This normalizes messy text input.",
+      "difficulty": "advanced",
+      "module": "python-automation"
+    },
+    {
+      "id": "a-found-q85",
+      "type": "multiple_choice",
+      "question": "Which ss command flags show all listening TCP ports with process names in numeric format?",
+      "options": [
+        "A) ss -a",
+        "B) ss -tlnp",
+        "C) ss -u",
+        "D) ss -r"
+      ],
+      "correctAnswer": "B) ss -tlnp",
+      "explanation": "ss -tlnp: -t (TCP), -l (listening), -n (numeric, don't resolve names), -p (show process). This is the go-to command for checking which services are bound to which ports.",
+      "difficulty": "intermediate",
+      "module": "networking"
+    }
+  ]
+}

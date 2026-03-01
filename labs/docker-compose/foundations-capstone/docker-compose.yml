@@ -1,0 +1,97 @@
+version: "3.8"
+
+# =============================================================================
+# Foundations Capstone Lab — Server Monitoring System
+# =============================================================================
+# This lab provides a development workspace with pre-installed tools, plus
+# target services (web app, database) for monitoring and network checks.
+#
+# Usage:
+#   docker compose up -d
+#   docker exec -it devops-capstone-monitor bash
+#
+# Services:
+#   monitor  — Development workspace (Python 3.11, Bash, networking tools)
+#   webapp   — Nginx web server (HTTP endpoint to monitor)
+#   database — Redis server (TCP port to monitor)
+#
+# Network:
+#   All services are on the "monitoring" bridge network. Inside the monitor
+#   container, reach other services by container name:
+#     curl http://devops-capstone-webapp/
+#     redis-cli -h devops-capstone-database ping
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Monitor — Development Workspace
+  # ---------------------------------------------------------------------------
+  # Your main workspace. Includes Python 3.11, Bash, and all system tools
+  # needed for the capstone project. The /workspace directory is mounted
+  # from the host so your work persists across container restarts.
+  # ---------------------------------------------------------------------------
+  monitor:
+    image: python:3.11-slim
+    container_name: devops-capstone-monitor
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq
+          procps
+          sysstat
+          curl
+          net-tools
+          dnsutils
+          bc
+          jq
+          git
+          vim
+          >/dev/null 2>&1 &&
+        pip install -q requests pyyaml psutil rich &&
+        echo '========================================' &&
+        echo '  Capstone Lab Ready.' &&
+        echo '  Run your project from /workspace' &&
+        echo '========================================' &&
+        /bin/bash
+      "
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - monitoring
+
+  # ---------------------------------------------------------------------------
+  # Web App — Nginx (HTTP endpoint target)
+  # ---------------------------------------------------------------------------
+  # A simple Nginx server that serves the default welcome page. Use this as
+  # an HTTP endpoint to monitor in your project. Reachable at:
+  #   http://devops-capstone-webapp/
+  # ---------------------------------------------------------------------------
+  webapp:
+    image: nginx:alpine
+    container_name: devops-capstone-webapp
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Database — Redis (TCP port target)
+  # ---------------------------------------------------------------------------
+  # A Redis server for testing port availability checks. Reachable at:
+  #   devops-capstone-database:6379
+  # ---------------------------------------------------------------------------
+  database:
+    image: redis:alpine
+    container_name: devops-capstone-database
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge

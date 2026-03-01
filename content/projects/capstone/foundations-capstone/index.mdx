@@ -1,0 +1,600 @@
+---
+title: "Server Monitoring and Alerting System"
+description: "Build a complete server monitoring system that checks health metrics, sends alerts, and presents a dashboard — using everything you've learned in the Foundations path."
+xpReward: 500
+estimatedMinutes: 180
+prerequisites:
+  - linux-fundamentals
+  - shell-scripting
+  - git-version-control
+  - networking-essentials
+  - python-for-devops
+  - configuration-management-basics
+---
+
+# Server Monitoring and Alerting System
+
+## Capstone Project — Foundations Path
+
+Congratulations on reaching the capstone project for the Foundations path. This is
+where everything comes together. Over the previous modules you learned how to
+navigate Linux, write shell scripts, manage code with Git, understand networking,
+and automate tasks with Python. Now you will combine all of those skills into a
+single, cohesive project: a **server monitoring and alerting system** that you
+could genuinely use in a production environment.
+
+---
+
+## What You Will Build
+
+You will build a monitoring system that collects health metrics, evaluates them
+against configurable thresholds, sends alerts, and presents data in a dashboard.
+The system has five major components:
+
+1. **A Bash monitoring script** that collects raw system metrics (CPU, memory,
+   disk, network) and outputs structured JSON data.
+2. **A Python automation layer** that reads the metric data, manages alert logic,
+   stores historical metrics, and generates reports.
+3. **Network health checks** that verify HTTP endpoints, DNS resolution, port
+   availability, and response times.
+4. **A terminal-based dashboard** that displays current and historical metrics
+   in a human-readable format.
+5. **A Git repository** with clean history, proper branching, documentation,
+   and conventional commit messages.
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Server Monitoring System                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────┐    ┌──────────────┐    ┌───────────────────────┐ │
+│  │  monitor.sh   │───▶│  metrics/     │◀───│  monitor.py           │ │
+│  │              │    │  (JSON files) │    │                       │ │
+│  │  - CPU       │    └──────────────┘    │  - MetricCollector    │ │
+│  │  - Memory    │                         │  - AlertManager       │ │
+│  │  - Disk      │    ┌──────────────┐    │  - ReportGenerator    │ │
+│  │  - Network   │    │  config.yaml  │───▶│  - NetworkChecker     │ │
+│  └──────────────┘    └──────────────┘    │  - Dashboard          │ │
+│                                           └───────┬───────────────┘ │
+│       ┌───────────────────────────────────────────┘                 │
+│       │                                                             │
+│       ▼                                                             │
+│  ┌──────────┐   ┌──────────────┐   ┌────────────────────────────┐ │
+│  │ Console   │   │ Webhook      │   │ Reports                    │ │
+│  │ Alerts    │   │ (Slack)      │   │ (HTML / Terminal)          │ │
+│  └──────────┘   └──────────────┘   └────────────────────────────┘ │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Network Health Checks                                       │   │
+│  │  - HTTP endpoint monitoring    - DNS resolution checks       │   │
+│  │  - Port availability scans     - Response time tracking      │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Terminal Dashboard                                          │   │
+│  │  CPU: 23%  |  Memory: 61%  |  Disk: 45%  |  Net: 12MB/s    │   │
+│  │  Alerts: None — All systems operational                      │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│  Cron: */1 * * * * /workspace/monitor.sh >> /workspace/metrics/... │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Project Phases
+
+This project is broken into five phases. Complete them in order. Each phase
+builds on the previous one and maps directly to a module you have already
+finished.
+
+---
+
+### Phase 1: Infrastructure Setup
+
+**Skills Used:** Linux, Git
+
+In this phase you set up the project foundation. A clean repository with a
+logical structure, a virtual environment for Python dependencies, and
+documentation that another engineer could follow to get started.
+
+#### Tasks
+
+1. **Initialize a Git repository** with an appropriate `.gitignore` file for
+   Python projects. Make your first commit with the project skeleton.
+
+2. **Create the directory structure:**
+   ```
+   server-monitor/
+   ├── monitor.sh
+   ├── monitor.py
+   ├── config.yaml
+   ├── requirements.txt
+   ├── .gitignore
+   ├── README.md
+   ├── metrics/          # stored metric snapshots
+   ├── reports/          # generated reports
+   ├── logs/             # application logs
+   └── tests/            # test scripts
+   ```
+
+3. **Set up a Python virtual environment:**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+4. **Write a README.md** that includes:
+   - Project title and description
+   - Prerequisites
+   - Installation and setup instructions
+   - Usage examples
+   - Project structure explanation
+   - Configuration guide
+
+5. **Establish a branching strategy.** Work on each phase in its own branch
+   (e.g., `phase-1/infrastructure`, `phase-2/monitoring-scripts`) and merge
+   into `main` with descriptive merge commits or pull request descriptions.
+
+#### Acceptance Criteria
+
+- Repository has at least five commits with meaningful messages.
+- `.gitignore` prevents committing `venv/`, `__pycache__/`, `.env`, and IDE files.
+- README is clear enough that a peer could set up the project from scratch.
+- Virtual environment works and all dependencies install cleanly.
+
+---
+
+### Phase 2: System Monitoring Scripts
+
+**Skills Used:** Shell Scripting, Linux
+
+In this phase you write the core data-collection layer: a Bash script that
+gathers system metrics and outputs structured JSON. This is the heartbeat of
+your monitoring system.
+
+#### Tasks
+
+1. **Implement `check_cpu()`** — Collect CPU usage percentage. Use tools such
+   as `top`, `mpstat`, or read from `/proc/stat`. Return a JSON object:
+   ```json
+   {
+     "metric": "cpu",
+     "value": 23.5,
+     "unit": "percent",
+     "timestamp": "2026-03-01T14:30:00Z"
+   }
+   ```
+
+2. **Implement `check_memory()`** — Collect total, used, and available memory.
+   Use `free` or read from `/proc/meminfo`. Return a JSON object:
+   ```json
+   {
+     "metric": "memory",
+     "total_mb": 8192,
+     "used_mb": 5120,
+     "available_mb": 3072,
+     "percent": 62.5,
+     "timestamp": "2026-03-01T14:30:00Z"
+   }
+   ```
+
+3. **Implement `check_disk()`** — Collect disk usage for mounted filesystems.
+   Use `df`. Return a JSON object per mount point.
+
+4. **Implement `check_network()`** — Collect bytes sent/received and active
+   connections. Use `/proc/net/dev` or `ss`. Return a JSON object.
+
+5. **Combine all checks** into a single JSON document written to
+   `metrics/metric-YYYY-MM-DD-HHMMSS.json`.
+
+6. **Add error handling** so the script does not crash if a tool is missing.
+   Log warnings to stderr and continue with the remaining checks.
+
+7. **Set up a cron job** that runs the script every minute:
+   ```
+   * * * * * /workspace/monitor.sh
+   ```
+
+#### Acceptance Criteria
+
+- Running `./monitor.sh` produces valid JSON to stdout (verify with `jq`).
+- Each metric includes a UTC timestamp.
+- The script handles missing commands gracefully (warning, not crash).
+- Metric files accumulate in `metrics/` with unique filenames.
+- ShellCheck reports no errors or warnings for the script.
+
+---
+
+### Phase 3: Python Automation
+
+**Skills Used:** Python for DevOps
+
+In this phase you build the Python layer that consumes the metric data, applies
+alerting logic, stores history, and generates reports.
+
+#### Tasks
+
+1. **Implement the `MetricCollector` class:**
+   - Load configuration from `config.yaml`.
+   - Read the latest metric file from `metrics/`.
+   - Optionally invoke `monitor.sh` directly via `subprocess`.
+   - Parse JSON data into Python objects.
+
+2. **Implement the `AlertManager` class:**
+   - Compare metric values against thresholds from `config.yaml`.
+   - Support multiple alert channels: `console` (print to terminal) and
+     `webhook` (HTTP POST to a Slack-compatible URL).
+   - Format alert messages with severity, metric name, current value,
+     and threshold.
+   - Example alert format:
+     ```
+     [CRITICAL] CPU usage at 92.3% (threshold: 80%)
+     [WARNING]  Memory usage at 84.1% (threshold: 85%)
+     ```
+   - Implement alert cooldown so the same alert is not sent repeatedly
+     within a configurable window (e.g., 5 minutes).
+
+3. **Implement the `ReportGenerator` class:**
+   - Read all metric files from `metrics/`.
+   - Compute summary statistics: min, max, average for each metric.
+   - Generate a terminal-formatted report.
+   - Generate an HTML report saved to `reports/report-YYYY-MM-DD.html`.
+   - Include a trend indicator: is each metric increasing, decreasing,
+     or stable compared to the previous collection period?
+
+4. **Implement the main loop:**
+   ```python
+   def main():
+       config = load_config("config.yaml")
+       collector = MetricCollector(config)
+       alerter = AlertManager(config)
+
+       metrics = collector.collect()
+       alerts = alerter.evaluate(metrics)
+       alerter.send(alerts)
+   ```
+
+5. **Add logging** using Python's `logging` module. Log to both console
+   and a file in `logs/monitor.log`. Use appropriate log levels.
+
+6. **Add error handling** with try/except blocks. The script should never
+   crash unexpectedly. All exceptions should be logged.
+
+#### Acceptance Criteria
+
+- `python3 monitor.py` runs without errors.
+- Alerts are printed to the console when thresholds are exceeded.
+- Webhook alerts are sent as HTTP POST with a JSON payload.
+- Reports are generated in both terminal and HTML format.
+- All functions have docstrings.
+- Logging captures key events (startup, metric collection, alerts, errors).
+
+---
+
+### Phase 4: Network Health Checks
+
+**Skills Used:** Networking
+
+In this phase you add network-level monitoring. Your system will check whether
+HTTP endpoints are reachable, DNS names resolve correctly, specific ports are
+open, and response times are within acceptable limits.
+
+#### Tasks
+
+1. **Implement HTTP endpoint monitoring:**
+   - Read endpoint list from `config.yaml`.
+   - Send an HTTP GET request to each endpoint.
+   - Record: status code, response time, whether it matches the expected
+     status (200 by default).
+   - Handle timeouts and connection errors gracefully.
+   ```python
+   def check_endpoint(url, timeout=5):
+       """Check if an HTTP endpoint is healthy."""
+       # Returns: {"url": ..., "status": ..., "response_time_ms": ..., "healthy": True/False}
+   ```
+
+2. **Implement DNS resolution monitoring:**
+   - Resolve a list of hostnames.
+   - Record resolution time and resolved IP addresses.
+   - Detect DNS failures and alert.
+   ```python
+   def check_dns(hostname):
+       """Check if a hostname resolves correctly."""
+       # Returns: {"hostname": ..., "resolved_ips": [...], "resolution_time_ms": ..., "success": True/False}
+   ```
+
+3. **Implement port availability checks:**
+   - Attempt a TCP connection to specified host:port combinations.
+   - Record whether the port is open and how long the connection took.
+   ```python
+   def check_port(host, port, timeout=3):
+       """Check if a TCP port is open."""
+       # Returns: {"host": ..., "port": ..., "open": True/False, "response_time_ms": ...}
+   ```
+
+4. **Implement response time tracking:**
+   - Store response times over time.
+   - Calculate average, p95, and p99 response times.
+   - Alert when response times exceed a configurable threshold.
+
+5. **Integrate network checks into the main monitoring loop.** Network check
+   results should appear in the metric output and in the dashboard.
+
+#### Acceptance Criteria
+
+- HTTP checks correctly identify up/down endpoints.
+- DNS resolution failures are detected and reported.
+- Port checks work for both open and closed ports.
+- Response times are tracked and stored historically.
+- Network check results are included in generated reports.
+
+---
+
+### Phase 5: Dashboard and Reporting
+
+**Skills Used:** Integration of all modules
+
+In this phase you bring everything together into a terminal-based dashboard
+and automated reporting system.
+
+#### Tasks
+
+1. **Build a terminal dashboard** that displays:
+   - Current system metrics (CPU, memory, disk, network) with color coding:
+     - Green: below 60% of threshold
+     - Yellow: between 60% and 90% of threshold
+     - Red: above 90% of threshold or exceeding threshold
+   - Network health check status for each endpoint.
+   - Recent alerts (last 10).
+   - Uptime and time since last check.
+   - Use the `rich` library for formatting, or implement plain-text
+     formatting if you prefer.
+
+2. **Implement auto-refresh** so the dashboard updates at a configurable
+   interval (default: every 60 seconds).
+
+3. **Generate daily summary reports** that include:
+   - Metric averages, peaks, and lows for the day.
+   - Number of alerts triggered and their severities.
+   - Endpoint availability percentage.
+   - Trend analysis: which metrics are trending upward?
+
+4. **Generate weekly summary reports** that include:
+   - Day-over-day comparison.
+   - Worst-performing metrics.
+   - Recommendations (e.g., "Disk usage has increased 5% this week;
+     consider cleanup").
+
+5. **Add command-line arguments** using `argparse`:
+   ```
+   python3 monitor.py                    # Run single collection + alert check
+   python3 monitor.py --dashboard        # Launch live dashboard
+   python3 monitor.py --report daily     # Generate daily report
+   python3 monitor.py --report weekly    # Generate weekly report
+   python3 monitor.py --check-network    # Run network checks only
+   ```
+
+#### Acceptance Criteria
+
+- Dashboard renders in the terminal with color-coded metrics.
+- Dashboard refreshes automatically.
+- Daily and weekly reports are generated on demand.
+- CLI arguments work as documented.
+- All components integrate without errors.
+
+---
+
+## Expected File Structure
+
+When you are finished, your project should look like this:
+
+```
+server-monitor/
+├── .git/
+├── .gitignore
+├── README.md
+├── requirements.txt
+├── config.yaml
+├── monitor.sh                # Phase 2: Bash metric collection
+├── monitor.py                # Phase 3-5: Python monitoring system
+├── metrics/                  # Auto-generated metric snapshots
+│   ├── metric-2026-03-01-143000.json
+│   └── ...
+├── reports/                  # Generated reports
+│   ├── report-2026-03-01.html
+│   └── ...
+├── logs/                     # Application logs
+│   └── monitor.log
+└── tests/                    # Test scripts
+    ├── test_monitor.sh       # Bash script tests
+    └── test_monitor.py       # Python unit tests
+```
+
+---
+
+## Rubric
+
+Your project will be evaluated across five categories. Each category is worth
+up to 100 points for a total of 500 XP.
+
+### 1. Code Quality (100 XP)
+
+| Criteria                              | Points |
+|---------------------------------------|--------|
+| Bash script passes ShellCheck         | 20     |
+| Python code follows PEP 8            | 20     |
+| Functions and classes have docstrings | 15     |
+| No hardcoded values (uses config)     | 15     |
+| DRY principle — no duplicated logic   | 15     |
+| Meaningful variable and function names| 15     |
+
+### 2. Git History (100 XP)
+
+| Criteria                              | Points |
+|---------------------------------------|--------|
+| At least 15 meaningful commits        | 25     |
+| Conventional commit messages          | 20     |
+| Feature branches for each phase       | 20     |
+| Clean merge history                   | 15     |
+| `.gitignore` is comprehensive         | 10     |
+| No secrets or large files committed   | 10     |
+
+### 3. Documentation (100 XP)
+
+| Criteria                              | Points |
+|---------------------------------------|--------|
+| README covers setup and usage         | 30     |
+| Code comments explain "why" not "what"| 25     |
+| Configuration file is documented      | 20     |
+| Architecture decisions are explained  | 15     |
+| Troubleshooting section in README     | 10     |
+
+### 4. Error Handling and Resilience (100 XP)
+
+| Criteria                              | Points |
+|---------------------------------------|--------|
+| Bash script handles missing commands  | 20     |
+| Python handles file I/O errors        | 20     |
+| Network checks handle timeouts        | 20     |
+| Alert system handles webhook failures | 15     |
+| Logging captures all error conditions | 15     |
+| System recovers from partial failures | 10     |
+
+### 5. Feature Completeness (100 XP)
+
+| Criteria                              | Points |
+|---------------------------------------|--------|
+| All four system metrics collected     | 20     |
+| Alert system works (console + webhook)| 20     |
+| Network health checks functional      | 20     |
+| Dashboard displays live data          | 15     |
+| Reports generated (daily + weekly)    | 15     |
+| CLI arguments work as specified       | 10     |
+
+---
+
+## Grading Tiers
+
+| Tier       | XP Range  | Description                                                  |
+|------------|-----------|--------------------------------------------------------------|
+| Exemplary  | 450 - 500 | All features complete, clean code, excellent Git history     |
+| Proficient | 350 - 449 | Most features complete, minor issues in code quality or docs |
+| Developing | 250 - 349 | Core features work but gaps in networking or reporting        |
+| Beginning  | 100 - 249 | Basic metric collection works, significant gaps elsewhere     |
+| Incomplete | 0 - 99    | Project does not run or is missing multiple phases            |
+
+---
+
+## Hints and Tips
+
+### Getting Started
+
+Do not try to build everything at once. Follow the phases in order. Get each
+phase working and committed before moving on.
+
+### Bash Script Tips
+
+- Use `date -u +"%Y-%m-%dT%H:%M:%SZ"` for UTC timestamps.
+- Use `jq` for JSON formatting if available; fall back to manual formatting.
+- Test with `./monitor.sh | jq .` to verify JSON validity.
+- Use `set -euo pipefail` at the top of your script for safety.
+
+### Python Tips
+
+- Use `pathlib.Path` instead of string concatenation for file paths.
+- Use `json.dumps(data, indent=2)` for readable JSON output.
+- Use `datetime.utcnow().isoformat()` for timestamps.
+- The `rich` library makes terminal dashboards easy with `Console`, `Table`,
+  and `Panel`.
+
+### Networking Tips
+
+- Use `requests.get(url, timeout=5)` with a timeout to prevent hangs.
+- Use `socket.getaddrinfo()` for DNS resolution.
+- Use `socket.create_connection((host, port), timeout=3)` for port checks.
+
+### Common Mistakes to Avoid
+
+1. **Committing the virtual environment.** Add `venv/` to `.gitignore`.
+2. **Hardcoding thresholds.** Always read from `config.yaml`.
+3. **Not handling errors.** Wrap every external call in error handling.
+4. **Giant commits.** Make small, focused commits per feature.
+5. **No testing.** Write at least a JSON output test and a threshold test.
+
+---
+
+## Lab Environment
+
+This project includes a Docker-based lab with three containers:
+**monitor** (your development workspace with Python 3.11 and system tools),
+**webapp** (Nginx for HTTP endpoint monitoring), and
+**database** (Redis for port availability checks).
+
+### Starting the Lab
+
+```bash
+cd labs/docker-compose/foundations-capstone
+docker compose up -d
+docker exec -it devops-capstone-monitor bash
+```
+
+Inside the lab, services are reachable by container name:
+
+| Service  | Hostname                      | Port |
+|----------|-------------------------------|------|
+| Web App  | devops-capstone-webapp        | 80   |
+| Database | devops-capstone-database      | 6379 |
+
+---
+
+## Submission Guide
+
+When your project is complete, verify the following checklist before submitting:
+
+### Pre-Submission Checklist
+
+- [ ] All five phases are implemented and functional.
+- [ ] `./monitor.sh` produces valid JSON output.
+- [ ] `python3 monitor.py` runs without errors.
+- [ ] `python3 monitor.py --dashboard` shows a formatted dashboard.
+- [ ] `python3 monitor.py --report daily` generates a report.
+- [ ] `python3 monitor.py --check-network` runs network checks.
+- [ ] Git history has at least 15 commits across feature branches.
+- [ ] README explains setup, usage, and configuration.
+- [ ] No secrets, virtual environments, or IDE files in the repository.
+- [ ] ShellCheck passes on `monitor.sh`.
+- [ ] Python code follows PEP 8 conventions.
+
+### How to Submit
+
+1. Push your repository to your GitHub account (public or shared access).
+2. Submit the repository URL through the learning platform.
+3. Include a short write-up (2-3 paragraphs) describing what you found most
+   challenging, what you would add with more time, and how you would adapt
+   this for production.
+
+---
+
+## Stretch Goals
+
+If you finish early or want to push further, consider these extensions:
+
+- **Persistent storage:** Store metrics in SQLite instead of JSON files.
+- **Email alerts:** Send alerts via SMTP in addition to console and webhook.
+- **Metric visualization:** Generate charts with `matplotlib` in reports.
+- **Config validation:** Validate `config.yaml` with a schema on startup.
+- **Systemd service:** Run the monitor as a background systemd service.
+- **Multi-host monitoring:** Collect metrics from remote hosts via SSH.
+- **REST API:** Expose metrics via a Flask or FastAPI endpoint.
+- **Anomaly detection:** Alert when a metric exceeds 2 standard deviations
+  above its rolling average.
+
+---
+
+Good luck. Build something you would be proud to show in a job interview.

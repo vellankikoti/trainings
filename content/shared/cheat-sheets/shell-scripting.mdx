@@ -1,0 +1,464 @@
+---
+title: "Shell Scripting Cheat Sheet"
+description: "Bash shell scripting reference covering variables, conditionals, loops, functions, arrays, text processing, error handling, and common patterns."
+---
+
+# Shell Scripting Cheat Sheet
+
+## Script Template
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+# -e: Exit on error
+# -u: Error on undefined variables
+# -o pipefail: Fail on any pipe command failure
+# IFS: Safer word splitting (newlines and tabs only)
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_NAME="$(basename "$0")"
+```
+
+## Variables
+
+### Declaration and Assignment
+
+```bash
+name="value"                # No spaces around =
+readonly CONSTANT="fixed"   # Immutable variable
+export ENV_VAR="visible"    # Available to child processes
+unset name                  # Remove a variable
+```
+
+### Quoting Rules
+
+| Syntax | Behavior | Example |
+|--------|----------|---------|
+| `"$var"` | Expands variable, preserves spaces | `"hello world"` stays as one word |
+| `'$var'` | Literal, no expansion | `'$var'` prints `$var` |
+| `$'...'` | Interprets escape sequences | `$'\t'` is a tab character |
+| `` `cmd` `` | Command substitution (legacy) | Prefer `$(cmd)` instead |
+
+### Parameter Expansion
+
+| Syntax | Description | Example |
+|--------|-------------|---------|
+| `${var:-default}` | Use default if unset/empty | `${PORT:-8080}` |
+| `${var:=default}` | Assign default if unset/empty | `${DB:=postgres}` |
+| `${var:?error msg}` | Error if unset/empty | `${API_KEY:?must be set}` |
+| `${var:+alt}` | Use alt if var IS set | `${DEBUG:+--verbose}` |
+| `${#var}` | Length of string | `${#name}` → `5` |
+| `${var^^}` | Uppercase | `${name^^}` → `ALICE` |
+| `${var,,}` | Lowercase | `${name,,}` → `alice` |
+| `${var%pattern}` | Remove shortest suffix | `${file%.txt}` → `data` |
+| `${var%%pattern}` | Remove longest suffix | `${path%%/*}` |
+| `${var#pattern}` | Remove shortest prefix | `${path#*/}` |
+| `${var##pattern}` | Remove longest prefix | `${path##*/}` → basename |
+| `${var/old/new}` | Replace first match | `${str/http/https}` |
+| `${var//old/new}` | Replace all matches | `${str// /_}` |
+| `${var:offset:len}` | Substring | `${str:0:5}` → first 5 chars |
+
+### Special Variables
+
+| Variable | Description |
+|----------|-------------|
+| `$0` | Script name |
+| `$1` ... `$9` | Positional parameters |
+| `$#` | Number of arguments |
+| `$@` | All arguments (preserves quoting) |
+| `$*` | All arguments (as single string) |
+| `$?` | Exit status of last command |
+| `$$` | PID of current script |
+| `$!` | PID of last background process |
+| `$_` | Last argument of previous command |
+| `${PIPESTATUS[@]}` | Exit statuses of all pipe commands |
+
+## Conditionals
+
+### Test Operators
+
+#### File Tests
+
+| Operator | Description |
+|----------|-------------|
+| `-f file` | Exists and is a regular file |
+| `-d dir` | Exists and is a directory |
+| `-e path` | Exists (any type) |
+| `-r file` | Is readable |
+| `-w file` | Is writable |
+| `-x file` | Is executable |
+| `-s file` | Exists and is not empty |
+| `-L file` | Is a symbolic link |
+| `f1 -nt f2` | f1 is newer than f2 |
+
+#### String Tests
+
+| Operator | Description |
+|----------|-------------|
+| `-z "$str"` | String is empty |
+| `-n "$str"` | String is not empty |
+| `"$a" == "$b"` | Strings are equal |
+| `"$a" != "$b"` | Strings differ |
+| `"$a" < "$b"` | Lexicographic less than (inside `[[ ]]`) |
+| `"$a" =~ regex` | Regex match (inside `[[ ]]`) |
+
+#### Numeric Tests
+
+| Operator | Description |
+|----------|-------------|
+| `$a -eq $b` | Equal |
+| `$a -ne $b` | Not equal |
+| `$a -lt $b` | Less than |
+| `$a -le $b` | Less than or equal |
+| `$a -gt $b` | Greater than |
+| `$a -ge $b` | Greater than or equal |
+
+### if / elif / else
+
+```bash
+if [[ -f "$config_file" ]]; then
+    source "$config_file"
+elif [[ -f /etc/default/myapp ]]; then
+    source /etc/default/myapp
+else
+    echo "No config found" >&2
+    exit 1
+fi
+```
+
+### case Statement
+
+```bash
+case "$action" in
+    start|up)
+        start_service
+        ;;
+    stop|down)
+        stop_service
+        ;;
+    restart)
+        stop_service
+        start_service
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}" >&2
+        exit 1
+        ;;
+esac
+```
+
+## Loops
+
+### for Loop
+
+```bash
+# Iterate over list
+for item in apple banana cherry; do
+    echo "$item"
+done
+
+# Iterate over glob (safe for filenames with spaces)
+for file in /var/log/*.log; do
+    [[ -f "$file" ]] || continue
+    echo "Processing: $file"
+done
+
+# C-style for loop
+for ((i = 0; i < 10; i++)); do
+    echo "$i"
+done
+
+# Iterate over command output
+for user in $(cut -d: -f1 /etc/passwd); do
+    echo "$user"
+done
+```
+
+### while Loop
+
+```bash
+# Read file line by line
+while IFS= read -r line; do
+    echo "$line"
+done < input.txt
+
+# Counter loop
+count=0
+while [[ $count -lt 5 ]]; do
+    echo "Attempt $((count + 1))"
+    ((count++))
+done
+
+# Infinite loop with break
+while true; do
+    read -rp "Continue? [y/n] " answer
+    [[ "$answer" == "n" ]] && break
+done
+```
+
+### until Loop
+
+```bash
+# Wait for service to be ready
+until curl -sf http://localhost:8080/health > /dev/null 2>&1; do
+    echo "Waiting for service..."
+    sleep 2
+done
+echo "Service is up!"
+```
+
+## Functions
+
+```bash
+# Function definition
+my_function() {
+    local name="$1"          # Local scope
+    local count="${2:-1}"     # Default value
+
+    if [[ -z "$name" ]]; then
+        echo "Error: name required" >&2
+        return 1              # Return non-zero for error
+    fi
+
+    echo "Hello, $name (x$count)"
+    return 0
+}
+
+# Call function
+my_function "Alice" 3
+
+# Capture output
+result=$(my_function "Bob")
+```
+
+### Cleanup with trap
+
+```bash
+cleanup() {
+    echo "Cleaning up..."
+    rm -f "$TMPFILE"
+    [[ -n "${PID:-}" ]] && kill "$PID" 2>/dev/null
+}
+trap cleanup EXIT          # Run on script exit (any reason)
+trap cleanup ERR           # Run on error
+trap '' SIGINT             # Ignore Ctrl+C
+trap 'echo interrupted' SIGTERM  # Custom handler
+
+TMPFILE=$(mktemp)
+# Script continues... cleanup runs automatically on exit
+```
+
+## Arrays
+
+### Indexed Arrays
+
+```bash
+# Declaration
+fruits=("apple" "banana" "cherry")
+
+# Access
+echo "${fruits[0]}"         # First element
+echo "${fruits[@]}"         # All elements
+echo "${#fruits[@]}"        # Array length
+echo "${!fruits[@]}"        # All indices
+
+# Append
+fruits+=("date")
+
+# Iterate
+for fruit in "${fruits[@]}"; do
+    echo "$fruit"
+done
+
+# Slice
+echo "${fruits[@]:1:2}"    # Elements 1 and 2
+```
+
+### Associative Arrays (Bash 4+)
+
+```bash
+declare -A config
+config[host]="localhost"
+config[port]="5432"
+config[db]="myapp"
+
+# Access
+echo "${config[host]}"
+
+# Iterate keys
+for key in "${!config[@]}"; do
+    echo "$key = ${config[$key]}"
+done
+
+# Check key exists
+if [[ -v config[host] ]]; then
+    echo "host is set"
+fi
+```
+
+## Text Processing One-Liners
+
+### grep
+
+```bash
+grep -rn "ERROR" /var/log/          # Recursive with line numbers
+grep -c "pattern" file              # Count matches
+grep -oP '(?<=key=)\w+' file       # Extract value after key= (Perl regex)
+grep -E "error|warning|critical" f  # Multiple patterns (extended regex)
+```
+
+### sed
+
+```bash
+sed -n '10,20p' file                # Print lines 10-20
+sed -i 's/http/https/g' file       # In-place replace all
+sed -i '/^#/d' file                # Delete comment lines
+sed -i '5i\New line here' file     # Insert at line 5
+sed -E 's/([0-9]+)/[\1]/g' file    # Capture groups
+```
+
+### awk
+
+```bash
+awk '{print $1, $NF}' file         # First and last fields
+awk -F: '$3 >= 1000' /etc/passwd   # Filter by numeric field
+awk '{sum += $1} END {print sum}'   # Sum a column
+awk '!seen[$0]++' file             # Remove duplicates (preserves order)
+awk '{printf "%-20s %s\n", $1, $2}' # Formatted output
+```
+
+## Error Handling Patterns
+
+### Check Command Success
+
+```bash
+if ! command -v docker &> /dev/null; then
+    echo "Error: docker is not installed" >&2
+    exit 1
+fi
+```
+
+### Or-Exit Pattern
+
+```bash
+cd /app/deploy || { echo "Failed to cd" >&2; exit 1; }
+```
+
+### Error Function
+
+```bash
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+[[ -f "$config" ]] || die "Config file not found: $config"
+```
+
+### Logging
+
+```bash
+log() {
+    local level="$1"; shift
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*" | tee -a "$LOG_FILE"
+}
+
+log INFO "Deployment started"
+log ERROR "Failed to connect to database"
+```
+
+## Common Patterns
+
+### Retry Loop
+
+```bash
+retry() {
+    local max_attempts="${1:-3}"
+    local delay="${2:-5}"
+    shift 2
+    local attempt=1
+
+    until "$@"; do
+        if ((attempt >= max_attempts)); then
+            echo "Failed after $max_attempts attempts" >&2
+            return 1
+        fi
+        echo "Attempt $attempt failed. Retrying in ${delay}s..."
+        sleep "$delay"
+        ((attempt++))
+    done
+}
+
+retry 3 5 curl -sf http://example.com/api
+```
+
+### Configuration File Loading
+
+```bash
+load_config() {
+    local config_file="${1:-.env}"
+    if [[ -f "$config_file" ]]; then
+        while IFS='=' read -r key value; do
+            [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+            export "${key}=${value}"
+        done < "$config_file"
+    fi
+}
+```
+
+### Lock File
+
+```bash
+LOCKFILE="/var/run/myapp.lock"
+
+acquire_lock() {
+    if ! mkdir "$LOCKFILE" 2>/dev/null; then
+        echo "Another instance is running" >&2
+        exit 1
+    fi
+    trap 'rm -rf "$LOCKFILE"' EXIT
+}
+```
+
+### Argument Parsing
+
+```bash
+usage() {
+    cat <<EOF
+Usage: $SCRIPT_NAME [OPTIONS] <target>
+
+Options:
+    -v, --verbose    Enable verbose output
+    -d, --dry-run    Show what would be done
+    -h, --help       Show this help
+EOF
+}
+
+VERBOSE=false
+DRY_RUN=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -v|--verbose)  VERBOSE=true; shift ;;
+        -d|--dry-run)  DRY_RUN=true; shift ;;
+        -h|--help)     usage; exit 0 ;;
+        --)            shift; break ;;
+        -*)            die "Unknown option: $1" ;;
+        *)             break ;;
+    esac
+done
+
+TARGET="${1:?Missing required argument: target}"
+```
+
+### Temporary Files
+
+```bash
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+TMPFILE=$(mktemp "$TMPDIR/myapp.XXXXXX")
+echo "data" > "$TMPFILE"
+```

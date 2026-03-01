@@ -474,7 +474,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-108: Create Foundations Path capstone project
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-097, TASK-101, TASK-104, TASK-105, TASK-107
 - **Estimated effort:** XL
@@ -499,7 +499,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-109: Create Foundations Path assessment
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-097, TASK-101, TASK-104, TASK-105, TASK-107
 - **Estimated effort:** L
@@ -674,7 +674,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-116: Create cheat sheets for Foundations modules
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-096, TASK-101, TASK-104
 - **Estimated effort:** L
