@@ -1,7 +1,7 @@
 # DevOps Engineers — Production Deployment Guide
 
-> **Goal**: Deploy the platform using free/open-source tools for ~$20/month total cost.
-> **Stack**: Next.js 14 + Supabase + Clerk + Vercel + Cloudflare + Stripe + Resend + Sentry + Upstash
+> **Goal**: Deploy the platform to `vellanki.in` using Coolify + Hetzner for ~$6/month total.
+> **Stack**: Next.js 14 + Coolify + Hetzner + Supabase + Clerk + Cloudflare + Stripe + Resend + Sentry
 
 ---
 
@@ -9,188 +9,117 @@
 
 | Service | Purpose | Tier | Cost |
 |---------|---------|------|------|
-| **Vercel** | Hosting & CDN | Hobby (Free) | $0/mo |
+| **Hetzner CX22** | VPS (2 vCPU, 4 GB RAM) | Cloud | ~$5/mo |
+| **Coolify** | Deployment Platform | Open Source (self-hosted) | $0/mo |
 | **Supabase** | PostgreSQL Database | Free | $0/mo |
 | **Clerk** | Authentication | Free (10k MAU) | $0/mo |
-| **Cloudflare** | DNS & CDN | Free | $0/mo |
+| **Cloudflare** | DNS & DDoS Protection | Free | $0/mo |
 | **GitHub** | Version Control & CI/CD | Free | $0/mo |
 | **Resend** | Transactional Email | Free (3k emails/mo) | $0/mo |
 | **Sentry** | Error Tracking | Developer (Free) | $0/mo |
-| **Upstash** | Redis (Rate Limiting) | Free (10k commands/day) | $0/mo |
 | **Stripe** | Payments | Pay-as-you-go | 2.9% + 30c per txn |
-| **Domain** | Custom domain | Namecheap/Cloudflare | ~$12/yr ($1/mo) |
-| | | **Total** | **~$1/mo** (+ Stripe fees on revenue) |
+| **Domain** | vellanki.in | Cloudflare Registrar | ~$12/yr ($1/mo) |
+| | | **Total** | **~$6/mo** |
 
-> **Note**: Vercel Hobby has limits (100GB bandwidth, 100 hrs build/mo, no cron jobs). Upgrade to Pro ($20/mo) when traffic grows or you need cron jobs for email automation.
+> **Why not Vercel?** Vercel's free Hobby tier prohibits commercial use and lacks cron jobs. Their Pro plan is $20/mo per seat. With Coolify on Hetzner, you get a full VPS with push-to-deploy, auto-SSL, and no cold starts for ~$5/mo — and you own the infrastructure.
+
+---
+
+## Architecture
+
+```
+                  ┌───────────────────┐
+                  │  Cloudflare DNS   │
+                  │  vellanki.in      │
+                  │  (Free)           │
+                  └────────┬──────────┘
+                           │
+                  ┌────────▼──────────┐
+                  │  Hetzner CX22     │
+                  │  ┌──────────────┐ │
+                  │  │   Coolify    │ │
+                  │  │  ┌────────┐  │ │
+                  │  │  │Next.js │  │ │
+                  │  │  │  App   │  │ │
+                  │  │  │ :3000  │  │ │
+                  │  │  └────────┘  │ │
+                  │  │   Traefik    │ │
+                  │  │   (SSL/LB)   │ │
+                  │  └──────────────┘ │
+                  └───┬────┬────┬─────┘
+                      │    │    │
+         ┌────────────┘    │    └────────────┐
+         │                 │                 │
+  ┌──────▼──────┐  ┌──────▼──────┐  ┌───────▼──────┐
+  │   Clerk     │  │  Supabase   │  │   Stripe     │
+  │   Auth      │  │  PostgreSQL │  │   Payments   │
+  │ (Free 10k)  │  │  (Free)     │  │  (2.9%/txn)  │
+  └─────────────┘  └─────────────┘  └──────────────┘
+```
 
 ---
 
 ## Prerequisites
 
 Before starting, ensure you have:
-- [ ] A GitHub account (your repo: `vellankikoti/trainings`)
-- [ ] Node.js 22.x installed locally
-- [ ] pnpm 10.x installed (`npm install -g pnpm@10`)
-- [ ] Git configured with SSH or HTTPS access
+
+- [x] GitHub account with repo `vellankikoti/trainings`
+- [x] Domain `vellanki.in` added to Cloudflare
+- [x] Supabase project created with migrations applied
+- [x] Clerk application created with API keys
+- [ ] Hetzner account (sign up below)
+- [ ] SSH key pair (for server access)
 
 ---
 
-## Step 1: Supabase — Database Setup
+## Step 1: Supabase — Database Setup (Done)
 
-Supabase provides a managed PostgreSQL database with Row-Level Security, real-time subscriptions, and a REST API.
-
-### 1.1 Create a Supabase Project
-
-1. Go to [supabase.com](https://supabase.com) and sign up (free)
-2. Click **"New Project"**
-3. Configure:
-   - **Organization**: Create one or select existing
-   - **Project name**: `devops-engineers`
-   - **Database password**: Generate a strong password (save it!)
-   - **Region**: Choose closest to your users (e.g., `us-east-1`)
-4. Click **"Create new project"** — wait ~2 minutes for provisioning
-
-### 1.2 Get Your API Keys
-
-1. Go to **Settings → API** in your Supabase dashboard
-2. Copy these values (you'll need them later):
+> You've already completed this step. For reference, your keys are:
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...  (the "anon public" key)
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGci...  (the "service_role" key — KEEP SECRET)
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...    (anon public key)
+SUPABASE_SERVICE_ROLE_KEY=eyJ...        (service_role key — KEEP SECRET)
 ```
 
-> **IMPORTANT**: The `service_role` key bypasses Row-Level Security. Never expose it in client-side code.
+### Verify Migrations
 
-### 1.3 Run Database Migrations
+Ensure these migration files have been run in order:
+1. `supabase/migrations/001_initial_schema.sql`
+2. `supabase/migrations/002_add_subscriptions.sql`
+3. `supabase/migrations/003_add_discussions.sql`
 
-Option A — **Via Supabase Dashboard (Recommended for first setup)**:
-
-1. Go to **SQL Editor** in your Supabase dashboard
-2. Run each migration file in order:
-   - Copy contents of `supabase/migrations/001_initial_schema.sql` → Execute
-   - Copy contents of `supabase/migrations/002_add_subscriptions.sql` → Execute
-   - Copy contents of `supabase/migrations/003_add_discussions.sql` → Execute
-3. Verify tables were created under **Table Editor**
-
-Option B — **Via Supabase CLI**:
-
-```bash
-# Install Supabase CLI
-npm install -g supabase
-
-# Link to your project
-supabase login
-supabase link --project-ref YOUR_PROJECT_ID
-
-# Push migrations
-supabase db push
-```
-
-### 1.4 Verify Database
-
-In the **Table Editor**, you should see these tables:
-- `profiles`, `lesson_progress`, `exercise_progress`, `quiz_responses`
-- `module_progress`, `daily_activity`, `achievements`, `user_achievements`
-- `certificates`, `subscriptions`, `discussions`, `discussion_votes`
+Verify in Supabase Dashboard → **Table Editor** that tables exist:
+`profiles`, `lesson_progress`, `exercise_progress`, `quiz_responses`,
+`module_progress`, `daily_activity`, `achievements`, `user_achievements`,
+`certificates`, `subscriptions`, `discussions`, `discussion_votes`
 
 ---
 
-## Step 2: Clerk — Authentication Setup
+## Step 2: Clerk — Authentication Setup (Done)
 
-Clerk handles user signup, login, OAuth (Google/GitHub), and session management.
-
-### 2.1 Create a Clerk Application
-
-1. Go to [clerk.com](https://clerk.com) and sign up (free — 10,000 monthly active users)
-2. Click **"Create application"**
-3. Configure:
-   - **Application name**: `DevOps Engineers`
-   - **Sign-in options**: Enable Email, Google, and GitHub
-4. Click **"Create application"**
-
-### 2.2 Get Your API Keys
-
-1. Go to **API Keys** in the Clerk dashboard
-2. Copy:
+> You've already completed this step. Your keys are:
 
 ```
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
 CLERK_SECRET_KEY=sk_live_...
 ```
 
-### 2.3 Configure Clerk Webhook
+### Webhook (Update After Deploy)
 
-This syncs user data from Clerk to your Supabase `profiles` table.
-
-1. Go to **Webhooks** in the Clerk dashboard
-2. Click **"Add Endpoint"**
-3. Configure:
-   - **URL**: `https://YOUR_DOMAIN.com/api/webhooks/clerk`
-     (Use a temporary URL for now — update after Vercel deployment)
-   - **Events**: Select:
-     - `user.created`
-     - `user.updated`
-     - `user.deleted`
-4. Click **"Create"**
-5. Copy the **Signing Secret**:
-
-```
-CLERK_WEBHOOK_SECRET=whsec_...
-```
-
-### 2.4 Configure OAuth Providers (Optional but Recommended)
-
-**Google OAuth**:
-1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Create a project → Enable Google+ API
-3. Create OAuth 2.0 credentials
-4. Add redirect URI: `https://YOUR_CLERK_DOMAIN/v1/oauth_callback`
-5. Enter Client ID and Secret in Clerk Dashboard → **Social Connections → Google**
-
-**GitHub OAuth**:
-1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
-2. Create a new OAuth App
-3. Set Authorization callback URL: `https://YOUR_CLERK_DOMAIN/v1/oauth_callback`
-4. Enter Client ID and Secret in Clerk Dashboard → **Social Connections → GitHub**
+After deploying to `vellanki.in`, configure the Clerk webhook:
+1. Clerk Dashboard → **Webhooks** → **Add Endpoint**
+2. URL: `https://vellanki.in/api/webhooks/clerk`
+3. Events: `user.created`, `user.updated`, `user.deleted`
+4. Copy the Signing Secret → `CLERK_WEBHOOK_SECRET=whsec_...`
 
 ---
 
-## Step 3: Cloudflare — DNS & CDN Setup
+## Step 3: Cloudflare — DNS Setup (Done)
 
-Cloudflare provides free DNS, CDN, DDoS protection, and SSL.
+> You've already added `vellanki.in` to Cloudflare. After creating the Hetzner server, you'll add DNS records.
 
-### 3.1 Register or Transfer Your Domain
-
-Option A — **Buy from Cloudflare** (cheapest, at-cost pricing):
-1. Go to [Cloudflare Registrar](https://dash.cloudflare.com/registrar)
-2. Search for your domain → Purchase
-
-Option B — **Buy from Namecheap** (~$12/yr) and point to Cloudflare:
-1. Buy domain at [namecheap.com](https://namecheap.com)
-2. In Namecheap, set custom nameservers to Cloudflare's (next step)
-
-### 3.2 Set Up Cloudflare DNS
-
-1. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → **Add a Site**
-2. Enter your domain → Select **Free** plan
-3. Cloudflare will give you nameservers (e.g., `aria.ns.cloudflare.com`)
-4. Update your domain registrar to use these nameservers
-5. Wait for propagation (up to 24 hours, usually minutes)
-
-### 3.3 Configure DNS Records
-
-Add these records in Cloudflare DNS (after Vercel setup in Step 4):
-
-| Type | Name | Content | Proxy |
-|------|------|---------|-------|
-| CNAME | `@` | `cname.vercel-dns.com` | DNS only (grey cloud) |
-| CNAME | `www` | `cname.vercel-dns.com` | DNS only (grey cloud) |
-
-> **Important**: Set proxy to "DNS only" (grey cloud) for Vercel. Vercel handles its own SSL and CDN.
-
-### 3.4 Cloudflare Settings
+### Cloudflare Settings (Configure Now)
 
 1. **SSL/TLS** → Set to **Full (Strict)**
 2. **Speed → Optimization** → Enable Auto Minify (HTML, CSS, JS)
@@ -199,209 +128,272 @@ Add these records in Cloudflare DNS (after Vercel setup in Step 4):
 
 ---
 
-## Step 4: Vercel — Hosting & Deployment
+## Step 4: Hetzner — Create a VPS
 
-Vercel is the native hosting platform for Next.js with automatic deployments from Git.
+### 4.1 Sign Up
 
-### 4.1 Create a Vercel Account
+1. Go to [hetzner.com/cloud](https://www.hetzner.com/cloud/) and create an account
+2. Hetzner requires a one-time €20 verification charge (refunded to your account as credit)
+3. Verify your identity (usually takes minutes)
 
-1. Go to [vercel.com](https://vercel.com) → Sign up with GitHub
-2. Authorize Vercel to access your GitHub account
+### 4.2 Add Your SSH Key
 
-### 4.2 Import Your Project
+1. Go to **Security → SSH Keys → Add SSH Key**
+2. Paste your public key:
+   ```bash
+   # If you don't have one yet:
+   ssh-keygen -t ed25519 -C "your@email.com"
+   cat ~/.ssh/id_ed25519.pub
+   ```
+3. Name it (e.g., `my-laptop`)
 
-1. Click **"Add New" → "Project"**
-2. Select the `vellankikoti/trainings` repository
-3. Configure the project:
-   - **Framework Preset**: Next.js (auto-detected)
-   - **Root Directory**: `./` (leave default — monorepo is handled by `vercel.json`)
-   - **Build Command**: `pnpm build` (from vercel.json)
-   - **Output Directory**: `apps/web/.next` (from vercel.json)
-   - **Install Command**: `pnpm install` (from vercel.json)
+### 4.3 Create the Server
 
-### 4.3 Set Environment Variables
+1. Click **"Add Server"**
+2. Configure:
 
-In Vercel → **Project Settings → Environment Variables**, add:
+| Setting | Value |
+|---------|-------|
+| **Location** | Ashburn (ash) — closest to US users |
+| **Image** | Ubuntu 24.04 |
+| **Type** | Shared vCPU → **CX22** (2 vCPUs, 4 GB RAM, 40 GB SSD) |
+| **Networking** | Public IPv4 + IPv6 |
+| **SSH Key** | Select the key you just added |
+| **Name** | `devops-engineers` |
 
-**Required (all environments)**:
-```
-NEXT_PUBLIC_APP_URL = https://yourdomain.com
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = pk_live_...
-CLERK_SECRET_KEY = sk_live_...
-CLERK_WEBHOOK_SECRET = whsec_...
-NEXT_PUBLIC_SUPABASE_URL = https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY = eyJ...
-SUPABASE_SERVICE_ROLE_KEY = eyJ...
-SKIP_ENV_VALIDATION = true
-```
+3. Click **"Create & Buy Now"**
+4. Note the **server IP address** (e.g., `65.109.xxx.xxx`)
 
-**Optional (enable when ready)**:
-```
-# Stripe
-STRIPE_SECRET_KEY = sk_live_...
-STRIPE_WEBHOOK_SECRET = whsec_...
+> **Cost**: CX22 = €4.49/mo (~$5/mo). This includes 20 TB of outbound traffic.
 
-# Resend
-RESEND_API_KEY = re_...
+### 4.4 Basic Server Hardening
 
-# Sentry
-NEXT_PUBLIC_SENTRY_DSN = https://...@o0.ingest.sentry.io/...
-
-# Upstash Redis (upgrade from in-memory rate limiting)
-UPSTASH_REDIS_REST_URL = https://...upstash.io
-UPSTASH_REDIS_REST_TOKEN = AX...
-
-# Cron secret (for email automation)
-CRON_SECRET = generate-a-random-string-here
-```
-
-> **Tip**: Set `SKIP_ENV_VALIDATION=true` for the build environment to prevent validation errors during CI.
-
-### 4.4 Deploy
-
-1. Click **"Deploy"** — Vercel will build and deploy your project
-2. Once deployed, you'll get a URL like `your-project.vercel.app`
-3. Note this URL — you'll need it for webhook configuration
-
-### 4.5 Add Custom Domain
-
-1. Go to **Project Settings → Domains**
-2. Add your domain: `yourdomain.com`
-3. Add `www.yourdomain.com` (will redirect to root per vercel.json)
-4. Vercel will show DNS configuration — these should match Step 3.3
-5. SSL is automatically provisioned by Vercel
-
-### 4.6 Update Webhook URLs
-
-Now that you have your production URL:
-1. **Clerk Dashboard → Webhooks**: Update endpoint URL to `https://yourdomain.com/api/webhooks/clerk`
-2. **Stripe Dashboard → Webhooks** (if configured): Update to `https://yourdomain.com/api/webhooks/stripe`
-
-### 4.7 Verify Deployment
+SSH into your server:
 
 ```bash
-# Health check
-curl https://yourdomain.com/api/health
+ssh root@YOUR_SERVER_IP
+```
 
-# Expected response:
-# {"status":"healthy","timestamp":"...","version":"1.0.0","checks":{"database":"connected","auth":"configured"}}
+Run basic security setup:
+
+```bash
+# Update system
+apt update && apt upgrade -y
+
+# Set up automatic security updates
+apt install unattended-upgrades -y
+dpkg-reconfigure -plow unattended-upgrades
+
+# Set up firewall
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 8000/tcp    # Coolify dashboard
+ufw enable
 ```
 
 ---
 
-## Step 5: Resend — Email Setup (Optional)
+## Step 5: Coolify — Install & Configure
 
-Resend handles transactional emails (welcome, certificates, streak reminders).
+### 5.1 Install Coolify
 
-### 5.1 Create a Resend Account
+Still SSH'd into your server:
+
+```bash
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
+```
+
+This installs Docker, Traefik (reverse proxy), and the Coolify UI. Takes ~2 minutes.
+
+When complete, you'll see:
+
+```
+Coolify is ready! Access it at: http://YOUR_SERVER_IP:8000
+```
+
+### 5.2 Initial Setup
+
+1. Open `http://YOUR_SERVER_IP:8000` in your browser
+2. Create your admin account (email + password)
+3. Complete the setup wizard:
+   - **Server**: `localhost` (already configured)
+   - **Validate**: Let Coolify verify Docker is running
+
+### 5.3 Connect GitHub
+
+1. Go to **Sources → Add → GitHub App**
+2. Click **"Register a GitHub App"**
+3. Follow the wizard:
+   - Coolify will redirect you to GitHub to create a GitHub App
+   - Authorize it to access your repositories
+   - Select `vellankikoti/trainings` (or all repositories)
+4. Back in Coolify, verify the source shows as connected
+
+### 5.4 Set Up the Domain
+
+1. Go to **Settings → General**
+2. Under "Instance's Domain", set: `http://YOUR_SERVER_IP:8000` (or a subdomain like `coolify.vellanki.in`)
+
+---
+
+## Step 6: Deploy the Application
+
+### 6.1 Create a New Project
+
+1. In Coolify, click **Projects → Add**
+2. Name: `DevOps Engineers`
+3. Click on the project → click **"Production"** environment → **Add New Resource**
+
+### 6.2 Configure the Application
+
+1. Select **Application** → **Public Repository** or **GitHub App** (if connected)
+2. Select repository: `vellankikoti/trainings`
+3. Branch: `main`
+
+Configure the build:
+
+| Setting | Value |
+|---------|-------|
+| **Build Pack** | Dockerfile |
+| **Dockerfile Location** | `/Dockerfile` |
+| **Port** | 3000 |
+| **Domain** | `vellanki.in` |
+
+### 6.3 Set Environment Variables
+
+In your application → **Environment Variables**, add each variable:
+
+**Required:**
+```
+NEXT_PUBLIC_APP_URL=https://vellanki.in
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
+CLERK_SECRET_KEY=sk_live_...
+CLERK_WEBHOOK_SECRET=whsec_...
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+NEXT_OUTPUT_MODE=standalone
+```
+
+**Optional (add when ready):**
+```
+# Stripe payments
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PREMIUM_MONTHLY_PRICE_ID=price_...
+STRIPE_PREMIUM_ANNUAL_PRICE_ID=price_...
+STRIPE_TEAM_MONTHLY_PRICE_ID=price_...
+STRIPE_TEAM_ANNUAL_PRICE_ID=price_...
+
+# Resend email
+RESEND_API_KEY=re_...
+EMAIL_FROM=DevOps Engineers <noreply@vellanki.in>
+
+# Sentry error tracking
+NEXT_PUBLIC_SENTRY_DSN=https://xxx@o0.ingest.sentry.io/0
+```
+
+### 6.4 Deploy
+
+1. Click **Deploy** — Coolify builds the Docker image using the Dockerfile
+2. Build takes ~3-5 minutes on first deploy (subsequent deploys are faster due to layer caching)
+3. Watch the build logs for any errors
+
+### 6.5 Configure DNS
+
+After the app is deployed, add DNS records in Cloudflare:
+
+| Type | Name | Content | Proxy |
+|------|------|---------|-------|
+| A | `@` | `YOUR_SERVER_IP` | DNS only (grey cloud) |
+| A | `www` | `YOUR_SERVER_IP` | DNS only (grey cloud) |
+
+> **Important**: Keep proxy mode as "DNS only" (grey cloud) so Coolify's Traefik can handle SSL via Let's Encrypt. Once SSL is working, you can optionally switch to orange cloud (Cloudflare proxy) for additional caching.
+
+### 6.6 SSL Certificate
+
+Coolify automatically provisions a Let's Encrypt SSL certificate for `vellanki.in` once DNS propagates. This usually takes 1-5 minutes.
+
+Verify SSL:
+```bash
+curl -I https://vellanki.in
+# Should show HTTP/2 200 with valid SSL
+```
+
+---
+
+## Step 7: Configure Webhooks
+
+Now that `vellanki.in` is live, update your webhook endpoints.
+
+### 7.1 Clerk Webhook
+
+1. Go to [Clerk Dashboard](https://dashboard.clerk.com) → **Webhooks**
+2. Edit your endpoint (or create a new one):
+   - **URL**: `https://vellanki.in/api/webhooks/clerk`
+   - **Events**: `user.created`, `user.updated`, `user.deleted`
+3. Copy the **Signing Secret** → update `CLERK_WEBHOOK_SECRET` in Coolify
+
+### 7.2 Stripe Webhook (if using)
+
+1. Go to [Stripe Dashboard](https://dashboard.stripe.com) → **Developers → Webhooks**
+2. **Add endpoint**:
+   - **URL**: `https://vellanki.in/api/webhooks/stripe`
+   - **Events**: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`
+3. Copy the **Signing Secret** → update `STRIPE_WEBHOOK_SECRET` in Coolify
+
+---
+
+## Step 8: Resend — Email Setup (Optional)
+
+### 8.1 Create Account & Add Domain
 
 1. Go to [resend.com](https://resend.com) → Sign up (free — 3,000 emails/month)
-2. Verify your email address
-
-### 5.2 Add Your Domain
-
-1. Go to **Domains** → **Add Domain**
-2. Enter your domain (e.g., `yourdomain.com`)
+2. Go to **Domains → Add Domain** → `vellanki.in`
 3. Add the DNS records Resend provides to Cloudflare:
-   - SPF record (TXT)
-   - DKIM records (CNAME)
-   - DMARC record (TXT)
-4. Click **"Verify"** — may take a few minutes
 
-### 5.3 Get Your API Key
+| Type | Name | Content |
+|------|------|---------|
+| TXT | `@` | SPF record from Resend |
+| CNAME | various | DKIM records from Resend |
+| TXT | `_dmarc` | DMARC record from Resend |
 
-1. Go to **API Keys** → **Create API Key**
-2. Name: `devops-engineers-production`
-3. Permission: **Sending access** for your domain
-4. Copy the key:
+4. Click **Verify** in Resend dashboard
 
-```
-RESEND_API_KEY=re_...
-```
+### 8.2 Get API Key
 
-5. Add to Vercel environment variables
+1. **API Keys → Create API Key**
+2. Name: `production`
+3. Permission: Sending access for `vellanki.in`
+4. Copy key → add `RESEND_API_KEY` to Coolify environment variables
 
 ---
 
-## Step 6: Sentry — Error Tracking (Optional)
-
-### 6.1 Create a Sentry Project
+## Step 9: Sentry — Error Tracking (Optional)
 
 1. Go to [sentry.io](https://sentry.io) → Sign up (free — 5,000 events/month)
-2. Create a new project:
-   - **Platform**: Next.js
-   - **Project name**: `devops-engineers`
-3. Copy the DSN:
-
-```
-NEXT_PUBLIC_SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
-```
-
-4. Add to Vercel environment variables
+2. Create project: Platform = Next.js, Name = `devops-engineers`
+3. Copy the DSN → add `NEXT_PUBLIC_SENTRY_DSN` to Coolify environment variables
 
 ---
 
-## Step 7: Upstash — Redis for Rate Limiting (Optional)
+## Step 10: Stripe — Payments (Optional)
 
-Upgrades the in-memory rate limiter to a distributed Redis-based solution.
+### 10.1 Create Products
 
-### 7.1 Create an Upstash Database
+In [Stripe Dashboard](https://dashboard.stripe.com) → **Products**, create:
 
-1. Go to [upstash.com](https://upstash.com) → Sign up (free — 10,000 commands/day)
-2. Click **"Create Database"**
-3. Configure:
-   - **Name**: `devops-engineers-ratelimit`
-   - **Region**: Choose closest to your Vercel deployment
-   - **Type**: Regional
-4. Copy the REST credentials:
-
-```
-UPSTASH_REDIS_REST_URL=https://...upstash.io
-UPSTASH_REDIS_REST_TOKEN=AX...
-```
-
-5. Add to Vercel environment variables
-
-> **Note**: The app currently uses in-memory rate limiting which works fine for single-instance Vercel deployments. Upstash is an upgrade path when you need distributed rate limiting across edge functions.
-
----
-
-## Step 8: Stripe — Payments (Optional)
-
-### 8.1 Create a Stripe Account
-
-1. Go to [stripe.com](https://stripe.com) → Sign up
-2. Complete business verification (required for live payments)
-
-### 8.2 Create Products and Prices
-
-In **Stripe Dashboard → Products**, create:
-
-**Product 1: Premium Plan**
-- Name: `DevOps Engineers Premium`
-- Price 1: $9/month (recurring, monthly)
-- Price 2: $79/year (recurring, yearly)
-
-**Product 2: Team Plan**
-- Name: `DevOps Engineers Team`
-- Price 1: $29/month per seat (recurring, monthly)
-- Price 2: $279/year per seat (recurring, yearly)
+| Product | Monthly Price | Annual Price |
+|---------|--------------|-------------|
+| DevOps Engineers Premium | $9/mo | $79/yr |
+| DevOps Engineers Team | $29/mo per seat | $279/yr per seat |
 
 Copy each Price ID (starts with `price_`).
 
-### 8.3 Configure Webhook
+### 10.2 Set Environment Variables
 
-1. Go to **Developers → Webhooks → Add endpoint**
-2. URL: `https://yourdomain.com/api/webhooks/stripe`
-3. Events to listen for:
-   - `checkout.session.completed`
-   - `customer.subscription.updated`
-   - `customer.subscription.deleted`
-   - `invoice.payment_failed`
-4. Copy the Signing Secret
-
-### 8.4 Set Environment Variables
-
+Add to Coolify:
 ```
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
@@ -411,70 +403,73 @@ STRIPE_TEAM_MONTHLY_PRICE_ID=price_...
 STRIPE_TEAM_ANNUAL_PRICE_ID=price_...
 ```
 
-> **Tip**: Use `sk_test_` keys and test mode products for staging. Switch to `sk_live_` for production.
+---
+
+## Step 11: Set Up Health Monitoring
+
+Since Coolify doesn't have built-in cron jobs like Vercel, set up monitoring separately.
+
+### Option A: Coolify's Built-in Health Checks
+
+Coolify monitors your container health automatically. If the container crashes, it restarts.
+
+### Option B: UptimeRobot (Free — Keeps Supabase Alive)
+
+Supabase free tier pauses after 7 days of inactivity. Prevent this with a free uptime monitor:
+
+1. Go to [uptimerobot.com](https://uptimerobot.com) → Sign up (free — 50 monitors)
+2. Add monitor:
+   - **Type**: HTTP(s)
+   - **URL**: `https://vellanki.in/api/health`
+   - **Interval**: 5 minutes
+3. This pings your health endpoint every 5 minutes, which queries Supabase, keeping it active
+
+### Option C: Cron Job on the Server
+
+SSH into your Hetzner server and add a cron job:
+
+```bash
+# Add to crontab
+crontab -e
+
+# Ping health endpoint every 5 minutes
+*/5 * * * * curl -s https://vellanki.in/api/health > /dev/null 2>&1
+
+# Trigger email job daily at 9 AM UTC
+0 9 * * * curl -s https://vellanki.in/api/cron/emails > /dev/null 2>&1
+```
 
 ---
 
-## Step 9: GitHub Actions — CI/CD Pipeline
+## Step 12: Post-Deployment Verification
 
-### 9.1 Set GitHub Secrets
+### Infrastructure Checks
 
-In your repository → **Settings → Secrets and variables → Actions**, add:
-
-**Repository Secrets**:
-```
-VERCEL_ORG_ID = (from Vercel → Settings → General)
-VERCEL_PROJECT_ID = (from Vercel → Project → Settings → General)
-VERCEL_TOKEN = (from Vercel → Settings → Tokens → Create)
-```
-
-**Repository Variables** (Settings → Variables):
-```
-VERCEL_CONFIGURED = true
-```
-
-### 9.2 CI Pipeline
-
-The existing `.github/workflows/ci.yml` automatically:
-- Runs on every PR and push to `main`
-- Lints, type-checks, builds, and tests
-- PRs must pass CI before merge
-
-### 9.3 Deployment Flow
-
-```
-Push to main → CI runs → Vercel auto-deploys production
-Push to develop → CI runs → Vercel deploys to staging (if configured)
-Create PR → CI runs → Vercel creates preview deployment
-```
-
----
-
-## Step 10: Post-Deployment Verification
-
-Run through this checklist after deployment:
-
-### Infrastructure
 ```bash
 # 1. Health check
-curl -s https://yourdomain.com/api/health | jq .
+curl -s https://vellanki.in/api/health | python3 -m json.tool
 # Expect: {"status":"healthy","checks":{"database":"connected","auth":"configured"}}
 
 # 2. Homepage loads
-curl -s -o /dev/null -w "%{http_code}" https://yourdomain.com
+curl -s -o /dev/null -w "%{http_code}" https://vellanki.in
 # Expect: 200
 
-# 3. Lesson page loads
-curl -s -o /dev/null -w "%{http_code}" https://yourdomain.com/paths/foundations
+# 3. Lesson content loads
+curl -s -o /dev/null -w "%{http_code}" https://vellanki.in/paths/foundations
 # Expect: 200
 
-# 4. API rate limiting works
-for i in {1..65}; do curl -s -o /dev/null -w "%{http_code}\n" https://yourdomain.com/api/health; done
-# Expect: 200s then 429s after limit
+# 4. SSL certificate valid
+curl -vI https://vellanki.in 2>&1 | grep "SSL certificate"
+# Expect: SSL certificate verify ok
+
+# 5. www redirect works
+curl -s -o /dev/null -w "%{http_code}" -L https://www.vellanki.in
+# Expect: 200 (redirects to vellanki.in)
 ```
 
-### Authentication
-1. Visit `https://yourdomain.com/sign-up` → Create an account
+### Authentication Flow
+
+1. Visit `https://vellanki.in/sign-up` → Create an account
 2. Verify redirect to `/onboarding`
 3. Complete onboarding → Verify redirect to `/dashboard`
 4. Check Supabase → `profiles` table has your user record
@@ -482,129 +477,215 @@ for i in {1..65}; do curl -s -o /dev/null -w "%{http_code}\n" https://yourdomain
 6. Sign out → Sign back in → Verify session works
 
 ### Content & Features
+
 1. Browse to `/paths/foundations` → Verify learning path loads
-2. Open a lesson → Verify MDX renders with code highlighting
+2. Open a lesson → Verify MDX content renders with code highlighting
 3. Complete a lesson → Verify progress is saved
 4. Take a quiz → Verify submission and results
 5. Check `/dashboard` → Verify stats update
 
 ### Payments (if Stripe configured)
+
 1. Visit `/pricing` → Verify plans display
-2. Click "Subscribe" on a test plan (use Stripe test card `4242 4242 4242 4242`)
+2. Click "Subscribe" → Use test card `4242 4242 4242 4242`
 3. Verify webhook fires → Check `subscriptions` table in Supabase
 4. Visit a premium feature → Verify access is granted
 
 ---
 
-## Deployment Architecture
+## Auto-Deploy from GitHub
+
+Coolify automatically deploys when you push to `main`. The flow:
 
 ```
-                    ┌─────────────────┐
-                    │   Cloudflare    │
-                    │   DNS & CDN     │
-                    │   (Free)        │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │     Vercel      │
-                    │   Next.js App   │
-                    │   Edge Network  │
-                    │   (Free/Pro)    │
-                    └───┬────┬────┬───┘
-                        │    │    │
-           ┌────────────┤    │    ├────────────┐
-           │            │    │    │            │
-    ┌──────▼──────┐ ┌──▼────▼──┐ │   ┌───────▼──────┐
-    │   Clerk     │ │ Supabase │ │   │   Stripe     │
-    │   Auth      │ │ Database │ │   │   Payments   │
-    │ (Free 10k)  │ │ (Free)   │ │   │  (2.9%/txn)  │
-    └─────────────┘ └──────────┘ │   └──────────────┘
-                                 │
-                    ┌────────────┤
-                    │            │
-             ┌──────▼──────┐ ┌──▼──────────┐
-             │   Resend    │ │   Sentry    │
-             │   Email     │ │   Errors    │
-             │ (Free 3k)   │ │ (Free 5k)   │
-             └─────────────┘ └─────────────┘
+Push to main
+    │
+    ▼
+GitHub webhook fires → Coolify receives
+    │
+    ▼
+Coolify builds Docker image (Dockerfile)
+    │
+    ▼
+Health check passes → Old container stopped
+    │
+    ▼
+New container starts on :3000
+    │
+    ▼
+Traefik routes vellanki.in → container
+    │
+    ▼
+Live at https://vellanki.in
+```
+
+### CI/CD with GitHub Actions
+
+The existing `.github/workflows/ci.yml` runs lint, type-check, build, and tests on every PR. Only code that passes CI gets merged to `main`, which triggers Coolify deploy.
+
+```
+PR created → GitHub Actions (lint, type-check, build, test)
+    │
+    ▼ (passes)
+Merge to main → Coolify auto-deploy to vellanki.in
+```
+
+---
+
+## Managing Your Server
+
+### Useful SSH Commands
+
+```bash
+# SSH into the server
+ssh root@YOUR_SERVER_IP
+
+# View running containers
+docker ps
+
+# View app logs
+docker logs -f $(docker ps -q --filter "name=devops")
+
+# Check disk space
+df -h
+
+# Check memory usage
+free -m
+
+# Check CPU usage
+htop
+```
+
+### Coolify Dashboard
+
+Access at `http://YOUR_SERVER_IP:8000` to:
+- View deployment history and logs
+- Roll back to a previous deployment
+- Update environment variables (triggers redeploy)
+- Monitor resource usage (CPU, memory, network)
+- Manage SSL certificates
+
+### Backup Strategy
+
+```bash
+# Coolify stores its config in /data/coolify
+# Back it up periodically:
+tar -czf coolify-backup-$(date +%F).tar.gz /data/coolify
+
+# Database backups are handled by Supabase (cloud)
+# Your code is in GitHub
+# Only server config needs backup
 ```
 
 ---
 
 ## Scaling Path
 
-When you outgrow free tiers, here's the upgrade path:
-
-| Milestone | Upgrade | Cost |
-|-----------|---------|------|
-| **100+ daily users** | Vercel Pro (cron jobs, more bandwidth) | +$20/mo |
-| **500 DB connections** | Supabase Pro (8GB, daily backups) | +$25/mo |
+| Milestone | Action | Cost |
+|-----------|--------|------|
+| **Starting out** | Hetzner CX22 (2 vCPU, 4 GB) | $5/mo |
+| **Growing traffic** | Upgrade to CX32 (4 vCPU, 8 GB) | $9/mo |
+| **High traffic** | CX42 (8 vCPU, 16 GB) or add a second server | $17/mo |
+| **500 DB connections** | Supabase Pro (8 GB, daily backups) | +$25/mo |
 | **10k+ MAU** | Clerk Pro | +$25/mo |
 | **3k+ emails/mo** | Resend Pro | +$20/mo |
-| **5k+ errors/mo** | Sentry Team | +$26/mo |
-| **High traffic** | Upstash Pro (more commands) | +$10/mo |
 
-**Estimated costs at scale (10k users)**: ~$126/month
+> **Scaling on Hetzner is easy**: Just resize the server in the Hetzner dashboard (takes ~30 seconds, brief downtime).
 
 ---
 
 ## Troubleshooting
 
-### Build Fails on Vercel
+### Build Fails in Coolify
 
 ```
 Error: Missing required environment variables
 ```
-**Fix**: Add `SKIP_ENV_VALIDATION=true` to Vercel environment variables.
+**Fix**: Ensure `NEXT_OUTPUT_MODE=standalone` is set in Coolify environment variables. The Dockerfile sets `SKIP_ENV_VALIDATION=true` during build, so other env vars aren't needed at build time.
 
-### Clerk Webhook Not Firing
+### SSL Certificate Not Issuing
 
-**Fix**: Ensure the webhook URL matches your deployed domain exactly. Check Clerk Dashboard → Webhooks → Recent Deliveries for errors.
+**Fix**: Ensure DNS records are set to "DNS only" (grey cloud) in Cloudflare, not "Proxied" (orange cloud). Coolify's Traefik needs direct access to issue Let's Encrypt certificates.
+
+### Clerk Webhook Returning 400/401
+
+**Fix**: Verify `CLERK_WEBHOOK_SECRET` in Coolify matches the signing secret in Clerk Dashboard → Webhooks. Redeploy after updating.
 
 ### Database Connection Error
 
 ```
 {"status":"degraded","checks":{"database":"unreachable"}}
 ```
-**Fix**: Verify `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are correct. Check Supabase project isn't paused (free tier pauses after 1 week of inactivity).
+**Fix**: Check if Supabase project is paused (free tier pauses after 7 days of inactivity). Resume it in the Supabase dashboard. Set up UptimeRobot (Step 11) to prevent this.
 
-### Supabase Free Tier Pausing
+### Container Keeps Restarting
 
-Supabase pauses free-tier projects after 7 days of inactivity.
-**Fix**: The health check cron job (`/api/health`) queries the database every 5 minutes, keeping it active. On Vercel Hobby (no cron), set up a free uptime monitor (e.g., [UptimeRobot](https://uptimerobot.com)) to ping `/api/health` every 5 minutes.
+```bash
+# Check container logs
+docker logs $(docker ps -aq --filter "name=devops" | head -1)
+```
+**Fix**: Usually an environment variable issue. Check Coolify dashboard → Application → Logs.
 
-### 403 on Webhook Endpoints
+### Out of Disk Space
 
-**Fix**: Ensure webhook secrets match between the service (Clerk/Stripe) and your environment variables. Signatures are verified on every request.
+```bash
+# Clean up old Docker images
+docker system prune -a --volumes
+```
 
-### CSS/Styles Not Loading
+### Port 3000 Conflict
 
-**Fix**: Check Content-Security-Policy headers in `next.config.mjs`. Ensure CDN domains are whitelisted.
+Coolify uses Traefik as a reverse proxy. Your app runs on port 3000 inside the container, and Traefik routes external traffic (443/80) to it. No port conflicts possible since each container has its own network.
 
 ---
 
-## Quick Start Commands (Local Development)
+## Quick Reference — All Environment Variables
 
 ```bash
-# Clone the repo
-git clone https://github.com/vellankikoti/trainings.git
-cd trainings
+# === REQUIRED ===
+NEXT_PUBLIC_APP_URL=https://vellanki.in
+NEXT_OUTPUT_MODE=standalone
 
-# Install dependencies
-pnpm install
+# Clerk Auth
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
+CLERK_SECRET_KEY=sk_live_...
+CLERK_WEBHOOK_SECRET=whsec_...
 
-# Copy environment variables
-cp .env.example .env.local
-# Edit .env.local with your Supabase and Clerk keys
+# Supabase Database
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
 
-# Start local Supabase (optional — for local database)
-supabase start
+# === OPTIONAL ===
 
-# Start development server
-pnpm dev
+# Stripe Payments
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PREMIUM_MONTHLY_PRICE_ID=price_...
+STRIPE_PREMIUM_ANNUAL_PRICE_ID=price_...
+STRIPE_TEAM_MONTHLY_PRICE_ID=price_...
+STRIPE_TEAM_ANNUAL_PRICE_ID=price_...
 
-# Open http://localhost:3000
+# Resend Email
+RESEND_API_KEY=re_...
+EMAIL_FROM=DevOps Engineers <noreply@vellanki.in>
+
+# Sentry Error Tracking
+NEXT_PUBLIC_SENTRY_DSN=https://xxx@o0.ingest.sentry.io/0
 ```
+
+---
+
+## References
+
+- [Coolify Docs — Next.js](https://coolify.io/docs/applications/nextjs)
+- [Self-Hosting Next.js with Hetzner and Coolify](https://jb.desishub.com/blog/deploy-nextjs-using-coolify-and-hezner)
+- [Hosting Next.js on Hetzner VPS via Coolify](https://deepakness.com/raw/nextjs-on-hetzner-vps/)
+- [Coolify GitHub](https://github.com/coollabsio/coolify)
+- [Hetzner Cloud](https://www.hetzner.com/cloud/)
+- [Vercel vs Coolify Cost Analysis](https://leonstaff.com/blogs/vercel-vs-coolify-cost-analysis/)
+
+For alternative hosting options (Railway, Render, Fly.io), see [hosting-alternatives.md](./hosting-alternatives.md).
 
 ---
 
