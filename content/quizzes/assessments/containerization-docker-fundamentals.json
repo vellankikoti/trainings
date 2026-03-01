@@ -276,7 +276,7 @@
       ],
       "correctAnswer": "A) db-data",
       "explanation": "Named volumes use a simple name without a path prefix. Docker recognizes 'db-data' as a named volume (creates it if it doesn't exist). Paths starting with / or ./ are treated as bind mounts.",
-      "difficulty": "beginner",
+      "difficulty": "intermediate",
       "lessonRef": "05-volumes-and-persistence"
     },
     {
@@ -331,7 +331,7 @@
       ],
       "correctAnswer": 1,
       "explanation": "Custom bridge networks provide automatic DNS resolution, allowing containers to reach each other by name. The default bridge network does NOT provide this -- containers can only communicate by IP address on the default bridge.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "06-networking-essentials"
     },
     {
@@ -406,7 +406,7 @@
       ],
       "correctAnswer": 2,
       "explanation": "Docker Compose automatically creates a default bridge network for the project. All services join this network and can reach each other using the service name defined in the compose file as the hostname.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "07-docker-compose"
     },
     {
@@ -546,7 +546,7 @@
       ],
       "correctAnswer": 1,
       "explanation": "docker image tag (or docker tag) creates a new tag that references an existing image. You must tag images with the registry/repository:tag format before pushing. For example: docker tag myapp registry.example.com/myapp:v1.0.",
-      "difficulty": "beginner",
+      "difficulty": "intermediate",
       "lessonRef": "10-working-with-registries"
     },
     {
@@ -586,7 +586,7 @@
       ],
       "correctAnswer": "A) push",
       "explanation": "docker push uploads an image to a registry. The image must be tagged with the appropriate registry/repository:tag format. You must be logged in with 'docker login' before pushing.",
-      "difficulty": "beginner",
+      "difficulty": "intermediate",
       "lessonRef": "10-working-with-registries"
     },
     {
@@ -616,7 +616,7 @@
       ],
       "correctAnswer": "A) COPY --from=builder",
       "explanation": "COPY --from=builder copies files from a named build stage. The stage is named using 'AS builder' in the FROM instruction. This is the key mechanism that makes multi-stage builds work.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "11-multi-stage-builds"
     },
     {
@@ -671,7 +671,7 @@
       ],
       "correctAnswer": "A) CMD",
       "explanation": "HEALTHCHECK uses CMD to specify the health check command. The command should return 0 for healthy, 1 for unhealthy. The --interval, --timeout, and --retries flags control the check frequency and failure thresholds.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "12-health-checks-and-restart-policies"
     },
     {
@@ -781,7 +781,7 @@
       ],
       "correctAnswer": 1,
       "explanation": "docker inspect returns a comprehensive JSON document containing the container's full configuration, current state, network settings, volume mounts, environment variables, and more. Use --format with Go templates to extract specific fields.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "14-debugging-and-troubleshooting"
     },
     {

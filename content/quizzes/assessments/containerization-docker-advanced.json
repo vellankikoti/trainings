@@ -46,10 +46,15 @@
     },
     {
       "id": "da-q03",
-      "type": "true_false",
-      "question": "BuildKit can build multiple independent stages in a Dockerfile in parallel, reducing overall build time.",
-      "options": ["True", "False"],
-      "correctAnswer": "True",
+      "type": "multiple_choice",
+      "question": "How does BuildKit improve upon the legacy Docker builder for multi-stage Dockerfiles?",
+      "options": [
+        "It uses a different image format",
+        "It analyzes the stage dependency graph and builds independent stages in parallel",
+        "It caches only the final stage for speed",
+        "It requires fewer FROM instructions"
+      ],
+      "correctAnswer": 1,
       "explanation": "BuildKit analyzes the dependency graph of stages and steps. Stages that do not depend on each other are built concurrently. This is a major improvement over the legacy builder which processed stages sequentially.",
       "difficulty": "intermediate",
       "lessonRef": "01-build-optimization"
@@ -266,15 +271,20 @@
       ],
       "correctAnswer": 1,
       "explanation": "Copy-on-write means the container reads files directly from image layers. Only when a file is modified does Docker copy it to the container's writable layer. This is efficient because most files are never modified, saving disk space and enabling instant container creation.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "05-storage-deep-dive"
     },
     {
       "id": "da-q19",
-      "type": "true_false",
-      "question": "Docker tmpfs mounts store data in the host's RAM and the data is lost when the container stops.",
-      "options": ["True", "False"],
-      "correctAnswer": "True",
+      "type": "multiple_choice",
+      "question": "What type of data is best suited for Docker tmpfs mounts?",
+      "options": [
+        "Database files that need persistence across restarts",
+        "Sensitive or temporary data that should not be persisted to disk",
+        "Static assets like images and CSS files",
+        "Docker image layers"
+      ],
+      "correctAnswer": 1,
       "explanation": "tmpfs mounts are stored in the host's memory (RAM) and are never written to the host filesystem. They are ideal for sensitive data that should not persist, like secrets or temporary processing data. All data is lost when the container stops.",
       "difficulty": "intermediate",
       "lessonRef": "05-storage-deep-dive"
@@ -291,7 +301,7 @@
       ],
       "correctAnswer": "A) df",
       "explanation": "docker system df shows disk usage for images, containers, volumes, and build cache. Use -v for a verbose breakdown. This helps identify what is consuming disk space before running cleanup commands like docker system prune.",
-      "difficulty": "beginner",
+      "difficulty": "intermediate",
       "lessonRef": "05-storage-deep-dive"
     },
     {
@@ -321,7 +331,7 @@
       ],
       "correctAnswer": 2,
       "explanation": "The overlay network driver creates a distributed network across multiple Docker hosts. It uses VXLAN encapsulation to tunnel traffic between hosts. Overlay networks are used in Docker Swarm and can be created with 'docker network create -d overlay'.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "06-advanced-networking"
     },
     {
@@ -486,7 +496,7 @@
       ],
       "correctAnswer": 1,
       "explanation": "An image manifest is a JSON document that describes the image: its layers (as content-addressable digests), configuration, and target platform. Multi-arch manifest lists reference platform-specific manifests to support different CPU architectures.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "09-registry-management"
     },
     {
@@ -621,12 +631,17 @@
     },
     {
       "id": "da-q44",
-      "type": "true_false",
-      "question": "Docker Swarm placement constraints allow you to control which nodes a service's tasks run on based on node labels.",
-      "options": ["True", "False"],
-      "correctAnswer": "True",
+      "type": "multiple_choice",
+      "question": "How do Docker Swarm placement constraints determine where service tasks are scheduled?",
+      "options": [
+        "They randomly distribute tasks across all available nodes",
+        "They use node labels and attributes to restrict which nodes can run specific tasks",
+        "They assign tasks based on the order nodes joined the swarm",
+        "They only schedule tasks on manager nodes"
+      ],
+      "correctAnswer": 1,
       "explanation": "Placement constraints use node labels to restrict where tasks are scheduled. For example, --constraint 'node.labels.disk==ssd' ensures tasks only run on SSD nodes. This is useful for GPU workloads, data locality, or compliance requirements.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "11-service-deployment"
     },
     {
@@ -681,7 +696,7 @@
       "options": ["True", "False"],
       "correctAnswer": "True",
       "explanation": "docker events streams real-time events from the daemon including container lifecycle (create, start, stop, die), image events (pull, push), volume events, and network events. It can be filtered by event type, container, and time range.",
-      "difficulty": "beginner",
+      "difficulty": "intermediate",
       "lessonRef": "12-monitoring-logging"
     },
     {
@@ -711,7 +726,7 @@
       ],
       "correctAnswer": "A) export",
       "explanation": "docker export creates a tar archive of a container's entire filesystem. Unlike 'docker save' (which exports an image with layers and metadata), 'export' flattens the filesystem into a single layer. Useful for forensic analysis of compromised containers.",
-      "difficulty": "intermediate",
+      "difficulty": "advanced",
       "lessonRef": "13-troubleshooting"
     },
     {
@@ -766,7 +781,7 @@
       ],
       "correctAnswer": "A) linux/amd64,linux/arm64",
       "explanation": "The --platform flag accepts OS/architecture pairs. docker buildx builds the image for each platform and creates a manifest list that registries use to serve the correct image to each architecture. The --push flag is required for multi-platform builds.",
-      "difficulty": "advanced",
+      "difficulty": "intermediate",
       "lessonRef": "14-advanced-build-patterns"
     },
     {
