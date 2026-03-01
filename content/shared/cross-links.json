@@ -1,0 +1,218 @@
+{
+  "id": "foundations-cross-links",
+  "title": "Foundations Path Cross-Module Links",
+  "description": "Maps relationships between lessons across different modules in the Foundations path for navigation and SEO",
+  "lastUpdated": "2026-03-01",
+  "modules": [
+    {
+      "slug": "linux",
+      "pathSlug": "foundations",
+      "nextModule": "shell-scripting",
+      "relatedModules": ["shell-scripting", "networking", "python-automation"]
+    },
+    {
+      "slug": "shell-scripting",
+      "pathSlug": "foundations",
+      "previousModule": "linux",
+      "nextModule": "git",
+      "relatedModules": ["linux", "python-automation"]
+    },
+    {
+      "slug": "git",
+      "pathSlug": "foundations",
+      "previousModule": "shell-scripting",
+      "nextModule": "networking",
+      "relatedModules": ["shell-scripting", "python-automation"]
+    },
+    {
+      "slug": "networking",
+      "pathSlug": "foundations",
+      "previousModule": "git",
+      "nextModule": "python-automation",
+      "relatedModules": ["linux", "python-automation"]
+    },
+    {
+      "slug": "python-automation",
+      "pathSlug": "foundations",
+      "previousModule": "networking",
+      "nextModule": null,
+      "relatedModules": ["linux", "shell-scripting", "networking"]
+    }
+  ],
+  "crossLinks": [
+    {
+      "from": { "module": "linux", "lesson": "01-the-linux-story" },
+      "to": { "module": "shell-scripting", "lesson": "01-what-is-shell-scripting" },
+      "relationship": "leads-to",
+      "description": "Linux CLI fundamentals lead directly into shell scripting"
+    },
+    {
+      "from": { "module": "linux", "lesson": "05-file-permissions" },
+      "to": { "module": "git", "lesson": "01-the-git-story" },
+      "relationship": "related",
+      "description": "File permissions affect Git repository management"
+    },
+    {
+      "from": { "module": "linux", "lesson": "06-users-and-groups" },
+      "to": { "module": "git", "lesson": "03-configuring-git" },
+      "relationship": "related",
+      "description": "User identity concepts apply to Git author configuration"
+    },
+    {
+      "from": { "module": "linux", "lesson": "07-process-management" },
+      "to": { "module": "shell-scripting", "lesson": "13-process-management" },
+      "relationship": "deepens",
+      "description": "Shell scripting automates process management tasks"
+    },
+    {
+      "from": { "module": "linux", "lesson": "09-networking-basics" },
+      "to": { "module": "networking", "lesson": "01-how-the-internet-works" },
+      "relationship": "leads-to",
+      "description": "Linux networking commands are used throughout the networking module"
+    },
+    {
+      "from": { "module": "linux", "lesson": "10-package-management" },
+      "to": { "module": "python-automation", "lesson": "02-installation-and-setup" },
+      "relationship": "related",
+      "description": "Package managers install Python and development tools"
+    },
+    {
+      "from": { "module": "linux", "lesson": "12-disk-management" },
+      "to": { "module": "networking", "lesson": "14-container-networking" },
+      "relationship": "related",
+      "description": "Disk and mount concepts apply to container storage"
+    },
+    {
+      "from": { "module": "linux", "lesson": "13-system-monitoring" },
+      "to": { "module": "python-automation", "lesson": "19-monitoring-scripts" },
+      "relationship": "leads-to",
+      "description": "Python automates system monitoring tasks learned in Linux"
+    },
+    {
+      "from": { "module": "linux", "lesson": "15-cron-and-scheduling" },
+      "to": { "module": "shell-scripting", "lesson": "15-real-world-scripts" },
+      "relationship": "related",
+      "description": "Cron jobs typically run shell scripts"
+    },
+    {
+      "from": { "module": "shell-scripting", "lesson": "03-variables-and-data" },
+      "to": { "module": "python-automation", "lesson": "03-python-basics" },
+      "relationship": "compare",
+      "description": "Compare variable handling in Bash vs Python"
+    },
+    {
+      "from": { "module": "shell-scripting", "lesson": "05-conditionals" },
+      "to": { "module": "python-automation", "lesson": "05-control-flow" },
+      "relationship": "compare",
+      "description": "Compare conditional syntax: Bash test/if vs Python if/elif"
+    },
+    {
+      "from": { "module": "shell-scripting", "lesson": "09-file-operations" },
+      "to": { "module": "python-automation", "lesson": "07-file-operations" },
+      "relationship": "compare",
+      "description": "Compare file handling in Bash vs Python"
+    },
+    {
+      "from": { "module": "shell-scripting", "lesson": "10-text-processing" },
+      "to": { "module": "python-automation", "lesson": "12-regex-text-processing" },
+      "relationship": "compare",
+      "description": "Compare grep/sed/awk with Python regex"
+    },
+    {
+      "from": { "module": "shell-scripting", "lesson": "11-error-handling" },
+      "to": { "module": "python-automation", "lesson": "11-error-handling-logging" },
+      "relationship": "compare",
+      "description": "Compare error handling strategies in Bash vs Python"
+    },
+    {
+      "from": { "module": "shell-scripting", "lesson": "16-production-scripting" },
+      "to": { "module": "python-automation", "lesson": "20-production-automation" },
+      "relationship": "related",
+      "description": "Both modules culminate in production-ready automation"
+    },
+    {
+      "from": { "module": "git", "lesson": "05-staging-and-committing" },
+      "to": { "module": "shell-scripting", "lesson": "15-real-world-scripts" },
+      "relationship": "related",
+      "description": "Git hooks run shell scripts on commit events"
+    },
+    {
+      "from": { "module": "git", "lesson": "11-remotes-and-collaboration" },
+      "to": { "module": "networking", "lesson": "05-http-and-https" },
+      "relationship": "related",
+      "description": "Git remotes use HTTP/HTTPS and SSH protocols"
+    },
+    {
+      "from": { "module": "git", "lesson": "13-pull-requests" },
+      "to": { "module": "python-automation", "lesson": "10-http-requests" },
+      "relationship": "related",
+      "description": "GitHub API uses HTTP requests for automation"
+    },
+    {
+      "from": { "module": "git", "lesson": "19-enterprise-branching" },
+      "to": { "module": "shell-scripting", "lesson": "15-real-world-scripts" },
+      "relationship": "related",
+      "description": "Deployment scripts automate branching workflows"
+    },
+    {
+      "from": { "module": "networking", "lesson": "03-ip-addresses-and-subnets" },
+      "to": { "module": "linux", "lesson": "09-networking-basics" },
+      "relationship": "builds-on",
+      "description": "IP configuration builds on Linux networking commands"
+    },
+    {
+      "from": { "module": "networking", "lesson": "04-dns-deep-dive" },
+      "to": { "module": "python-automation", "lesson": "10-http-requests" },
+      "relationship": "related",
+      "description": "DNS resolution is fundamental to HTTP requests in Python"
+    },
+    {
+      "from": { "module": "networking", "lesson": "09-firewalls-and-security" },
+      "to": { "module": "linux", "lesson": "18-security-basics" },
+      "relationship": "builds-on",
+      "description": "Firewall rules build on Linux security concepts"
+    },
+    {
+      "from": { "module": "networking", "lesson": "12-troubleshooting-networks" },
+      "to": { "module": "linux", "lesson": "09-networking-basics" },
+      "relationship": "builds-on",
+      "description": "Network troubleshooting uses Linux CLI tools"
+    },
+    {
+      "from": { "module": "networking", "lesson": "14-container-networking" },
+      "to": { "module": "python-automation", "lesson": "15-docker-sdk" },
+      "relationship": "leads-to",
+      "description": "Container networking concepts apply to Docker SDK usage"
+    },
+    {
+      "from": { "module": "python-automation", "lesson": "09-os-and-subprocess" },
+      "to": { "module": "shell-scripting", "lesson": "01-what-is-shell-scripting" },
+      "relationship": "builds-on",
+      "description": "subprocess.run() executes shell commands from Python"
+    },
+    {
+      "from": { "module": "python-automation", "lesson": "13-boto3-aws-basics" },
+      "to": { "module": "networking", "lesson": "13-cloud-networking" },
+      "relationship": "related",
+      "description": "AWS automation requires understanding cloud networking"
+    },
+    {
+      "from": { "module": "python-automation", "lesson": "14-paramiko-ssh" },
+      "to": { "module": "linux", "lesson": "17-remote-access" },
+      "relationship": "builds-on",
+      "description": "Paramiko automates SSH connections learned in Linux"
+    },
+    {
+      "from": { "module": "python-automation", "lesson": "15-docker-sdk" },
+      "to": { "module": "networking", "lesson": "14-container-networking" },
+      "relationship": "builds-on",
+      "description": "Docker SDK manages containers learned in networking module"
+    },
+    {
+      "from": { "module": "python-automation", "lesson": "16-kubernetes-client" },
+      "to": { "module": "networking", "lesson": "14-container-networking" },
+      "relationship": "related",
+      "description": "Kubernetes client builds on container and networking concepts"
+    }
+  ]
+}
