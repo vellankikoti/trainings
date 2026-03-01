@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "./Logo";
 import { MobileNav } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
+import { SearchDialog } from "./SearchDialog";
 
 const NAV_ITEMS = [
   { label: "Learning Paths", href: "/paths" },
@@ -31,6 +32,7 @@ export function Header() {
           </nav>
         </div>
         <div className="flex items-center gap-2">
+          <SearchDialog />
           <ThemeToggle />
           <SignedOut>
             <Button variant="ghost" asChild>

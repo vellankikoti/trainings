@@ -86,7 +86,7 @@
 
 ### TASK-044: Build module assessment quiz page
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-043
 - **Estimated effort:** M
@@ -151,7 +151,7 @@
 
 ### TASK-047: Build local Docker lab CLI tool
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-046
 - **Estimated effort:** XL
@@ -204,7 +204,7 @@
 
 ### TASK-049: Build browser-based terminal component (basic)
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-033
 - **Estimated effort:** XL
@@ -231,7 +231,7 @@
 
 ### TASK-050: Create lab integration in lesson pages
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-049
 - **Estimated effort:** M
@@ -344,9 +344,9 @@
 
 ## Sprint 8: Search & Navigation (Week 8)
 
-### TASK-055: Implement search with Pagefind
+### TASK-055: Implement search with Cmd+K
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-025, TASK-033
 - **Estimated effort:** L
@@ -418,7 +418,7 @@
 
 ### TASK-058: Create breadcrumb navigation component
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-033
 - **Estimated effort:** S
@@ -515,7 +515,7 @@
 
 ### TASK-062: Build blog system
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-025
 - **Estimated effort:** L
@@ -561,7 +561,7 @@
 
 ### TASK-064: Build Pricing page
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-017
 - **Estimated effort:** M
@@ -607,7 +607,7 @@
 
 ### TASK-066: Add loading states and skeletons
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-023, TASK-033, TASK-043
 - **Estimated effort:** M
@@ -718,7 +718,7 @@
 
 ### TASK-071: Create lesson template MDX file
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-032
 - **Estimated effort:** S
@@ -1127,7 +1127,7 @@
 
 ### TASK-089: Create development setup documentation
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-040
 - **Estimated effort:** M

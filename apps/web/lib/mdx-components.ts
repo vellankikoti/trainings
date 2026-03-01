@@ -5,6 +5,8 @@ import { Exercise } from "@/components/content/Exercise";
 import { MiniProject } from "@/components/content/MiniProject";
 import { CollapsibleSolution } from "@/components/content/CollapsibleSolution";
 import { Quiz, QuizQuestion } from "@/components/content/Quiz";
+import { LabEmbed } from "@/components/content/LabEmbed";
+import { Terminal } from "@/components/content/Terminal";
 
 export const mdxComponents = {
   // Custom components for MDX content
@@ -17,6 +19,8 @@ export const mdxComponents = {
   CollapsibleSolution,
   Quiz,
   QuizQuestion,
+  LabEmbed,
+  Terminal,
 
   // Override standard HTML elements
   pre: (props: React.ComponentProps<"pre">) => {

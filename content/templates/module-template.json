@@ -1,0 +1,30 @@
+{
+  "title": "Module Title",
+  "slug": "module-slug",
+  "description": "A concise description of what this module covers and what learners will achieve. 1-2 sentences.",
+  "objectives": [
+    "First module-level learning objective",
+    "Second module-level learning objective",
+    "Third module-level learning objective"
+  ],
+  "prerequisites": [],
+  "estimatedHours": 8,
+  "order": 1,
+  "lessons": [
+    {
+      "slug": "lesson-one-slug",
+      "title": "Lesson One Title",
+      "order": 1
+    },
+    {
+      "slug": "lesson-two-slug",
+      "title": "Lesson Two Title",
+      "order": 2
+    },
+    {
+      "slug": "lesson-three-slug",
+      "title": "Lesson Three Title",
+      "order": 3
+    }
+  ]
+}

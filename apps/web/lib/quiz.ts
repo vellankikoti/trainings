@@ -24,6 +24,7 @@ export interface Quiz {
   pathSlug: string;
   passingScore: number;
   timeLimit?: number;
+  isAssessment?: boolean;
   xpRewards: {
     pass: number;
     perfect: number;
@@ -71,6 +72,30 @@ export function getQuizByLesson(
       const content = fs.readFileSync(filePath, "utf-8");
       const quiz = JSON.parse(content) as Quiz;
       if (quiz.lessonSlug === lessonSlug) return quiz;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Load an assessment quiz by module slug.
+ */
+export function getAssessment(
+  pathSlug: string,
+  moduleSlug: string,
+): Quiz | null {
+  const assessmentsDir = path.join(QUIZ_DIR, "assessments");
+  if (!fs.existsSync(assessmentsDir)) return null;
+
+  const files = fs.readdirSync(assessmentsDir).filter((f) => f.endsWith(".json"));
+  for (const file of files) {
+    const filePath = path.join(assessmentsDir, file);
+    try {
+      const content = fs.readFileSync(filePath, "utf-8");
+      const quiz = JSON.parse(content) as Quiz;
+      if (quiz.pathSlug === pathSlug && quiz.moduleSlug === moduleSlug) return quiz;
     } catch {
       continue;
     }

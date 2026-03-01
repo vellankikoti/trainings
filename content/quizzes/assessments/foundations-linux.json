@@ -1,0 +1,239 @@
+{
+  "id": "assessment-foundations-linux",
+  "title": "Linux Foundations Assessment",
+  "description": "Comprehensive assessment covering all Linux fundamentals. Pass this to earn your Linux Foundations certificate.",
+  "lessonSlug": "_assessment",
+  "moduleSlug": "linux",
+  "pathSlug": "foundations",
+  "passingScore": 80,
+  "timeLimit": 1800,
+  "isAssessment": true,
+  "xpRewards": {
+    "pass": 200,
+    "perfect": 300,
+    "retry": 50
+  },
+  "questions": [
+    {
+      "id": "a-lx-q1",
+      "type": "multiple_choice",
+      "question": "What percentage of the world's top servers run Linux?",
+      "options": ["About 50%", "About 75%", "Over 96%", "100%"],
+      "correctAnswer": 2,
+      "explanation": "Linux powers over 96.3% of the world's top 1 million servers.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q2",
+      "type": "multiple_choice",
+      "question": "What is the relationship between the Linux kernel and a Linux distribution?",
+      "options": [
+        "They are the same thing",
+        "The kernel is the core; a distro bundles it with tools and a package manager",
+        "A distro is a lighter version of the kernel",
+        "The kernel is only for advanced users"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The Linux kernel manages hardware and processes. A distribution packages the kernel with user-space tools, libraries, and a package manager.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q3",
+      "type": "true_false",
+      "question": "The 'pwd' command displays the current working directory.",
+      "correctAnswer": true,
+      "explanation": "'pwd' stands for 'print working directory' and shows the full path of your current location.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q4",
+      "type": "multiple_choice",
+      "question": "Which command lists directory contents including hidden files?",
+      "options": ["ls -h", "ls -a", "ls -r", "ls -t"],
+      "correctAnswer": 1,
+      "explanation": "The '-a' (all) flag shows hidden files that start with a dot.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q5",
+      "type": "multiple_choice",
+      "question": "What does the permission string 'rwxr-x---' mean?",
+      "options": [
+        "Owner can read/write/execute, group can read/execute, others have no access",
+        "Everyone can read, write, and execute",
+        "Only the owner can access the file",
+        "Group members have full access"
+      ],
+      "correctAnswer": 0,
+      "explanation": "Permissions are split into 3 groups of 3: owner (rwx), group (r-x), others (---). Owner has full access, group can read and execute, others have no permissions.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q6",
+      "type": "multiple_choice",
+      "question": "Which command changes file permissions in Linux?",
+      "options": ["chown", "chmod", "chgrp", "chperm"],
+      "correctAnswer": 1,
+      "explanation": "'chmod' (change mode) modifies file permissions. 'chown' changes ownership, 'chgrp' changes group.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q7",
+      "type": "true_false",
+      "question": "In Linux, the root directory is represented by '~'.",
+      "correctAnswer": false,
+      "explanation": "The root directory is '/'. The tilde '~' represents the current user's home directory.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q8",
+      "type": "multiple_choice",
+      "question": "What does the pipe operator '|' do in Linux?",
+      "options": [
+        "Redirects output to a file",
+        "Runs two commands simultaneously",
+        "Sends the output of one command as input to another",
+        "Creates a symbolic link"
+      ],
+      "correctAnswer": 2,
+      "explanation": "The pipe operator takes stdout of the left command and passes it as stdin to the right command, enabling command composition.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q9",
+      "type": "multiple_choice",
+      "question": "Which command searches for text patterns in files?",
+      "options": ["find", "grep", "locate", "search"],
+      "correctAnswer": 1,
+      "explanation": "'grep' (Global Regular Expression Print) searches for text patterns within files. 'find' searches for files by name/attributes.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q10",
+      "type": "multiple_choice",
+      "question": "What is the purpose of the /etc directory in Linux?",
+      "options": [
+        "User home directories",
+        "System configuration files",
+        "Temporary files",
+        "Device files"
+      ],
+      "correctAnswer": 1,
+      "explanation": "/etc contains system-wide configuration files. It's one of the most important directories for system administration.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q11",
+      "type": "true_false",
+      "question": "Docker containers share the host Linux kernel.",
+      "correctAnswer": true,
+      "explanation": "Docker containers share the host OS kernel, which is why they're lightweight compared to virtual machines.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q12",
+      "type": "multiple_choice",
+      "question": "Which package manager does Ubuntu use?",
+      "options": ["yum", "dnf", "apt", "pacman"],
+      "correctAnswer": 2,
+      "explanation": "Ubuntu uses apt (Advanced Package Tool). yum/dnf are for Red Hat/Fedora, pacman is for Arch Linux.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q13",
+      "type": "multiple_choice",
+      "question": "What does 'chmod 755 script.sh' do?",
+      "options": [
+        "Makes the file read-only for everyone",
+        "Owner: rwx, Group: r-x, Others: r-x",
+        "Deletes the file permissions",
+        "Makes the file writable by everyone"
+      ],
+      "correctAnswer": 1,
+      "explanation": "755 in octal means: 7 (rwx) for owner, 5 (r-x) for group, 5 (r-x) for others. This is a common permission for executable scripts.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q14",
+      "type": "multiple_choice",
+      "question": "Which command shows running processes in Linux?",
+      "options": ["top", "ls", "df", "mount"],
+      "correctAnswer": 0,
+      "explanation": "'top' shows real-time information about running processes, CPU usage, and memory. 'htop' is a popular enhanced alternative.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q15",
+      "type": "multiple_choice",
+      "question": "What is the significance of the shebang (#!) at the beginning of a script?",
+      "options": [
+        "It's a comment",
+        "It specifies which interpreter should execute the script",
+        "It marks the file as executable",
+        "It's required syntax in all scripts"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The shebang line (e.g., #!/bin/bash) tells the OS which interpreter to use when executing the script directly.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q16",
+      "type": "true_false",
+      "question": "The 'man' command displays the manual page for a given command.",
+      "correctAnswer": true,
+      "explanation": "'man' (manual) provides detailed documentation for Linux commands, including options, syntax, and examples.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q17",
+      "type": "multiple_choice",
+      "question": "What does the command 'tail -f /var/log/syslog' do?",
+      "options": [
+        "Shows the first 10 lines of the file",
+        "Deletes the log file",
+        "Follows the file in real-time, showing new lines as they're added",
+        "Counts the number of lines in the file"
+      ],
+      "correctAnswer": 2,
+      "explanation": "'tail -f' (follow) continuously monitors a file and displays new lines as they are appended. Essential for real-time log monitoring.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "a-lx-q18",
+      "type": "multiple_choice",
+      "question": "Which Linux philosophy principle states that programs should do one thing well?",
+      "options": [
+        "Everything is a file",
+        "Small, focused tools",
+        "Text is the universal interface",
+        "Silence is golden"
+      ],
+      "correctAnswer": 1,
+      "explanation": "The Unix/Linux philosophy emphasizes writing programs that do one thing and do it well, then combining them with pipes and redirection.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q19",
+      "type": "multiple_choice",
+      "question": "What does the 'sudo' command do?",
+      "options": [
+        "Switches to a different user",
+        "Executes a command with superuser (root) privileges",
+        "Shuts down the system",
+        "Shows system information"
+      ],
+      "correctAnswer": 1,
+      "explanation": "'sudo' (superuser do) executes a command with elevated privileges. It's safer than logging in as root because it provides an audit trail.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "a-lx-q20",
+      "type": "multiple_choice",
+      "question": "Which redirection operator appends output to a file without overwriting?",
+      "options": [">", ">>", "<", "|"],
+      "correctAnswer": 1,
+      "explanation": "'>>' appends output to the end of a file. '>' overwrites the file. '<' redirects input from a file. '|' pipes output to another command.",
+      "difficulty": "medium"
+    }
+  ]
+}
