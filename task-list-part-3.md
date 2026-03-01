@@ -340,7 +340,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-104: Create Git Lessons 11-20 — Remotes & Advanced
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-103
 - **Estimated effort:** XL
@@ -370,7 +370,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-105: Create Networking module — All lessons
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-096 (Linux networking lesson provides foundation)
 - **Estimated effort:** XL (multi-session)
@@ -609,7 +609,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-113: Create quiz question pools for all migrated modules
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P0
 - **Depends on:** TASK-100, TASK-104
 - **Estimated effort:** L
@@ -631,7 +631,7 @@ Content is the product. The platform is the delivery mechanism.
 
 ### TASK-114: Create lab configurations for Shell Scripting and Git
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-046, TASK-100, TASK-104
 - **Estimated effort:** L

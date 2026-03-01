@@ -1,0 +1,966 @@
+---
+title: "Cloud Networking Basics"
+description: "Networking in the cloud era. Understand VPCs, subnets, security groups, and the virtual networking that makes AWS, GCP, and Azure work."
+order: 13
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 12-network-troubleshooting
+objectives:
+  - Understand VPC architecture and design
+  - Configure subnets (public and private)
+  - Know how security groups and NACLs differ
+  - Understand internet and NAT gateways
+tags:
+  - networking
+  - cloud
+  - vpc
+  - aws
+---
+
+<Callout type="story" title="The Story">
+Your company is moving to the cloud. The architect draws a diagram with boxes labeled "VPC," "public subnet," "private subnet," "NAT gateway," "internet gateway." Everyone nods like they understand. But do you? A VPC is just a virtual network. Subnets are just IP ranges. Security groups are just firewalls. All the physical networking concepts you've learned apply — they're just virtualized. Understanding cloud networking is understanding networking with an API.
+</Callout>
+
+## What Is a VPC?
+
+A Virtual Private Cloud (VPC) is your isolated, private network within a cloud provider. Think of it as your own data center network, but virtual — defined entirely in software and managed through an API.
+
+```
+Traditional Data Center:
+  Physical routers → Physical switches → Physical servers
+  Cables, racks, and hardware you manage
+
+VPC (Virtual Private Cloud):
+  Virtual routers → Virtual subnets → Virtual machines
+  All defined in code, provisioned in seconds
+
+Every VPC is:
+  - Isolated from other customers' VPCs
+  - Contained within a region (e.g., us-east-1)
+  - Defined by a CIDR block (your private IP range)
+  - Fully controlled by you: subnets, routes, firewalls
+```
+
+## VPC CIDR Blocks
+
+When you create a VPC, you assign it a CIDR block — the range of private IP addresses available within the VPC.
+
+```bash
+# Common VPC CIDR choices:
+
+# /16 — Large VPC (65,536 IPs)
+# Best for: Production environments with many services
+10.0.0.0/16     # 10.0.0.0 - 10.0.255.255
+
+# /20 — Medium VPC (4,096 IPs)
+# Best for: Smaller environments, development
+10.1.0.0/20     # 10.1.0.0 - 10.1.15.255
+
+# /24 — Small VPC (256 IPs)
+# Best for: Testing, single-purpose VPCs
+10.2.0.0/24     # 10.2.0.0 - 10.2.0.255
+```
+
+<Callout type="warning" title="Plan CIDR Blocks Carefully">
+VPC CIDR blocks cannot overlap if you plan to connect VPCs via peering or transit gateway. Plan your IP addressing scheme before creating VPCs.
+
+```
+BAD: Two VPCs that might need to connect
+  Production VPC:  10.0.0.0/16
+  Staging VPC:     10.0.0.0/16   ← Same range! Cannot peer.
+
+GOOD: Non-overlapping ranges
+  Production VPC:  10.0.0.0/16
+  Staging VPC:     10.1.0.0/16
+  Development VPC: 10.2.0.0/16
+```
+</Callout>
+
+## Subnets: Public vs Private
+
+Subnets divide your VPC into smaller networks, each in a specific Availability Zone (AZ). The critical distinction is public vs private.
+
+```
+VPC: 10.0.0.0/16
+├── Public Subnet (10.0.1.0/24) — AZ us-east-1a
+│   ├── Has a route to the Internet Gateway
+│   ├── Instances CAN have public IPs
+│   └── Used for: Load balancers, bastion hosts, NAT gateways
+│
+├── Public Subnet (10.0.2.0/24) — AZ us-east-1b
+│   └── Same config, different AZ (for redundancy)
+│
+├── Private Subnet (10.0.10.0/24) — AZ us-east-1a
+│   ├── NO route to Internet Gateway
+│   ├── Instances CANNOT have public IPs
+│   ├── Outbound internet via NAT Gateway
+│   └── Used for: Application servers, workers
+│
+├── Private Subnet (10.0.11.0/24) — AZ us-east-1b
+│   └── Same config, different AZ
+│
+├── Data Subnet (10.0.20.0/24) — AZ us-east-1a
+│   ├── NO internet access at all (no NAT)
+│   └── Used for: Databases, caches (RDS, ElastiCache)
+│
+└── Data Subnet (10.0.21.0/24) — AZ us-east-1b
+    └── Same config, different AZ
+```
+
+### Subnet Sizing
+
+```bash
+# AWS reserves 5 IPs in every subnet:
+#   .0   — Network address
+#   .1   — VPC router
+#   .2   — DNS server
+#   .3   — Reserved for future use
+#   .255 — Broadcast (not used in VPC, but reserved)
+
+# So a /24 subnet gives you 251 usable IPs (256 - 5)
+# A /20 subnet gives you 4,091 usable IPs (4,096 - 5)
+
+# Sizing guidelines:
+#   /24 (251 IPs)   — Small tier, limited services
+#   /22 (1,019 IPs) — Medium tier, room to grow
+#   /20 (4,091 IPs) — Large tier, Kubernetes nodes
+```
+
+## Internet Gateway
+
+An Internet Gateway (IGW) connects your VPC to the internet. Without it, nothing in the VPC can reach the internet or be reached from it.
+
+```
+Internet
+    │
+    ▼
+┌──────────────────┐
+│  Internet Gateway │  ← Attached to the VPC
+└────────┬─────────┘
+         │
+    ┌────▼────────────────────────────────┐
+    │              VPC                     │
+    │                                      │
+    │  ┌─────────────────┐                │
+    │  │  Public Subnet   │                │
+    │  │  Route: 0.0.0.0/0 → IGW         │
+    │  │  [Web Server]    │                │
+    │  └─────────────────┘                │
+    │                                      │
+    │  ┌─────────────────┐                │
+    │  │  Private Subnet  │                │
+    │  │  NO route to IGW │                │
+    │  │  [App Server]    │                │
+    │  └─────────────────┘                │
+    └──────────────────────────────────────┘
+
+Key point: The IGW alone doesn't make a subnet public.
+The subnet's ROUTE TABLE must have a route pointing to the IGW.
+```
+
+## NAT Gateway
+
+A NAT Gateway allows instances in private subnets to initiate outbound connections to the internet (for updates, API calls, etc.) while preventing inbound connections from the internet.
+
+```
+Private Instance needs to download packages:
+
+  Private Instance (10.0.10.50)
+       │
+       ▼
+  Private Subnet Route Table:
+    0.0.0.0/0 → NAT Gateway
+       │
+       ▼
+  NAT Gateway (in Public Subnet)
+    Translates: 10.0.10.50 → NAT's public IP (54.x.x.x)
+       │
+       ▼
+  Internet Gateway
+       │
+       ▼
+  Internet (apt-get update, pip install, etc.)
+
+Response follows the reverse path back to the private instance.
+The internet only sees the NAT Gateway's public IP.
+```
+
+<Callout type="tip" title="NAT Gateway Costs">
+NAT Gateways are expensive — they charge per hour AND per GB of data processed. For non-production environments, consider a NAT instance (a small EC2 instance running NAT) or VPC endpoints to avoid NAT costs entirely for AWS service traffic.
+</Callout>
+
+## Route Tables
+
+Every subnet has a route table that determines where traffic goes. This is the mechanism that makes a subnet public or private.
+
+```bash
+# Public Subnet Route Table:
+# Destination        Target
+# 10.0.0.0/16       local          ← VPC internal traffic stays in VPC
+# 0.0.0.0/0         igw-abc123     ← Everything else goes to Internet Gateway
+
+# Private Subnet Route Table:
+# Destination        Target
+# 10.0.0.0/16       local          ← VPC internal traffic stays in VPC
+# 0.0.0.0/0         nat-xyz789     ← Everything else goes through NAT Gateway
+
+# Data Subnet Route Table (fully isolated):
+# Destination        Target
+# 10.0.0.0/16       local          ← Only VPC internal traffic
+# (No default route — no internet access at all)
+```
+
+```bash
+# AWS CLI examples:
+
+# Create a route table
+aws ec2 create-route-table --vpc-id vpc-abc123
+
+# Add a route to the internet gateway (makes it a public route table)
+aws ec2 create-route \
+    --route-table-id rtb-public123 \
+    --destination-cidr-block 0.0.0.0/0 \
+    --gateway-id igw-abc123
+
+# Add a route to the NAT gateway (makes it a private route table)
+aws ec2 create-route \
+    --route-table-id rtb-private456 \
+    --destination-cidr-block 0.0.0.0/0 \
+    --nat-gateway-id nat-xyz789
+
+# Associate a route table with a subnet
+aws ec2 associate-route-table \
+    --route-table-id rtb-public123 \
+    --subnet-id subnet-pub1
+```
+
+## Security Groups
+
+Security groups are stateful firewalls attached to individual instances (EC2, RDS, etc.). They control inbound and outbound traffic at the instance level.
+
+```bash
+# Security Group properties:
+#   - STATEFUL: If you allow inbound, the response is automatically allowed out
+#   - Default DENY inbound: Must explicitly allow inbound traffic
+#   - Default ALLOW outbound: All outbound traffic is allowed by default
+#   - Applied to instances, not subnets
+#   - Can reference other security groups (powerful for tier-based access)
+
+# Web Server Security Group
+# Inbound Rules:
+#   Type      Protocol  Port    Source
+#   HTTP      TCP       80      0.0.0.0/0         ← Anyone can access HTTP
+#   HTTPS     TCP       443     0.0.0.0/0         ← Anyone can access HTTPS
+#   SSH       TCP       22      10.0.1.0/24       ← SSH only from public subnet
+
+# Outbound Rules:
+#   Type      Protocol  Port    Destination
+#   All       All       All     0.0.0.0/0         ← Can reach anything (default)
+
+# Application Server Security Group
+# Inbound Rules:
+#   Type      Protocol  Port    Source
+#   Custom    TCP       8080    sg-webserver       ← Only from web server SG
+#   SSH       TCP       22      sg-bastion         ← Only from bastion SG
+
+# Database Security Group
+# Inbound Rules:
+#   Type      Protocol  Port    Source
+#   PostgreSQL TCP      5432    sg-appserver       ← Only from app server SG
+#   PostgreSQL TCP      5432    sg-bastion         ← Only from bastion for admin
+```
+
+<Callout type="tip" title="Security Group Best Practice: Reference Other SGs">
+Instead of using IP addresses in security group rules, reference other security groups. This way, when you scale (add more app servers), they automatically get access to the database because they share the same security group.
+
+```
+BAD:  Allow 10.0.10.50 on port 5432 (breaks when you add more servers)
+GOOD: Allow sg-appserver on port 5432 (works for any server in that SG)
+```
+</Callout>
+
+## Network ACLs (NACLs)
+
+NACLs are stateless firewalls attached to subnets. They provide an additional layer of security on top of security groups.
+
+```bash
+# NACL properties:
+#   - STATELESS: Must explicitly allow both inbound AND outbound
+#   - Rules are numbered and evaluated in order (lowest number first)
+#   - First matching rule wins (unlike security groups where all rules apply)
+#   - Applied to subnets (affects all instances in the subnet)
+#   - Default NACL allows all traffic
+
+# Example NACL for a public subnet:
+# Inbound Rules:
+#   Rule#  Type      Protocol  Port Range  Source        Action
+#   100    HTTP      TCP       80          0.0.0.0/0    ALLOW
+#   110    HTTPS     TCP       443         0.0.0.0/0    ALLOW
+#   120    SSH       TCP       22          10.0.0.0/16  ALLOW
+#   130    Ephemeral TCP       1024-65535  0.0.0.0/0    ALLOW  ← Return traffic!
+#   *      All       All       All         0.0.0.0/0    DENY   ← Default deny
+
+# Outbound Rules:
+#   Rule#  Type      Protocol  Port Range  Destination   Action
+#   100    HTTP      TCP       80          0.0.0.0/0    ALLOW
+#   110    HTTPS     TCP       443         0.0.0.0/0    ALLOW
+#   120    Ephemeral TCP       1024-65535  0.0.0.0/0    ALLOW  ← Return traffic!
+#   *      All       All       All         0.0.0.0/0    DENY
+```
+
+### Security Groups vs NACLs
+
+```
+Feature              Security Group           NACL
+─────────────────────────────────────────────────────
+Stateful?            Yes                      No
+Applied to?          Instance                 Subnet
+Default inbound      Deny                     Allow (default NACL)
+Default outbound     Allow                    Allow (default NACL)
+Rule evaluation      All rules evaluated      First match wins
+Allow/Deny rules     Allow only               Allow and Deny
+Use case             Primary firewall         Subnet-level guard
+
+Recommendation: Use security groups as your primary firewall.
+Use NACLs only for broad subnet-level blocking (e.g., block a known
+malicious IP range from an entire subnet).
+```
+
+## VPC Peering
+
+VPC peering connects two VPCs so instances in each can communicate using private IPs, as if they were in the same network.
+
+```
+VPC A (10.0.0.0/16) ←── Peering Connection ──→ VPC B (10.1.0.0/16)
+
+Instance in VPC A (10.0.1.50) can reach Instance in VPC B (10.1.2.30)
+directly via private IP — no internet involved.
+
+Requirements:
+  - CIDR blocks must not overlap
+  - Both VPCs must accept the peering request
+  - Route tables in both VPCs must be updated
+  - Security groups must allow the traffic
+
+Limitations:
+  - Not transitive: If A peers with B and B peers with C,
+    A CANNOT reach C through B
+  - Maximum 125 peering connections per VPC
+```
+
+```bash
+# Route table entry for VPC peering:
+# In VPC A's route table:
+#   Destination    Target
+#   10.1.0.0/16   pcx-abc123    ← Traffic to VPC B goes through peering
+
+# In VPC B's route table:
+#   Destination    Target
+#   10.0.0.0/16   pcx-abc123    ← Traffic to VPC A goes through peering
+```
+
+## VPC Endpoints
+
+VPC endpoints let you access AWS services (S3, DynamoDB, etc.) without going through the internet or NAT Gateway. This saves money and improves security.
+
+```
+Without VPC Endpoint:
+  Private Instance → NAT Gateway → Internet Gateway → S3
+  (Costs money for NAT, data goes over the internet)
+
+With VPC Endpoint:
+  Private Instance → VPC Endpoint → S3
+  (Free for Gateway endpoints, stays on AWS network)
+
+Two types:
+  Gateway Endpoint:  Free, for S3 and DynamoDB only
+                     Adds a route to your route table
+  Interface Endpoint: Costs money, for 100+ other AWS services
+                     Creates an ENI in your subnet
+```
+
+```bash
+# Create a Gateway VPC endpoint for S3
+aws ec2 create-vpc-endpoint \
+    --vpc-id vpc-abc123 \
+    --service-name com.amazonaws.us-east-1.s3 \
+    --route-table-ids rtb-private456
+
+# This adds a route like:
+#   Destination             Target
+#   pl-63a5400a (S3 prefix) vpce-s3endpoint
+```
+
+## Transit Gateway
+
+When you have many VPCs that need to communicate, peering connections become unmanageable. A Transit Gateway acts as a central hub.
+
+```
+Without Transit Gateway (mesh of peering connections):
+  VPC A ── peer ── VPC B
+  VPC A ── peer ── VPC C
+  VPC B ── peer ── VPC C
+  VPC A ── peer ── VPC D
+  ...
+  N VPCs = N*(N-1)/2 peering connections = nightmare
+
+With Transit Gateway (hub and spoke):
+  VPC A ──┐
+  VPC B ──┤
+  VPC C ──┼── Transit Gateway ── On-Premises (VPN)
+  VPC D ──┤
+  VPC E ──┘
+
+  Each VPC connects once to the Transit Gateway.
+  Routing is centralized and manageable.
+```
+
+## Common Architectures
+
+### Three-Tier Architecture
+
+The most common cloud network design: public, private, and data tiers across multiple availability zones.
+
+```
+                         Internet
+                            │
+                     ┌──────▼──────┐
+                     │  Internet    │
+                     │  Gateway     │
+                     └──────┬──────┘
+                            │
+    ┌───────────────────────┼────────────────────────┐
+    │                  VPC: 10.0.0.0/16              │
+    │                       │                         │
+    │   AZ-1a               │              AZ-1b      │
+    │   ┌───────────────┐   │   ┌───────────────┐    │
+    │   │ Public 10.0.1.0│   │   │ Public 10.0.2.0│   │
+    │   │  [ALB]  [NAT] │   │   │  [ALB]         │   │
+    │   └───────┬───────┘   │   └───────┬───────┘    │
+    │           │           │           │             │
+    │   ┌───────▼───────┐   │   ┌───────▼───────┐    │
+    │   │Private 10.0.10│   │   │Private 10.0.11│    │
+    │   │  [App Server] │   │   │  [App Server] │    │
+    │   └───────┬───────┘   │   └───────┬───────┘    │
+    │           │           │           │             │
+    │   ┌───────▼───────┐   │   ┌───────▼───────┐    │
+    │   │ Data 10.0.20  │   │   │ Data 10.0.21  │    │
+    │   │  [RDS Primary]│   │   │  [RDS Standby]│    │
+    │   └───────────────┘   │   └───────────────┘    │
+    │                                                 │
+    └─────────────────────────────────────────────────┘
+```
+
+### Multi-AZ for High Availability
+
+```
+Why multi-AZ?
+  - Each AZ is a physically separate data center
+  - If AZ-1a goes down, AZ-1b keeps running
+  - Load balancers distribute across AZs automatically
+  - RDS multi-AZ failover is automatic
+
+Minimum for production:
+  - 2 AZs (3 for critical workloads)
+  - Subnets in each AZ for each tier
+  - Load balancer spanning all AZs
+  - Database replication across AZs
+```
+
+<Exercise number={1} title="Design a VPC">
+
+Plan CIDR blocks, subnets, and routing for a three-tier application:
+
+```bash
+# ============================================
+# VPC Design Exercise
+# Design a production-ready VPC for a three-tier app
+# ============================================
+
+echo "============================================="
+echo "  VPC Design Exercise"
+echo "============================================="
+
+cat << 'DESIGN'
+
+Requirements:
+  - Three-tier application (web, app, data)
+  - Two availability zones for high availability
+  - Public-facing load balancer
+  - Application servers in private subnets
+  - Database in isolated subnets (no internet access)
+  - NAT Gateway for private subnets to reach internet
+
+=== VPC Design ===
+
+VPC CIDR: 10.0.0.0/16 (65,536 IPs)
+
+Subnet Plan:
+  ┌─────────────────────────────────────────────────────┐
+  │ Tier       │ AZ-a Subnet     │ AZ-b Subnet         │
+  ├─────────────────────────────────────────────────────┤
+  │ Public     │ 10.0.1.0/24     │ 10.0.2.0/24         │
+  │            │ (251 IPs)       │ (251 IPs)            │
+  │            │ ALB, NAT GW,    │ ALB                  │
+  │            │ Bastion         │                      │
+  ├─────────────────────────────────────────────────────┤
+  │ Private    │ 10.0.10.0/24    │ 10.0.11.0/24        │
+  │ (App)      │ (251 IPs)       │ (251 IPs)            │
+  │            │ App servers,    │ App servers           │
+  │            │ Workers         │                      │
+  ├─────────────────────────────────────────────────────┤
+  │ Private    │ 10.0.20.0/24    │ 10.0.21.0/24        │
+  │ (Data)     │ (251 IPs)       │ (251 IPs)            │
+  │            │ RDS Primary,    │ RDS Standby,         │
+  │            │ ElastiCache     │ ElastiCache          │
+  └─────────────────────────────────────────────────────┘
+
+Route Tables:
+  Public RT:
+    10.0.0.0/16 → local
+    0.0.0.0/0   → igw-xxxxx (Internet Gateway)
+
+  Private RT:
+    10.0.0.0/16 → local
+    0.0.0.0/0   → nat-xxxxx (NAT Gateway)
+
+  Data RT:
+    10.0.0.0/16 → local
+    (No default route — completely isolated from internet)
+
+DESIGN
+
+# Generate the AWS CLI commands
+echo ""
+echo "=== AWS CLI Commands ==="
+echo ""
+
+cat << 'COMMANDS'
+# 1. Create the VPC
+aws ec2 create-vpc --cidr-block 10.0.0.0/16 \
+    --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=production-vpc}]'
+
+# 2. Create Internet Gateway
+aws ec2 create-internet-gateway \
+    --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=production-igw}]'
+aws ec2 attach-internet-gateway --internet-gateway-id igw-xxx --vpc-id vpc-xxx
+
+# 3. Create Subnets
+# Public subnets
+aws ec2 create-subnet --vpc-id vpc-xxx --cidr-block 10.0.1.0/24 \
+    --availability-zone us-east-1a \
+    --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=public-1a}]'
+aws ec2 create-subnet --vpc-id vpc-xxx --cidr-block 10.0.2.0/24 \
+    --availability-zone us-east-1b \
+    --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=public-1b}]'
+
+# Private (app) subnets
+aws ec2 create-subnet --vpc-id vpc-xxx --cidr-block 10.0.10.0/24 \
+    --availability-zone us-east-1a \
+    --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=private-app-1a}]'
+aws ec2 create-subnet --vpc-id vpc-xxx --cidr-block 10.0.11.0/24 \
+    --availability-zone us-east-1b \
+    --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=private-app-1b}]'
+
+# Private (data) subnets
+aws ec2 create-subnet --vpc-id vpc-xxx --cidr-block 10.0.20.0/24 \
+    --availability-zone us-east-1a \
+    --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=private-data-1a}]'
+aws ec2 create-subnet --vpc-id vpc-xxx --cidr-block 10.0.21.0/24 \
+    --availability-zone us-east-1b \
+    --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=private-data-1b}]'
+
+# 4. Create NAT Gateway (in public subnet)
+aws ec2 allocate-address --domain vpc  # Get an Elastic IP first
+aws ec2 create-nat-gateway --subnet-id subnet-public-1a --allocation-id eipalloc-xxx
+
+# 5. Create and configure Route Tables
+# Public route table
+aws ec2 create-route-table --vpc-id vpc-xxx
+aws ec2 create-route --route-table-id rtb-public \
+    --destination-cidr-block 0.0.0.0/0 --gateway-id igw-xxx
+aws ec2 associate-route-table --route-table-id rtb-public --subnet-id subnet-public-1a
+aws ec2 associate-route-table --route-table-id rtb-public --subnet-id subnet-public-1b
+
+# Private route table
+aws ec2 create-route-table --vpc-id vpc-xxx
+aws ec2 create-route --route-table-id rtb-private \
+    --destination-cidr-block 0.0.0.0/0 --nat-gateway-id nat-xxx
+aws ec2 associate-route-table --route-table-id rtb-private --subnet-id subnet-app-1a
+aws ec2 associate-route-table --route-table-id rtb-private --subnet-id subnet-app-1b
+
+# Data route table (no internet route)
+aws ec2 create-route-table --vpc-id vpc-xxx
+aws ec2 associate-route-table --route-table-id rtb-data --subnet-id subnet-data-1a
+aws ec2 associate-route-table --route-table-id rtb-data --subnet-id subnet-data-1b
+COMMANDS
+
+echo ""
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Security Group Rules">
+
+Write security group rules for web, app, and database tiers:
+
+```bash
+# ============================================
+# Security Group Rules Exercise
+# ============================================
+
+echo "============================================="
+echo "  Security Group Design Exercise"
+echo "============================================="
+
+cat << 'SG_DESIGN'
+
+=== Security Group Design for Three-Tier App ===
+
+1. ALB Security Group (sg-alb)
+   ┌────────────────────────────────────────────────────┐
+   │ Inbound Rules:                                      │
+   │   HTTP    TCP  80   0.0.0.0/0       (Public HTTP)  │
+   │   HTTPS   TCP  443  0.0.0.0/0       (Public HTTPS) │
+   │                                                     │
+   │ Outbound Rules:                                     │
+   │   Custom  TCP  8080 sg-app          (To app servers)│
+   └────────────────────────────────────────────────────┘
+
+2. Bastion Security Group (sg-bastion)
+   ┌────────────────────────────────────────────────────┐
+   │ Inbound Rules:                                      │
+   │   SSH     TCP  22   203.0.113.0/24  (Office IP only)│
+   │                                                     │
+   │ Outbound Rules:                                     │
+   │   SSH     TCP  22   10.0.0.0/16     (To any in VPC) │
+   └────────────────────────────────────────────────────┘
+
+3. Application Security Group (sg-app)
+   ┌────────────────────────────────────────────────────┐
+   │ Inbound Rules:                                      │
+   │   Custom  TCP  8080 sg-alb          (From ALB only) │
+   │   SSH     TCP  22   sg-bastion      (From bastion)  │
+   │                                                     │
+   │ Outbound Rules:                                     │
+   │   Postgres TCP 5432 sg-db           (To database)   │
+   │   Redis   TCP  6379 sg-cache        (To cache)      │
+   │   HTTPS   TCP  443  0.0.0.0/0       (External APIs) │
+   └────────────────────────────────────────────────────┘
+
+4. Database Security Group (sg-db)
+   ┌────────────────────────────────────────────────────┐
+   │ Inbound Rules:                                      │
+   │   Postgres TCP 5432 sg-app          (From app only) │
+   │   Postgres TCP 5432 sg-bastion      (Admin access)  │
+   │                                                     │
+   │ Outbound Rules:                                     │
+   │   (None needed — stateful, responses auto-allowed)  │
+   └────────────────────────────────────────────────────┘
+
+5. Cache Security Group (sg-cache)
+   ┌────────────────────────────────────────────────────┐
+   │ Inbound Rules:                                      │
+   │   Redis   TCP  6379 sg-app          (From app only) │
+   │                                                     │
+   │ Outbound Rules:                                     │
+   │   (None needed)                                     │
+   └────────────────────────────────────────────────────┘
+
+SG_DESIGN
+
+# Generate AWS CLI commands for security groups
+echo ""
+echo "=== AWS CLI Commands ==="
+echo ""
+
+cat << 'SG_COMMANDS'
+# Create security groups
+aws ec2 create-security-group --group-name sg-alb \
+    --description "ALB security group" --vpc-id vpc-xxx
+aws ec2 create-security-group --group-name sg-bastion \
+    --description "Bastion security group" --vpc-id vpc-xxx
+aws ec2 create-security-group --group-name sg-app \
+    --description "App server security group" --vpc-id vpc-xxx
+aws ec2 create-security-group --group-name sg-db \
+    --description "Database security group" --vpc-id vpc-xxx
+
+# ALB rules
+aws ec2 authorize-security-group-ingress --group-id sg-alb-xxx \
+    --protocol tcp --port 80 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id sg-alb-xxx \
+    --protocol tcp --port 443 --cidr 0.0.0.0/0
+
+# App rules — reference ALB security group
+aws ec2 authorize-security-group-ingress --group-id sg-app-xxx \
+    --protocol tcp --port 8080 --source-group sg-alb-xxx
+aws ec2 authorize-security-group-ingress --group-id sg-app-xxx \
+    --protocol tcp --port 22 --source-group sg-bastion-xxx
+
+# DB rules — reference App security group
+aws ec2 authorize-security-group-ingress --group-id sg-db-xxx \
+    --protocol tcp --port 5432 --source-group sg-app-xxx
+aws ec2 authorize-security-group-ingress --group-id sg-db-xxx \
+    --protocol tcp --port 5432 --source-group sg-bastion-xxx
+
+# Bastion rules — only from office IP
+aws ec2 authorize-security-group-ingress --group-id sg-bastion-xxx \
+    --protocol tcp --port 22 --cidr 203.0.113.0/24
+SG_COMMANDS
+
+echo ""
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<MiniProject title="VPC Designer">
+
+Build a script that generates a VPC design document based on requirements:
+
+```bash
+cat > ~/vpc-designer.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# ============================================
+# VPC Designer
+# Generates a VPC design based on requirements
+# Usage: ./vpc-designer.sh
+# ============================================
+
+echo "╔════════════════════════════════════════════╗"
+echo "║          VPC Designer Tool                 ║"
+echo "╚════════════════════════════════════════════╝"
+echo ""
+
+# --- Configuration ---
+# Modify these variables for your requirements
+PROJECT_NAME="${1:-myproject}"
+ENVIRONMENT="${2:-production}"
+VPC_CIDR="${3:-10.0.0.0/16}"
+NUM_AZS="${4:-2}"
+TIERS="${5:-public,private,data}"
+
+echo "Configuration:"
+echo "  Project:     $PROJECT_NAME"
+echo "  Environment: $ENVIRONMENT"
+echo "  VPC CIDR:    $VPC_CIDR"
+echo "  AZs:         $NUM_AZS"
+echo "  Tiers:       $TIERS"
+echo ""
+
+# --- Parse VPC CIDR ---
+VPC_BASE=$(echo "$VPC_CIDR" | cut -d'/' -f1)
+VPC_FIRST_OCTET=$(echo "$VPC_BASE" | cut -d'.' -f1)
+VPC_SECOND_OCTET=$(echo "$VPC_BASE" | cut -d'.' -f2)
+
+# --- Generate subnet plan ---
+generate_subnets() {
+    local tier_idx=0
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Subnet Plan"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf "  %-15s %-5s %-20s %-10s\n" "TIER" "AZ" "CIDR" "USABLE IPs"
+    printf "  %-15s %-5s %-20s %-10s\n" "----" "--" "----" "----------"
+
+    IFS=',' read -ra TIER_LIST <<< "$TIERS"
+    for tier in "${TIER_LIST[@]}"; do
+        local third_octet=$((tier_idx * 10))
+        for az in $(seq 0 $((NUM_AZS - 1))); do
+            local subnet_third=$((third_octet + az + 1))
+            local cidr="${VPC_FIRST_OCTET}.${VPC_SECOND_OCTET}.${subnet_third}.0/24"
+            local az_letter=$(echo $az | awk '{printf "%c", 97+$1}')
+            printf "  %-15s %-5s %-20s %-10s\n" "$tier" "${az_letter}" "$cidr" "251"
+        done
+        tier_idx=$((tier_idx + 1))
+    done
+    echo ""
+}
+
+# --- Generate route tables ---
+generate_routes() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Route Tables"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    IFS=',' read -ra TIER_LIST <<< "$TIERS"
+    for tier in "${TIER_LIST[@]}"; do
+        echo ""
+        echo "  Route Table: rt-${PROJECT_NAME}-${tier}"
+        printf "    %-20s %-20s\n" "Destination" "Target"
+        printf "    %-20s %-20s\n" "-----------" "------"
+        printf "    %-20s %-20s\n" "$VPC_CIDR" "local"
+
+        case "$tier" in
+            public)
+                printf "    %-20s %-20s\n" "0.0.0.0/0" "Internet Gateway"
+                ;;
+            private)
+                printf "    %-20s %-20s\n" "0.0.0.0/0" "NAT Gateway"
+                ;;
+            data)
+                echo "    (No default route — isolated)"
+                ;;
+        esac
+    done
+    echo ""
+}
+
+# --- Generate security groups ---
+generate_security_groups() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Security Groups"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    IFS=',' read -ra TIER_LIST <<< "$TIERS"
+    for tier in "${TIER_LIST[@]}"; do
+        echo ""
+        echo "  sg-${PROJECT_NAME}-${tier}:"
+        case "$tier" in
+            public)
+                echo "    Inbound:  TCP/80 from 0.0.0.0/0, TCP/443 from 0.0.0.0/0"
+                echo "    Outbound: All traffic to 0.0.0.0/0"
+                ;;
+            private)
+                echo "    Inbound:  TCP/8080 from sg-${PROJECT_NAME}-public"
+                echo "              TCP/22 from sg-${PROJECT_NAME}-bastion"
+                echo "    Outbound: TCP/5432 to sg-${PROJECT_NAME}-data"
+                echo "              TCP/443 to 0.0.0.0/0 (external APIs)"
+                ;;
+            data)
+                echo "    Inbound:  TCP/5432 from sg-${PROJECT_NAME}-private"
+                echo "              TCP/5432 from sg-${PROJECT_NAME}-bastion"
+                echo "    Outbound: (stateful responses only)"
+                ;;
+        esac
+    done
+    echo ""
+}
+
+# --- Generate network diagram ---
+generate_diagram() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Network Diagram"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    cat << 'DIAGRAM'
+                           Internet
+                              │
+                       ┌──────▼──────┐
+                       │  Internet    │
+                       │  Gateway     │
+                       └──────┬──────┘
+                              │
+      ┌───────────────────────┼────────────────────────┐
+      │                  VPC                            │
+      │                       │                         │
+      │   ┌──────────────┐    │    ┌──────────────┐    │
+      │   │ Public Sub-a │    │    │ Public Sub-b │    │
+      │   │  [ALB][NAT]  │    │    │  [ALB]       │    │
+      │   └──────┬───────┘    │    └──────┬───────┘    │
+      │          │            │           │             │
+      │   ┌──────▼───────┐    │    ┌──────▼───────┐    │
+      │   │ Private Sub-a│    │    │ Private Sub-b│    │
+      │   │  [App]       │    │    │  [App]       │    │
+      │   └──────┬───────┘    │    └──────┬───────┘    │
+      │          │            │           │             │
+      │   ┌──────▼───────┐    │    ┌──────▼───────┐    │
+      │   │ Data Sub-a   │    │    │ Data Sub-b   │    │
+      │   │  [DB Primary]│    │    │  [DB Standby]│    │
+      │   └──────────────┘    │    └──────────────┘    │
+      │                                                 │
+      └─────────────────────────────────────────────────┘
+DIAGRAM
+    echo ""
+}
+
+# --- Generate cost estimate ---
+generate_cost_notes() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Cost Considerations"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "  NAT Gateway:       ~\$32/month + \$0.045/GB processed"
+    echo "  VPC Endpoints:     ~\$7/month per interface endpoint"
+    echo "  Transit Gateway:   ~\$36/month per attachment"
+    echo "  Public IPs:        \$3.60/month per unused EIP"
+    echo "  Data Transfer:     \$0.01/GB cross-AZ"
+    echo ""
+    echo "  Cost optimization tips:"
+    echo "  - Use VPC Gateway endpoints for S3/DynamoDB (free)"
+    echo "  - Consider NAT instance for non-prod (cheaper)"
+    echo "  - Minimize cross-AZ data transfer"
+    echo "  - Use VPC flow logs selectively (storage costs)"
+    echo ""
+}
+
+# --- Generate Terraform skeleton ---
+generate_terraform() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Terraform Skeleton"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    cat << TERRAFORM
+  # main.tf — VPC Infrastructure
+  resource "aws_vpc" "${PROJECT_NAME}" {
+    cidr_block           = "$VPC_CIDR"
+    enable_dns_hostnames = true
+    enable_dns_support   = true
+    tags = {
+      Name        = "${PROJECT_NAME}-vpc"
+      Environment = "$ENVIRONMENT"
+    }
+  }
+
+  resource "aws_internet_gateway" "${PROJECT_NAME}" {
+    vpc_id = aws_vpc.${PROJECT_NAME}.id
+    tags   = { Name = "${PROJECT_NAME}-igw" }
+  }
+
+  # Generate subnets, route tables, NAT gateways, and
+  # security groups using the plan above.
+  # See full Terraform VPC module: terraform-aws-modules/vpc/aws
+TERRAFORM
+    echo ""
+}
+
+# --- Run all generators ---
+generate_subnets
+generate_routes
+generate_security_groups
+generate_diagram
+generate_cost_notes
+generate_terraform
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Design complete!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+SCRIPT
+
+chmod +x ~/vpc-designer.sh
+
+# Run the VPC designer
+echo "=== Running VPC Designer ==="
+echo ""
+~/vpc-designer.sh "webapp" "production" "10.0.0.0/16" "2" "public,private,data"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- A VPC is your isolated virtual network in the cloud — all physical networking concepts apply, just virtualized
+- Public subnets have a route to the Internet Gateway; private subnets route through a NAT Gateway
+- Security groups are stateful firewalls on instances; NACLs are stateless firewalls on subnets
+- Reference security groups (not IPs) in rules so access scales automatically with your fleet
+- NAT Gateways are expensive — use VPC endpoints for AWS service traffic to save money
+- Plan CIDR blocks carefully — they cannot overlap if VPCs need to peer
+- Three-tier architecture across multiple AZs is the standard production design
+- Everything in cloud networking can be defined as code with Terraform or CloudFormation
+
+## What's Next
+
+Your cloud networking foundation is solid. But modern applications run in containers, and container networking adds another layer of abstraction. In **Container Networking**, you'll learn how Docker creates virtual networks, how containers discover each other via DNS, and how port mapping connects containers to the outside world.

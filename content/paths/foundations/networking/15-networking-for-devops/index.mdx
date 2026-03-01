@@ -1,0 +1,1257 @@
+---
+title: "Networking for DevOps"
+description: "Tie it all together. Apply networking knowledge to real DevOps scenarios — CI/CD pipelines, microservices, monitoring, and incident response."
+order: 15
+xpReward: 150
+estimatedMinutes: 40
+prerequisites:
+  - 14-container-networking
+objectives:
+  - Apply networking to CI/CD pipeline design
+  - Understand service mesh basics
+  - Monitor network performance
+  - Handle networking incidents effectively
+tags:
+  - networking
+  - devops
+  - microservices
+  - monitoring
+---
+
+<Callout type="story" title="The Story">
+Your microservices architecture has 30 services communicating over HTTP. Response times are increasing. Some requests timeout. The problem? Service A calls Service B, which calls Service C, which calls Service D — and each hop adds latency. A request that should take 50ms now takes 2 seconds. Understanding network latency, connection pooling, timeouts, and retry strategies is what makes the difference between a microservices architecture that scales and one that collapses.
+</Callout>
+
+## Networking in CI/CD
+
+CI/CD pipelines are heavily network-dependent. Build agents need to pull code, download dependencies, push artifacts, and deploy to environments — all over the network.
+
+### Build Agent Network Requirements
+
+```
+CI/CD Pipeline Network Flow:
+
+  Build Agent
+    │
+    ├── Pull source code ───────────── Git server (SSH/HTTPS)
+    ├── Download dependencies ──────── npm registry, PyPI, Maven Central
+    ├── Pull base images ───────────── Container registry (Docker Hub, ECR)
+    ├── Run tests ──────────────────── Test databases, services
+    ├── Push artifacts ─────────────── Artifact store (S3, Nexus, Artifactory)
+    ├── Push container images ──────── Container registry
+    └── Deploy ─────────────────────── Kubernetes API, SSH to servers
+
+Each step requires network access. If any fails, the pipeline breaks.
+```
+
+```bash
+# Common CI/CD networking issues and solutions:
+
+# Issue: Slow dependency downloads
+# Solution: Use a local proxy/cache
+# npm: set npm config to use a Verdaccio proxy
+npm config set registry http://npm-cache.internal:4873/
+
+# pip: use a devpi proxy
+pip install --index-url http://devpi.internal:3141/root/pypi/+simple/
+
+# Docker: use a registry mirror
+# /etc/docker/daemon.json
+{
+  "registry-mirrors": ["https://registry-cache.internal:5000"]
+}
+
+# Issue: Build agent can't reach private resources
+# Solution: Place agents in the same VPC/network as your services
+# or use VPN/tunnel connections
+
+# Issue: Flaky deployments due to timeouts
+# Solution: Set appropriate timeouts and retries
+kubectl apply -f deployment.yaml --timeout=120s
+curl --retry 3 --retry-delay 5 --max-time 30 http://service/health
+```
+
+### Pipeline Network Security
+
+```bash
+# Principle: Build agents should have least-privilege network access
+
+# Good: Agent can only reach what it needs
+# Security group for CI/CD agents:
+#   Outbound: TCP/443 to artifact stores
+#   Outbound: TCP/443 to container registries
+#   Outbound: TCP/6443 to Kubernetes API
+#   Outbound: TCP/22 to deployment targets
+#   Inbound: None (agents pull work, don't accept connections)
+
+# Bad: Agent has unrestricted outbound access
+#   Outbound: All traffic to 0.0.0.0/0
+#   Risk: Compromised agent can exfiltrate data anywhere
+```
+
+## Microservices Networking
+
+### Service Discovery
+
+In a microservices architecture, services need to find each other. There are two main patterns:
+
+```
+Client-side discovery:
+  Service A asks a registry "where is Service B?"
+  Registry responds with IP:port
+  Service A connects directly
+  Examples: Netflix Eureka, Consul
+
+Server-side discovery:
+  Service A sends request to a load balancer/proxy
+  Load balancer knows where Service B is
+  Load balancer forwards the request
+  Examples: AWS ALB, Kubernetes Service, Nginx
+
+DNS-based discovery:
+  Service A resolves "service-b.namespace.svc.cluster.local"
+  DNS returns the current IP(s) of Service B
+  Examples: Kubernetes DNS, Consul DNS, Docker DNS
+```
+
+```bash
+# Kubernetes DNS-based service discovery
+# Service name resolves to cluster IP
+nslookup user-service.default.svc.cluster.local
+# Server: 10.96.0.10
+# Address: 10.96.0.10#53
+# Name: user-service.default.svc.cluster.local
+# Address: 10.100.200.50
+
+# From within a pod, just use the service name:
+curl http://user-service:8080/api/users
+# Kubernetes DNS handles the rest
+```
+
+### API Gateways
+
+An API gateway is the single entry point for all client requests to your microservices:
+
+```
+Without API Gateway:
+  Client → Service A (port 3000)
+  Client → Service B (port 3001)
+  Client → Service C (port 3002)
+  Client needs to know about every service
+
+With API Gateway:
+  Client → API Gateway (port 443)
+           ├── /users   → User Service
+           ├── /orders  → Order Service
+           ├── /payments → Payment Service
+           └── /auth    → Auth Service
+  Client only knows one endpoint
+
+API Gateway handles:
+  - Request routing
+  - Authentication/authorization
+  - Rate limiting
+  - TLS termination
+  - Request/response transformation
+  - Logging and monitoring
+
+Tools: Kong, AWS API Gateway, Traefik, Ambassador, Nginx
+```
+
+### Timeouts, Retries, and Circuit Breakers
+
+The three pillars of resilient microservices networking:
+
+```bash
+# === Timeouts ===
+# Every network call MUST have a timeout
+# Without timeouts, one slow service blocks everything
+
+# Bad: No timeout — hangs forever if service is slow
+curl http://payment-service/charge
+
+# Good: 5-second timeout
+curl --max-time 5 http://payment-service/charge
+
+# Timeout strategy:
+#   Connection timeout: 1-3 seconds (how long to establish TCP)
+#   Read timeout: 5-30 seconds (how long to wait for response)
+#   Total timeout: Connection + Read + Processing
+
+# === Retries ===
+# Network failures are transient — retry with backoff
+
+# Retry with exponential backoff
+retry_with_backoff() {
+    local max_retries=3
+    local delay=1
+
+    for attempt in $(seq 1 "$max_retries"); do
+        if curl --max-time 5 -sf "$1" > /dev/null; then
+            echo "Success on attempt $attempt"
+            return 0
+        fi
+        echo "Attempt $attempt failed, waiting ${delay}s..."
+        sleep "$delay"
+        delay=$((delay * 2))  # 1s, 2s, 4s
+    done
+
+    echo "All $max_retries attempts failed"
+    return 1
+}
+
+# === Circuit Breaker ===
+# If a service is consistently failing, stop calling it
+# Prevent cascade failures across the system
+
+# Circuit breaker states:
+#   CLOSED:    Normal operation, requests pass through
+#   OPEN:      Service is failing, immediately reject requests
+#   HALF-OPEN: Try one request to see if service recovered
+
+# Example: Simple circuit breaker in bash
+FAILURE_COUNT=0
+FAILURE_THRESHOLD=5
+CIRCUIT_STATE="closed"
+
+call_service() {
+    if [ "$CIRCUIT_STATE" = "open" ]; then
+        echo "Circuit OPEN — rejecting request (service is down)"
+        return 1
+    fi
+
+    if curl --max-time 3 -sf "$1" > /dev/null 2>&1; then
+        FAILURE_COUNT=0
+        CIRCUIT_STATE="closed"
+        return 0
+    else
+        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+        if [ "$FAILURE_COUNT" -ge "$FAILURE_THRESHOLD" ]; then
+            CIRCUIT_STATE="open"
+            echo "Circuit OPENED after $FAILURE_COUNT failures"
+        fi
+        return 1
+    fi
+}
+```
+
+<Callout type="warning" title="The Retry Storm">
+Be careful with retries. If Service A retries 3 times, and Service B (which A calls) also retries 3 times, and Service C (which B calls) also retries 3 times, a single failure generates 3 x 3 x 3 = 27 requests. This is called a "retry storm" and can amplify a small failure into a complete outage. Use retry budgets and only retry at one layer.
+</Callout>
+
+## Service Mesh
+
+A service mesh handles the networking between microservices — encryption, traffic management, and observability — without changing application code.
+
+```
+Without service mesh:
+  Each service must implement:
+  ├── TLS encryption
+  ├── Retries and timeouts
+  ├── Circuit breakers
+  ├── Load balancing
+  ├── Metrics collection
+  └── Distributed tracing
+
+With service mesh:
+  A sidecar proxy handles all of that:
+  ┌────────────────────────────────────────┐
+  │ Pod                                     │
+  │  ┌─────────────┐  ┌─────────────────┐ │
+  │  │ Application  │  │ Sidecar Proxy   │ │
+  │  │ (your code)  ├──┤ (Envoy/Linkerd) │ │
+  │  │              │  │ - mTLS          │ │
+  │  │ Just makes   │  │ - Retries       │ │
+  │  │ HTTP calls   │  │ - Metrics       │ │
+  │  └─────────────┘  │ - Tracing       │ │
+  │                    └─────────────────┘ │
+  └────────────────────────────────────────┘
+
+  All service-to-service traffic goes through the proxy.
+  The application doesn't need to know about TLS, retries, etc.
+```
+
+### Istio vs Linkerd
+
+```
+Istio:
+  - Full-featured service mesh
+  - Uses Envoy proxy as sidecar
+  - Complex but powerful: traffic splitting, fault injection, mTLS
+  - Higher resource overhead
+  - Best for: Large, complex microservices deployments
+
+Linkerd:
+  - Lightweight service mesh
+  - Uses its own Rust-based proxy (linkerd2-proxy)
+  - Simpler to operate, lower resource usage
+  - Focused on observability and reliability
+  - Best for: Teams wanting mesh benefits with less complexity
+
+What they both provide:
+  - Mutual TLS (mTLS) between all services — automatic encryption
+  - Traffic management — canary deployments, traffic splitting
+  - Observability — latency, success rates, request volumes
+  - Retries and timeouts — without code changes
+```
+
+```bash
+# Istio: Split traffic between versions (canary deployment)
+# 90% to v1, 10% to v2
+cat << 'EOF'
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: reviews
+spec:
+  hosts:
+    - reviews
+  http:
+    - route:
+        - destination:
+            host: reviews
+            subset: v1
+          weight: 90
+        - destination:
+            host: reviews
+            subset: v2
+          weight: 10
+EOF
+```
+
+## Network Monitoring
+
+### Key Metrics to Monitor
+
+```
+Latency:
+  - P50 (median): What most users experience
+  - P95: What 1 in 20 users experience
+  - P99: Worst-case for most users
+  - Goal: P99 < 200ms for user-facing services
+
+Packet Loss:
+  - Normal: 0%
+  - Concerning: > 0.1%
+  - Critical: > 1%
+  - Causes: Congestion, bad hardware, routing issues
+
+Bandwidth:
+  - Utilization: Current throughput vs capacity
+  - Alert when: > 80% sustained utilization
+  - Track: Inbound vs outbound per service
+
+Connection Rates:
+  - New connections per second
+  - Active connections
+  - Connection errors (refused, timeout, reset)
+  - Track: Close-wait buildup (app not closing connections)
+
+DNS:
+  - Resolution time (should be < 10ms internal)
+  - Resolution failures (any > 0 is a problem)
+  - Cache hit rate
+```
+
+### Monitoring Tools
+
+```bash
+# === Prometheus + Blackbox Exporter ===
+# Probe endpoints and measure availability/latency
+
+# blackbox_exporter config: probes HTTP, TCP, DNS, ICMP
+# modules:
+#   http_2xx:
+#     prober: http
+#     timeout: 5s
+#     http:
+#       valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+#       valid_status_codes: [200]
+#       preferred_ip_protocol: "ip4"
+
+# Prometheus scrape config:
+# - job_name: 'blackbox-http'
+#   metrics_path: /probe
+#   params:
+#     module: [http_2xx]
+#   static_configs:
+#     - targets:
+#       - https://myapp.com
+#       - https://api.myapp.com/health
+#       - https://admin.myapp.com
+#   relabel_configs:
+#     - source_labels: [__address__]
+#       target_label: __param_target
+#     - target_label: __address__
+#       replacement: blackbox-exporter:9115
+
+# === Useful Prometheus queries ===
+
+# HTTP request latency (P99)
+# histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+
+# Request error rate
+# rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
+
+# Network bytes transmitted
+# rate(node_network_transmit_bytes_total[5m])
+
+# TCP connection states
+# node_netstat_Tcp_CurrEstab
+# node_netstat_Tcp_InErrs
+
+# === Simple monitoring with curl ===
+# Quick health check script
+check_endpoint() {
+    local url="$1"
+    local timeout="${2:-5}"
+    local result
+
+    result=$(curl -s -o /dev/null -w "%{http_code}|%{time_total}" \
+        --max-time "$timeout" "$url" 2>/dev/null)
+
+    local code=$(echo "$result" | cut -d'|' -f1)
+    local time=$(echo "$result" | cut -d'|' -f2)
+
+    if [ "$code" -ge 200 ] && [ "$code" -lt 400 ] 2>/dev/null; then
+        echo "  [OK]   $url — ${code} in ${time}s"
+    else
+        echo "  [FAIL] $url — ${code} in ${time}s"
+    fi
+}
+
+check_endpoint "https://example.com" 5
+```
+
+## Network Incident Response
+
+When a network incident happens, follow a structured runbook to minimize time-to-resolution.
+
+### Incident Response Runbook
+
+```bash
+# ============================================
+# Network Incident Response Runbook
+# ============================================
+
+# Step 1: IDENTIFY SCOPE
+# What is affected? One service? One region? Everything?
+echo "=== Step 1: Identify Scope ==="
+echo "Questions to answer:"
+echo "  - Which users/services are affected?"
+echo "  - When did the issue start?"
+echo "  - What changed recently? (deployments, config changes, infra changes)"
+echo "  - Is it intermittent or constant?"
+
+# Step 2: CHECK DNS
+echo ""
+echo "=== Step 2: Check DNS ==="
+echo "dig affected-service.example.com"
+echo "dig @8.8.8.8 affected-service.example.com"
+echo "# Compare results — is DNS returning the correct IP?"
+
+# Step 3: CHECK CONNECTIVITY
+echo ""
+echo "=== Step 3: Check Connectivity ==="
+echo "ping -c 3 <target-ip>"
+echo "traceroute -n <target-ip>"
+echo "mtr -n --report -c 10 <target-ip>"
+echo "# Where does connectivity break?"
+
+# Step 4: CHECK FIREWALL / SECURITY GROUPS
+echo ""
+echo "=== Step 4: Check Firewall ==="
+echo "# AWS: Check security groups and NACLs"
+echo "aws ec2 describe-security-groups --group-ids sg-xxx"
+echo "# Linux: Check iptables"
+echo "sudo iptables -L -n -v"
+echo "# Did someone change firewall rules?"
+
+# Step 5: CHECK APPLICATION
+echo ""
+echo "=== Step 5: Check Application ==="
+echo "curl -v https://affected-service.example.com/"
+echo "# Check HTTP response code, timing, TLS"
+echo "kubectl get pods -n production"
+echo "kubectl logs -n production deployment/affected-service --tail=50"
+
+# Step 6: CHECK INFRASTRUCTURE
+echo ""
+echo "=== Step 6: Check Infrastructure ==="
+echo "# Load balancer health checks"
+echo "aws elbv2 describe-target-health --target-group-arn <arn>"
+echo "# Kubernetes endpoints"
+echo "kubectl get endpoints affected-service"
+echo "# Are there enough healthy instances?"
+
+# Step 7: COMMUNICATE
+echo ""
+echo "=== Step 7: Communicate ==="
+echo "  - Post status update to incident channel"
+echo "  - Update status page if user-facing"
+echo "  - Assign roles: incident commander, communicator, engineers"
+```
+
+## Infrastructure as Code for Networking
+
+Define your network infrastructure in code so it is reproducible, version-controlled, and auditable.
+
+```bash
+# Terraform example: VPC with networking
+cat << 'TERRAFORM'
+# main.tf — Network Infrastructure
+
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "5.0.0"
+
+  name = "production-vpc"
+  cidr = "10.0.0.0/16"
+
+  azs             = ["us-east-1a", "us-east-1b", "us-east-1c"]
+  public_subnets  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  private_subnets = ["10.0.10.0/24", "10.0.11.0/24", "10.0.12.0/24"]
+  database_subnets = ["10.0.20.0/24", "10.0.21.0/24", "10.0.22.0/24"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = false  # One per AZ for HA
+
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Environment = "production"
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_security_group" "web" {
+  name_prefix = "web-"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "app" {
+  name_prefix = "app-"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
+    security_groups = [aws_security_group.web.id]
+  }
+}
+
+resource "aws_security_group" "db" {
+  name_prefix = "db-"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.app.id]
+  }
+}
+TERRAFORM
+```
+
+## Zero-Trust Networking
+
+The modern approach to network security — no implicit trust based on network location.
+
+```
+Traditional (perimeter-based):
+  "Inside the VPN = trusted"
+  Problem: Once an attacker gets inside, they have free access
+
+Zero Trust:
+  "Never trust, always verify"
+  Every request must be:
+    1. Authenticated (who are you?)
+    2. Authorized (are you allowed to do this?)
+    3. Encrypted (can anyone eavesdrop?)
+    4. Logged (we can audit later)
+
+Implementation:
+  - Identity-aware proxy (Cloudflare Access, Google BeyondCorp)
+  - Mutual TLS (mTLS) between all services
+  - Short-lived credentials (not long-lived API keys)
+  - Microsegmentation (fine-grained network policies)
+  - Continuous verification (not just at login)
+```
+
+```bash
+# Kubernetes Network Policy — microsegmentation example
+cat << 'EOF'
+# Only allow traffic from the API pods to the database pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-access
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api
+      ports:
+        - protocol: TCP
+          port: 5432
+# Result: Only pods labeled "app: api" can reach the database on port 5432
+# All other pods are blocked — even if they're in the same namespace
+EOF
+```
+
+## DevOps Networking Checklist
+
+```
+Before deploying a new service, verify:
+
+[ ] DNS: Service has a DNS record (internal or external)
+[ ] Ports: Service binds to the correct port and interface (0.0.0.0, not 127.0.0.1)
+[ ] Firewall: Security groups allow traffic from expected sources
+[ ] Load balancer: Health check endpoint exists and returns 200
+[ ] TLS: Certificate is valid and auto-renewing
+[ ] Timeouts: All outbound calls have connection and read timeouts
+[ ] Retries: Retry logic with exponential backoff for transient failures
+[ ] Circuit breaker: Failing dependencies don't cascade
+[ ] Monitoring: Latency, error rate, and throughput dashboards exist
+[ ] Alerting: Alerts fire for high error rate, high latency, health check failure
+[ ] Runbook: Incident response steps documented for this service
+[ ] Network policy: Only expected services can reach this one
+```
+
+## Networking Certifications Roadmap
+
+```
+For DevOps engineers who want to deepen their networking knowledge:
+
+Entry Level:
+  - CompTIA Network+ (foundational networking)
+  - AWS Cloud Practitioner (cloud networking basics)
+
+Intermediate:
+  - AWS Solutions Architect Associate (VPC, networking)
+  - Cisco CCNA (comprehensive networking)
+  - CKA - Certified Kubernetes Administrator (container networking)
+
+Advanced:
+  - AWS Advanced Networking Specialty
+  - Cisco CCNP Enterprise
+  - CKAD/CKS for Kubernetes network policies
+```
+
+<Exercise number={1} title="Microservices Debugging">
+
+Diagnose networking issues in a multi-service environment:
+
+```bash
+# ============================================
+# Microservices Network Debugging Exercise
+# ============================================
+
+echo "============================================="
+echo "  Microservices Network Debugging"
+echo "============================================="
+echo ""
+
+cat << 'SCENARIOS'
+=== Scenario 1: High Latency Chain ===
+
+Architecture:
+  Client → API Gateway → User Service → Auth Service → Database
+
+Symptoms:
+  - API responses taking 5+ seconds (should be < 200ms)
+  - No errors, just slow
+
+Debugging steps:
+
+  1. Add timing to each hop:
+     curl -w "TTFB: %{time_starttransfer}s Total: %{time_total}s\n" \
+         -o /dev/null -s http://api-gateway/users
+
+  2. Check each service individually:
+     curl -w "Total: %{time_total}s\n" -o /dev/null -s http://user-service:8080/health
+     curl -w "Total: %{time_total}s\n" -o /dev/null -s http://auth-service:8081/health
+
+  3. Check database connection pool:
+     # Is the pool exhausted? Are queries slow?
+     kubectl exec -it deploy/user-service -- curl localhost:8080/metrics | grep db_pool
+
+  4. Check for DNS resolution delays:
+     kubectl exec -it deploy/user-service -- \
+         time nslookup auth-service.production.svc.cluster.local
+
+  Diagnosis: Auth service DNS resolution taking 2s (ndots:5 causing DNS search)
+  Fix: Add "ndots: 2" to pod DNS config, or use FQDN in service URLs
+
+---
+
+=== Scenario 2: Intermittent Connection Refused ===
+
+Architecture:
+  API Service → Payment Service (3 replicas behind Kubernetes Service)
+
+Symptoms:
+  - 10% of requests to payment service fail with "connection refused"
+  - Errors are random
+
+Debugging steps:
+
+  1. Check all payment service pods:
+     kubectl get pods -l app=payment-service
+     # Is one pod crashing/restarting?
+
+  2. Check endpoints:
+     kubectl get endpoints payment-service
+     # Are all pod IPs listed? Is one missing?
+
+  3. Check pod health:
+     kubectl describe pod payment-service-abc123
+     # Look at: readiness probe, restart count, events
+
+  4. Check if pod is listening:
+     kubectl exec payment-service-abc123 -- ss -tlnp | grep 8080
+
+  Diagnosis: One pod is in CrashLoopBackOff but briefly passes readiness probe
+  Fix: Improve readiness probe (check actual functionality, not just port)
+
+---
+
+=== Scenario 3: Complete Network Partition ===
+
+Architecture:
+  Service A (VPC-1) → Service B (VPC-2) via VPC peering
+
+Symptoms:
+  - All requests from Service A to Service B timeout
+  - Started after infrastructure change
+
+Debugging steps:
+
+  1. Check VPC peering connection status:
+     aws ec2 describe-vpc-peering-connections
+     # Is it in "active" state?
+
+  2. Check route tables:
+     aws ec2 describe-route-tables --filters "Name=vpc-id,Values=vpc-1"
+     # Is there a route to VPC-2 CIDR via the peering connection?
+
+  3. Check security groups:
+     # Does Service B's SG allow traffic from VPC-1's CIDR?
+
+  4. Check NACLs:
+     # Did someone add a DENY rule?
+
+  Diagnosis: Route to VPC-2 was removed during Terraform apply
+  Fix: Re-add the route, add the peering route to Terraform state
+
+SCENARIOS
+
+echo ""
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Network Monitoring">
+
+Set up basic network monitoring checks:
+
+```bash
+# ============================================
+# Network Monitoring Exercise
+# ============================================
+
+echo "============================================="
+echo "  Network Monitoring Setup"
+echo "============================================="
+echo ""
+
+# Create a monitoring check script
+cat > /tmp/net-monitor.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# ============================================
+# Network Monitoring Checks
+# Run periodically via cron to track network health
+# ============================================
+
+LOG_FILE="/tmp/net-monitor.log"
+ALERT_THRESHOLD_MS=2000    # Alert if response > 2 seconds
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Endpoints to monitor
+ENDPOINTS=(
+    "https://example.com|Example Website"
+    "https://httpbin.org/get|HTTPBin API"
+)
+
+# DNS servers to check
+DNS_SERVERS=("8.8.8.8" "1.1.1.1")
+
+# Ports to check on localhost
+LOCAL_PORTS=(22 80 443)
+
+log() {
+    echo "[$TIMESTAMP] $1" | tee -a "$LOG_FILE"
+}
+
+# --- HTTP Endpoint Checks ---
+check_http() {
+    local url="$1"
+    local name="$2"
+
+    local result
+    result=$(curl -s -o /dev/null -w "%{http_code}|%{time_total}|%{time_namelookup}|%{time_connect}" \
+        --max-time 10 "$url" 2>/dev/null)
+
+    local code=$(echo "$result" | cut -d'|' -f1)
+    local total=$(echo "$result" | cut -d'|' -f2)
+    local dns=$(echo "$result" | cut -d'|' -f3)
+    local connect=$(echo "$result" | cut -d'|' -f4)
+
+    local total_ms=$(echo "$total" | awk '{printf "%.0f", $1 * 1000}')
+
+    if [ "$code" = "000" ]; then
+        log "HTTP FAIL | $name | timeout or unreachable"
+        return 1
+    elif [ "$code" -ge 500 ] 2>/dev/null; then
+        log "HTTP FAIL | $name | status=$code total=${total}s"
+        return 1
+    elif [ "$total_ms" -gt "$ALERT_THRESHOLD_MS" ] 2>/dev/null; then
+        log "HTTP SLOW | $name | status=$code total=${total}s dns=${dns}s connect=${connect}s"
+        return 1
+    else
+        log "HTTP OK   | $name | status=$code total=${total}s dns=${dns}s"
+        return 0
+    fi
+}
+
+# --- DNS Checks ---
+check_dns() {
+    local server="$1"
+    local start_time end_time duration
+
+    start_time=$(date +%s%N)
+    if dig @"$server" example.com +short +time=3 > /dev/null 2>&1; then
+        end_time=$(date +%s%N)
+        duration=$(( (end_time - start_time) / 1000000 ))
+        log "DNS  OK   | Server $server | ${duration}ms"
+        return 0
+    else
+        log "DNS  FAIL | Server $server | timeout or error"
+        return 1
+    fi
+}
+
+# --- Port Checks ---
+check_port() {
+    local port="$1"
+
+    if timeout 2 bash -c "echo > /dev/tcp/127.0.0.1/$port" 2>/dev/null; then
+        log "PORT OK   | localhost:$port | open"
+        return 0
+    else
+        log "PORT FAIL | localhost:$port | closed or filtered"
+        return 1
+    fi
+}
+
+# --- Connectivity Check ---
+check_connectivity() {
+    if ping -c 2 -W 2 8.8.8.8 > /dev/null 2>&1; then
+        local latency
+        latency=$(ping -c 3 -W 2 8.8.8.8 2>/dev/null | tail -1 | awk -F'/' '{print $5}')
+        log "PING OK   | 8.8.8.8 | avg=${latency}ms"
+        return 0
+    else
+        log "PING FAIL | 8.8.8.8 | unreachable"
+        return 1
+    fi
+}
+
+# === Run all checks ===
+echo "============================================="
+echo "  Network Health Check — $TIMESTAMP"
+echo "============================================="
+
+FAILURES=0
+
+# Connectivity
+echo ""
+echo "--- Connectivity ---"
+check_connectivity || FAILURES=$((FAILURES + 1))
+
+# DNS
+echo ""
+echo "--- DNS Resolution ---"
+for dns in "${DNS_SERVERS[@]}"; do
+    check_dns "$dns" || FAILURES=$((FAILURES + 1))
+done
+
+# HTTP Endpoints
+echo ""
+echo "--- HTTP Endpoints ---"
+for endpoint in "${ENDPOINTS[@]}"; do
+    IFS='|' read -r url name <<< "$endpoint"
+    check_http "$url" "$name" || FAILURES=$((FAILURES + 1))
+done
+
+# Local Ports
+echo ""
+echo "--- Local Ports ---"
+for port in "${LOCAL_PORTS[@]}"; do
+    check_port "$port" || FAILURES=$((FAILURES + 1))
+done
+
+# Summary
+echo ""
+echo "============================================="
+if [ "$FAILURES" -eq 0 ]; then
+    echo "  All checks passed"
+else
+    echo "  $FAILURES check(s) failed — investigate!"
+fi
+echo "  Log: $LOG_FILE"
+echo "============================================="
+SCRIPT
+
+chmod +x /tmp/net-monitor.sh
+
+# Run the monitoring checks
+bash /tmp/net-monitor.sh
+
+# Show how to set up as a cron job
+echo ""
+echo "=== Set up as a cron job ==="
+echo "# Run every 5 minutes:"
+echo "*/5 * * * * /tmp/net-monitor.sh >> /tmp/net-monitor-cron.log 2>&1"
+echo ""
+
+echo "--- Exercise complete ---"
+```
+
+</Exercise>
+
+<MiniProject title="Network Operations Dashboard">
+
+Build a script that provides a real-time view of network health:
+
+```bash
+cat > ~/net-ops-dashboard.sh << 'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+# ============================================
+# Network Operations Dashboard
+# Real-time view of network health: connectivity, DNS, ports, latency
+# Usage: ./net-ops-dashboard.sh [--once]
+# ============================================
+
+# Configuration
+REFRESH_INTERVAL=10
+ENDPOINTS=(
+    "https://example.com|Example.com"
+    "https://httpbin.org/get|HTTPBin"
+)
+
+DNS_DOMAINS=("google.com" "github.com" "example.com")
+
+CRITICAL_PORTS=(
+    "127.0.0.1|22|SSH"
+)
+
+PING_TARGETS=("8.8.8.8" "1.1.1.1")
+
+# State tracking
+declare -A LAST_STATUS
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# --- Dashboard rendering ---
+render_header() {
+    echo -e "${BOLD}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║              Network Operations Dashboard                      ║${NC}"
+    echo -e "${BOLD}╠════════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${BOLD}║${NC}  Host: $(hostname -s 2>/dev/null || echo 'unknown')$(printf '%*s' $((42 - ${#HOSTNAME})) '')${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  Time: $(date '+%Y-%m-%d %H:%M:%S')                                  ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  Refresh: every ${REFRESH_INTERVAL}s$(printf '%*s' 40 '')${BOLD}║${NC}"
+    echo -e "${BOLD}╚════════════════════════════════════════════════════════════════╝${NC}"
+}
+
+render_section() {
+    echo ""
+    echo -e "${CYAN}━━━ $1 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+status_icon() {
+    case "$1" in
+        ok)   echo -e "${GREEN}[OK]${NC}" ;;
+        warn) echo -e "${YELLOW}[!!]${NC}" ;;
+        fail) echo -e "${RED}[XX]${NC}" ;;
+    esac
+}
+
+# --- Checks ---
+check_internet() {
+    render_section "Internet Connectivity"
+
+    for target in "${PING_TARGETS[@]}"; do
+        local result
+        result=$(ping -c 3 -W 2 "$target" 2>/dev/null | tail -1)
+
+        if [ -n "$result" ] && echo "$result" | grep -q "min/avg/max"; then
+            local avg
+            avg=$(echo "$result" | awk -F'/' '{print $5}')
+            local status="ok"
+            local avg_int=${avg%.*}
+
+            if [ "$avg_int" -gt 100 ] 2>/dev/null; then
+                status="warn"
+            fi
+
+            echo -e "  $(status_icon $status)  $target — avg ${avg}ms"
+        else
+            echo -e "  $(status_icon fail)  $target — unreachable"
+        fi
+    done
+}
+
+check_dns() {
+    render_section "DNS Resolution"
+
+    for domain in "${DNS_DOMAINS[@]}"; do
+        local start_time end_time duration_ms ip
+
+        start_time=$(date +%s%N)
+        ip=$(dig +short "$domain" A 2>/dev/null | head -1)
+        end_time=$(date +%s%N)
+        duration_ms=$(( (end_time - start_time) / 1000000 ))
+
+        if [ -n "$ip" ]; then
+            local status="ok"
+            if [ "$duration_ms" -gt 500 ]; then
+                status="warn"
+            fi
+            printf "  $(status_icon $status)  %-25s → %-16s (%dms)\n" "$domain" "$ip" "$duration_ms"
+        else
+            printf "  $(status_icon fail)  %-25s → FAILED\n" "$domain"
+        fi
+    done
+}
+
+check_endpoints() {
+    render_section "HTTP Endpoints"
+
+    for entry in "${ENDPOINTS[@]}"; do
+        IFS='|' read -r url name <<< "$entry"
+
+        local result
+        result=$(curl -s -o /dev/null -w "%{http_code}|%{time_total}" \
+            --max-time 10 "$url" 2>/dev/null)
+
+        local code=$(echo "$result" | cut -d'|' -f1)
+        local total=$(echo "$result" | cut -d'|' -f2)
+        local total_ms=$(echo "$total" | awk '{printf "%.0f", $1 * 1000}')
+
+        if [ "$code" = "000" ]; then
+            printf "  $(status_icon fail)  %-20s — timeout\n" "$name"
+        elif [ "$code" -ge 500 ] 2>/dev/null; then
+            printf "  $(status_icon fail)  %-20s — HTTP %s (%sms)\n" "$name" "$code" "$total_ms"
+        elif [ "$total_ms" -gt 2000 ] 2>/dev/null; then
+            printf "  $(status_icon warn)  %-20s — HTTP %s (%sms) SLOW\n" "$name" "$code" "$total_ms"
+        else
+            printf "  $(status_icon ok)  %-20s — HTTP %s (%sms)\n" "$name" "$code" "$total_ms"
+        fi
+    done
+}
+
+check_ports() {
+    render_section "Critical Ports"
+
+    for entry in "${CRITICAL_PORTS[@]}"; do
+        IFS='|' read -r host port service <<< "$entry"
+
+        if timeout 2 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
+            printf "  $(status_icon ok)  %-8s %s:%s\n" "$service" "$host" "$port"
+        else
+            printf "  $(status_icon fail)  %-8s %s:%s — NOT LISTENING\n" "$service" "$host" "$port"
+        fi
+    done
+}
+
+check_connections() {
+    render_section "Connection States"
+
+    local established=$(ss -t state established 2>/dev/null | tail -n +2 | wc -l)
+    local time_wait=$(ss -t state time-wait 2>/dev/null | wc -l)
+    local close_wait=$(ss -t state close-wait 2>/dev/null | wc -l)
+    local listening=$(ss -tln 2>/dev/null | tail -n +2 | wc -l)
+
+    local cw_status="ok"
+    [ "$close_wait" -gt 50 ] 2>/dev/null && cw_status="warn"
+    [ "$close_wait" -gt 200 ] 2>/dev/null && cw_status="fail"
+
+    local tw_status="ok"
+    [ "$time_wait" -gt 500 ] 2>/dev/null && tw_status="warn"
+
+    echo -e "  $(status_icon ok)    Listening:    $listening"
+    echo -e "  $(status_icon ok)    Established:  $established"
+    echo -e "  $(status_icon $tw_status)    Time-Wait:    $time_wait"
+    echo -e "  $(status_icon $cw_status)    Close-Wait:   $close_wait"
+}
+
+check_interfaces() {
+    render_section "Network Interfaces"
+
+    ip -br addr show 2>/dev/null | while read -r iface state addrs; do
+        local status="ok"
+        [ "$state" != "UP" ] && [ "$iface" != "lo" ] && status="fail"
+
+        if [ "$iface" = "lo" ]; then
+            continue  # Skip loopback for cleaner output
+        fi
+
+        printf "  $(status_icon $status)  %-12s %-6s %s\n" "$iface" "$state" "$addrs"
+    done
+}
+
+check_disk_for_logs() {
+    render_section "Log Disk Usage"
+
+    local log_usage
+    log_usage=$(df -h /var/log 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%')
+
+    if [ -n "$log_usage" ]; then
+        local status="ok"
+        [ "$log_usage" -gt 80 ] 2>/dev/null && status="warn"
+        [ "$log_usage" -gt 95 ] 2>/dev/null && status="fail"
+        echo -e "  $(status_icon $status)  /var/log: ${log_usage}% used"
+    fi
+}
+
+# --- Main dashboard ---
+run_dashboard() {
+    clear 2>/dev/null || true
+    render_header
+    check_interfaces
+    check_internet
+    check_dns
+    check_endpoints
+    check_ports
+    check_connections
+    check_disk_for_logs
+
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "  Last updated: $(date '+%H:%M:%S')"
+}
+
+# --- Entry point ---
+if [ "${1:-}" = "--once" ]; then
+    run_dashboard
+else
+    echo "Running dashboard (refresh every ${REFRESH_INTERVAL}s)..."
+    echo "Press Ctrl+C to stop."
+    echo ""
+
+    # Run once immediately, then show how to loop
+    run_dashboard
+
+    echo ""
+    echo "  (Single run mode — use 'watch -n $REFRESH_INTERVAL ~/net-ops-dashboard.sh --once'"
+    echo "   for continuous monitoring)"
+fi
+SCRIPT
+
+chmod +x ~/net-ops-dashboard.sh
+
+# Run the dashboard once
+echo "=== Running Network Operations Dashboard ==="
+echo ""
+~/net-ops-dashboard.sh --once
+```
+
+</MiniProject>
+
+## Congratulations!
+
+You have completed the entire Networking module. Starting from the basics of how data travels across networks, you have built a comprehensive understanding of networking that spans every layer of the stack.
+
+Here is what you now know:
+
+```
+What you've mastered:
+
+  Fundamentals:
+    - OSI model and TCP/IP stack
+    - IP addressing, subnets, and CIDR
+    - DNS resolution and management
+    - TCP/UDP protocols and ports
+
+  Infrastructure:
+    - Routing and switching
+    - Firewalls and security
+    - Load balancers and proxies
+    - VPNs and tunneling
+
+  Modern Networking:
+    - Cloud networking (VPCs, subnets, security groups)
+    - Container networking (Docker bridges, DNS, port mapping)
+    - Microservices patterns (service discovery, circuit breakers)
+    - Zero-trust architecture
+
+  Operations:
+    - Systematic troubleshooting methodology
+    - Network monitoring and alerting
+    - Incident response procedures
+    - Infrastructure as code for networking
+```
+
+Networking is the foundation that everything else in DevOps builds upon. Every deployment, every container, every cloud resource, every microservice call depends on the network. The knowledge you have built here will serve you throughout your entire DevOps career.
+
+## Key Takeaways
+
+- CI/CD pipelines depend heavily on networking — cache dependencies locally, secure build agent access
+- Microservices require timeouts, retries with backoff, and circuit breakers to be resilient
+- Service meshes (Istio, Linkerd) handle networking concerns without changing application code
+- Monitor latency (P50, P95, P99), error rates, and connection states continuously
+- Follow a structured incident response runbook: scope, DNS, connectivity, firewall, application
+- Define networking infrastructure as code (Terraform) for reproducibility and auditability
+- Zero trust is replacing traditional VPNs — verify every request, trust nothing by default
+- The DevOps networking checklist ensures every new service launches with proper network configuration
+
+## What's Next
+
+With networking mastered, you are ready to move on to the next pillar of DevOps. The skills you have built here — understanding protocols, configuring firewalls, designing cloud networks, debugging connectivity issues — will be applied every day as you work with containerization, orchestration, CI/CD, and cloud infrastructure. Networking is not just a topic you have studied. It is a skill you will use for your entire career.

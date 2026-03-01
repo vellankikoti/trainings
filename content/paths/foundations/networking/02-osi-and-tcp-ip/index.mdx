@@ -1,0 +1,800 @@
+---
+title: "The OSI and TCP/IP Models"
+description: "Understand the layered architecture of networking. The OSI and TCP/IP models organize how data flows from application to wire and back."
+order: 2
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - "01-how-the-internet-works"
+objectives:
+  - "Name and describe the 7 OSI layers"
+  - "Map OSI to the 4-layer TCP/IP model"
+  - "Understand encapsulation and decapsulation"
+  - "Identify which protocols operate at each layer"
+tags:
+  - networking
+  - osi
+  - tcp-ip
+  - protocols
+---
+
+<Callout type="story" title="The Story">
+Networking would be chaos without standards. Imagine if every device manufacturer invented their own way to communicate — nothing would work together. The OSI model solved this by dividing networking into 7 layers, each with a specific job. The TCP/IP model is the practical implementation used everywhere today. When someone says "that's a Layer 3 problem" or "check the Layer 7 firewall," they're speaking this language. You need to speak it too.
+</Callout>
+
+## Why Layered Models Exist
+
+Before networking standards existed, every vendor had their own proprietary protocols. An IBM mainframe couldn't talk to a DEC minicomputer. A Novell network couldn't connect to an AppleTalk network. It was a mess.
+
+Layered models solve two fundamental problems:
+
+**Separation of Concerns** — Each layer handles one specific aspect of networking. The layer that routes packets between networks doesn't need to know about encryption. The layer that handles encryption doesn't need to know about electrical signals on a wire. Each layer does its job and passes data to the next.
+
+**Interoperability** — As long as everyone agrees on the interface between layers, any vendor can implement any layer independently. Your laptop's Wi-Fi card (Layer 1/2) works with any router because they both follow the same standards at those layers.
+
+```
+Without layers:             With layers:
+┌──────────────────┐        ┌─────────────────┐
+│  One monolithic  │        │  Application    │ ← Independent
+│  networking      │        ├─────────────────┤
+│  implementation  │   vs   │  Transport      │ ← Can be swapped
+│  that does       │        ├─────────────────┤
+│  everything      │        │  Network        │ ← Different vendors
+│                  │        ├─────────────────┤
+└──────────────────┘        │  Physical/Link  │ ← Different media
+                            └─────────────────┘
+```
+
+<Callout type="tip" title="The Analogy That Sticks">
+Think of layers like the postal system. You write a letter (application layer), put it in an envelope with an address (transport/network layer), the mail carrier picks it up (data link layer), and the truck drives it across the country (physical layer). Each person in the chain does their job without needing to know the contents of the letter.
+</Callout>
+
+## The OSI Model: 7 Layers
+
+The **Open Systems Interconnection** (OSI) model was developed by the ISO in 1984. It defines 7 layers, from physical signals at the bottom to user applications at the top.
+
+### Layer 7: Application
+
+The layer closest to the user. It provides network services directly to applications.
+
+- **What it does**: Provides protocols for specific applications
+- **Protocols**: HTTP, HTTPS, FTP, SMTP, DNS, SSH, SNMP
+- **Example**: Your browser using HTTP to request a web page
+
+```bash
+# You interact with Layer 7 every time you use curl:
+curl https://www.example.com
+
+# Or when you SSH into a server:
+ssh user@server.example.com
+
+# Or when you send email via SMTP:
+# (SMTP operates at Layer 7)
+```
+
+### Layer 6: Presentation
+
+Translates data between the application and the network. Handles encoding, encryption, and compression.
+
+- **What it does**: Data formatting, encryption/decryption, compression
+- **Protocols**: SSL/TLS, JPEG, ASCII, UTF-8
+- **Example**: TLS encrypting your HTTP traffic into HTTPS
+
+```bash
+# TLS operates at the Presentation layer
+# You can inspect TLS details:
+openssl s_client -connect www.example.com:443 -brief
+
+# Output shows the presentation layer at work:
+# CONNECTION ESTABLISHED
+# Protocol version: TLSv1.3
+# Ciphersuite: TLS_AES_256_GCM_SHA384
+```
+
+### Layer 5: Session
+
+Manages sessions — establishing, maintaining, and terminating connections between applications.
+
+- **What it does**: Session management, authentication, reconnection
+- **Protocols**: NetBIOS, RPC, PPTP
+- **Example**: Maintaining your login session to a remote server
+
+<Callout type="info" title="Layers 5 and 6 in Practice">
+In the real world, Layers 5 (Session) and 6 (Presentation) are often merged into the Application layer. The TCP/IP model combines all three into one layer. You will rarely hear someone say "that's a Layer 5 problem." But understanding these layers conceptually helps you think about what happens to data during encryption, encoding, and session management.
+</Callout>
+
+### Layer 4: Transport
+
+Provides end-to-end communication between processes on different hosts. This is where reliability and flow control happen.
+
+- **What it does**: Segmentation, flow control, error recovery, port numbers
+- **Protocols**: TCP (reliable), UDP (fast)
+- **PDU**: Segment (TCP) or Datagram (UDP)
+
+```bash
+# TCP provides reliable, ordered delivery:
+# - Three-way handshake
+# - Acknowledgments
+# - Retransmission
+# - Flow control
+
+# UDP provides fast, fire-and-forget delivery:
+# - No handshake
+# - No acknowledgments
+# - No retransmission
+# - Used for DNS, video streaming, gaming
+
+# See active TCP connections:
+ss -tuln
+
+# Example output:
+# State  Recv-Q Send-Q Local Address:Port  Peer Address:Port
+# LISTEN 0      128    0.0.0.0:22          0.0.0.0:*           ← SSH (TCP)
+# LISTEN 0      128    0.0.0.0:80          0.0.0.0:*           ← HTTP (TCP)
+# LISTEN 0      128    0.0.0.0:443         0.0.0.0:*           ← HTTPS (TCP)
+```
+
+### Layer 3: Network
+
+Handles logical addressing and routing — getting packets from source to destination across multiple networks.
+
+- **What it does**: IP addressing, routing, packet forwarding
+- **Protocols**: IP (IPv4/IPv6), ICMP, OSPF, BGP
+- **PDU**: Packet
+- **Devices**: Routers
+
+```bash
+# Layer 3 is where IP addresses live:
+ip addr show
+
+# Routing decisions happen at Layer 3:
+ip route show
+
+# ICMP (ping) operates at Layer 3:
+ping -c 3 google.com
+
+# traceroute shows Layer 3 routing:
+traceroute google.com
+```
+
+### Layer 2: Data Link
+
+Handles communication between directly connected devices on the same network. Uses MAC addresses for local delivery.
+
+- **What it does**: Framing, MAC addressing, error detection, media access control
+- **Protocols**: Ethernet, Wi-Fi (802.11), ARP
+- **PDU**: Frame
+- **Devices**: Switches, bridges
+
+```bash
+# Layer 2 uses MAC addresses (hardware addresses):
+ip link show
+
+# Example output:
+# eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+#     link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff
+#                ^^^^^^^^^^^^^^^^^
+#                MAC address (48 bits, 6 hex pairs)
+
+# ARP maps Layer 3 (IP) to Layer 2 (MAC):
+arp -a
+# Or the modern equivalent:
+ip neigh show
+
+# Example:
+# 192.168.1.1 dev eth0 lladdr aa:bb:cc:dd:ee:ff REACHABLE
+```
+
+### Layer 1: Physical
+
+The actual physical medium that carries the bits — cables, radio waves, light pulses.
+
+- **What it does**: Transmits raw bits over a physical medium
+- **Technologies**: Ethernet cables, fiber optics, Wi-Fi radio, Bluetooth
+- **PDU**: Bits
+- **Devices**: Hubs, repeaters, cables, network interface cards
+
+```bash
+# You can check the physical layer status:
+ethtool eth0
+
+# Example output:
+# Speed: 1000Mb/s          ← Link speed
+# Duplex: Full             ← Full duplex communication
+# Link detected: yes       ← Cable is connected
+
+# Or check interface status:
+ip link show eth0
+# eth0: <BROADCAST,MULTICAST,UP,LOWER_UP>  ← UP means Layer 1 is working
+```
+
+## Quick Reference: All 7 Layers
+
+| Layer | Name | Function | Protocols | PDU | Devices |
+|---|---|---|---|---|---|
+| 7 | Application | User-facing services | HTTP, DNS, SSH, FTP | Data | — |
+| 6 | Presentation | Encoding, encryption | TLS, JPEG, ASCII | Data | — |
+| 5 | Session | Session management | RPC, NetBIOS | Data | — |
+| 4 | Transport | End-to-end delivery | TCP, UDP | Segment | — |
+| 3 | Network | Routing between networks | IP, ICMP, BGP | Packet | Router |
+| 2 | Data Link | Local delivery | Ethernet, Wi-Fi, ARP | Frame | Switch |
+| 1 | Physical | Bit transmission | Cables, radio, fiber | Bits | Hub, NIC |
+
+<Callout type="tip" title="Memorize the Layers">
+**Top-down**: "All People Seem To Need Data Processing" (Application, Presentation, Session, Transport, Network, Data Link, Physical).
+
+**Bottom-up**: "Please Do Not Throw Sausage Pizza Away" (Physical, Data Link, Network, Transport, Session, Presentation, Application).
+
+Pick whichever one sticks — you will use these layer names every day in DevOps.
+</Callout>
+
+## The TCP/IP Model: 4 Layers
+
+The **TCP/IP model** (also called the Internet Protocol Suite) is the practical model that the Internet actually uses. It was developed by the Department of Defense in the 1970s and predates the OSI model.
+
+| TCP/IP Layer | OSI Layers | Protocols |
+|---|---|---|
+| **Application** | 7 + 6 + 5 | HTTP, DNS, SSH, TLS, FTP, SMTP |
+| **Transport** | 4 | TCP, UDP |
+| **Internet** | 3 | IP, ICMP, ARP |
+| **Network Access** | 2 + 1 | Ethernet, Wi-Fi, fiber, cables |
+
+```
+        OSI Model                    TCP/IP Model
+   ┌─────────────────┐
+   │  7. Application  │         ┌─────────────────┐
+   ├─────────────────┤         │                 │
+   │  6. Presentation │    ──►  │   Application   │
+   ├─────────────────┤         │                 │
+   │  5. Session      │         └────────┬────────┘
+   ├─────────────────┤                  │
+   │  4. Transport    │    ──►  ┌────────┴────────┐
+   ├─────────────────┤         │   Transport     │
+   │  3. Network      │    ──►  ├─────────────────┤
+   ├─────────────────┤         │   Internet      │
+   │  2. Data Link    │         ├─────────────────┤
+   ├─────────────────┤    ──►  │  Network Access │
+   │  1. Physical     │         └─────────────────┘
+   └─────────────────┘
+```
+
+<Callout type="info" title="OSI vs TCP/IP — Which Matters?">
+The OSI model is a **conceptual framework** used for discussion and troubleshooting. The TCP/IP model is the **actual implementation** used on the Internet. In practice, you will use OSI layer numbers when talking about problems ("Layer 3 routing issue") and TCP/IP when talking about protocol stacks ("the application layer handles DNS"). Know both.
+</Callout>
+
+## Encapsulation and Decapsulation
+
+As data moves down the layers (sending), each layer **wraps** the data from the layer above with its own header. This process is called **encapsulation**.
+
+As data moves up the layers (receiving), each layer **removes** its header and passes the payload to the layer above. This is called **decapsulation**.
+
+```
+Sending (Encapsulation — headers added going DOWN):
+
+Application:    [         DATA         ]
+                         ↓
+Transport:      [TCP HDR][    DATA     ]  ← Segment
+                         ↓
+Network:        [IP HDR][TCP HDR][DATA ]  ← Packet
+                         ↓
+Data Link:  [ETH HDR][IP HDR][TCP][DATA][ETH TRLR]  ← Frame
+                         ↓
+Physical:   01101001110100101011...        ← Bits on the wire
+
+
+Receiving (Decapsulation — headers removed going UP):
+
+Physical:   01101001110100101011...        ← Bits received
+                         ↓
+Data Link:  [ETH HDR][IP HDR][TCP][DATA][ETH TRLR]  → Strip Ethernet
+                         ↓
+Network:        [IP HDR][TCP HDR][DATA ]  → Strip IP
+                         ↓
+Transport:      [TCP HDR][    DATA     ]  → Strip TCP
+                         ↓
+Application:    [         DATA         ]  → Delivered!
+```
+
+### PDUs at Each Layer
+
+The data unit has a different name at each layer — these are called **Protocol Data Units** (PDUs):
+
+| Layer | PDU Name | Contains |
+|---|---|---|
+| Application | Data | Raw application payload |
+| Transport | Segment (TCP) / Datagram (UDP) | Port numbers + data |
+| Network | Packet | IP addresses + segment |
+| Data Link | Frame | MAC addresses + packet |
+| Physical | Bits | Binary representation of frame |
+
+```bash
+# You can visualize encapsulation with tcpdump:
+sudo tcpdump -i eth0 -nn -v -c 5
+
+# This shows packets with their headers at multiple layers:
+# - Ethernet header (Layer 2): MAC addresses
+# - IP header (Layer 3): source/destination IP
+# - TCP header (Layer 4): source/destination port
+# - Payload (Layer 7): application data
+```
+
+<Callout type="warning" title="Encapsulation Adds Overhead">
+Each layer adds its own header, which takes up space. An Ethernet frame header is 14 bytes, an IP header is 20 bytes, a TCP header is 20 bytes. That is 54 bytes of overhead before you even send a single byte of application data. On a 1500-byte MTU, your maximum payload is 1460 bytes (or less with TCP options). This is why small packets are inefficient and why protocols like HTTP/2 multiplex multiple requests over a single connection.
+</Callout>
+
+## Protocols by Layer
+
+Understanding which protocol operates at which layer is essential for troubleshooting:
+
+### Layer 7 (Application) Protocols
+
+```bash
+# HTTP — Web traffic (port 80)
+curl http://example.com
+
+# HTTPS — Encrypted web traffic (port 443)
+curl https://example.com
+
+# DNS — Name resolution (port 53)
+dig example.com
+
+# SSH — Secure remote access (port 22)
+ssh user@server
+
+# FTP — File transfer (port 21)
+# SMTP — Email sending (port 25)
+# SNMP — Network monitoring (port 161)
+```
+
+### Layer 4 (Transport) Protocols
+
+```bash
+# TCP — Reliable, ordered, connection-oriented
+# Used by: HTTP, SSH, FTP, SMTP
+# Features: handshake, ACKs, retransmission, flow control
+
+# UDP — Unreliable, fast, connectionless
+# Used by: DNS, DHCP, video streaming, gaming, VoIP
+# Features: no handshake, no ACKs, low overhead
+
+# Compare TCP and UDP:
+# TCP: "Did you get my message?" "Yes, got it." "OK, sending the next one."
+# UDP: "Here's my message. Here's another one. And another one."
+
+# See which protocols are in use on your system:
+ss -tuln
+# -t = TCP, -u = UDP, -l = listening, -n = numeric
+```
+
+### Layer 3 (Network) Protocols
+
+```bash
+# IP (Internet Protocol) — Addressing and routing
+ip addr show        # View IP addresses
+ip route show       # View routing table
+
+# ICMP (Internet Control Message Protocol) — Diagnostics
+ping google.com             # ICMP echo request/reply
+traceroute google.com       # Uses ICMP TTL exceeded
+
+# ARP (Address Resolution Protocol) — IP to MAC mapping
+ip neigh show       # View ARP table
+```
+
+### Layer 2 (Data Link) Protocols
+
+```bash
+# Ethernet — Wired LAN communication
+ip link show        # View Ethernet interfaces
+
+# 802.11 (Wi-Fi) — Wireless LAN communication
+iwconfig            # View wireless interfaces (if available)
+
+# MAC addresses are the identifiers at this layer:
+ip link show eth0 | grep ether
+# link/ether 02:42:ac:11:00:02
+```
+
+## A Real-World Example: HTTP Request Through All Layers
+
+Let's trace an HTTP request through every layer of the model:
+
+```
+You type: curl http://example.com
+
+Layer 7 (Application):
+  curl creates an HTTP GET request:
+  "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"
+
+Layer 4 (Transport):
+  TCP segments the data, adds source port (random high port)
+  and destination port (80). Performs three-way handshake.
+  [SrcPort:54321 | DstPort:80 | Seq:1 | ACK:0 | DATA...]
+
+Layer 3 (Network):
+  IP adds source IP (your IP) and destination IP (93.184.216.34).
+  [SrcIP:192.168.1.50 | DstIP:93.184.216.34 | TTL:64 | TCP segment...]
+
+Layer 2 (Data Link):
+  Ethernet adds source MAC (your NIC) and destination MAC
+  (your router's MAC — NOT the server's MAC).
+  [SrcMAC:aa:bb:cc:dd:ee:ff | DstMAC:11:22:33:44:55:66 | IP packet...]
+
+Layer 1 (Physical):
+  Electrical signals on the Ethernet cable:
+  01001010110100011010...
+```
+
+<Callout type="tip" title="MAC Addresses Are Local Only">
+A critical detail: the destination MAC address in Layer 2 is always the **next hop**, not the final destination. Your computer sends frames to your router's MAC address. The router then creates a new frame with its MAC as source and the next router's MAC as destination. This process repeats at every hop. Only the IP addresses (Layer 3) stay the same end-to-end.
+</Callout>
+
+## When Layers Matter for DevOps
+
+Understanding layers helps you troubleshoot systematically:
+
+| Symptom | Likely Layer | Tools | Check |
+|---|---|---|---|
+| "Server unreachable" | Layer 1-3 | `ping`, `traceroute`, `ip link` | Cable, IP, routing |
+| "Connection refused" | Layer 4 | `ss`, `telnet`, `nc` | Service running? Firewall? |
+| "Connection timed out" | Layer 3-4 | `traceroute`, `ss` | Routing, firewall |
+| "502 Bad Gateway" | Layer 7 | `curl -v`, logs | Proxy config, upstream |
+| "SSL handshake failed" | Layer 6/7 | `openssl s_client` | Certificate, TLS config |
+| "Slow network" | Layer 1-3 | `ethtool`, `mtr` | Duplex, MTU, routing |
+
+```bash
+# Systematic troubleshooting — work from the bottom up:
+
+# Layer 1: Is the link up?
+ip link show eth0
+# Look for: state UP
+
+# Layer 2: Can we reach the local gateway?
+arping -c 3 192.168.1.1
+
+# Layer 3: Can we route to the destination?
+ping -c 3 8.8.8.8
+traceroute 8.8.8.8
+
+# Layer 4: Is the port open?
+nc -zv example.com 443
+# Connection to example.com 443 port [tcp/https] succeeded!
+
+# Layer 7: Does the application respond correctly?
+curl -v https://example.com
+```
+
+<Exercise number={1} title="Identify the Layer">
+
+For each scenario below, identify which OSI layer is primarily involved and explain why. Write your answers before checking the solution.
+
+1. A network cable is unplugged from the server
+2. A switch forwards a frame based on MAC address
+3. A router forwards a packet to the next hop
+4. A TCP connection fails because the port is not open
+5. A DNS query resolves a domain name to an IP address
+6. An SSL certificate has expired, causing HTTPS to fail
+7. A Wi-Fi signal is too weak to maintain a connection
+8. An HTTP 404 Not Found error is returned
+
+<CollapsibleSolution>
+
+| Scenario | Layer | Explanation |
+|---|---|---|
+| 1. Cable unplugged | **Layer 1 (Physical)** | No physical medium to carry signals |
+| 2. Switch forwarding by MAC | **Layer 2 (Data Link)** | Switches use MAC addresses (Layer 2) to forward frames |
+| 3. Router forwarding by IP | **Layer 3 (Network)** | Routers use IP addresses (Layer 3) to make forwarding decisions |
+| 4. Port not open (TCP) | **Layer 4 (Transport)** | Ports are a Transport layer concept; TCP RST indicates no service listening |
+| 5. DNS resolving a name | **Layer 7 (Application)** | DNS is an Application layer protocol |
+| 6. Expired SSL certificate | **Layer 6 (Presentation)** | TLS/SSL handles encryption at the Presentation layer |
+| 7. Weak Wi-Fi signal | **Layer 1 (Physical)** | Radio signal strength is a Physical layer concern |
+| 8. HTTP 404 error | **Layer 7 (Application)** | HTTP status codes are Application layer responses |
+
+Key insight: The layer tells you where to focus your troubleshooting. A Layer 1 problem means check cables and signals. A Layer 4 problem means check firewalls and services. A Layer 7 problem means check application configuration and logs.
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise number={2} title="Packet Inspection">
+
+Use `tcpdump` or `curl -v` to observe data at different layers of the network stack. Follow these steps and identify which layer each piece of information belongs to.
+
+```bash
+# Part 1: Use curl -v to see multiple layers at once
+curl -v http://example.com 2>&1
+
+# Part 2: Use tcpdump to capture packets (requires root)
+sudo tcpdump -i eth0 -nn -v -c 10 host 93.184.216.34
+
+# Part 3: Inspect a specific TCP handshake
+sudo tcpdump -i eth0 -nn -c 3 'tcp[tcpflags] & (tcp-syn|tcp-ack) != 0' host 93.184.216.34
+```
+
+For the curl output, label each line with its OSI layer:
+- Lines starting with `*` are connection information
+- Lines starting with `>` are request headers sent
+- Lines starting with `<` are response headers received
+
+<CollapsibleSolution>
+
+```bash
+# curl -v output annotated by layer:
+
+$ curl -v http://example.com 2>&1
+
+# Layer 7 (Application) — DNS resolution
+* Trying 93.184.216.34:80...
+
+# Layer 4 (Transport) — TCP connection
+* Connected to example.com (93.184.216.34) port 80
+
+# Layer 7 (Application) — HTTP request
+> GET / HTTP/1.1
+> Host: example.com
+> User-Agent: curl/7.81.0
+> Accept: */*
+
+# Layer 7 (Application) — HTTP response
+< HTTP/1.1 200 OK
+< Content-Type: text/html; charset=UTF-8
+< Content-Length: 1256
+< Date: Mon, 01 Jan 2024 00:00:00 GMT
+
+# Layer 7 (Application) — Response body
+<!doctype html>
+<html>...
+
+# tcpdump output annotated:
+$ sudo tcpdump -i eth0 -nn -v -c 5 host 93.184.216.34
+
+# Layer 2: Ethernet frame (MAC addresses)
+# Layer 3: IP header (source/dest IP, TTL)
+# Layer 4: TCP header (source/dest port, flags, seq/ack numbers)
+
+# 10:00:01 IP (tos 0x0, ttl 64, id 12345, offset 0, flags [DF], proto TCP (6), length 60)
+#     192.168.1.50.54321 > 93.184.216.34.80: Flags [S], seq 1000, win 65535
+#     ^                    ^                  ^         ^
+#     Layer 3: Src IP      Layer 3: Dst IP    Layer 4   Layer 4: TCP SYN
+
+# Each line from tcpdump shows you Layers 2-4 simultaneously.
+# The payload (if displayed) would be Layer 7.
+```
+
+The key takeaway: `curl -v` primarily shows you Layers 4 and 7. `tcpdump` shows you Layers 2, 3, and 4 in raw form. Together, they give you visibility into nearly every layer.
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Network Layer Visualizer">
+
+Build a script that demonstrates what happens at each layer of the network model when you make a request to a given hostname.
+
+```bash
+#!/bin/bash
+# layer-visualizer.sh — Show what happens at each network layer
+# Usage: ./layer-visualizer.sh <hostname>
+
+HOST="${1:-example.com}"
+PORT=443
+
+echo "=============================================="
+echo "  Network Layer Visualizer"
+echo "  Target: $HOST"
+echo "=============================================="
+
+# --- Layer 7: Application (DNS) ---
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  LAYER 7 — APPLICATION (DNS Resolution)  ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+echo "Resolving $HOST using DNS (an Application layer protocol)..."
+dig "$HOST" +short
+echo ""
+echo "DNS query details:"
+dig "$HOST" +noall +answer +stats 2>/dev/null | head -10
+
+# Resolve for later use
+IP=$(dig +short "$HOST" | grep -E '^[0-9]' | head -1)
+if [ -z "$IP" ]; then
+    echo "ERROR: Could not resolve $HOST"
+    exit 1
+fi
+echo ""
+echo "Resolved IP: $IP"
+
+# --- Layer 4: Transport (TCP) ---
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  LAYER 4 — TRANSPORT (TCP Handshake)     ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+echo "Attempting TCP connection to $IP:$PORT..."
+echo "TCP uses a three-way handshake: SYN → SYN-ACK → ACK"
+echo ""
+
+# Time the TCP connection
+TCP_START=$(date +%s%N)
+if nc -z -w 5 "$IP" "$PORT" 2>/dev/null; then
+    TCP_END=$(date +%s%N)
+    TCP_TIME=$(( (TCP_END - TCP_START) / 1000000 ))
+    echo "TCP connection established in ${TCP_TIME}ms"
+    echo "Source port: (ephemeral, assigned by OS)"
+    echo "Destination port: $PORT"
+else
+    echo "TCP connection FAILED to $IP:$PORT"
+    echo "Possible causes: firewall, service not running, routing issue"
+fi
+
+# Show current TCP connections to this host
+echo ""
+echo "Active TCP connections to $IP:"
+ss -tn dst "$IP" 2>/dev/null || echo "(no active connections)"
+
+# --- Layer 3: Network (IP Routing) ---
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  LAYER 3 — NETWORK (IP Routing)          ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
+# Show local IP
+LOCAL_IP=$(ip route get "$IP" 2>/dev/null | grep -oP 'src \K\S+')
+echo "Source IP:      ${LOCAL_IP:-unknown}"
+echo "Destination IP: $IP"
+
+# Show route
+echo ""
+echo "Route to destination:"
+ip route get "$IP" 2>/dev/null
+
+echo ""
+echo "Tracing path (Layer 3 hops):"
+traceroute -m 10 -w 2 -q 1 "$IP" 2>/dev/null | head -12 || echo "traceroute not available"
+
+# --- Layer 2: Data Link (MAC / Ethernet) ---
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  LAYER 2 — DATA LINK (MAC Addresses)     ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
+# Get the interface used
+IFACE=$(ip route get "$IP" 2>/dev/null | grep -oP 'dev \K\S+')
+echo "Interface: ${IFACE:-unknown}"
+
+if [ -n "$IFACE" ]; then
+    LOCAL_MAC=$(ip link show "$IFACE" 2>/dev/null | grep ether | awk '{print $2}')
+    echo "Local MAC:  ${LOCAL_MAC:-unknown}"
+fi
+
+# Get gateway MAC
+GATEWAY=$(ip route get "$IP" 2>/dev/null | grep -oP 'via \K\S+')
+if [ -n "$GATEWAY" ]; then
+    GATEWAY_MAC=$(ip neigh show "$GATEWAY" 2>/dev/null | awk '{print $5}')
+    echo "Gateway IP:  $GATEWAY"
+    echo "Gateway MAC: ${GATEWAY_MAC:-unknown (not in ARP cache)}"
+    echo ""
+    echo "NOTE: The destination MAC in the frame is the gateway's MAC,"
+    echo "      not the final server's MAC. MAC addresses are local only."
+fi
+
+# --- Layer 1: Physical ---
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  LAYER 1 — PHYSICAL (Interface Status)   ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
+if [ -n "$IFACE" ]; then
+    echo "Interface $IFACE status:"
+    ip link show "$IFACE" | head -2
+
+    # Try ethtool for physical details
+    if command -v ethtool &>/dev/null; then
+        echo ""
+        ethtool "$IFACE" 2>/dev/null | grep -E "Speed|Duplex|Link detected" || true
+    fi
+
+    echo ""
+    echo "MTU (Maximum Transmission Unit):"
+    ip link show "$IFACE" | grep -oP 'mtu \K\d+'
+    echo "bytes — this is the maximum frame size at Layer 2"
+fi
+
+# --- Full HTTP Request ---
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  FULL REQUEST (All Layers Combined)       ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+echo "Making HTTPS request through all layers..."
+echo ""
+curl -s -o /dev/null -w "\
+  DNS Lookup:     %{time_namelookup}s  (Layer 7: DNS)
+  TCP Connect:    %{time_connect}s  (Layer 4: TCP handshake)
+  TLS Handshake:  %{time_appconnect}s  (Layer 6: TLS)
+  First Byte:     %{time_starttransfer}s  (Layer 7: HTTP response)
+  Total Time:     %{time_total}s  (All layers)
+  HTTP Status:    %{http_code}        (Layer 7: Application)
+  Bytes Received: %{size_download}     (Layer 7: Payload)
+" "https://$HOST" 2>/dev/null
+
+echo ""
+echo "=============================================="
+echo "  Visualization Complete"
+echo "=============================================="
+```
+
+Save and run the script:
+
+```bash
+chmod +x layer-visualizer.sh
+
+# Test with different hosts
+./layer-visualizer.sh google.com
+./layer-visualizer.sh github.com
+./layer-visualizer.sh example.com
+```
+
+This script demonstrates all layers in action. Notice how each layer adds its own information: DNS at Layer 7, TCP ports at Layer 4, IP routing at Layer 3, MAC addresses at Layer 2, and physical interface status at Layer 1. Each layer has its own tools and its own troubleshooting approach.
+
+</MiniProject>
+
+## Key Takeaways
+
+- The OSI model divides networking into 7 layers — each layer handles a specific concern, from physical signals (Layer 1) to application protocols (Layer 7)
+- The TCP/IP model uses 4 layers (Network Access, Internet, Transport, Application) and is the model the Internet actually implements
+- Encapsulation wraps data with headers as it moves down the stack; decapsulation removes headers as it moves up — each layer adds its own protocol data unit (PDU)
+- Knowing which layer a problem belongs to determines which tools you use to troubleshoot: `ping` for Layer 3, `ss` for Layer 4, `curl -v` for Layer 7
+
+<Quiz>
+<QuizQuestion
+  question="At which OSI layer does a router operate?"
+  options={[
+    "Layer 1 (Physical)",
+    "Layer 2 (Data Link)",
+    "Layer 3 (Network)",
+    "Layer 4 (Transport)"
+  ]}
+  answer={2}
+  explanation="Routers operate at Layer 3 (Network) because they make forwarding decisions based on IP addresses. Switches operate at Layer 2 (Data Link) using MAC addresses. Hubs operate at Layer 1 (Physical)."
+/>
+<QuizQuestion
+  question="What is the process of adding headers to data as it moves down the network layers called?"
+  options={[
+    "Fragmentation",
+    "Decapsulation",
+    "Encapsulation",
+    "Multiplexing"
+  ]}
+  answer={2}
+  explanation="Encapsulation is the process of wrapping data with headers (and sometimes trailers) as it moves down the layers. Each layer adds its own header. Decapsulation is the reverse — removing headers as data moves up the layers on the receiving end."
+/>
+<QuizQuestion
+  question="Which tool would you use to troubleshoot a 'Connection refused' error?"
+  options={[
+    "ping (Layer 3)",
+    "ethtool (Layer 1)",
+    "ss or netstat (Layer 4)",
+    "traceroute (Layer 3)"
+  ]}
+  answer={2}
+  explanation="'Connection refused' is a Layer 4 (Transport) issue — it means the TCP connection was rejected, typically because no service is listening on that port. The ss command shows listening ports and active connections. ping and traceroute test Layer 3 (IP routing), and ethtool checks Layer 1 (physical link)."
+/>
+<QuizQuestion
+  question="How does the TCP/IP model differ from the OSI model?"
+  options={[
+    "TCP/IP has 7 layers, OSI has 4",
+    "TCP/IP combines the top 3 OSI layers into one Application layer and the bottom 2 into Network Access",
+    "They are identical models with different names",
+    "TCP/IP only handles TCP traffic, not UDP"
+  ]}
+  answer={1}
+  explanation="The TCP/IP model has 4 layers. It combines OSI Layers 5, 6, and 7 into a single Application layer, and combines Layers 1 and 2 into Network Access. The Transport and Network (Internet) layers map directly. TCP/IP handles both TCP and UDP at the Transport layer."
+/>
+</Quiz>
+
+## What's Next?
+
+In the next lesson, **IP Addressing and Subnets**, you will dive deep into the Layer 3 addressing scheme that makes routing possible. You will learn to read and calculate CIDR notation, subnet networks, and plan IP address schemes — skills you will use every time you configure a VPC, Docker network, or Kubernetes cluster.

@@ -1,0 +1,131 @@
+name: git-basics
+title: "Git Basics Lab"
+description: "Master fundamental Git operations including commits, branches, merging, stashing, history rewriting, and recovery techniques."
+module: "git-basics"
+difficulty: beginner-to-intermediate
+duration: 45
+
+environment:
+  type: docker-compose
+  compose_file: docker-compose.yml
+
+exercises:
+  - id: git-ex-1
+    title: "Initialize a repository and make your first commit"
+    description: "Create a new directory called 'myproject' in /workspace, initialize it as a Git repository, create a file called 'README.md' with the text 'My Project', stage it, and make your first commit with the message 'Initial commit'."
+    hints:
+      - "Use 'mkdir myproject && cd myproject && git init'"
+      - "Create the file: echo 'My Project' > README.md"
+      - "Stage and commit: git add README.md && git commit -m 'Initial commit'"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && git log --oneline | head -1 | grep -q 'Initial commit' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-2
+    title: "Create and switch between branches"
+    description: "In your myproject repo, create a branch called 'feature-login', switch to it, add a file called 'login.txt' with the text 'Login module', and commit it. Then switch back to main and verify that login.txt does not exist on main."
+    hints:
+      - "Create and switch: git checkout -b feature-login"
+      - "Add and commit: echo 'Login module' > login.txt && git add login.txt && git commit -m 'Add login module'"
+      - "Switch back: git checkout main"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && git branch | grep -q 'feature-login' && git checkout feature-login -- login.txt 2>/dev/null && grep -q 'Login module' login.txt && git checkout main && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-3
+    title: "Stage specific hunks with git add -p"
+    description: "On the main branch of myproject, edit README.md so it has at least two separate changes (e.g., add a line at the top and another at the bottom). Use 'git add -p' to stage only one of the hunks. Verify with 'git diff --cached' that only part of the file is staged, then commit the staged change with the message 'Partial update'."
+    hints:
+      - "Make two distinct edits separated by existing content so Git sees two hunks"
+      - "In 'git add -p', type 'y' to stage a hunk and 'n' to skip one"
+      - "Check staged content with 'git diff --cached' and unstaged with 'git diff'"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && git log --oneline | grep -q 'Partial update' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-4
+    title: "Write a conventional commit message"
+    description: "In myproject, create a file called 'auth.js' with the content 'module.exports = {};'. Stage it and commit using a conventional commit message format: 'feat(auth): add authentication module' with a body that says 'Implements the base authentication module skeleton for future development.'"
+    hints:
+      - "Use git commit with a multi-line message using -m twice"
+      - "Try: git commit -m 'feat(auth): add authentication module' -m 'Implements the base authentication module skeleton for future development.'"
+      - "The format is: type(scope): description"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && git log --oneline | grep -q 'feat(auth)' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-5
+    title: "Search Git history with formatted log"
+    description: "Use git log with formatting to find all commits in myproject. Write a command that shows each commit on one line with the short hash, date (YYYY-MM-DD), and subject. Save the output to /workspace/git-history.txt."
+    hints:
+      - "Use: git log --pretty=format:'%h %ad %s' --date=short"
+      - "Redirect the output: > /workspace/git-history.txt"
+      - "You can also use --author or --since flags to filter"
+    validation:
+      type: command
+      command: "test -s /workspace/git-history.txt && head -1 /workspace/git-history.txt | grep -qE '^[a-f0-9]+ [0-9]{4}-[0-9]{2}-[0-9]{2} ' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-6
+    title: "Create and resolve a merge conflict"
+    description: "In myproject on main, edit README.md to say 'Version 1.0' on line 2. Commit it. Then switch to feature-login and edit README.md to say 'Version 2.0' on line 2. Commit it. Switch back to main and merge feature-login -- this will create a conflict. Resolve the conflict by keeping 'Version 2.0', stage the file, and complete the merge."
+    hints:
+      - "After the merge fails, open README.md and remove the conflict markers (<<<<<<, ======, >>>>>>)"
+      - "Keep the content you want, save, then: git add README.md && git commit -m 'Resolve merge conflict'"
+      - "Verify with: git log --oneline --graph"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && git log --oneline | grep -qi 'merge\\|conflict\\|resolve' && grep -q 'Version 2.0' README.md && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-7
+    title: "Stash and restore work in progress"
+    description: "In myproject on main, create a new file called 'wip.txt' with some content and stage it. Then use 'git stash' to save your work. Verify the working directory is clean. Then restore the stashed changes with 'git stash pop' and verify wip.txt is back."
+    hints:
+      - "Stage first: echo 'work in progress' > wip.txt && git add wip.txt"
+      - "Stash it: git stash"
+      - "Restore it: git stash pop"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && test -f wip.txt && git stash list | wc -l | grep -qE '^0$' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-8
+    title: "Reorganize commits with git reset"
+    description: "In myproject, make two quick commits: one adding 'a.txt' and another adding 'b.txt'. Then use 'git reset --soft HEAD~2' to undo both commits while keeping the changes staged. Verify both files are staged, then recommit them together with the message 'Add a.txt and b.txt'."
+    hints:
+      - "Create commits: echo a > a.txt && git add a.txt && git commit -m 'Add a' && echo b > b.txt && git add b.txt && git commit -m 'Add b'"
+      - "Soft reset: git reset --soft HEAD~2"
+      - "Recommit: git commit -m 'Add a.txt and b.txt'"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && git log --oneline | grep -q 'Add a.txt and b.txt' && test -f a.txt && test -f b.txt && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-9
+    title: "Safely undo a commit with git revert"
+    description: "In myproject, create a file called 'mistake.txt', commit it with the message 'Add mistake'. Then use 'git revert' to undo that commit (this creates a new revert commit). Verify that mistake.txt no longer exists in the working directory but the history shows both the original and revert commits."
+    hints:
+      - "Create: echo 'oops' > mistake.txt && git add mistake.txt && git commit -m 'Add mistake'"
+      - "Revert: git revert HEAD --no-edit"
+      - "Verify: git log --oneline should show the revert commit"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && ! test -f mistake.txt && git log --oneline | grep -qi 'revert' && echo 'pass'"
+      expected_output: "pass"
+
+  - id: git-ex-10
+    title: "Recover a deleted branch with git reflog"
+    description: "In myproject, create a branch called 'experiment', switch to it, add a file called 'experiment.txt' and commit it. Switch back to main and delete the experiment branch with 'git branch -D experiment'. Now use 'git reflog' to find the commit hash from the deleted branch and recreate it with 'git branch experiment <hash>'. Verify the branch exists again with the commit."
+    hints:
+      - "After deleting, run: git reflog | grep 'experiment'"
+      - "Find the commit hash where you added experiment.txt"
+      - "Recreate: git branch experiment <hash>"
+    validation:
+      type: command
+      command: "cd /workspace/myproject && git branch | grep -q 'experiment' && git log experiment --oneline | grep -qi 'experiment' && echo 'pass'"
+      expected_output: "pass"

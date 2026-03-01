@@ -1,0 +1,1327 @@
+---
+title: "Enterprise Branching Strategies"
+description: "Choose the right branching strategy for your team. Compare GitFlow, GitHub Flow, GitLab Flow, and trunk-based development — understand the trade-offs and when to use each."
+order: 19
+xpReward: 100
+estimatedMinutes: 40
+prerequisites:
+  - 18-git-bisect
+objectives:
+  - Understand GitFlow and its use cases
+  - Implement GitHub Flow for continuous deployment
+  - Compare GitLab Flow for staged environments
+  - Evaluate trunk-based development for CI/CD
+  - Choose the right strategy for your team
+tags:
+  - git
+  - branching-strategy
+  - gitflow
+  - enterprise
+---
+
+<Callout type="story" title="The Story">
+Your startup is growing. With 3 developers, "just push to main" worked fine. Now you have 30 developers, 5 teams, staging and production environments, and monthly releases. Developers are stepping on each other's branches. Hotfixes are getting lost. Nobody knows which code is in production. You need a branching strategy — a set of rules everyone follows so that Git serves your process instead of fighting it.
+</Callout>
+
+## Why Branching Strategies Matter
+
+A branching strategy is a contract your team agrees on. It answers questions that come up every day:
+
+```
+- "Where do I create my feature branch from?"
+- "Where do I merge when I'm done?"
+- "How do we handle hotfixes?"
+- "Which branch represents production?"
+- "How do we release?"
+- "Can I push directly to main?"
+```
+
+Without a strategy, every developer invents their own workflow. Branches pile up. Merges become confusing. Deployments become risky. With a strategy, everyone speaks the same language.
+
+The four major strategies, from most structured to least:
+
+```
+Most structured ──────────────────────────── Least structured
+   GitFlow     GitLab Flow    GitHub Flow    Trunk-Based
+   (complex)   (moderate)     (simple)       (minimal)
+```
+
+## GitFlow
+
+GitFlow, created by Vincent Driessen in 2010, is the most structured branching model. It defines specific branch types with strict rules about where code flows.
+
+### Branch Types
+
+```
+main (or master)
+  │   Always reflects production. Every commit is a release tag.
+  │
+develop
+  │   Integration branch. Features merge here first.
+  │
+feature/*
+  │   One per feature. Branch from develop, merge back to develop.
+  │
+release/*
+  │   Preparation for a release. Branch from develop, merge to main AND develop.
+  │
+hotfix/*
+      Emergency fixes. Branch from main, merge to main AND develop.
+```
+
+### GitFlow Diagram
+
+```
+main:     ──●──────────────────●──────────●──────●──
+             \                / \        /      /
+hotfix:       \              /   \      /      /
+               \            /     \    /    ●─●
+                \          /       \  /    /
+release:         \      ●─●────●   \/    /
+                  \    /    \   \   /\   /
+develop:  ──●──●───●──●──●──●───●──●──●──●──●──
+              \   /    \      /        \
+feature:    ●──●──●     ●──●──●         ●──●
+            (auth)     (payments)      (search)
+```
+
+### GitFlow Workflow
+
+```bash
+# === Starting a new feature ===
+# Branch from develop
+git switch develop
+git pull origin develop
+git switch -c feature/user-authentication
+
+# Work on the feature
+# ... commits ...
+
+# Merge back to develop (via PR in most teams)
+git switch develop
+git merge --no-ff feature/user-authentication
+git branch -d feature/user-authentication
+git push origin develop
+
+# === Creating a release ===
+# When develop has enough features for a release
+git switch develop
+git switch -c release/2.1.0
+
+# Only bug fixes and version bumps on the release branch
+echo "2.1.0" > VERSION
+git add . && git commit -m "Bump version to 2.1.0"
+# Fix any release bugs...
+
+# Merge release to main
+git switch main
+git merge --no-ff release/2.1.0
+git tag -a v2.1.0 -m "Release 2.1.0"
+
+# Merge release back to develop (to capture bug fixes)
+git switch develop
+git merge --no-ff release/2.1.0
+git branch -d release/2.1.0
+
+# Push everything
+git push origin main develop --tags
+
+# === Emergency hotfix ===
+# Branch from main (production)
+git switch main
+git switch -c hotfix/security-patch
+
+# Fix the bug
+# ... commits ...
+
+# Merge to main
+git switch main
+git merge --no-ff hotfix/security-patch
+git tag -a v2.1.1 -m "Hotfix: security patch"
+
+# Merge to develop (so the fix is in future releases too)
+git switch develop
+git merge --no-ff hotfix/security-patch
+git branch -d hotfix/security-patch
+
+git push origin main develop --tags
+```
+
+### When to Use GitFlow
+
+```
+GOOD FIT:                              POOR FIT:
+✓ Versioned software (v1.0, v2.0)     ✗ Continuous deployment (web apps)
+✓ Scheduled releases (monthly)          ✗ Small teams (< 5 developers)
+✓ Multiple versions in production       ✗ Fast iteration required
+✓ Formal QA process                     ✗ Teams new to Git
+✓ Desktop/mobile apps                   ✗ Microservices
+✓ Libraries and frameworks              ✗ High deployment frequency
+```
+
+<Callout type="warning" title="GitFlow Complexity">
+GitFlow's biggest drawback is complexity. It has 5 branch types, strict merge directions, and requires discipline to follow. For web applications that deploy continuously, GitFlow is usually overkill. It was designed for software that ships versioned releases (like desktop apps or libraries), not for web apps that deploy multiple times per day.
+</Callout>
+
+## GitHub Flow
+
+GitHub Flow is the simplest branching strategy. Created by GitHub, it has just two concepts: `main` is always deployable, and everything else is a feature branch.
+
+### Branch Types
+
+```
+main
+  │   Always deployable. Protected. Deploy on every merge.
+  │
+feature/*
+      Short-lived. Branch from main, PR back to main, deploy on merge.
+```
+
+### GitHub Flow Diagram
+
+```
+main:     ──●──●──●──●──●──●──●──●──●──●──
+              \   /  \     /     \     /
+feature:    ●──●──●    ●──●──●    ●──●
+            (login)   (dashboard) (search)
+                ↑          ↑          ↑
+            PR + review  PR + review  PR + review
+            then merge   then merge   then merge
+            then deploy  then deploy  then deploy
+```
+
+### GitHub Flow Workflow
+
+```bash
+# === Starting work ===
+# Always branch from main
+git switch main
+git pull origin main
+git switch -c feature/add-search
+
+# Work on the feature (commit early and often)
+git add . && git commit -m "Add search index"
+git add . && git commit -m "Add search UI component"
+git add . && git commit -m "Add search API endpoint"
+
+# Push and create a Pull Request
+git push -u origin feature/add-search
+# Create PR on GitHub (or via CLI: gh pr create)
+
+# === Review process ===
+# Teammates review the PR
+# CI runs tests automatically
+# Address feedback with more commits
+
+# === Merge and deploy ===
+# Once approved and CI passes:
+# Merge the PR (usually via GitHub UI)
+# Deploy automatically (CI/CD triggers on merge to main)
+
+# === Clean up ===
+git switch main
+git pull origin main
+git branch -d feature/add-search
+```
+
+### The Rules of GitHub Flow
+
+```
+1. main is ALWAYS deployable
+2. Branch from main for any change
+3. Push to your branch regularly
+4. Open a PR when you want feedback (or when you're done)
+5. Merge only after PR review AND CI passes
+6. Deploy immediately after merging to main
+```
+
+### When to Use GitHub Flow
+
+```
+GOOD FIT:                              POOR FIT:
+✓ Continuous deployment                 ✗ Multiple versions in production
+✓ Web applications                      ✗ Scheduled releases
+✓ Small to medium teams                 ✗ Formal QA stages
+✓ Fast iteration                        ✗ Desktop/mobile apps with versions
+✓ Microservices                         ✗ Regulated industries (audit trail)
+✓ Teams new to branching strategies     ✗ Need staging environments
+```
+
+<Callout type="tip" title="GitHub Flow Is the Default Choice">
+If you're unsure which strategy to use, start with GitHub Flow. It's simple, well-understood, and works for most web development teams. You can always add complexity later (environment branches, release branches) if needed. You can't easily simplify a complex strategy that's already in place.
+</Callout>
+
+## GitLab Flow
+
+GitLab Flow sits between GitHub Flow's simplicity and GitFlow's structure. It adds environment branches for staged deployments.
+
+### Branch Types
+
+```
+main (or production)
+  │   Reflects production. Deployments happen from here.
+  │
+staging (or pre-production)
+  │   Code goes here for QA before production.
+  │
+develop (optional)
+  │   Integration branch for features.
+  │
+feature/*
+      Short-lived. Branch from main, merge to main, flows downstream.
+```
+
+### GitLab Flow — Environment Branches
+
+```
+feature → main → staging → production
+
+main:        ──●──●──●──●──●──●──●──
+                \   /        ↓
+feature:      ●──●──●      (merge down)
+                          ↓
+staging:     ────────────●──●──●──
+                              ↓
+                          (merge down when ready)
+                              ↓
+production:  ─────────────────●──●──
+```
+
+### GitLab Flow — Release Branches
+
+```
+feature → main → release/X.Y
+
+main:           ──●──●──●──●──●──●──●──●──
+                    \   /              \
+feature:          ●──●──●              (cherry-pick)
+                                        ↓
+release/2.5:     ──────────●──●──●──●──●──
+                           ↑
+                     (branch from main at release time)
+                     (only bug fixes after branching)
+
+release/2.6:     ─────────────────●──●──●──
+```
+
+### GitLab Flow Workflow
+
+```bash
+# === Environment branch model ===
+
+# Work on a feature (same as GitHub Flow)
+git switch main
+git pull origin main
+git switch -c feature/new-dashboard
+
+# ... work and commits ...
+
+# Merge to main (via PR)
+git push -u origin feature/new-dashboard
+# Create merge request, get review, CI passes, merge
+
+# Promote to staging
+git switch staging
+git merge main
+git push origin staging
+# Staging deployment triggers automatically
+
+# After QA approval, promote to production
+git switch production
+git merge staging
+git push origin production
+# Production deployment triggers automatically
+
+# === Release branch model ===
+
+# When it's time to release
+git switch main
+git switch -c release/2.5
+git push origin release/2.5
+
+# Bug fixes go to main first, then cherry-pick to release
+git switch main
+# ... fix bug, commit, push ...
+git switch release/2.5
+git cherry-pick <fix-commit>
+git push origin release/2.5
+
+# Tag the release
+git tag -a v2.5.1 -m "Release 2.5.1"
+git push origin release/2.5 --tags
+```
+
+### When to Use GitLab Flow
+
+```
+GOOD FIT:                              POOR FIT:
+✓ Staged environments (dev/staging/prod) ✗ Simple continuous deployment
+✓ QA process before production           ✗ Very small teams
+✓ Need to control what's in production   ✗ No staging environments
+✓ Medium to large teams                  ✗ Teams wanting simplicity
+✓ SaaS with release trains               ✗ Pure trunk-based development
+✓ Regulated industries                   ✗ Microservices (per-service deploy)
+```
+
+## Trunk-Based Development
+
+Trunk-based development is the most minimalist strategy. Everyone commits to a single branch (trunk/main). Feature branches, if used at all, are extremely short-lived (hours, not days).
+
+### Branch Types
+
+```
+main (trunk)
+  │   The only long-lived branch. Everyone commits here.
+  │
+short-lived branches (optional)
+      Live for hours, not days. Maximum 1-2 days.
+```
+
+### Trunk-Based Development Diagram
+
+```
+No branches (pure trunk):
+main: ──●──●──●──●──●──●──●──●──●──●──●──●──
+         A   B   A   C   B   A   C   B   A
+      (developers A, B, C all commit to main)
+
+With short-lived branches (common variant):
+main:   ──●──●──●──●──●──●──●──●──●──●──●──
+            \  / \   /   \  /
+feature:  ●──●    ●──●    ●──●
+          (< 1 day) (< 1 day) (< 1 day)
+```
+
+### Trunk-Based Workflow
+
+```bash
+# === Pure trunk-based (no branches) ===
+
+# Pull latest
+git switch main
+git pull origin main
+
+# Make small, incremental changes
+git add . && git commit -m "Add search button to header"
+git push origin main
+# CI runs, deploys if green
+
+# Another small change
+git add . && git commit -m "Wire search button to API"
+git push origin main
+# CI runs, deploys if green
+
+# === With short-lived branches ===
+
+# Small, focused branch
+git switch -c add-search-button
+git add . && git commit -m "Add search button to header"
+git push -u origin add-search-button
+# Create PR immediately
+# Review happens within hours (not days)
+# Merge same day
+
+# Key: the branch never lives more than 1-2 days
+```
+
+### Feature Flags (Essential for Trunk-Based)
+
+Since everyone pushes to main and it deploys immediately, you need feature flags to hide incomplete features:
+
+```bash
+# Don't merge half-finished features behind branches
+# Instead, merge them behind feature flags
+
+cat > src/features.js << 'EOF'
+const features = {
+  newSearch: process.env.FEATURE_NEW_SEARCH === 'true',
+  darkMode: process.env.FEATURE_DARK_MODE === 'true',
+  newCheckout: process.env.FEATURE_NEW_CHECKOUT === 'true',
+};
+
+module.exports = features;
+EOF
+
+# In your code:
+cat > src/header.js << 'EOF'
+const features = require('./features');
+
+function renderHeader() {
+  return `
+    <header>
+      <nav>Home | Products | About</nav>
+      ${features.newSearch ? '<SearchBar />' : ''}
+    </header>
+  `;
+}
+EOF
+
+# Deploy safely: feature is in main but hidden
+# Enable for testing: FEATURE_NEW_SEARCH=true (in staging)
+# Enable for everyone: FEATURE_NEW_SEARCH=true (in production)
+# Rollback without code change: FEATURE_NEW_SEARCH=false
+```
+
+### When to Use Trunk-Based Development
+
+```
+GOOD FIT:                              POOR FIT:
+✓ High CI/CD maturity                   ✗ No CI/CD pipeline
+✓ Excellent test coverage               ✗ Poor test coverage
+✓ Small, senior teams                   ✗ Junior-heavy teams
+✓ Feature flag infrastructure           ✗ No feature flag system
+✓ Continuous deployment (multiple/day)  ✗ Scheduled releases
+✓ Google, Meta, Netflix scale           ✗ Versioned software
+✓ Microservices                         ✗ Teams learning Git
+```
+
+<Callout type="warning" title="Trunk-Based Requires Maturity">
+Trunk-based development looks simple but requires the most engineering maturity. You need: excellent CI (tests run in minutes, not hours), comprehensive test coverage, feature flags, monitoring, and the ability to roll back deployments quickly. Without these, pushing directly to main becomes dangerous rather than efficient.
+</Callout>
+
+## Comparison Table
+
+| Aspect | GitFlow | GitHub Flow | GitLab Flow | Trunk-Based |
+|---|---|---|---|---|
+| **Complexity** | High (5 branch types) | Low (2 branch types) | Medium (3-4 types) | Minimal (1-2 types) |
+| **Long-lived branches** | main, develop | main | main + env branches | main only |
+| **Feature branches** | From develop | From main | From main | Optional, very short |
+| **Release process** | Release branches | Deploy on merge | Promote through envs | Deploy on push |
+| **Hotfix process** | Hotfix branch → main + develop | Branch → main | Fix main → cherry-pick | Fix main → deploy |
+| **Deployment frequency** | Weekly/monthly | On every merge | Controlled promotion | Multiple per day |
+| **Best team size** | 10-100+ | 2-20 | 5-50 | 3-30 (senior) |
+| **CI/CD requirement** | Moderate | High | High | Very high |
+| **Learning curve** | Steep | Gentle | Moderate | Gentle (but discipline) |
+| **Versioned releases** | Excellent | Poor | Good | Poor |
+| **Multiple environments** | Manual | No built-in | Built-in | Via feature flags |
+
+## Choosing the Right Strategy
+
+Use this decision flowchart to choose:
+
+```
+Start
+│
+├── Do you ship versioned software (v1.0, v2.0)?
+│   ├── Yes → Do you maintain multiple versions simultaneously?
+│   │         ├── Yes → GitFlow
+│   │         └── No  → GitLab Flow (release branches)
+│   └── No  → Continue ↓
+│
+├── Do you have staging/pre-production environments?
+│   ├── Yes → Do you need controlled promotion between environments?
+│   │         ├── Yes → GitLab Flow (environment branches)
+│   │         └── No  → GitHub Flow + CI/CD stages
+│   └── No  → Continue ↓
+│
+├── Do you deploy to production multiple times per day?
+│   ├── Yes → Do you have feature flags and strong CI/CD?
+│   │         ├── Yes → Trunk-Based Development
+│   │         └── No  → GitHub Flow (build maturity first)
+│   └── No  → GitHub Flow
+│
+└── Default → GitHub Flow (simplest, most versatile)
+```
+
+<Callout type="tip" title="Strategy Evolution">
+Most teams evolve their strategy over time:
+1. **Startup (2-3 devs):** Push to main (informal trunk-based)
+2. **Growing (5-15 devs):** GitHub Flow (add PRs, CI)
+3. **Scaling (15-50 devs):** GitLab Flow (add environments) or GitFlow (add releases)
+4. **Mature (50+ devs):** Trunk-based with feature flags (requires investment in tooling)
+
+Don't jump to a complex strategy before you need it. Let your process evolve with your team.
+</Callout>
+
+## Release Tagging and Versioning
+
+Regardless of which strategy you choose, proper versioning is essential:
+
+### Semantic Versioning (SemVer)
+
+```bash
+# MAJOR.MINOR.PATCH
+# v2.4.1
+# │ │ │
+# │ │ └── PATCH: Bug fixes, no API changes
+# │ └──── MINOR: New features, backwards compatible
+# └────── MAJOR: Breaking changes
+
+# Examples:
+git tag -a v1.0.0 -m "Initial release"
+git tag -a v1.1.0 -m "Add search feature"
+git tag -a v1.1.1 -m "Fix search pagination bug"
+git tag -a v2.0.0 -m "New API (breaking changes)"
+```
+
+### Annotated Tags for Releases
+
+```bash
+# Annotated tags (recommended for releases)
+git tag -a v2.1.0 -m "Release 2.1.0
+
+Features:
+- User dashboard redesign
+- Search improvements
+- API rate limiting
+
+Bug fixes:
+- Fix memory leak in worker pool
+- Fix timezone handling in reports"
+
+# List tags
+git tag -l "v2.*"
+
+# Show tag details
+git show v2.1.0
+
+# Push tags
+git push origin v2.1.0
+git push origin --tags  # push all tags
+```
+
+### Release Notes from Git Log
+
+```bash
+# Generate release notes from commit messages
+git log --oneline v2.0.0..v2.1.0 --format="- %s (%an)"
+# - Fix timezone handling in reports (Alice)
+# - Add API rate limiting (Bob)
+# - Search improvements (Charlie)
+# - User dashboard redesign (Alice)
+# - Fix memory leak in worker pool (Bob)
+
+# Group by type (if using conventional commits)
+echo "## Features"
+git log v2.0.0..v2.1.0 --oneline --grep="^feat" --format="- %s"
+echo ""
+echo "## Bug Fixes"
+git log v2.0.0..v2.1.0 --oneline --grep="^fix" --format="- %s"
+```
+
+## Branch Naming Conventions
+
+Consistent naming makes branches self-documenting:
+
+```bash
+# Feature branches
+feature/user-authentication
+feature/JIRA-1234-add-search
+feature/add-payment-gateway
+
+# Bug fix branches
+fix/login-timeout
+bugfix/JIRA-5678-null-pointer
+fix/memory-leak-worker
+
+# Hotfix branches (production emergencies)
+hotfix/security-patch
+hotfix/JIRA-9999-sql-injection
+
+# Release branches
+release/2.1.0
+release/2024-Q1
+
+# Experimental branches
+experiment/new-search-algorithm
+spike/evaluate-redis-caching
+
+# Convention: lowercase, hyphens, optional ticket numbers
+# Bad:  Feature_UserAuth, my-branch, test123
+# Good: feature/JIRA-1234-user-auth
+```
+
+<Callout type="tip" title="Enforce Naming with Git Hooks">
+You can enforce branch naming conventions with a pre-push hook:
+```bash
+#!/bin/bash
+branch=$(git branch --show-current)
+pattern="^(feature|fix|hotfix|release|experiment)/"
+if [[ ! $branch =~ $pattern ]] && [[ $branch != "main" ]] && [[ $branch != "develop" ]]; then
+  echo "Branch name '$branch' doesn't match pattern: $pattern"
+  exit 1
+fi
+```
+</Callout>
+
+<Exercise number={1} title="GitFlow Simulation">
+
+```bash
+# Walk through a complete GitFlow cycle
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# === Setup: Initial release ===
+echo '{"version": "1.0.0"}' > package.json
+cat > src/app.js << 'EOF'
+function app() {
+  console.log("MyApp v1.0.0");
+  return { status: "running" };
+}
+module.exports = app;
+EOF
+mkdir -p src
+git add . && git commit -q -m "v1.0.0: Initial release"
+git tag -a v1.0.0 -m "Release 1.0.0"
+
+# Create develop branch
+git switch -c develop
+echo ""
+echo "=== GitFlow Setup Complete ==="
+echo "Branches: $(git branch | tr '\n' ' ')"
+echo ""
+
+# === Phase 1: Feature Development ===
+echo "=== Phase 1: Feature Development ==="
+echo ""
+
+# Feature 1: User Authentication
+git switch -c feature/user-auth develop
+cat > src/auth.js << 'EOF'
+function login(username, password) {
+  // Authenticate user
+  return { token: "jwt-token", user: username };
+}
+function logout(token) {
+  return { success: true };
+}
+module.exports = { login, logout };
+EOF
+git add . && git commit -q -m "Add user authentication module"
+echo "auth.js: $(head -1 src/auth.js)"
+git add . && git commit -q -m "Add authentication tests"
+echo "Feature/user-auth: $(git log --oneline develop..HEAD | wc -l) commits"
+
+# Merge feature to develop
+git switch develop
+git merge --no-ff feature/user-auth -m "Merge feature/user-auth into develop"
+git branch -d feature/user-auth
+echo "Merged to develop."
+echo ""
+
+# Feature 2: Search
+git switch -c feature/search develop
+cat > src/search.js << 'EOF'
+function search(query) {
+  return { results: [], query: query };
+}
+module.exports = { search };
+EOF
+git add . && git commit -q -m "Add search functionality"
+echo "Feature/search: $(git log --oneline develop..HEAD | wc -l) commit(s)"
+
+git switch develop
+git merge --no-ff feature/search -m "Merge feature/search into develop"
+git branch -d feature/search
+echo "Merged to develop."
+echo ""
+
+echo "Develop branch history:"
+git log --oneline --graph develop
+echo ""
+
+# === Phase 2: Release Preparation ===
+echo "=== Phase 2: Release Preparation ==="
+echo ""
+
+git switch -c release/1.1.0 develop
+echo "Created release/1.1.0 from develop"
+
+# Version bump
+sed -i 's/1.0.0/1.1.0/g' package.json src/app.js
+git add . && git commit -q -m "Bump version to 1.1.0"
+
+# Bug fix found during release QA
+echo "// Fixed edge case in search" >> src/search.js
+git add . && git commit -q -m "Fix search edge case found in QA"
+
+echo "Release branch commits:"
+git log --oneline develop..release/1.1.0
+echo ""
+
+# Merge release to main
+git switch main
+git merge --no-ff release/1.1.0 -m "Release 1.1.0"
+git tag -a v1.1.0 -m "Release 1.1.0 - Auth + Search"
+echo "Merged release to main and tagged v1.1.0"
+
+# Merge release back to develop
+git switch develop
+git merge --no-ff release/1.1.0 -m "Merge release/1.1.0 back to develop"
+git branch -d release/1.1.0
+echo "Merged release back to develop"
+echo ""
+
+echo "Main branch:"
+git log --oneline main
+echo ""
+echo "Tags:"
+git tag -l
+echo ""
+
+# === Phase 3: Hotfix ===
+echo "=== Phase 3: Emergency Hotfix ==="
+echo ""
+
+# Critical bug in production!
+git switch -c hotfix/auth-crash main
+echo "Created hotfix branch from main (production)"
+
+# Fix the bug
+cat > src/auth.js << 'EOF'
+function login(username, password) {
+  if (!username || !password) {
+    throw new Error("Username and password required");
+  }
+  return { token: "jwt-token", user: username };
+}
+function logout(token) {
+  if (!token) return { success: false, error: "No token" };
+  return { success: true };
+}
+module.exports = { login, logout };
+EOF
+git add . && git commit -q -m "Hotfix: Handle null credentials in auth"
+sed -i 's/1.1.0/1.1.1/g' package.json
+git add . && git commit -q -m "Bump version to 1.1.1"
+
+echo "Hotfix commits:"
+git log --oneline main..hotfix/auth-crash
+echo ""
+
+# Merge hotfix to main
+git switch main
+git merge --no-ff hotfix/auth-crash -m "Hotfix 1.1.1: auth crash fix"
+git tag -a v1.1.1 -m "Hotfix 1.1.1"
+echo "Merged hotfix to main, tagged v1.1.1"
+
+# Merge hotfix to develop (critical!)
+git switch develop
+git merge --no-ff hotfix/auth-crash -m "Merge hotfix/auth-crash into develop"
+git branch -d hotfix/auth-crash
+echo "Merged hotfix to develop"
+echo ""
+
+# === Final State ===
+echo "=== Final GitFlow State ==="
+echo ""
+echo "Main (production):"
+git log --oneline main
+echo ""
+echo "Develop (integration):"
+git log --oneline develop
+echo ""
+echo "Tags (releases):"
+git tag -l -n1
+echo ""
+echo "Active branches:"
+git branch
+echo ""
+echo "Full history graph:"
+git log --oneline --graph --all
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="GitHub Flow in Action">
+
+```bash
+# Simulate GitHub Flow with feature branches, PRs, and deployment
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+# === Setup: Production-ready main ===
+mkdir -p src tests
+cat > src/api.js << 'EOF'
+const express = require('express');
+const app = express();
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/users', (req, res) => res.json({ users: [] }));
+
+module.exports = app;
+EOF
+cat > tests/api.test.js << 'EOF'
+test('health check returns ok', () => {
+  expect(true).toBe(true);
+});
+EOF
+cat > deploy.sh << 'EOF'
+#!/bin/bash
+echo "Deploying $(git log --oneline -1)..."
+echo "Running tests..."
+echo "Tests passed!"
+echo "Deployed to production at $(date)"
+EOF
+chmod +x deploy.sh
+git add . && git commit -q -m "Initial production setup"
+
+echo "=== GitHub Flow: main is always deployable ==="
+echo ""
+echo "Rule 1: main represents production"
+git log --oneline main
+echo ""
+
+# === Developer A: Add products endpoint ===
+echo "=== Developer A: Working on products feature ==="
+echo ""
+
+git switch -c feature/add-products
+cat >> src/api.js << 'APIEOF'
+
+app.get('/products', (req, res) => {
+  res.json({ products: [
+    { id: 1, name: 'Widget', price: 9.99 },
+    { id: 2, name: 'Gadget', price: 24.99 }
+  ]});
+});
+APIEOF
+git add . && git commit -q -m "Add products endpoint"
+
+cat >> tests/api.test.js << 'TESTEOF'
+
+test('products endpoint returns array', () => {
+  expect(true).toBe(true);
+});
+TESTEOF
+git add . && git commit -q -m "Add products endpoint tests"
+
+echo "Developer A's branch:"
+git log --oneline main..HEAD
+echo ""
+
+# Simulate PR review
+echo "--- Simulating PR: feature/add-products → main ---"
+echo "Files changed:"
+git diff --stat main..feature/add-products
+echo ""
+echo "CI Status: Running tests..."
+echo "CI Status: All tests passed!"
+echo "Review: Approved by Developer B"
+echo ""
+
+# Merge (simulating PR merge)
+git switch main
+git merge --no-ff feature/add-products -m "Merge PR #1: Add products endpoint"
+git branch -d feature/add-products
+
+echo "--- Deploy triggered by merge to main ---"
+./deploy.sh
+echo ""
+
+# === Developer B: Add search (started in parallel) ===
+echo "=== Developer B: Working on search feature (started earlier) ==="
+echo ""
+
+git switch -c feature/add-search main
+cat > src/search.js << 'EOF'
+function search(query, products) {
+  return products.filter(p =>
+    p.name.toLowerCase().includes(query.toLowerCase())
+  );
+}
+module.exports = { search };
+EOF
+git add . && git commit -q -m "Add search module"
+
+cat >> src/api.js << 'APIEOF'
+
+const { search } = require('./search');
+app.get('/search', (req, res) => {
+  const query = req.query.q || '';
+  const results = search(query, []);
+  res.json({ results });
+});
+APIEOF
+git add . && git commit -q -m "Add search API endpoint"
+
+echo "Developer B's branch:"
+git log --oneline main..HEAD
+echo ""
+
+echo "--- Simulating PR: feature/add-search → main ---"
+echo "Files changed:"
+git diff --stat main..feature/add-search
+echo ""
+
+# Developer B needs to update from main first
+echo "CI Status: Tests passed on branch"
+echo "Note: Branch is behind main by 1 merge commit"
+echo "Updating branch with latest main..."
+git merge main -m "Update branch with latest main"
+echo "CI Status: Re-running tests after merge..."
+echo "CI Status: All tests passed!"
+echo "Review: Approved by Developer A"
+echo ""
+
+git switch main
+git merge --no-ff feature/add-search -m "Merge PR #2: Add search functionality"
+git branch -d feature/add-search
+
+echo "--- Deploy triggered by merge to main ---"
+./deploy.sh
+echo ""
+
+# === Hotfix: Bug in production ===
+echo "=== URGENT: Bug found in production ==="
+echo ""
+
+git switch -c fix/search-null-query main
+cat > src/search.js << 'EOF'
+function search(query, products) {
+  if (!query || !products) return [];
+  return products.filter(p =>
+    p.name.toLowerCase().includes(query.toLowerCase())
+  );
+}
+module.exports = { search };
+EOF
+git add . && git commit -q -m "Fix: Handle null query in search"
+
+echo "--- Simulating URGENT PR: fix/search-null-query → main ---"
+echo "Files changed:"
+git diff --stat main..fix/search-null-query
+echo "CI Status: Tests passed!"
+echo "Review: EXPEDITED - Approved by Developer A"
+echo ""
+
+git switch main
+git merge --no-ff fix/search-null-query -m "Merge PR #3: Fix null search query (HOTFIX)"
+git branch -d fix/search-null-query
+
+echo "--- EMERGENCY Deploy triggered ---"
+./deploy.sh
+echo ""
+
+# === Summary ===
+echo "=== GitHub Flow Summary ==="
+echo ""
+echo "Main branch (always deployable):"
+git log --oneline --graph main
+echo ""
+echo "Three merge cycles completed:"
+echo "  PR #1: Products endpoint → merged → deployed"
+echo "  PR #2: Search feature → merged → deployed"
+echo "  PR #3: Hotfix → merged → deployed (emergency)"
+echo ""
+echo "No long-lived branches. No release branches."
+echo "No develop branch. Just main + short feature branches."
+echo ""
+echo "Active branches:"
+git branch
+echo "(Only main remains — all feature branches were deleted after merge)"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Branching Strategy Guide">
+
+```bash
+cat > ~/branching-strategy-guide.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Branching Strategy Guide
+# Interactive tool that recommends a branching strategy based on team answers
+
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Scoring
+GITFLOW_SCORE=0
+GITHUB_FLOW_SCORE=0
+GITLAB_FLOW_SCORE=0
+TRUNK_SCORE=0
+
+ask() {
+    local question="$1"
+    shift
+    local options=("$@")
+
+    echo ""
+    echo -e "${BOLD}${question}${NC}"
+    for i in "${!options[@]}"; do
+        echo "  $((i + 1))) ${options[$i]}"
+    done
+    echo ""
+
+    local choice
+    while true; do
+        read -r -p "Your choice (1-${#options[@]}): " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
+            break
+        fi
+        echo "Please enter a number between 1 and ${#options[@]}"
+    done
+
+    echo "$choice"
+}
+
+echo -e "${BLUE}${BOLD}============================================${NC}"
+echo -e "${BLUE}${BOLD}  Branching Strategy Recommendation Guide${NC}"
+echo -e "${BLUE}${BOLD}============================================${NC}"
+echo ""
+echo "Answer these questions about your team and project."
+echo "I'll recommend the best branching strategy for you."
+
+# Question 1: Team Size
+Q1=$(ask "How many developers are on your team?" \
+    "1-3 developers" \
+    "4-10 developers" \
+    "11-30 developers" \
+    "30+ developers")
+
+case $Q1 in
+    1) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 3)); TRUNK_SCORE=$((TRUNK_SCORE + 2)) ;;
+    2) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 2)); GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 2)) ;;
+    3) GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 3)); GITFLOW_SCORE=$((GITFLOW_SCORE + 2)) ;;
+    4) GITFLOW_SCORE=$((GITFLOW_SCORE + 3)); TRUNK_SCORE=$((TRUNK_SCORE + 2)) ;;
+esac
+
+# Question 2: Deployment Frequency
+Q2=$(ask "How often do you deploy to production?" \
+    "Multiple times per day" \
+    "Daily or every few days" \
+    "Weekly" \
+    "Monthly or less frequently")
+
+case $Q2 in
+    1) TRUNK_SCORE=$((TRUNK_SCORE + 4)); GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 2)) ;;
+    2) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 3)); GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 2)) ;;
+    3) GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 3)); GITFLOW_SCORE=$((GITFLOW_SCORE + 2)) ;;
+    4) GITFLOW_SCORE=$((GITFLOW_SCORE + 4)) ;;
+esac
+
+# Question 3: Release Model
+Q3=$(ask "How do you handle releases?" \
+    "We deploy continuously (no versioned releases)" \
+    "We tag releases but deploy continuously" \
+    "We have scheduled release cycles" \
+    "We maintain multiple release versions simultaneously")
+
+case $Q3 in
+    1) TRUNK_SCORE=$((TRUNK_SCORE + 3)); GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 3)) ;;
+    2) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 2)); GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 2)) ;;
+    3) GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 3)); GITFLOW_SCORE=$((GITFLOW_SCORE + 3)) ;;
+    4) GITFLOW_SCORE=$((GITFLOW_SCORE + 5)) ;;
+esac
+
+# Question 4: Environments
+Q4=$(ask "How many deployment environments do you have?" \
+    "Just production" \
+    "Production + staging" \
+    "Production + staging + QA/dev" \
+    "Multiple production environments (regions, clients)")
+
+case $Q4 in
+    1) TRUNK_SCORE=$((TRUNK_SCORE + 3)); GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 3)) ;;
+    2) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 2)); GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 3)) ;;
+    3) GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 4)); GITFLOW_SCORE=$((GITFLOW_SCORE + 2)) ;;
+    4) GITFLOW_SCORE=$((GITFLOW_SCORE + 3)); GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 3)) ;;
+esac
+
+# Question 5: CI/CD Maturity
+Q5=$(ask "What's your CI/CD maturity level?" \
+    "No CI/CD — manual builds and deploys" \
+    "Basic CI — automated tests, manual deploy" \
+    "Good CI/CD — automated tests and deployment" \
+    "Advanced — feature flags, canary deploys, auto-rollback")
+
+case $Q5 in
+    1) GITFLOW_SCORE=$((GITFLOW_SCORE + 3)) ;;
+    2) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 3)); GITFLOW_SCORE=$((GITFLOW_SCORE + 2)) ;;
+    3) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 2)); GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 3)) ;;
+    4) TRUNK_SCORE=$((TRUNK_SCORE + 5)); GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 1)) ;;
+esac
+
+# Question 6: Software Type
+Q6=$(ask "What type of software are you building?" \
+    "Web application (SaaS)" \
+    "Mobile app" \
+    "Desktop application" \
+    "Library/framework/API" \
+    "Microservices")
+
+case $Q6 in
+    1) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 2)); TRUNK_SCORE=$((TRUNK_SCORE + 2)) ;;
+    2) GITFLOW_SCORE=$((GITFLOW_SCORE + 3)); GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 2)) ;;
+    3) GITFLOW_SCORE=$((GITFLOW_SCORE + 4)) ;;
+    4) GITFLOW_SCORE=$((GITFLOW_SCORE + 3)); GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 1)) ;;
+    5) TRUNK_SCORE=$((TRUNK_SCORE + 3)); GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 2)) ;;
+esac
+
+# Question 7: Team Experience
+Q7=$(ask "What's your team's Git experience level?" \
+    "Mostly junior — still learning Git basics" \
+    "Mixed — some experienced, some learning" \
+    "Experienced — comfortable with branching and merging" \
+    "Expert — comfortable with rebasing, bisect, advanced workflows")
+
+case $Q7 in
+    1) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 4)) ;;
+    2) GITHUB_FLOW_SCORE=$((GITHUB_FLOW_SCORE + 2)); GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 2)) ;;
+    3) GITLAB_FLOW_SCORE=$((GITLAB_FLOW_SCORE + 2)); GITFLOW_SCORE=$((GITFLOW_SCORE + 2)) ;;
+    4) TRUNK_SCORE=$((TRUNK_SCORE + 3)); GITFLOW_SCORE=$((GITFLOW_SCORE + 1)) ;;
+esac
+
+# Calculate results
+echo ""
+echo -e "${BLUE}${BOLD}============================================${NC}"
+echo -e "${BLUE}${BOLD}  Recommendation Results${NC}"
+echo -e "${BLUE}${BOLD}============================================${NC}"
+echo ""
+
+# Find the winner
+MAX_SCORE=0
+WINNER=""
+declare -A SCORES
+SCORES[GitFlow]=$GITFLOW_SCORE
+SCORES[GitHub_Flow]=$GITHUB_FLOW_SCORE
+SCORES[GitLab_Flow]=$GITLAB_FLOW_SCORE
+SCORES[Trunk_Based]=$TRUNK_SCORE
+
+for strategy in GitFlow GitHub_Flow GitLab_Flow Trunk_Based; do
+    if [ "${SCORES[$strategy]}" -gt "$MAX_SCORE" ]; then
+        MAX_SCORE=${SCORES[$strategy]}
+        WINNER=$strategy
+    fi
+done
+
+# Display scores as a bar chart
+TOTAL=$((GITFLOW_SCORE + GITHUB_FLOW_SCORE + GITLAB_FLOW_SCORE + TRUNK_SCORE))
+for strategy in GitFlow GitHub_Flow GitLab_Flow Trunk_Based; do
+    score=${SCORES[$strategy]}
+    bar_length=$((score * 2))
+    bar=$(printf '█%.0s' $(seq 1 $bar_length 2>/dev/null) 2>/dev/null || echo "█")
+    pct=$((score * 100 / (TOTAL > 0 ? TOTAL : 1)))
+    display_name=$(echo "$strategy" | sed 's/_/ /g')
+
+    if [ "$strategy" = "$WINNER" ]; then
+        printf "  ${GREEN}%-15s ${bar} %d points (%d%%) ★ RECOMMENDED${NC}\n" "$display_name" "$score" "$pct"
+    else
+        printf "  ${CYAN}%-15s ${bar} %d points (%d%%)${NC}\n" "$display_name" "$score" "$pct"
+    fi
+done
+
+echo ""
+
+# Display recommendation details
+WINNER_DISPLAY=$(echo "$WINNER" | sed 's/_/ /g')
+echo -e "${GREEN}${BOLD}Recommended Strategy: ${WINNER_DISPLAY}${NC}"
+echo ""
+
+case $WINNER in
+    GitFlow)
+        echo "GitFlow is ideal for your situation because your team likely:"
+        echo "  - Ships versioned, scheduled releases"
+        echo "  - Needs formal release preparation and QA processes"
+        echo "  - Maintains multiple versions simultaneously"
+        echo ""
+        echo "Branch structure:"
+        echo "  main ─── always reflects production"
+        echo "  develop ─── integration branch for features"
+        echo "  feature/* ─── one per feature, merge to develop"
+        echo "  release/* ─── prepare releases, merge to main + develop"
+        echo "  hotfix/* ─── emergency fixes from main"
+        echo ""
+        echo "Getting started:"
+        echo "  git switch -c develop main"
+        echo "  git switch -c feature/my-feature develop"
+        ;;
+    GitHub_Flow)
+        echo "GitHub Flow is ideal for your situation because your team likely:"
+        echo "  - Deploys continuously to production"
+        echo "  - Values simplicity and fast iteration"
+        echo "  - Uses pull requests for code review"
+        echo ""
+        echo "Branch structure:"
+        echo "  main ─── always deployable, deploy on every merge"
+        echo "  feature/* ─── short-lived, merge via PR"
+        echo ""
+        echo "Getting started:"
+        echo "  git switch -c feature/my-feature main"
+        echo "  # work, commit, push"
+        echo "  # open PR, get review, merge, deploy"
+        ;;
+    GitLab_Flow)
+        echo "GitLab Flow is ideal for your situation because your team likely:"
+        echo "  - Has multiple environments (staging, production)"
+        echo "  - Needs controlled promotion between environments"
+        echo "  - Wants more structure than GitHub Flow without GitFlow complexity"
+        echo ""
+        echo "Branch structure:"
+        echo "  main ─── latest stable code"
+        echo "  staging ─── deployed to staging environment"
+        echo "  production ─── deployed to production"
+        echo "  feature/* ─── merge to main, promote downstream"
+        echo ""
+        echo "Getting started:"
+        echo "  git switch -c staging main"
+        echo "  git switch -c production main"
+        echo "  git switch -c feature/my-feature main"
+        ;;
+    Trunk_Based)
+        echo "Trunk-based development is ideal for your situation because your team likely:"
+        echo "  - Has strong CI/CD with feature flags"
+        echo "  - Deploys multiple times per day"
+        echo "  - Has experienced developers comfortable with frequent integration"
+        echo ""
+        echo "Branch structure:"
+        echo "  main ─── the only long-lived branch"
+        echo "  (optional) short-lived branches ─── < 1-2 days"
+        echo ""
+        echo "Getting started:"
+        echo "  # Commit directly to main (or via very short branches)"
+        echo "  # Use feature flags for incomplete features"
+        echo "  # Deploy on every push"
+        echo ""
+        echo "Prerequisites:"
+        echo "  - Feature flag system"
+        echo "  - Fast CI pipeline (< 10 minutes)"
+        echo "  - Good test coverage"
+        echo "  - Monitoring and rollback capability"
+        ;;
+esac
+
+echo ""
+echo -e "${YELLOW}Remember: strategies evolve with your team. Start simple, add structure as needed.${NC}"
+SCRIPT
+
+chmod +x ~/branching-strategy-guide.sh
+
+echo "=== Branching Strategy Guide Created ==="
+echo ""
+echo "Usage: ~/branching-strategy-guide.sh"
+echo ""
+echo "The script asks 7 questions about your team and project,"
+echo "then recommends the best branching strategy with setup instructions."
+echo ""
+echo "To run it: ~/branching-strategy-guide.sh"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- **GitFlow** uses five branch types (main, develop, feature, release, hotfix) and is best for versioned software with scheduled releases
+- **GitHub Flow** is the simplest strategy: main + feature branches, deploy on every merge to main
+- **GitLab Flow** adds environment branches (staging, production) for controlled promotion between environments
+- **Trunk-based development** has everyone commit to main with feature flags — requires high CI/CD maturity
+- Start with GitHub Flow if unsure — it works for most web development teams and you can add complexity later
+- All strategies benefit from consistent branch naming conventions (feature/*, fix/*, hotfix/*)
+- Use semantic versioning (MAJOR.MINOR.PATCH) and annotated tags for releases
+- The best strategy is one your team actually follows — a simple strategy used consistently beats a complex one used inconsistently
+- Teams typically evolve: informal pushing to main, then GitHub Flow, then GitLab Flow or trunk-based with feature flags
+- Branch protection rules, required reviews, and CI checks are essential regardless of which strategy you choose
+
+## What's Next
+
+You now understand how to organize your team's branching workflow. But a strategy is only as good as its enforcement. In **Git in Production**, you'll learn to lock it all down — Git hooks for automation, branch protection rules, signed commits for security, CI/CD integration, and the practices that make Git truly enterprise-ready.

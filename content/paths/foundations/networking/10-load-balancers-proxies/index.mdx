@@ -1,0 +1,1242 @@
+---
+title: "Load Balancers and Proxies"
+description: "Distribute traffic, improve reliability, and add security. Master load balancing algorithms, reverse proxies, and the architecture patterns used in every production system."
+order: 10
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 09-firewalls-and-security
+objectives:
+  - Understand forward and reverse proxy concepts
+  - Know common load balancing algorithms
+  - Configure basic Nginx as reverse proxy
+  - Understand health checks and failover
+tags:
+  - networking
+  - load-balancing
+  - proxy
+  - nginx
+---
+
+<Callout type="story" title="The Story">
+Your app is running on one server. It gets featured on Hacker News. Traffic goes 100x. The server melts. If you had a load balancer distributing traffic across 10 servers, each would handle 10x — well within capacity. Load balancers don't just distribute traffic — they provide health checking, SSL termination, and automatic failover. They're the gatekeepers of every production system.
+</Callout>
+
+## Forward Proxy vs Reverse Proxy
+
+Before diving into load balancers, understand the two types of proxies. They sit on opposite sides of the connection.
+
+### Forward Proxy (Client-Side)
+
+A forward proxy sits in front of **clients** and forwards their requests to the internet:
+
+```
+Clients → Forward Proxy → Internet → Servers
+
+[Browser A] ─┐
+[Browser B] ─┼→ [Forward Proxy] → [Internet] → [example.com]
+[Browser C] ─┘
+
+Use cases:
+  - Hide client identity (anonymity)
+  - Content filtering (block certain sites)
+  - Caching (reduce bandwidth)
+  - Corporate networks (control outbound traffic)
+```
+
+```bash
+# Example: Using a forward proxy with curl
+# curl -x http://proxy-server:3128 http://example.com
+
+# Squid is a common forward proxy
+# Check if squid is running
+ss -tlnp | grep 3128 2>/dev/null
+```
+
+### Reverse Proxy (Server-Side)
+
+A reverse proxy sits in front of **servers** and forwards client requests to backend servers:
+
+```
+Clients → Internet → Reverse Proxy → Backend Servers
+
+                          ┌→ [App Server 1]
+[Client] → [Reverse Proxy] ─┼→ [App Server 2]
+                          └→ [App Server 3]
+
+Use cases:
+  - Load balancing (distribute traffic)
+  - SSL termination (decrypt once at proxy)
+  - Caching (serve static content without hitting backend)
+  - Security (hide backend server details)
+  - Compression (reduce response sizes)
+```
+
+```bash
+# Nginx is the most common reverse proxy
+# Check if nginx is running
+ss -tlnp | grep -E ":80|:443" 2>/dev/null
+nginx -v 2>/dev/null
+```
+
+<Callout type="tip" title="The Key Difference">
+A forward proxy hides the client from the server. A reverse proxy hides the server from the client. In DevOps, you will work with reverse proxies almost every day.
+</Callout>
+
+## Load Balancing Algorithms
+
+A load balancer is a reverse proxy that distributes traffic across multiple backend servers. The algorithm determines how traffic is distributed.
+
+### Round Robin
+
+Distributes requests evenly in order: Server 1, Server 2, Server 3, Server 1, Server 2, ...
+
+```
+Request 1 → Server A
+Request 2 → Server B
+Request 3 → Server C
+Request 4 → Server A  (back to start)
+Request 5 → Server B
+Request 6 → Server C
+```
+
+**Best for**: Servers with equal capacity handling stateless requests.
+
+```nginx
+# Nginx round robin (default behavior)
+upstream backend {
+    server 10.0.1.10:8080;
+    server 10.0.1.11:8080;
+    server 10.0.1.12:8080;
+}
+```
+
+### Weighted Round Robin
+
+Same as round robin but servers with higher weight get more requests:
+
+```
+Weights: Server A = 5, Server B = 3, Server C = 2
+Total weight: 10
+
+Out of every 10 requests:
+  Server A gets 5 (50%)
+  Server B gets 3 (30%)
+  Server C gets 2 (20%)
+```
+
+**Best for**: Servers with different capacities (larger servers get more traffic).
+
+```nginx
+# Nginx weighted round robin
+upstream backend {
+    server 10.0.1.10:8080 weight=5;   # 50% of traffic
+    server 10.0.1.11:8080 weight=3;   # 30% of traffic
+    server 10.0.1.12:8080 weight=2;   # 20% of traffic
+}
+```
+
+### Least Connections
+
+Sends each new request to the server with the fewest active connections:
+
+```
+Current connections: A=12, B=8, C=15
+Next request → Server B (lowest)
+
+Current connections: A=12, B=9, C=15
+Next request → Server B (still lowest)
+
+Current connections: A=10, B=9, C=15
+Next request → Server B (still lowest)
+```
+
+**Best for**: Requests with varying processing times (some fast, some slow).
+
+```nginx
+# Nginx least connections
+upstream backend {
+    least_conn;
+    server 10.0.1.10:8080;
+    server 10.0.1.11:8080;
+    server 10.0.1.12:8080;
+}
+```
+
+### IP Hash
+
+Routes requests from the same client IP to the same backend server:
+
+```
+Client 192.168.1.5  → always → Server A
+Client 192.168.1.10 → always → Server B
+Client 192.168.1.15 → always → Server C
+```
+
+**Best for**: Stateful applications that need session persistence without sticky cookies.
+
+```nginx
+# Nginx IP hash
+upstream backend {
+    ip_hash;
+    server 10.0.1.10:8080;
+    server 10.0.1.11:8080;
+    server 10.0.1.12:8080;
+}
+```
+
+### Random
+
+Picks a random server for each request. Simple but surprisingly effective at scale.
+
+```nginx
+# Nginx random (with two-choice optimization)
+upstream backend {
+    random two least_conn;
+    server 10.0.1.10:8080;
+    server 10.0.1.11:8080;
+    server 10.0.1.12:8080;
+}
+```
+
+### Algorithm Comparison
+
+| Algorithm | Pros | Cons | Best For |
+|-----------|------|------|----------|
+| Round Robin | Simple, even distribution | Ignores server load | Equal servers, fast requests |
+| Weighted RR | Handles different capacities | Static configuration | Mixed server sizes |
+| Least Connections | Adapts to load | Slightly more overhead | Variable request times |
+| IP Hash | Session persistence | Uneven if clients are behind NAT | Stateful applications |
+| Random | Simple, no state needed | May be uneven | Large server pools |
+
+## Health Checks
+
+A load balancer must know which servers are healthy. Unhealthy servers are removed from the pool automatically.
+
+### Active Health Checks
+
+The load balancer actively probes each backend:
+
+```
+Load Balancer → GET /health → Server A → 200 OK ✓ (healthy)
+Load Balancer → GET /health → Server B → 200 OK ✓ (healthy)
+Load Balancer → GET /health → Server C → 503     ✗ (unhealthy, removed)
+```
+
+```nginx
+# Nginx active health checks (Nginx Plus / OpenResty)
+upstream backend {
+    server 10.0.1.10:8080;
+    server 10.0.1.11:8080;
+    server 10.0.1.12:8080;
+
+    # Check every 5 seconds, 3 failures = unhealthy, 2 successes = healthy
+    # health_check interval=5s fails=3 passes=2 uri=/health;
+}
+```
+
+### Passive Health Checks
+
+The load balancer monitors real traffic and marks servers that fail:
+
+```nginx
+# Nginx passive health checks (open source Nginx)
+upstream backend {
+    server 10.0.1.10:8080 max_fails=3 fail_timeout=30s;
+    server 10.0.1.11:8080 max_fails=3 fail_timeout=30s;
+    server 10.0.1.12:8080 max_fails=3 fail_timeout=30s;
+    # After 3 failures, server is considered down for 30 seconds
+    # Then Nginx tries it again
+}
+```
+
+### Health Check Types
+
+| Type | What It Checks | Example |
+|------|---------------|---------|
+| TCP | Can connect to port? | `nc -z server 8080` |
+| HTTP | Returns 2xx status? | `GET /health → 200 OK` |
+| Application | Is the app truly healthy? | Check DB connection, disk space, queue depth |
+
+```bash
+# Common health check endpoint patterns
+# Simple: Returns 200 if app is running
+# curl http://localhost:8080/health
+# {"status": "ok"}
+
+# Detailed: Checks dependencies
+# curl http://localhost:8080/health/detailed
+# {"status": "ok", "database": "connected", "redis": "connected", "disk": "42% used"}
+```
+
+## Session Persistence (Sticky Sessions)
+
+Some applications store session data in memory. These need sticky sessions — all requests from the same user go to the same server:
+
+```
+Without sticky sessions:
+  Request 1 (login)    → Server A (creates session)
+  Request 2 (dashboard) → Server B (no session! → redirect to login)
+
+With sticky sessions:
+  Request 1 (login)    → Server A (creates session)
+  Request 2 (dashboard) → Server A (session found → success)
+```
+
+```nginx
+# Nginx sticky sessions via cookie
+upstream backend {
+    server 10.0.1.10:8080;
+    server 10.0.1.11:8080;
+
+    # Use IP hash for basic persistence
+    ip_hash;
+
+    # Or use sticky cookie (Nginx Plus)
+    # sticky cookie srv_id expires=1h domain=.example.com path=/;
+}
+```
+
+<Callout type="warning" title="Avoid Sticky Sessions When Possible">
+Sticky sessions complicate scaling and failover. If Server A dies, all its users lose their sessions. Better approaches: store sessions in a shared store (Redis, database) or use stateless JWT tokens. This lets any server handle any request.
+</Callout>
+
+## SSL Termination
+
+SSL termination means decrypting HTTPS at the load balancer and sending plain HTTP to backend servers:
+
+```
+Client ──HTTPS──→ Load Balancer ──HTTP──→ Backend Servers
+
+Benefits:
+  - Backend servers don't need SSL certificates
+  - One place to manage certificates
+  - Reduces CPU load on backends
+  - Easier to configure and maintain
+```
+
+```nginx
+# Nginx SSL termination
+server {
+    listen 443 ssl;
+    server_name example.com;
+
+    # SSL certificate
+    ssl_certificate     /etc/nginx/ssl/example.com.crt;
+    ssl_certificate_key /etc/nginx/ssl/example.com.key;
+
+    # Modern SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # Proxy to backend (plain HTTP)
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name example.com;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+## Nginx as a Reverse Proxy
+
+Nginx is the most widely used reverse proxy and load balancer. Here is a complete configuration:
+
+### Basic Reverse Proxy
+
+```nginx
+# /etc/nginx/conf.d/app.conf
+
+# Define backend servers
+upstream app_servers {
+    least_conn;
+    server 10.0.1.10:8080 weight=3;
+    server 10.0.1.11:8080 weight=2;
+    server 10.0.1.12:8080 weight=1 backup;  # Only used when others are down
+
+    # Keepalive connections to backends (connection pooling)
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    server_name app.example.com;
+
+    # Proxy to backend
+    location / {
+        proxy_pass http://app_servers;
+
+        # Pass original client information
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeout settings
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+
+        # Connection reuse
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    # Health check endpoint (don't proxy)
+    location /nginx-health {
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
+
+    # Serve static files directly (don't hit backend)
+    location /static/ {
+        alias /var/www/static/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+}
+```
+
+```bash
+# Test Nginx configuration
+nginx -t 2>/dev/null || echo "nginx not installed"
+
+# Reload Nginx (apply changes without downtime)
+# sudo nginx -s reload
+
+# View Nginx access logs
+# tail -f /var/log/nginx/access.log
+
+# Common proxy headers explained:
+# X-Real-IP         → The actual client IP
+# X-Forwarded-For   → Chain of proxy IPs the request passed through
+# X-Forwarded-Proto → Was the original request HTTP or HTTPS?
+# Host              → The hostname the client requested
+```
+
+### Nginx Important Directives
+
+```nginx
+# Buffering — controls how Nginx handles backend responses
+proxy_buffering on;
+proxy_buffer_size 4k;
+proxy_buffers 8 4k;
+
+# Rate limiting — prevent abuse
+limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+
+location /api/ {
+    limit_req zone=api burst=20 nodelay;
+    proxy_pass http://app_servers;
+}
+
+# Caching — reduce backend load
+proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=cache:10m max_size=1g;
+
+location / {
+    proxy_cache cache;
+    proxy_cache_valid 200 10m;
+    proxy_cache_valid 404 1m;
+    proxy_pass http://app_servers;
+}
+```
+
+## HAProxy Basics
+
+HAProxy is another popular load balancer, often used for TCP (Layer 4) load balancing:
+
+```
+# /etc/haproxy/haproxy.cfg (simplified)
+
+frontend http_front
+    bind *:80
+    default_backend app_servers
+
+backend app_servers
+    balance roundrobin
+    option httpchk GET /health
+    server app1 10.0.1.10:8080 check inter 5s fall 3 rise 2
+    server app2 10.0.1.11:8080 check inter 5s fall 3 rise 2
+    server app3 10.0.1.12:8080 check inter 5s fall 3 rise 2
+
+# HAProxy stats page
+listen stats
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+```
+
+```bash
+# Check HAProxy status
+haproxy -v 2>/dev/null || echo "haproxy not installed"
+
+# Validate config
+# haproxy -c -f /etc/haproxy/haproxy.cfg
+```
+
+## Layer 4 vs Layer 7 Load Balancing
+
+| Feature | Layer 4 (Transport) | Layer 7 (Application) |
+|---------|---------------------|----------------------|
+| Works at | TCP/UDP level | HTTP/HTTPS level |
+| Sees | IP addresses, ports | URLs, headers, cookies |
+| Speed | Faster (less processing) | Slower (inspects content) |
+| Routing | Based on IP/port | Based on URL, header, cookie |
+| SSL | Pass-through or terminate | Must terminate to inspect |
+| Use case | Database LB, TCP services | Web applications, API routing |
+
+```
+Layer 4 (TCP Load Balancing):
+  Client → LB (port 5432) → PostgreSQL primary
+  The LB only sees TCP packets, forwards based on port
+
+Layer 7 (HTTP Load Balancing):
+  Client → LB → inspects URL:
+    /api/*    → API servers
+    /static/* → CDN
+    /admin/*  → Admin servers
+```
+
+```nginx
+# Layer 7 routing in Nginx (content-based routing)
+server {
+    listen 80;
+
+    location /api/ {
+        proxy_pass http://api_servers;
+    }
+
+    location /static/ {
+        proxy_pass http://cdn_servers;
+    }
+
+    location /admin/ {
+        proxy_pass http://admin_servers;
+        # Restrict to internal network
+        allow 10.0.0.0/8;
+        deny all;
+    }
+}
+```
+
+## Cloud Load Balancers
+
+Cloud providers offer managed load balancers that handle provisioning, scaling, and failover:
+
+### AWS Load Balancers
+
+| Type | Layer | Best For |
+|------|-------|----------|
+| ALB (Application) | L7 | HTTP/HTTPS, path-based routing, WebSocket |
+| NLB (Network) | L4 | TCP/UDP, ultra-low latency, static IPs |
+| CLB (Classic) | L4/L7 | Legacy (use ALB/NLB for new projects) |
+
+### GCP Load Balancers
+
+| Type | Scope | Best For |
+|------|-------|----------|
+| HTTP(S) LB | Global | Web applications, CDN integration |
+| TCP/SSL Proxy | Global | Non-HTTP TCP services |
+| Network LB | Regional | UDP, TCP without proxy |
+
+```bash
+# Check load balancer status (AWS CLI)
+# aws elbv2 describe-load-balancers --query 'LoadBalancers[*].[LoadBalancerName,State.Code]'
+
+# Check target health (AWS CLI)
+# aws elbv2 describe-target-health --target-group-arn <arn>
+```
+
+## Deployment Patterns with Load Balancers
+
+### Blue-Green Deployment
+
+```
+Load Balancer
+  ├── Blue (current version) ← 100% traffic
+  └── Green (new version)    ← 0% traffic
+
+Deploy new code to Green, test it, then switch:
+
+Load Balancer
+  ├── Blue (old version)     ← 0% traffic
+  └── Green (new version)    ← 100% traffic
+
+Rollback = switch back to Blue instantly.
+```
+
+### Canary Deployment
+
+```
+Load Balancer
+  ├── Production pool (v1) ← 95% traffic
+  └── Canary pool (v2)     ← 5% traffic
+
+Monitor errors and latency on the canary.
+If OK → gradually increase to 100%.
+If not → route 100% back to v1.
+```
+
+```nginx
+# Nginx canary with split_clients
+split_clients "${remote_addr}" $backend_pool {
+    5%   canary;
+    *    production;
+}
+
+upstream production {
+    server 10.0.1.10:8080;
+    server 10.0.1.11:8080;
+}
+
+upstream canary {
+    server 10.0.2.10:8080;
+}
+
+server {
+    listen 80;
+    location / {
+        proxy_pass http://$backend_pool;
+    }
+}
+```
+
+## CDN as Load Distribution
+
+A CDN (Content Delivery Network) is a globally distributed network of edge servers that cache content close to users:
+
+```
+Without CDN:
+  User in Tokyo → crosses Pacific → Server in Virginia → 200ms latency
+
+With CDN:
+  User in Tokyo → CDN edge in Tokyo → 10ms latency
+  (If not cached, CDN fetches from origin once, then serves from cache)
+```
+
+```bash
+# Common CDNs: Cloudflare, AWS CloudFront, Fastly, Akamai
+
+# Check if a site uses a CDN
+# Look for CDN-specific headers
+curl -sI https://example.com 2>/dev/null | grep -iE "server|cdn|cache|cf-ray|x-cache"
+
+# CDN headers to look for:
+# CF-Ray: Cloudflare
+# X-Cache: CloudFront
+# X-Served-By: Fastly
+# X-Akamai-Transformed: Akamai
+```
+
+<Exercise number={1} title="Nginx Reverse Proxy">
+
+Configure Nginx as a reverse proxy to backend servers (simulated):
+
+```bash
+# --- Part 1: Create simulated backend servers ---
+echo "=== Part 1: Setting Up Backend Servers ==="
+
+# Create simple HTTP servers using bash (simulating backends)
+# Backend 1 on port 8081
+while true; do
+    echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nResponse from Backend 1 (port 8081)" | \
+        nc -l -p 8081 -q 1 2>/dev/null || break
+done &
+BACKEND1_PID=$!
+
+# Backend 2 on port 8082
+while true; do
+    echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nResponse from Backend 2 (port 8082)" | \
+        nc -l -p 8082 -q 1 2>/dev/null || break
+done &
+BACKEND2_PID=$!
+
+# Backend 3 on port 8083
+while true; do
+    echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nResponse from Backend 3 (port 8083)" | \
+        nc -l -p 8083 -q 1 2>/dev/null || break
+done &
+BACKEND3_PID=$!
+
+sleep 2
+
+echo "Backend servers started:"
+ss -tlnp | grep -E "808[123]" 2>/dev/null
+
+# --- Part 2: Create Nginx configuration ---
+echo ""
+echo "=== Part 2: Nginx Reverse Proxy Configuration ==="
+
+cat << 'NGINX_CONF'
+# /etc/nginx/conf.d/reverse-proxy.conf
+# Complete reverse proxy configuration
+
+# Backend server pool
+upstream app_backend {
+    # Load balancing algorithm
+    least_conn;
+
+    # Backend servers with weights
+    server 127.0.0.1:8081 weight=3;
+    server 127.0.0.1:8082 weight=2;
+    server 127.0.0.1:8083 weight=1 backup;
+
+    # Health check parameters
+    # max_fails: how many failures before marking down
+    # fail_timeout: how long to wait before retrying
+
+    # Connection pooling
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    server_name app.example.com;
+
+    # Proxy settings
+    location / {
+        proxy_pass http://app_backend;
+
+        # Forward client info to backend
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+
+        # Enable keepalive to backend
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    # API routing (different backend)
+    location /api/ {
+        proxy_pass http://app_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # API-specific timeouts
+        proxy_read_timeout 60s;
+    }
+
+    # Static files (serve directly)
+    location /static/ {
+        alias /var/www/static/;
+        expires 7d;
+        add_header Cache-Control "public";
+    }
+
+    # Health check endpoint
+    location /health {
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
+}
+NGINX_CONF
+
+# --- Part 3: Test the backend servers ---
+echo ""
+echo "=== Part 3: Testing Backends ==="
+for port in 8081 8082 8083; do
+    echo -n "  Backend $port: "
+    response=$(curl -s --max-time 2 http://localhost:$port 2>/dev/null)
+    if [ -n "$response" ]; then
+        echo "$response"
+    else
+        echo "No response"
+    fi
+done
+
+# --- Part 4: Demonstrate proxy headers ---
+echo ""
+echo "=== Part 4: Important Proxy Headers ==="
+echo ""
+echo "Headers a reverse proxy should forward:"
+echo "  Host:              The original requested hostname"
+echo "  X-Real-IP:         The actual client IP address"
+echo "  X-Forwarded-For:   Chain of IPs (client, proxy1, proxy2)"
+echo "  X-Forwarded-Proto: Original protocol (http or https)"
+echo ""
+echo "Without these headers, the backend sees the proxy's IP as the client."
+
+# Cleanup
+kill $BACKEND1_PID $BACKEND2_PID $BACKEND3_PID 2>/dev/null
+wait 2>/dev/null
+
+echo ""
+echo "Backend servers stopped."
+```
+
+</Exercise>
+
+<Exercise number={2} title="Load Balancing Algorithms">
+
+Demonstrate round-robin vs least-connections with simulated traffic:
+
+```bash
+# --- Simulate Load Balancing Algorithms ---
+
+echo "=== Load Balancing Algorithm Comparison ==="
+echo ""
+
+# Simulate Round Robin
+echo "--- Round Robin ---"
+echo "Equal distribution across 3 servers:"
+echo ""
+
+declare -A rr_counts
+servers=("Server-A" "Server-B" "Server-C")
+total_requests=30
+
+for (( i=0; i<total_requests; i++ )); do
+    server_idx=$((i % 3))
+    server="${servers[$server_idx]}"
+    rr_counts["$server"]=$(( ${rr_counts["$server"]:-0} + 1 ))
+done
+
+printf "  %-12s %-10s %s\n" "Server" "Requests" "Distribution"
+printf "  %-12s %-10s %s\n" "------" "--------" "------------"
+for server in "${servers[@]}"; do
+    count=${rr_counts["$server"]}
+    pct=$((count * 100 / total_requests))
+    bar=$(printf '%*s' $((pct / 5)) '' | tr ' ' '#')
+    printf "  %-12s %-10s %s (%d%%)\n" "$server" "$count" "$bar" "$pct"
+done
+
+# Simulate Weighted Round Robin
+echo ""
+echo "--- Weighted Round Robin ---"
+echo "Weights: Server-A=5, Server-B=3, Server-C=2"
+echo ""
+
+declare -A wrr_counts
+weights=(5 3 2)
+total_weight=10
+total_requests=100
+
+for (( i=0; i<total_requests; i++ )); do
+    pos=$((i % total_weight))
+    if [ "$pos" -lt 5 ]; then
+        server="Server-A"
+    elif [ "$pos" -lt 8 ]; then
+        server="Server-B"
+    else
+        server="Server-C"
+    fi
+    wrr_counts["$server"]=$(( ${wrr_counts["$server"]:-0} + 1 ))
+done
+
+printf "  %-12s %-8s %-10s %s\n" "Server" "Weight" "Requests" "Distribution"
+printf "  %-12s %-8s %-10s %s\n" "------" "------" "--------" "------------"
+for i in 0 1 2; do
+    server="${servers[$i]}"
+    count=${wrr_counts["$server"]}
+    pct=$((count * 100 / total_requests))
+    bar=$(printf '%*s' $((pct / 5)) '' | tr ' ' '#')
+    printf "  %-12s %-8s %-10s %s (%d%%)\n" "$server" "${weights[$i]}" "$count" "$bar" "$pct"
+done
+
+# Simulate Least Connections
+echo ""
+echo "--- Least Connections ---"
+echo "Simulating requests with varying processing times:"
+echo ""
+
+declare -A lc_connections
+declare -A lc_counts
+for server in "${servers[@]}"; do
+    lc_connections["$server"]=0
+    lc_counts["$server"]=0
+done
+
+for (( i=0; i<30; i++ )); do
+    # Find server with least connections
+    min_conn=999999
+    min_server=""
+    for server in "${servers[@]}"; do
+        if [ "${lc_connections[$server]}" -lt "$min_conn" ]; then
+            min_conn=${lc_connections[$server]}
+            min_server="$server"
+        fi
+    done
+
+    # Assign request to least-connected server
+    lc_connections["$min_server"]=$(( ${lc_connections["$min_server"]} + 1 ))
+    lc_counts["$min_server"]=$(( ${lc_counts["$min_server"]} + 1 ))
+
+    # Simulate random request completion (some connections close)
+    for server in "${servers[@]}"; do
+        if [ "${lc_connections[$server]}" -gt 0 ] && [ $(( RANDOM % 3 )) -eq 0 ]; then
+            lc_connections["$server"]=$(( ${lc_connections["$server"]} - 1 ))
+        fi
+    done
+done
+
+printf "  %-12s %-10s %-12s %s\n" "Server" "Requests" "Active Conn" "Distribution"
+printf "  %-12s %-10s %-12s %s\n" "------" "--------" "-----------" "------------"
+for server in "${servers[@]}"; do
+    count=${lc_counts["$server"]}
+    active=${lc_connections["$server"]}
+    pct=$((count * 100 / 30))
+    bar=$(printf '%*s' $((pct / 5)) '' | tr ' ' '#')
+    printf "  %-12s %-10s %-12s %s (%d%%)\n" "$server" "$count" "$active" "$bar" "$pct"
+done
+
+# Simulate IP Hash
+echo ""
+echo "--- IP Hash ---"
+echo "Same client IP always routes to same server:"
+echo ""
+
+client_ips=("192.168.1.10" "192.168.1.20" "192.168.1.30" "10.0.0.5" "10.0.0.15")
+
+for ip in "${client_ips[@]}"; do
+    # Simple hash: sum of IP octets mod server count
+    hash=0
+    IFS='.' read -ra octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        hash=$((hash + octet))
+    done
+    server_idx=$((hash % 3))
+    echo "  Client $ip → ${servers[$server_idx]}"
+done
+
+echo ""
+echo "  Notice: Same IP always goes to the same server."
+echo "  This provides session persistence without cookies."
+```
+
+</Exercise>
+
+<MiniProject title="Load Balancer Simulator">
+
+Build a script that simulates different load balancing algorithms and shows traffic distribution:
+
+```bash
+cat > ~/lb-simulator.sh << 'SCRIPT'
+#!/bin/bash
+# Load Balancer Simulator
+# Simulates different LB algorithms and visualizes traffic distribution
+
+NUM_REQUESTS="${1:-100}"
+ALGORITHM="${2:-all}"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Define servers
+SERVERS=("web-01:8080" "web-02:8080" "web-03:8080" "web-04:8080")
+WEIGHTS=(5 3 2 1)
+CAPACITIES=(100 80 60 40)
+
+declare -A request_counts
+declare -A active_connections
+declare -A response_times
+
+reset_counters() {
+    for server in "${SERVERS[@]}"; do
+        request_counts["$server"]=0
+        active_connections["$server"]=0
+        response_times["$server"]=0
+    done
+}
+
+print_bar() {
+    local count=$1
+    local total=$2
+    local max_width=40
+
+    if [ "$total" -eq 0 ]; then
+        echo ""
+        return
+    fi
+
+    local filled=$((count * max_width / total))
+    local empty=$((max_width - filled))
+
+    printf "${GREEN}"
+    printf '%*s' "$filled" '' | tr ' ' '='
+    printf "${NC}"
+    printf '%*s' "$empty" '' | tr ' ' '-'
+}
+
+print_results() {
+    local title=$1
+    echo ""
+    echo -e "${CYAN}--- $title ---${NC}"
+    echo ""
+
+    local total=0
+    for server in "${SERVERS[@]}"; do
+        total=$((total + ${request_counts["$server"]}))
+    done
+
+    printf "  %-15s %-10s %-8s %s\n" "Server" "Requests" "Pct" "Distribution"
+    printf "  %-15s %-10s %-8s %s\n" "------" "--------" "---" "------------"
+
+    for i in "${!SERVERS[@]}"; do
+        server="${SERVERS[$i]}"
+        count=${request_counts["$server"]}
+        if [ "$total" -gt 0 ]; then
+            pct=$((count * 100 / total))
+        else
+            pct=0
+        fi
+        bar=$(print_bar "$count" "$total")
+        printf "  %-15s %-10s %-7s %s\n" "$server" "$count" "${pct}%" "$bar"
+    done
+    echo "  Total requests: $total"
+}
+
+# Algorithm 1: Round Robin
+simulate_round_robin() {
+    reset_counters
+    local num_servers=${#SERVERS[@]}
+
+    for (( i=0; i<NUM_REQUESTS; i++ )); do
+        server_idx=$((i % num_servers))
+        server="${SERVERS[$server_idx]}"
+        request_counts["$server"]=$(( ${request_counts["$server"]} + 1 ))
+    done
+
+    print_results "Round Robin"
+    echo "  Algorithm: Rotate through servers in order."
+    echo "  Best for: Equal servers, stateless requests."
+}
+
+# Algorithm 2: Weighted Round Robin
+simulate_weighted_rr() {
+    reset_counters
+    local total_weight=0
+    for w in "${WEIGHTS[@]}"; do
+        total_weight=$((total_weight + w))
+    done
+
+    # Build expanded server list based on weights
+    local expanded=()
+    for i in "${!SERVERS[@]}"; do
+        for (( j=0; j<${WEIGHTS[$i]}; j++ )); do
+            expanded+=("${SERVERS[$i]}")
+        done
+    done
+
+    for (( i=0; i<NUM_REQUESTS; i++ )); do
+        idx=$((i % total_weight))
+        server="${expanded[$idx]}"
+        request_counts["$server"]=$(( ${request_counts["$server"]} + 1 ))
+    done
+
+    print_results "Weighted Round Robin (weights: ${WEIGHTS[*]})"
+    echo "  Algorithm: Higher weight = more requests."
+    echo "  Best for: Servers with different capacities."
+}
+
+# Algorithm 3: Least Connections
+simulate_least_conn() {
+    reset_counters
+
+    for (( i=0; i<NUM_REQUESTS; i++ )); do
+        # Find server with fewest active connections
+        min_conn=999999
+        min_server="${SERVERS[0]}"
+        for server in "${SERVERS[@]}"; do
+            if [ "${active_connections[$server]}" -lt "$min_conn" ]; then
+                min_conn=${active_connections[$server]}
+                min_server="$server"
+            fi
+        done
+
+        request_counts["$min_server"]=$(( ${request_counts["$min_server"]} + 1 ))
+        active_connections["$min_server"]=$(( ${active_connections["$min_server"]} + 1 ))
+
+        # Simulate random connection completions
+        for server in "${SERVERS[@]}"; do
+            if [ "${active_connections[$server]}" -gt 0 ]; then
+                if [ $(( RANDOM % 4 )) -eq 0 ]; then
+                    active_connections["$server"]=$(( ${active_connections["$server"]} - 1 ))
+                fi
+            fi
+        done
+    done
+
+    print_results "Least Connections"
+    echo "  Algorithm: Route to server with fewest active connections."
+    echo "  Best for: Requests with varying processing times."
+}
+
+# Algorithm 4: IP Hash
+simulate_ip_hash() {
+    reset_counters
+    local num_servers=${#SERVERS[@]}
+
+    # Generate random client IPs
+    for (( i=0; i<NUM_REQUESTS; i++ )); do
+        # Simulate 20 unique clients making multiple requests
+        client_id=$((RANDOM % 20))
+        octet1=$((client_id * 7 % 256))
+        octet2=$((client_id * 13 % 256))
+
+        # Hash based on client
+        hash=$((octet1 + octet2))
+        server_idx=$((hash % num_servers))
+        server="${SERVERS[$server_idx]}"
+        request_counts["$server"]=$(( ${request_counts["$server"]} + 1 ))
+    done
+
+    print_results "IP Hash (20 simulated clients)"
+    echo "  Algorithm: Same client IP always goes to same server."
+    echo "  Best for: Session persistence, stateful apps."
+}
+
+# Algorithm 5: Random
+simulate_random() {
+    reset_counters
+    local num_servers=${#SERVERS[@]}
+
+    for (( i=0; i<NUM_REQUESTS; i++ )); do
+        server_idx=$((RANDOM % num_servers))
+        server="${SERVERS[$server_idx]}"
+        request_counts["$server"]=$(( ${request_counts["$server"]} + 1 ))
+    done
+
+    print_results "Random"
+    echo "  Algorithm: Pick a random server for each request."
+    echo "  Best for: Large pools, stateless services."
+}
+
+# Simulate health check failure
+simulate_failover() {
+    reset_counters
+    local num_servers=${#SERVERS[@]}
+
+    echo ""
+    echo -e "${CYAN}--- Failover Simulation ---${NC}"
+    echo ""
+    echo "  Simulating $NUM_REQUESTS requests with server failure at request 50..."
+    echo ""
+
+    local failed_server="${SERVERS[1]}"
+    local fail_at=50
+    local recover_at=80
+
+    for (( i=0; i<NUM_REQUESTS; i++ )); do
+        # Round robin, but skip failed server
+        local available=()
+        for server in "${SERVERS[@]}"; do
+            if [ "$server" = "$failed_server" ] && [ "$i" -ge "$fail_at" ] && [ "$i" -lt "$recover_at" ]; then
+                continue  # Server is down
+            fi
+            available+=("$server")
+        done
+
+        local avail_count=${#available[@]}
+        server_idx=$((i % avail_count))
+        server="${available[$server_idx]}"
+        request_counts["$server"]=$(( ${request_counts["$server"]} + 1 ))
+    done
+
+    echo "  Timeline:"
+    echo "    Requests 1-49:   All 4 servers active"
+    echo -e "    Requests 50-79:  ${RED}$failed_server DOWN${NC} (3 servers handling traffic)"
+    echo -e "    Requests 80-100: ${GREEN}$failed_server RECOVERED${NC} (4 servers active)"
+    echo ""
+
+    local total=0
+    for server in "${SERVERS[@]}"; do
+        total=$((total + ${request_counts["$server"]}))
+    done
+
+    printf "  %-15s %-10s %-8s %s\n" "Server" "Requests" "Pct" "Distribution"
+    printf "  %-15s %-10s %-8s %s\n" "------" "--------" "---" "------------"
+
+    for server in "${SERVERS[@]}"; do
+        count=${request_counts["$server"]}
+        pct=$((count * 100 / total))
+        bar=$(print_bar "$count" "$total")
+        note=""
+        if [ "$server" = "$failed_server" ]; then
+            note=" (was down for 30 requests)"
+        fi
+        printf "  %-15s %-10s %-7s %s%s\n" "$server" "$count" "${pct}%" "$bar" "$note"
+    done
+}
+
+# Main
+echo "============================================="
+echo "  Load Balancer Simulator"
+echo "  Requests: $NUM_REQUESTS"
+echo "  Servers: ${#SERVERS[@]} (${SERVERS[*]})"
+echo "============================================="
+
+case "$ALGORITHM" in
+    round-robin)     simulate_round_robin ;;
+    weighted)        simulate_weighted_rr ;;
+    least-conn)      simulate_least_conn ;;
+    ip-hash)         simulate_ip_hash ;;
+    random)          simulate_random ;;
+    failover)        simulate_failover ;;
+    all)
+        simulate_round_robin
+        simulate_weighted_rr
+        simulate_least_conn
+        simulate_ip_hash
+        simulate_random
+        simulate_failover
+        ;;
+    *)
+        echo "Usage: $0 [num_requests] [algorithm]"
+        echo "Algorithms: round-robin, weighted, least-conn, ip-hash, random, failover, all"
+        exit 1
+        ;;
+esac
+
+echo ""
+echo "============================================="
+echo "  Simulation complete."
+echo "============================================="
+SCRIPT
+
+chmod +x ~/lb-simulator.sh
+
+# Run the simulator with 100 requests, all algorithms
+~/lb-simulator.sh 100 all
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- A **forward proxy** hides clients; a **reverse proxy** hides servers — DevOps primarily uses reverse proxies
+- **Load balancers** distribute traffic across multiple servers for reliability and performance
+- **Round robin** is the simplest algorithm; **least connections** adapts best to variable workloads
+- **Health checks** automatically remove unhealthy servers from the pool — configure both active and passive checks
+- **SSL termination** at the load balancer simplifies certificate management and reduces backend CPU usage
+- **Nginx** is the most common reverse proxy: learn `upstream`, `proxy_pass`, and proxy headers
+- Forward critical headers: `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`, `Host`
+- Avoid **sticky sessions** when possible — use shared session stores (Redis) for stateless backends
+- **Layer 4** load balancing is faster but blind to content; **Layer 7** enables URL-based routing
+- **Blue-green** and **canary** deployments use load balancers for zero-downtime releases
+- CDNs are a form of global load distribution — caching content at edge locations near users
+
+## What's Next
+
+You can now distribute traffic and protect your infrastructure. In **VPNs and Tunnels**, you'll learn how to securely connect networks across the internet, create encrypted tunnels, and understand the networking that makes remote work and multi-region architectures possible.

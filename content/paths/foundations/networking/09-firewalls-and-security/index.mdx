@@ -1,0 +1,884 @@
+---
+title: "Firewalls and Network Security"
+description: "Control what traffic enters and leaves your network. Master iptables, ufw, security groups, and the defense-in-depth approach to network security."
+order: 9
+xpReward: 100
+estimatedMinutes: 35
+prerequisites:
+  - 08-routing-and-switching
+objectives:
+  - Understand firewall types and architectures
+  - Configure rules with ufw and iptables
+  - Apply the principle of least privilege to network access
+  - Understand security groups in cloud environments
+tags:
+  - networking
+  - firewall
+  - security
+  - iptables
+---
+
+<Callout type="story" title="The Story">
+Your Redis server was exposed to the internet for 3 hours during a deployment. In that window, a bot found it, connected (no password was set), and dumped your entire cache — including session tokens. A simple firewall rule allowing Redis only from your application subnet would have prevented this. Network security isn't about exotic attacks — it's about not leaving doors open.
+</Callout>
+
+## What Is a Firewall?
+
+A firewall is a packet filter that controls which network traffic is allowed to enter and leave a system or network. It examines each packet and decides: **allow**, **drop**, or **reject**.
+
+```
+Incoming packet
+     ↓
+┌─────────────┐
+│   Firewall   │
+│              │
+│  Match rules │ → ALLOW → packet delivered
+│  in order    │ → DROP  → packet silently discarded
+│              │ → REJECT → packet returned with error
+└─────────────┘
+     ↓
+No match → default policy (usually DROP)
+```
+
+### Firewall Types
+
+| Type | Layer | What It Inspects | Example |
+|------|-------|-----------------|---------|
+| Packet filtering | L3/L4 | IP addresses, ports, protocols | iptables, nftables |
+| Stateful inspection | L3/L4 | Above + connection state (new, established) | iptables with conntrack |
+| Application layer (WAF) | L7 | HTTP content, headers, payloads | ModSecurity, AWS WAF |
+
+```bash
+# Check if your system has a firewall active
+sudo iptables -L -n 2>/dev/null | head -10
+sudo ufw status 2>/dev/null
+```
+
+## iptables — The Linux Firewall
+
+`iptables` is the traditional Linux firewall tool. It is powerful, flexible, and the foundation of Linux networking security.
+
+### Chains and Tables
+
+iptables organizes rules into **chains** (when to check) and **tables** (what to do):
+
+```
+Tables:
+  filter  → Default table. Accept, drop, or reject packets.
+  nat     → Network address translation. Modify source/destination.
+  mangle  → Alter packet headers (TTL, TOS, etc.)
+  raw     → Bypass connection tracking.
+
+Chains (in the filter table):
+  INPUT    → Packets destined FOR this machine
+  OUTPUT   → Packets originating FROM this machine
+  FORWARD  → Packets passing THROUGH this machine (routing)
+```
+
+```
+Incoming packet → PREROUTING → routing decision
+                                    ↓
+                            ┌── For this host? ──┐
+                            │                     │
+                           Yes                    No
+                            ↓                     ↓
+                          INPUT              FORWARD
+                            ↓                     ↓
+                       Local process          routing
+                            ↓                     ↓
+                          OUTPUT            POSTROUTING
+                            ↓                     ↓
+                       POSTROUTING            Output
+                            ↓
+                          Output
+```
+
+### Reading iptables Rules
+
+```bash
+# List all rules in the filter table
+sudo iptables -L -n -v 2>/dev/null
+
+# List rules with line numbers (useful for inserting/deleting)
+sudo iptables -L -n --line-numbers 2>/dev/null
+
+# List rules for a specific chain
+sudo iptables -L INPUT -n -v 2>/dev/null
+
+# List NAT rules
+sudo iptables -t nat -L -n 2>/dev/null
+```
+
+### Writing iptables Rules
+
+The basic syntax:
+
+```bash
+iptables -A CHAIN -p PROTOCOL --dport PORT -s SOURCE -j TARGET
+
+# -A     → Append to chain
+# -I     → Insert at position (top = highest priority)
+# -D     → Delete a rule
+# -p     → Protocol (tcp, udp, icmp)
+# --dport → Destination port
+# --sport → Source port
+# -s     → Source IP/network
+# -d     → Destination IP/network
+# -j     → Jump to target (ACCEPT, DROP, REJECT, LOG)
+# -i     → Input interface
+# -o     → Output interface
+```
+
+### Common iptables Examples
+
+```bash
+# Allow SSH (port 22)
+sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+# Allow HTTP and HTTPS
+sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+
+# Allow established and related connections
+# (responses to outgoing requests)
+sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Allow loopback traffic (localhost)
+sudo iptables -A INPUT -i lo -j ACCEPT
+
+# Allow SSH only from a specific subnet
+sudo iptables -A INPUT -p tcp --dport 22 -s 192.168.1.0/24 -j ACCEPT
+
+# Allow Redis only from the app subnet
+sudo iptables -A INPUT -p tcp --dport 6379 -s 10.0.1.0/24 -j ACCEPT
+
+# Rate limit SSH connections (prevent brute force)
+sudo iptables -A INPUT -p tcp --dport 22 -m conntrack --ctstate NEW \
+    -m limit --limit 3/min --limit-burst 3 -j ACCEPT
+
+# Log dropped packets (for debugging)
+sudo iptables -A INPUT -j LOG --log-prefix "DROPPED: " --log-level 4
+
+# Drop everything else (default deny)
+sudo iptables -A INPUT -j DROP
+```
+
+<Callout type="warning" title="Rule Order Matters">
+iptables evaluates rules top to bottom and stops at the first match. If you put `DROP all` before `ACCEPT ssh`, SSH will be blocked. Always put your ACCEPT rules before the final DROP. Use `iptables -I INPUT 1` to insert at the top if needed.
+</Callout>
+
+### Managing iptables Rules
+
+```bash
+# Delete a rule by number
+sudo iptables -D INPUT 3
+
+# Delete a rule by specification
+sudo iptables -D INPUT -p tcp --dport 80 -j ACCEPT
+
+# Flush all rules (WARNING: removes all rules!)
+sudo iptables -F
+
+# Set default policy
+sudo iptables -P INPUT DROP      # Default deny incoming
+sudo iptables -P FORWARD DROP    # Default deny forwarding
+sudo iptables -P OUTPUT ACCEPT   # Default allow outgoing
+
+# Save rules (varies by distro)
+sudo iptables-save > /etc/iptables/rules.v4 2>/dev/null
+# Or on RHEL/CentOS:
+# sudo service iptables save
+
+# Restore rules
+sudo iptables-restore < /etc/iptables/rules.v4 2>/dev/null
+```
+
+### A Complete Web Server Ruleset
+
+```bash
+# Flush existing rules
+sudo iptables -F
+sudo iptables -X
+
+# Set default policies
+sudo iptables -P INPUT DROP
+sudo iptables -P FORWARD DROP
+sudo iptables -P OUTPUT ACCEPT
+
+# Allow loopback
+sudo iptables -A INPUT -i lo -j ACCEPT
+
+# Allow established connections
+sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Allow SSH (with rate limiting)
+sudo iptables -A INPUT -p tcp --dport 22 -m conntrack --ctstate NEW \
+    -m limit --limit 5/min --limit-burst 5 -j ACCEPT
+
+# Allow HTTP and HTTPS
+sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+
+# Allow ICMP (ping)
+sudo iptables -A INPUT -p icmp --icmp-type echo-request \
+    -m limit --limit 1/s -j ACCEPT
+
+# Log everything else before dropping
+sudo iptables -A INPUT -j LOG --log-prefix "FW-DROP: " --log-level 4
+sudo iptables -A INPUT -j DROP
+```
+
+## ufw — Uncomplicated Firewall
+
+`ufw` is a user-friendly frontend to iptables. It is the recommended tool on Ubuntu and Debian systems:
+
+```bash
+# Check ufw status
+sudo ufw status verbose 2>/dev/null
+
+# Enable ufw (WARNING: ensure SSH is allowed first!)
+sudo ufw allow ssh       # Always do this first!
+sudo ufw enable
+
+# Set default policies
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+```
+
+### Common ufw Rules
+
+```bash
+# Allow a service by name
+sudo ufw allow ssh          # port 22
+sudo ufw allow http         # port 80
+sudo ufw allow https        # port 443
+
+# Allow a specific port
+sudo ufw allow 8080/tcp
+sudo ufw allow 53/udp
+
+# Allow from a specific IP
+sudo ufw allow from 192.168.1.100
+
+# Allow from a subnet to a specific port
+sudo ufw allow from 10.0.1.0/24 to any port 5432
+
+# Allow a port range
+sudo ufw allow 8000:8100/tcp
+
+# Deny a specific IP
+sudo ufw deny from 203.0.113.100
+
+# Delete a rule
+sudo ufw delete allow 8080/tcp
+
+# Show numbered rules (for deletion)
+sudo ufw status numbered
+
+# Delete by number
+sudo ufw delete 3
+
+# Reset all rules
+sudo ufw reset
+```
+
+### ufw for a Web Server
+
+```bash
+# Complete setup for a web server
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# Essential services
+sudo ufw allow ssh
+sudo ufw allow http
+sudo ufw allow https
+
+# Application server (only from load balancer)
+sudo ufw allow from 10.0.0.5 to any port 8080
+
+# Database (only from app servers)
+sudo ufw allow from 10.0.1.0/24 to any port 5432
+
+# Enable
+sudo ufw enable
+
+# Verify
+sudo ufw status verbose
+```
+
+<Callout type="tip" title="ufw Application Profiles">
+ufw supports application profiles that group ports together. Run `sudo ufw app list` to see available profiles. For example, `sudo ufw allow 'Nginx Full'` allows both HTTP and HTTPS. You can create custom profiles in `/etc/ufw/applications.d/`.
+</Callout>
+
+## Security Groups — Cloud Firewalls
+
+In cloud environments (AWS, GCP, Azure), security groups act as virtual firewalls attached to instances:
+
+### AWS Security Groups
+
+```
+Security Group: sg-webserver
+  Inbound rules:
+    TCP 22    from 10.0.0.0/8      (SSH from internal)
+    TCP 80    from 0.0.0.0/0       (HTTP from anywhere)
+    TCP 443   from 0.0.0.0/0       (HTTPS from anywhere)
+
+  Outbound rules:
+    All       to 0.0.0.0/0         (allow all outbound)
+```
+
+Key differences from iptables:
+
+| Feature | iptables | Security Groups |
+|---------|----------|-----------------|
+| Stateful | With conntrack module | Always stateful |
+| Default | Configurable | Deny all inbound, allow all outbound |
+| Rule order | First match wins | All rules evaluated (any allow = allow) |
+| Scope | Single host | Attached to instances |
+| Changes | Immediate | Immediate (no restart) |
+
+### Network ACLs vs Security Groups
+
+```
+Network ACL (NACL):
+  - Stateless (must allow both inbound AND outbound)
+  - Applied at the subnet level
+  - Rules processed in order (like iptables)
+  - Supports ALLOW and DENY rules
+
+Security Group:
+  - Stateful (return traffic auto-allowed)
+  - Applied at the instance level
+  - All rules evaluated (no ordering)
+  - Only ALLOW rules (implicit deny)
+```
+
+## Defense in Depth
+
+Never rely on a single security layer. Stack multiple layers:
+
+```
+Internet
+  ↓
+Cloud Firewall / WAF          ← Layer 1: Block bad IPs, SQL injection
+  ↓
+Load Balancer (SSL termination) ← Layer 2: Only expose 80/443
+  ↓
+Security Group                 ← Layer 3: Only allow LB → app servers
+  ↓
+Host Firewall (ufw/iptables)   ← Layer 4: Additional host-level rules
+  ↓
+Application                    ← Layer 5: Authentication, authorization
+  ↓
+Database (bound to localhost)  ← Layer 6: Not network-accessible
+```
+
+```bash
+# Defense in depth checklist
+echo "=== Defense in Depth Checklist ==="
+echo ""
+
+# 1. Check firewall is active
+echo "1. Firewall status:"
+sudo ufw status 2>/dev/null || \
+    (sudo iptables -L -n 2>/dev/null | head -5)
+
+# 2. Check for services bound to 0.0.0.0
+echo ""
+echo "2. Services exposed to network (0.0.0.0):"
+ss -tlnp | grep "0.0.0.0" | awk '{print "  ", $4, $6}'
+
+# 3. Check for default passwords / no auth
+echo ""
+echo "3. Services that should be checked for authentication:"
+for port in 6379 27017 9200; do
+    if ss -tln | grep -q ":${port} "; then
+        echo "   WARNING: Port $port is listening — verify authentication is enabled"
+    fi
+done
+```
+
+## Common Firewall Rules for a Web Server
+
+```bash
+# The minimum viable firewall for a production web server:
+
+# === iptables version ===
+sudo iptables -F
+sudo iptables -P INPUT DROP
+sudo iptables -P FORWARD DROP
+sudo iptables -P OUTPUT ACCEPT
+
+# Loopback
+sudo iptables -A INPUT -i lo -j ACCEPT
+
+# Established connections
+sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# SSH (restricted to admin network)
+sudo iptables -A INPUT -p tcp --dport 22 -s 10.0.0.0/8 -j ACCEPT
+
+# HTTP/HTTPS (public)
+sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+
+# Ping (rate limited)
+sudo iptables -A INPUT -p icmp --icmp-type echo-request \
+    -m limit --limit 1/s -j ACCEPT
+
+# Drop everything else
+sudo iptables -A INPUT -j DROP
+```
+
+## Port Knocking
+
+Port knocking is a technique where you "knock" on a sequence of closed ports before the real port opens:
+
+```bash
+# Concept: To open SSH, first connect to ports 7000, 8000, 9000 in order
+# Only then does port 22 open for your IP
+
+# This is typically configured with knockd:
+# /etc/knockd.conf:
+# [openSSH]
+#     sequence    = 7000,8000,9000
+#     seq_timeout = 5
+#     command     = /sbin/iptables -A INPUT -s %IP% -p tcp --dport 22 -j ACCEPT
+#     tcpflags    = syn
+
+# Client side:
+# knock server-ip 7000 8000 9000
+# ssh user@server-ip
+```
+
+## fail2ban — Automated IP Blocking
+
+fail2ban monitors logs for repeated failures and automatically bans offending IPs:
+
+```bash
+# Check if fail2ban is installed
+fail2ban-client status 2>/dev/null
+
+# Check SSH jail status
+fail2ban-client status sshd 2>/dev/null
+
+# fail2ban configuration concept (/etc/fail2ban/jail.local):
+# [sshd]
+# enabled = true
+# port    = ssh
+# filter  = sshd
+# logpath = /var/log/auth.log
+# maxretry = 5       # Ban after 5 failures
+# findtime = 600     # Within 10 minutes
+# bantime  = 3600    # Ban for 1 hour
+
+# See what fail2ban adds to iptables
+sudo iptables -L f2b-sshd -n 2>/dev/null
+```
+
+<Exercise number={1} title="UFW Configuration">
+
+Set up a firewall for a web server: allow HTTP/HTTPS/SSH, deny everything else:
+
+```bash
+# 1. Check current firewall status
+echo "=== Current Firewall Status ==="
+sudo ufw status verbose 2>/dev/null || echo "ufw not available"
+sudo iptables -L -n 2>/dev/null | head -15
+
+# 2. Show current rules (if any)
+echo ""
+echo "=== Current iptables Rules ==="
+sudo iptables -L INPUT -n --line-numbers 2>/dev/null
+
+# 3. Demonstrate ufw commands (dry run — showing what WOULD be configured)
+echo ""
+echo "=== UFW Configuration Plan ==="
+echo "The following commands would configure a web server firewall:"
+echo ""
+echo "  # Step 1: Set default policies"
+echo "  sudo ufw default deny incoming"
+echo "  sudo ufw default allow outgoing"
+echo ""
+echo "  # Step 2: Allow essential services"
+echo "  sudo ufw allow ssh           # Port 22 — remote access"
+echo "  sudo ufw allow http          # Port 80 — web traffic"
+echo "  sudo ufw allow https         # Port 443 — secure web traffic"
+echo ""
+echo "  # Step 3: Allow specific application ports (examples)"
+echo "  sudo ufw allow from 10.0.1.0/24 to any port 5432   # PostgreSQL from app subnet"
+echo "  sudo ufw allow from 10.0.1.0/24 to any port 6379   # Redis from app subnet"
+echo ""
+echo "  # Step 4: Enable firewall"
+echo "  sudo ufw enable"
+
+# 4. Build equivalent iptables rules (actually applied for demonstration)
+echo ""
+echo "=== Equivalent iptables Rules ==="
+
+# Show what a clean web server ruleset looks like
+cat << 'RULES'
+# Flush existing rules
+iptables -F
+iptables -X
+
+# Default policies
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT ACCEPT
+
+# Allow loopback
+iptables -A INPUT -i lo -j ACCEPT
+
+# Allow established/related
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Allow SSH
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+# Allow HTTP
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+
+# Allow HTTPS
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+
+# Allow ping (rate limited)
+iptables -A INPUT -p icmp --icmp-type echo-request -m limit --limit 1/s -j ACCEPT
+
+# Log dropped packets
+iptables -A INPUT -j LOG --log-prefix "FW-DROP: "
+
+# Drop all other incoming
+iptables -A INPUT -j DROP
+RULES
+
+# 5. Verify what's currently exposed
+echo ""
+echo "=== Currently Exposed Services ==="
+echo "These services are currently listening and may need firewall rules:"
+ss -tlnp 2>/dev/null | awk 'NR>1 {print "  ", $4, $6}'
+```
+
+</Exercise>
+
+<Exercise number={2} title="Iptables Rules">
+
+Write iptables rules for specific traffic filtering scenarios:
+
+```bash
+# Scenario 1: Basic web server protection
+echo "=== Scenario 1: Web Server ==="
+echo "Rules for a public-facing web server:"
+echo ""
+
+# Show the rules we would create
+RULES=(
+    "-A INPUT -i lo -j ACCEPT"
+    "-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+    "-A INPUT -p tcp --dport 22 -s 10.0.0.0/8 -j ACCEPT"
+    "-A INPUT -p tcp --dport 80 -j ACCEPT"
+    "-A INPUT -p tcp --dport 443 -j ACCEPT"
+    "-A INPUT -p icmp --icmp-type echo-request -j ACCEPT"
+    "-A INPUT -j DROP"
+)
+
+for rule in "${RULES[@]}"; do
+    echo "  iptables $rule"
+done
+
+# Scenario 2: Database server (internal only)
+echo ""
+echo "=== Scenario 2: Database Server ==="
+echo "Rules for an internal database server:"
+echo ""
+
+DB_RULES=(
+    "-A INPUT -i lo -j ACCEPT"
+    "-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+    "-A INPUT -p tcp --dport 22 -s 10.0.0.0/24 -j ACCEPT"
+    "-A INPUT -p tcp --dport 5432 -s 10.0.1.0/24 -j ACCEPT"
+    "-A INPUT -p tcp --dport 5432 -s 10.0.2.0/24 -j ACCEPT"
+    "-A INPUT -j DROP"
+)
+
+for rule in "${DB_RULES[@]}"; do
+    echo "  iptables $rule"
+done
+
+# Scenario 3: Rate limiting to prevent brute force
+echo ""
+echo "=== Scenario 3: Rate Limiting ==="
+echo "Rules to prevent SSH brute force attacks:"
+echo ""
+echo "  # Allow max 3 new SSH connections per minute"
+echo "  iptables -A INPUT -p tcp --dport 22 -m conntrack --ctstate NEW \\"
+echo "      -m limit --limit 3/min --limit-burst 3 -j ACCEPT"
+echo "  iptables -A INPUT -p tcp --dport 22 -m conntrack --ctstate NEW -j DROP"
+
+# Scenario 4: Logging suspicious traffic
+echo ""
+echo "=== Scenario 4: Logging ==="
+echo "Rules to log before dropping:"
+echo ""
+echo "  # Create a custom chain for logging"
+echo "  iptables -N LOG_AND_DROP"
+echo "  iptables -A LOG_AND_DROP -j LOG --log-prefix 'FW-BLOCK: ' --log-level 4"
+echo "  iptables -A LOG_AND_DROP -j DROP"
+echo ""
+echo "  # Use the custom chain"
+echo "  iptables -A INPUT -j LOG_AND_DROP"
+
+# Verify current rules
+echo ""
+echo "=== Current System Rules ==="
+sudo iptables -L -n -v 2>/dev/null | head -20 || echo "Cannot read iptables (need root)"
+
+# Show connection tracking stats
+echo ""
+echo "=== Connection Tracking ==="
+cat /proc/net/nf_conntrack 2>/dev/null | wc -l | \
+    xargs -I{} echo "  Tracked connections: {}" 2>/dev/null || \
+    echo "  Connection tracking info not available"
+sudo sysctl net.netfilter.nf_conntrack_max 2>/dev/null | \
+    awk '{print "  Max tracked:", $3}' 2>/dev/null
+```
+
+</Exercise>
+
+<MiniProject title="Firewall Audit Tool">
+
+Build a script that audits current firewall rules and reports potential security issues:
+
+```bash
+cat > ~/firewall-audit.sh << 'SCRIPT'
+#!/bin/bash
+# Firewall Audit Tool
+# Audits current firewall configuration and reports security issues
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+ISSUES=0
+WARNINGS=0
+
+log_issue() {
+    echo -e "  ${RED}[ISSUE]${NC} $1"
+    ISSUES=$((ISSUES + 1))
+}
+
+log_warning() {
+    echo -e "  ${YELLOW}[WARN]${NC} $1"
+    WARNINGS=$((WARNINGS + 1))
+}
+
+log_ok() {
+    echo -e "  ${GREEN}[OK]${NC} $1"
+}
+
+echo "============================================="
+echo "  Firewall Security Audit"
+echo "  Host: $(hostname)"
+echo "  Time: $(date)"
+echo "============================================="
+
+# --- Check 1: Is a firewall active? ---
+echo ""
+echo "--- Check 1: Firewall Status ---"
+
+UFW_ACTIVE=false
+IPTABLES_RULES=0
+
+# Check ufw
+if command -v ufw >/dev/null 2>&1; then
+    ufw_status=$(sudo ufw status 2>/dev/null | head -1)
+    if echo "$ufw_status" | grep -q "active"; then
+        log_ok "ufw is active"
+        UFW_ACTIVE=true
+    else
+        log_warning "ufw is installed but not active"
+    fi
+fi
+
+# Check iptables
+if command -v iptables >/dev/null 2>&1; then
+    IPTABLES_RULES=$(sudo iptables -L -n 2>/dev/null | grep -cE "^(ACCEPT|DROP|REJECT|LOG)")
+    if [ "$IPTABLES_RULES" -gt 0 ]; then
+        log_ok "iptables has $IPTABLES_RULES rules configured"
+    else
+        if [ "$UFW_ACTIVE" = false ]; then
+            log_issue "No firewall rules detected (iptables empty, ufw not active)"
+        fi
+    fi
+fi
+
+# --- Check 2: Default policies ---
+echo ""
+echo "--- Check 2: Default Policies ---"
+
+if command -v iptables >/dev/null 2>&1; then
+    input_policy=$(sudo iptables -L INPUT -n 2>/dev/null | head -1 | grep -oP 'policy \K\w+')
+    forward_policy=$(sudo iptables -L FORWARD -n 2>/dev/null | head -1 | grep -oP 'policy \K\w+')
+    output_policy=$(sudo iptables -L OUTPUT -n 2>/dev/null | head -1 | grep -oP 'policy \K\w+')
+
+    if [ "$input_policy" = "DROP" ] || [ "$input_policy" = "REJECT" ]; then
+        log_ok "INPUT default policy: $input_policy (deny by default)"
+    elif [ "$input_policy" = "ACCEPT" ]; then
+        log_warning "INPUT default policy: ACCEPT (should be DROP)"
+    fi
+
+    if [ "$forward_policy" = "DROP" ] || [ "$forward_policy" = "REJECT" ]; then
+        log_ok "FORWARD default policy: $forward_policy"
+    elif [ "$forward_policy" = "ACCEPT" ]; then
+        log_warning "FORWARD default policy: ACCEPT (should be DROP unless routing)"
+    fi
+
+    echo "  OUTPUT default policy: ${output_policy:-unknown}"
+fi
+
+# --- Check 3: Open ports ---
+echo ""
+echo "--- Check 3: Open Ports Analysis ---"
+
+# Check for commonly dangerous open ports
+declare -A RISKY_PORTS
+RISKY_PORTS=(
+    [6379]="Redis - often no auth by default"
+    [27017]="MongoDB - often no auth by default"
+    [9200]="Elasticsearch - no auth in older versions"
+    [11211]="Memcached - no auth, DDoS amplification risk"
+    [2375]="Docker API - unauthenticated access to containers"
+    [2376]="Docker API (TLS) - verify certificates are configured"
+    [5900]="VNC - often weak authentication"
+    [23]="Telnet - unencrypted, use SSH instead"
+    [21]="FTP - unencrypted, use SFTP instead"
+    [3389]="RDP - frequent brute force target"
+)
+
+for port in "${!RISKY_PORTS[@]}"; do
+    if ss -tln | grep -q ":${port} "; then
+        bind_addr=$(ss -tlnp | grep ":${port} " | awk '{print $4}' | head -1)
+        if echo "$bind_addr" | grep -q "0.0.0.0"; then
+            log_issue "Port $port (${RISKY_PORTS[$port]}) bound to 0.0.0.0 (network accessible)"
+        elif echo "$bind_addr" | grep -q "127.0.0.1"; then
+            log_ok "Port $port (${RISKY_PORTS[$port]}) bound to 127.0.0.1 (localhost only)"
+        else
+            log_warning "Port $port (${RISKY_PORTS[$port]}) is listening on $bind_addr"
+        fi
+    fi
+done
+
+# --- Check 4: Services bound to 0.0.0.0 ---
+echo ""
+echo "--- Check 4: Network-Exposed Services ---"
+
+exposed_count=0
+while IFS= read -r line; do
+    port=$(echo "$line" | awk '{print $4}')
+    process=$(echo "$line" | awk '{print $6}')
+    if echo "$port" | grep -q "0.0.0.0:"; then
+        echo "  EXPOSED: $port → $process"
+        exposed_count=$((exposed_count + 1))
+    fi
+done < <(ss -tlnp 2>/dev/null | tail -n +2)
+
+if [ "$exposed_count" -eq 0 ]; then
+    log_ok "No services bound to 0.0.0.0"
+else
+    log_warning "$exposed_count services bound to 0.0.0.0 (network accessible)"
+fi
+
+# --- Check 5: SSH configuration ---
+echo ""
+echo "--- Check 5: SSH Security ---"
+
+if ss -tln | grep -q ":22 "; then
+    log_ok "SSH is running"
+
+    # Check if SSH allows root login
+    if [ -f /etc/ssh/sshd_config ]; then
+        root_login=$(grep -E "^PermitRootLogin" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+        if [ "$root_login" = "yes" ]; then
+            log_issue "SSH allows root login (PermitRootLogin yes)"
+        elif [ "$root_login" = "no" ] || [ "$root_login" = "prohibit-password" ]; then
+            log_ok "SSH root login restricted ($root_login)"
+        fi
+
+        # Check password authentication
+        pass_auth=$(grep -E "^PasswordAuthentication" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+        if [ "$pass_auth" = "yes" ]; then
+            log_warning "SSH password authentication is enabled (prefer key-based)"
+        elif [ "$pass_auth" = "no" ]; then
+            log_ok "SSH password authentication disabled (key-based only)"
+        fi
+    fi
+else
+    echo "  SSH not running on port 22"
+fi
+
+# --- Check 6: Connection tracking ---
+echo ""
+echo "--- Check 6: Connection Tracking ---"
+
+conntrack_count=$(cat /proc/net/nf_conntrack 2>/dev/null | wc -l)
+conntrack_max=$(sysctl -n net.netfilter.nf_conntrack_max 2>/dev/null)
+
+if [ -n "$conntrack_max" ] && [ "$conntrack_max" -gt 0 ]; then
+    usage_pct=$((conntrack_count * 100 / conntrack_max))
+    if [ "$usage_pct" -gt 80 ]; then
+        log_warning "Connection tracking at ${usage_pct}% ($conntrack_count / $conntrack_max)"
+    else
+        log_ok "Connection tracking: $conntrack_count / $conntrack_max (${usage_pct}%)"
+    fi
+else
+    echo "  Connection tracking info not available"
+fi
+
+# --- Summary ---
+echo ""
+echo "============================================="
+echo "  Audit Summary"
+echo "============================================="
+echo -e "  Issues:   ${RED}${ISSUES}${NC}"
+echo -e "  Warnings: ${YELLOW}${WARNINGS}${NC}"
+echo ""
+
+if [ "$ISSUES" -eq 0 ] && [ "$WARNINGS" -eq 0 ]; then
+    echo -e "  ${GREEN}All checks passed.${NC}"
+elif [ "$ISSUES" -eq 0 ]; then
+    echo -e "  ${YELLOW}No critical issues, but review warnings.${NC}"
+else
+    echo -e "  ${RED}Critical issues found — review and remediate.${NC}"
+fi
+
+echo ""
+echo "============================================="
+SCRIPT
+
+chmod +x ~/firewall-audit.sh
+
+# Run the audit
+~/firewall-audit.sh
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- A **firewall** filters packets based on rules: ACCEPT, DROP, or REJECT
+- **iptables** uses chains (INPUT, OUTPUT, FORWARD) and processes rules top to bottom — first match wins
+- Always allow **loopback** and **established/related** connections before anything else
+- **Default deny** (DROP policy) is the foundation of a secure firewall — only allow what you explicitly need
+- **ufw** is the simpler option for single servers; use `sudo ufw allow ssh` before enabling
+- **Security groups** in cloud environments are stateful and evaluated as a set (any allow wins)
+- **Defense in depth** means multiple layers: WAF, load balancer, security group, host firewall, application auth
+- Never expose databases (Redis, MongoDB, PostgreSQL) to `0.0.0.0` — bind to `127.0.0.1` or restrict by subnet
+- **fail2ban** automates IP blocking for brute force attacks
+- Rule order matters in iptables — put ACCEPT rules before the final DROP
+
+## What's Next
+
+Your firewall controls which traffic gets in, but how do you distribute that traffic across multiple servers? In **Load Balancers and Proxies**, you'll learn how reverse proxies, load balancing algorithms, and health checks keep production systems fast and reliable — even when individual servers fail.

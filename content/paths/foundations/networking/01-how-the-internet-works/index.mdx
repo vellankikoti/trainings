@@ -1,0 +1,687 @@
+---
+title: "How the Internet Works"
+description: "Follow a packet from your browser to a server and back. Understand the physical and logical infrastructure that makes the internet possible."
+order: 1
+xpReward: 75
+estimatedMinutes: 25
+prerequisites: []
+objectives:
+  - "Trace what happens when you type a URL into your browser"
+  - "Understand the physical internet infrastructure"
+  - "Know the roles of ISPs, routers, and switches"
+  - "Understand client-server vs peer-to-peer models"
+tags:
+  - networking
+  - internet
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+You type "google.com" and hit Enter. In 200 milliseconds, a page appears. In that fraction of a second, your computer looked up an IP address, established a TCP connection, negotiated TLS encryption, sent an HTTP request, received a response, and rendered HTML. Your data traveled through copper wire, fiber optic cable, and possibly a satellite — crossing continents and oceans. Understanding this journey is the foundation of everything in networking.
+</Callout>
+
+## What Is a Network?
+
+A **network** is two or more devices connected together to share resources and communicate. That's it. Two laptops connected by a cable? That's a network. Billions of devices connected across the globe? That's also a network — the biggest one ever built.
+
+Networks come in different scales:
+
+| Network Type | Scope | Example |
+|---|---|---|
+| **LAN** (Local Area Network) | Single building or campus | Your office network |
+| **WAN** (Wide Area Network) | Spans cities, countries, or continents | A company connecting offices across the world |
+| **MAN** (Metropolitan Area Network) | Spans a city | A university campus network |
+| **The Internet** | Global | The network of all networks |
+
+The **Internet** is not a single network — it is a network of networks. Thousands of independent networks (ISPs, universities, corporations, governments) agree to connect and pass traffic to each other. No single entity owns or controls it.
+
+<Callout type="info" title="Internet vs. World Wide Web">
+The Internet and the World Wide Web are not the same thing. The **Internet** is the physical and logical infrastructure — cables, routers, protocols. The **Web** is an application that runs on top of the Internet, using HTTP to serve web pages. Email, SSH, DNS, and video streaming also run on the Internet but are not "the web."
+</Callout>
+
+## The Physical Infrastructure
+
+Data does not travel through some ethereal cloud. It moves through real, physical infrastructure:
+
+### Cables and Fiber
+
+- **Copper cables** (Ethernet, coaxial) carry electrical signals over short distances
+- **Fiber optic cables** carry light pulses over long distances at near the speed of light
+- **Submarine cables** cross oceans — over 400 cables totaling more than 1.3 million kilometers connect continents
+
+```
+Your Computer
+    │
+    ├── Ethernet cable (copper) ──► Your Router
+    │                                    │
+    │                                    ├── Fiber ──► ISP Network
+    │                                                     │
+    │                                                     ├── Fiber ──► Internet Backbone
+    │                                                                       │
+    │                                                          ┌────────────┤
+    │                                                          │            │
+    │                                              Submarine Cable    Terrestrial Fiber
+    │                                                          │            │
+    │                                                     Data Center   Data Center
+```
+
+### Data Centers
+
+Data centers are the warehouses of the internet. They house thousands of servers that store websites, run applications, and process data. Companies like Google, Amazon, and Microsoft operate data centers on every continent (except Antarctica).
+
+### Routers and Switches
+
+**Switches** connect devices within a local network. They operate at Layer 2 (data link) and forward frames based on MAC addresses.
+
+**Routers** connect different networks together. They operate at Layer 3 (network) and forward packets based on IP addresses. Every time your data crosses a network boundary, a router makes a forwarding decision.
+
+```bash
+# You can see the routers between you and a destination:
+traceroute google.com
+
+# Example output:
+#  1  192.168.1.1 (192.168.1.1)        1.234 ms   ← Your home router
+#  2  10.0.0.1 (10.0.0.1)              5.678 ms   ← ISP router
+#  3  72.14.215.85 (72.14.215.85)     10.123 ms   ← Another hop
+#  ...
+# 10  142.250.80.46 (142.250.80.46)   15.456 ms   ← Google's server
+```
+
+<Callout type="tip" title="Traceroute in Practice">
+`traceroute` (or `tracert` on Windows) sends packets with increasing TTL values. Each router that drops the packet sends back an ICMP "Time Exceeded" message, revealing itself. This is how you can see the path your data takes. Some routers are configured not to respond, which shows up as `* * *` in the output.
+</Callout>
+
+## ISPs and the Internet Backbone
+
+Not all ISPs are created equal. The Internet has a hierarchical structure:
+
+### Tier 1 ISPs
+
+**Tier 1 ISPs** form the backbone of the Internet. They have global networks and exchange traffic with each other for free through **peering agreements**. Examples: AT&T, Lumen (formerly CenturyLink), NTT, Telia.
+
+A Tier 1 ISP can reach every other network on the Internet without paying anyone for transit.
+
+### Tier 2 ISPs
+
+**Tier 2 ISPs** are regional networks. They peer with some networks but pay Tier 1 ISPs for access to the rest of the Internet. Examples: Comcast, Vodafone, many national carriers.
+
+### Tier 3 ISPs
+
+**Tier 3 ISPs** are local providers — the company you pay for home internet. They buy transit from Tier 2 or Tier 1 ISPs to connect you to the global Internet.
+
+### Internet Exchange Points (IXPs)
+
+**IXPs** are physical locations where multiple ISPs connect their networks to exchange traffic directly. This is more efficient than routing through the backbone. Major IXPs include DE-CIX (Frankfurt), AMS-IX (Amsterdam), and LINX (London).
+
+```
+         ┌──────────────┐
+         │   Tier 1 ISP │ ◄──── Peering ────► │ Tier 1 ISP │
+         └──────┬───────┘                      └─────┬──────┘
+                │ Transit ($)                        │ Transit ($)
+         ┌──────┴───────┐                      ┌─────┴──────┐
+         │   Tier 2 ISP │ ◄── Peering (IXP) ─► │ Tier 2 ISP │
+         └──────┬───────┘                      └─────┬──────┘
+                │ Transit ($)                        │ Transit ($)
+         ┌──────┴───────┐                      ┌─────┴──────┐
+         │   Tier 3 ISP │                      │ Tier 3 ISP │
+         └──────┬───────┘                      └─────┬──────┘
+                │                                    │
+           Your Home                           Someone Else
+```
+
+## Packet Switching
+
+The Internet uses **packet switching** — data is broken into small **packets** that travel independently through the network and are reassembled at the destination.
+
+### How It Works
+
+1. **Fragmentation** — Your data is broken into packets (typically up to 1500 bytes each)
+2. **Addressing** — Each packet gets a header with source and destination IP addresses
+3. **Independent routing** — Each packet can take a different path through the network
+4. **Reassembly** — The destination puts packets back in order using sequence numbers
+
+```bash
+# You can see packet size in action with ping:
+ping -s 1400 google.com
+
+# The -s flag sets the packet size in bytes
+# Default is 56 bytes (64 with ICMP header)
+
+# See your network's Maximum Transmission Unit (MTU):
+ip link show eth0
+
+# Example output:
+# eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 ...
+#                                          ^^^^^^^^
+#                                     Max packet size
+```
+
+<Callout type="warning" title="Why Packet Size Matters">
+If a packet is larger than the MTU of any link along the path, it must be fragmented or dropped. This causes performance issues. VPNs and tunnels add extra headers, reducing the effective MTU. If you see mysterious connection problems — especially with large transfers — MTU issues are a common culprit.
+</Callout>
+
+### Why Not Circuit Switching?
+
+The old telephone network used **circuit switching** — a dedicated path was reserved for the entire duration of a call. Packet switching is better for data because:
+
+- **Efficiency** — No bandwidth is wasted when you're not actively sending data
+- **Resilience** — If one path fails, packets can take a different route
+- **Scalability** — Millions of connections can share the same infrastructure
+
+## What Happens When You Visit a Website
+
+Let's trace exactly what happens when you type `https://www.example.com` and press Enter:
+
+### Step 1: DNS Lookup
+
+Your browser needs to find the IP address of `www.example.com`:
+
+```bash
+# Your browser checks:
+# 1. Browser cache (did we look this up recently?)
+# 2. OS cache (has the operating system resolved this?)
+# 3. Router cache
+# 4. ISP's DNS resolver
+# 5. Recursive DNS resolution (root → TLD → authoritative)
+
+# You can do this manually:
+dig www.example.com
+
+# ;; ANSWER SECTION:
+# www.example.com.    86400   IN  A   93.184.216.34
+```
+
+### Step 2: TCP Handshake
+
+Your computer establishes a TCP connection with the server using a **three-way handshake**:
+
+```
+Client                          Server
+  │                               │
+  ├── SYN (seq=100) ─────────►   │   "I want to connect"
+  │                               │
+  │   ◄── SYN-ACK (seq=300,      │   "OK, I accept"
+  │       ack=101) ──────────     │
+  │                               │
+  ├── ACK (ack=301) ─────────►   │   "Connection established"
+  │                               │
+```
+
+### Step 3: TLS Handshake
+
+Since we're using HTTPS, the client and server negotiate encryption:
+
+```
+Client                          Server
+  │                               │
+  ├── ClientHello ───────────►   │   Supported cipher suites
+  │                               │
+  │   ◄── ServerHello ──────     │   Chosen cipher, certificate
+  │                               │
+  ├── Key Exchange ──────────►   │   Generate shared secret
+  │                               │
+  │   ◄── Finished ─────────     │   Encrypted channel ready
+  │                               │
+```
+
+### Step 4: HTTP Request
+
+Your browser sends an HTTP request over the encrypted connection:
+
+```http
+GET / HTTP/1.1
+Host: www.example.com
+User-Agent: Mozilla/5.0
+Accept: text/html
+Accept-Language: en-US
+Connection: keep-alive
+```
+
+### Step 5: HTTP Response
+
+The server processes the request and sends back a response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=UTF-8
+Content-Length: 1256
+
+<!doctype html>
+<html>
+<head>
+    <title>Example Domain</title>
+...
+```
+
+### Step 6: Rendering
+
+The browser parses HTML, fetches CSS/JavaScript/images (each requiring its own request), and renders the page.
+
+```bash
+# You can see all of this happening with curl:
+curl -v https://www.example.com 2>&1
+
+# This shows DNS resolution, TCP connect, TLS handshake,
+# request headers, and response headers
+```
+
+<Callout type="tip" title="curl -v Is Your Best Friend">
+The `curl -v` command (verbose mode) shows you every step of the connection process. When you are debugging connectivity issues, this is often the first tool you should reach for. It tells you exactly where in the process things go wrong.
+</Callout>
+
+## Client-Server vs Peer-to-Peer
+
+There are two fundamental models for how networked applications communicate:
+
+### Client-Server Model
+
+Most of the internet uses the **client-server** model:
+
+- The **client** initiates requests (your browser, your API consumer, your SSH session)
+- The **server** listens for and responds to requests (web servers, API servers, SSH daemons)
+
+```
+    ┌──────────┐         Request          ┌──────────┐
+    │  Client  │ ────────────────────►    │  Server  │
+    │ (Browser)│                          │  (Nginx) │
+    │          │ ◄────────────────────    │          │
+    └──────────┘         Response         └──────────┘
+```
+
+### Peer-to-Peer Model
+
+In **peer-to-peer** (P2P), every node is both a client and a server:
+
+- BitTorrent — file sharing where every downloader is also an uploader
+- Blockchain — decentralized ledger where every node validates transactions
+- WebRTC — browser-to-browser video calling
+
+```
+    ┌──────┐ ◄──────► ┌──────┐
+    │ Peer │          │ Peer │
+    └──┬───┘          └───┬──┘
+       │                  │
+       │    ┌──────┐      │
+       └──► │ Peer │ ◄────┘
+            └──────┘
+```
+
+<Callout type="info" title="Hybrid Models">
+Many modern systems use a hybrid approach. Video conferencing apps use a central server for signaling and coordination but peer-to-peer connections for the actual video stream. BitTorrent uses trackers (servers) to help peers find each other, but the actual file transfer is peer-to-peer.
+</Callout>
+
+## IP Addresses
+
+Every device on the Internet needs an address. That address is its **IP address**.
+
+### IPv4 Format
+
+An IPv4 address is a 32-bit number, written as four octets in dotted decimal notation:
+
+```
+192.168.1.100
+
+Each octet = 8 bits = 0-255
+Total: 4 octets × 8 bits = 32 bits
+Total possible addresses: 2^32 = ~4.3 billion
+```
+
+### Public vs Private IP Addresses
+
+Not all IP addresses are routable on the public Internet. Three ranges are reserved for **private** (internal) use:
+
+| Range | CIDR | Addresses | Common Use |
+|---|---|---|---|
+| 10.0.0.0 – 10.255.255.255 | 10.0.0.0/8 | 16.7 million | Large networks, cloud VPCs |
+| 172.16.0.0 – 172.31.255.255 | 172.16.0.0/12 | 1 million | Medium networks |
+| 192.168.0.0 – 192.168.255.255 | 192.168.0.0/16 | 65,536 | Home and small office |
+
+```bash
+# See your private IP address:
+ip addr show | grep "inet "
+
+# Example output:
+# inet 127.0.0.1/8 scope host lo        ← Loopback (yourself)
+# inet 192.168.1.50/24 scope global eth0 ← Your private IP
+
+# See your public IP address:
+curl -s ifconfig.me
+# Output: 203.0.113.47  ← Your public IP (as seen by the internet)
+```
+
+Your home router uses **NAT** (Network Address Translation) to let multiple devices with private IPs share a single public IP.
+
+## Domains and URLs
+
+IP addresses are hard to remember. **Domain names** provide human-readable names that map to IP addresses via DNS.
+
+### Anatomy of a URL
+
+```
+https://www.example.com:443/path/to/page?query=value#section
+│       │   │          │   │              │            │
+│       │   │          │   │              │            └── Fragment
+│       │   │          │   │              └── Query string
+│       │   │          │   └── Path
+│       │   │          └── Port (443 = HTTPS default)
+│       │   └── Domain name
+│       └── Subdomain
+└── Protocol (scheme)
+```
+
+```bash
+# You can break down a domain's DNS records:
+dig example.com
+
+# Or get just the IP:
+dig +short example.com
+# 93.184.216.34
+
+# See the full domain hierarchy:
+dig +trace example.com
+# Shows: root (.) → .com → example.com
+```
+
+<Exercise number={1} title="Trace a Request">
+
+Use the following commands to trace the complete path of a request from your machine to `google.com`. Run each command and observe the output carefully.
+
+```bash
+# 1. Find the IP address using DNS
+dig google.com +short
+
+# 2. Test basic connectivity with ping
+ping -c 4 google.com
+
+# 3. Trace the route through the network
+traceroute -m 15 google.com
+
+# 4. See the full HTTP conversation
+curl -v https://google.com 2>&1
+```
+
+Answer these questions based on your output:
+
+1. What IP address did DNS return for google.com?
+2. What was the average round-trip time (RTT) from ping?
+3. How many hops (routers) did traceroute reveal?
+4. What HTTP status code did curl receive?
+
+<CollapsibleSolution>
+
+```bash
+# 1. DNS lookup
+$ dig google.com +short
+142.250.80.46
+
+# 2. Ping for connectivity and latency
+$ ping -c 4 google.com
+PING google.com (142.250.80.46) 56(84) bytes of data.
+64 bytes from lhr25s34-in-f14.1e100.net: icmp_seq=1 ttl=117 time=5.23 ms
+64 bytes from lhr25s34-in-f14.1e100.net: icmp_seq=2 ttl=117 time=5.11 ms
+64 bytes from lhr25s34-in-f14.1e100.net: icmp_seq=3 ttl=117 time=5.09 ms
+64 bytes from lhr25s34-in-f14.1e100.net: icmp_seq=4 ttl=117 time=5.15 ms
+--- google.com ping statistics ---
+4 packets transmitted, 4 received, 0% packet loss, time 3004ms
+rtt min/avg/max/mdev = 5.090/5.145/5.230/0.053 ms
+
+# 3. Traceroute shows each router hop
+$ traceroute -m 15 google.com
+traceroute to google.com (142.250.80.46), 15 hops max
+ 1  192.168.1.1 (192.168.1.1)  1.234 ms
+ 2  10.0.0.1 (10.0.0.1)  5.678 ms
+ 3  * * *
+ ...
+10  142.250.80.46 (142.250.80.46)  5.456 ms
+
+# 4. curl -v shows DNS, TCP, TLS, HTTP
+$ curl -v https://google.com 2>&1
+* Trying 142.250.80.46:443...           ← TCP connect
+* Connected to google.com               ← TCP established
+* SSL connection using TLS 1.3          ← TLS negotiated
+> GET / HTTP/1.1                        ← HTTP request sent
+< HTTP/1.1 301 Moved Permanently        ← Response: redirect to www.
+< Location: https://www.google.com/
+```
+
+Key observations:
+- DNS resolved to an IP address (yours may differ based on location)
+- Ping shows round-trip time of about 5ms (varies by distance to Google's nearest data center)
+- Traceroute typically shows 8-15 hops depending on your location
+- Google returns a 301 redirect from `google.com` to `www.google.com`
+
+</CollapsibleSolution>
+</Exercise>
+
+<Exercise number={2} title="Network Discovery">
+
+Discover your own network configuration by running these commands. This is something you will do frequently as a DevOps engineer when setting up or troubleshooting servers.
+
+```bash
+# 1. Find your IP address and network interface details
+ip addr show
+
+# 2. Find your hostname
+hostname
+hostname -f    # Fully qualified domain name (if configured)
+
+# 3. Check your DNS resolver configuration
+cat /etc/resolv.conf
+
+# 4. Check your default gateway (router)
+ip route show
+
+# 5. Check what DNS servers you're using
+# (may vary by distribution)
+cat /etc/resolv.conf | grep nameserver
+```
+
+Write down:
+1. Your IP address and subnet mask
+2. Your default gateway
+3. Your DNS server(s)
+4. Your hostname
+
+<CollapsibleSolution>
+
+```bash
+# 1. IP address and interfaces
+$ ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536
+    inet 127.0.0.1/8 scope host lo
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+    inet 192.168.1.50/24 brd 192.168.1.255 scope global eth0
+#         ^^^^^^^^^^^^^^
+#    IP: 192.168.1.50, Subnet mask: /24 (255.255.255.0)
+
+# 2. Hostname
+$ hostname
+my-workstation
+
+$ hostname -f
+my-workstation.local
+
+# 3. DNS configuration
+$ cat /etc/resolv.conf
+nameserver 192.168.1.1      ← Usually your router
+nameserver 8.8.8.8          ← Google's public DNS (backup)
+
+# 4. Default gateway
+$ ip route show
+default via 192.168.1.1 dev eth0    ← Default gateway (your router)
+192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.50
+
+# Summary:
+# IP Address:       192.168.1.50
+# Subnet Mask:      /24 (255.255.255.0)
+# Default Gateway:  192.168.1.1
+# DNS Server:       192.168.1.1, 8.8.8.8
+# Hostname:         my-workstation
+```
+
+Understanding your network configuration is the first step in diagnosing any connectivity problem. When a server cannot reach the Internet, these are the first things you check: Does it have an IP? Is the gateway correct? Are the DNS servers reachable?
+
+</CollapsibleSolution>
+</Exercise>
+
+<MiniProject title="Request Tracer">
+
+Build a shell script that traces everything that happens when you visit a URL. This script will perform DNS lookup, TCP connection, TLS negotiation, and HTTP request — and report what happens at each stage.
+
+```bash
+#!/bin/bash
+# request-tracer.sh — Trace what happens when you visit a URL
+# Usage: ./request-tracer.sh <url>
+
+URL="${1:-https://www.example.com}"
+
+# Strip protocol for hostname
+HOSTNAME=$(echo "$URL" | sed 's|https\?://||' | sed 's|/.*||')
+
+echo "=========================================="
+echo "  Request Tracer"
+echo "  Target: $URL"
+echo "=========================================="
+
+# Step 1: DNS Resolution
+echo ""
+echo "[1/5] DNS Resolution"
+echo "-------------------------------------------"
+echo "Looking up IP address for $HOSTNAME..."
+DNS_START=$(date +%s%N)
+IP=$(dig +short "$HOSTNAME" | head -1)
+DNS_END=$(date +%s%N)
+DNS_TIME=$(( (DNS_END - DNS_START) / 1000000 ))
+
+if [ -z "$IP" ]; then
+    echo "FAILED: Could not resolve $HOSTNAME"
+    exit 1
+fi
+echo "Resolved: $HOSTNAME → $IP"
+echo "DNS lookup time: ${DNS_TIME}ms"
+
+# Step 2: Network Path
+echo ""
+echo "[2/5] Network Path (first 10 hops)"
+echo "-------------------------------------------"
+traceroute -m 10 -w 2 "$HOSTNAME" 2>/dev/null || echo "traceroute not available, skipping"
+
+# Step 3: TCP Connection Test
+echo ""
+echo "[3/5] TCP Connection"
+echo "-------------------------------------------"
+CONNECT_START=$(date +%s%N)
+if bash -c "echo >/dev/tcp/$IP/443" 2>/dev/null; then
+    CONNECT_END=$(date +%s%N)
+    CONNECT_TIME=$(( (CONNECT_END - CONNECT_START) / 1000000 ))
+    echo "TCP connection to $IP:443 succeeded"
+    echo "Connect time: ${CONNECT_TIME}ms"
+else
+    echo "TCP connection to $IP:443 failed"
+fi
+
+# Step 4: TLS Certificate Info
+echo ""
+echo "[4/5] TLS Certificate"
+echo "-------------------------------------------"
+echo | openssl s_client -connect "$HOSTNAME:443" -servername "$HOSTNAME" 2>/dev/null | \
+    openssl x509 -noout -subject -issuer -dates 2>/dev/null || \
+    echo "Could not retrieve TLS certificate"
+
+# Step 5: HTTP Request
+echo ""
+echo "[5/5] HTTP Request"
+echo "-------------------------------------------"
+HTTP_RESPONSE=$(curl -s -o /dev/null -w \
+    "HTTP Status:    %{http_code}\nRemote IP:      %{remote_ip}\nDNS Time:       %{time_namelookup}s\nConnect Time:   %{time_connect}s\nTLS Time:       %{time_appconnect}s\nFirst Byte:     %{time_starttransfer}s\nTotal Time:     %{time_total}s\nBytes Received: %{size_download}\n" \
+    "$URL" 2>/dev/null)
+echo "$HTTP_RESPONSE"
+
+# Summary
+echo ""
+echo "=========================================="
+echo "  Summary"
+echo "=========================================="
+echo "Hostname:     $HOSTNAME"
+echo "IP Address:   $IP"
+echo "DNS Time:     ${DNS_TIME}ms"
+echo "$HTTP_RESPONSE" | grep "Total Time"
+echo "=========================================="
+```
+
+Save this script, make it executable, and test it:
+
+```bash
+# Create and save the script
+chmod +x request-tracer.sh
+
+# Run it
+./request-tracer.sh https://www.google.com
+
+# Try different URLs to compare
+./request-tracer.sh https://www.github.com
+./request-tracer.sh https://www.example.com
+```
+
+This script demonstrates every concept from this lesson: DNS resolution, network path tracing, TCP connections, TLS certificates, and HTTP requests. As you progress through the networking module, you will understand each of these steps at a deeper level.
+
+</MiniProject>
+
+## Key Takeaways
+
+- The Internet is a network of networks — built on physical infrastructure including fiber optic cables, routers, and data centers connected through a hierarchy of ISPs
+- Data travels as packets that are independently routed and reassembled at the destination, making the network resilient and efficient
+- When you visit a website, six steps happen in order: DNS lookup, TCP handshake, TLS negotiation, HTTP request, HTTP response, and page rendering
+- Every device needs an IP address — private IPs are used within local networks, and NAT translates them to public IPs for Internet access
+- Tools like `ping`, `traceroute`, `dig`, and `curl -v` let you observe and debug every step of this process
+
+<Quiz>
+<QuizQuestion
+  question="What is the correct order of events when you visit https://example.com?"
+  options={[
+    "HTTP request → DNS lookup → TCP handshake → TLS → Response",
+    "DNS lookup → TCP handshake → TLS handshake → HTTP request → Response",
+    "TLS handshake → DNS lookup → HTTP request → TCP handshake → Response",
+    "TCP handshake → DNS lookup → TLS handshake → HTTP request → Response"
+  ]}
+  answer={1}
+  explanation="The browser first resolves the domain name to an IP (DNS), then establishes a TCP connection (three-way handshake), then negotiates encryption (TLS), and finally sends the HTTP request and receives the response."
+/>
+<QuizQuestion
+  question="What does a Tier 1 ISP have that a Tier 3 ISP does not?"
+  options={[
+    "Faster internet speeds",
+    "More customers",
+    "The ability to reach any network without paying for transit",
+    "Better security"
+  ]}
+  answer={2}
+  explanation="Tier 1 ISPs can reach every other network on the Internet through peering agreements without paying anyone for transit. Tier 3 ISPs (local providers) must pay higher-tier ISPs for access to the broader Internet."
+/>
+<QuizQuestion
+  question="Which IP address range is reserved for private (internal) use?"
+  options={[
+    "8.8.8.0/24",
+    "192.168.0.0/16",
+    "142.250.0.0/16",
+    "1.1.1.0/24"
+  ]}
+  answer={1}
+  explanation="192.168.0.0/16 is one of three private IP ranges (along with 10.0.0.0/8 and 172.16.0.0/12). The other options are public IP addresses: 8.8.8.8 is Google DNS, 142.250.x.x is Google's public range, and 1.1.1.1 is Cloudflare DNS."
+/>
+<QuizQuestion
+  question="What is the advantage of packet switching over circuit switching?"
+  options={[
+    "Packets always arrive in order",
+    "It uses less physical cable",
+    "It is more efficient — bandwidth is shared and routes can adapt to failures",
+    "It is faster for voice calls"
+  ]}
+  answer={2}
+  explanation="Packet switching is more efficient because bandwidth is not wasted when no data is being sent, and packets can be rerouted around failures. Circuit switching reserves a dedicated path for the entire session, wasting bandwidth during silence."
+/>
+</Quiz>
+
+## What's Next?
+
+In the next lesson, **The OSI and TCP/IP Models**, you will learn the layered architecture that organizes how data flows from your application to the wire and back. The journey we traced in this lesson — DNS, TCP, TLS, HTTP — will map perfectly onto these layers. When someone says "that's a Layer 3 problem," you will know exactly what they mean.

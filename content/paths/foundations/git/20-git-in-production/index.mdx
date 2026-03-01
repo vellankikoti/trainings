@@ -1,0 +1,1979 @@
+---
+title: "Git in Production"
+description: "Git isn't just for developers. Master hooks, CI/CD integration, branch protection, signed commits, monorepos, and the practices that make Git enterprise-ready."
+order: 20
+xpReward: 150
+estimatedMinutes: 45
+prerequisites:
+  - 19-enterprise-branching
+objectives:
+  - Set up Git hooks for automation
+  - Integrate Git with CI/CD pipelines
+  - Configure branch protection for team safety
+  - Use signed commits for security
+  - Understand monorepo vs multi-repo trade-offs
+tags:
+  - git
+  - production
+  - hooks
+  - ci-cd
+  - enterprise
+---
+
+<Callout type="story" title="The Story">
+A junior developer accidentally pushes a commit with an AWS secret key to the public repo. The key is scraped by a bot within 2 minutes and used to spin up crypto-mining instances. The $10,000 AWS bill arrives on Monday. This was preventable — a pre-commit hook scanning for secrets, branch protection preventing direct pushes to main, and signed commits for audit trails. Git in production isn't about learning new commands — it's about configuring Git to protect your team from mistakes.
+</Callout>
+
+## Git Hooks — Automated Guardrails
+
+Git hooks are scripts that run automatically at specific points in the Git workflow. They're your first line of defense against mistakes.
+
+### How Hooks Work
+
+```
+Hooks live in .git/hooks/ (local, not committed)
+or can be managed by frameworks (shared with the team)
+
+Client-side hooks:           Server-side hooks:
+  pre-commit                   pre-receive
+  prepare-commit-msg           update
+  commit-msg                   post-receive
+  post-commit
+  pre-push
+  pre-rebase
+  post-checkout
+  post-merge
+```
+
+### pre-commit Hook
+
+Runs before every commit. If it exits non-zero, the commit is aborted. Perfect for catching problems early.
+
+```bash
+# .git/hooks/pre-commit
+#!/bin/bash
+
+echo "Running pre-commit checks..."
+
+# 1. Check for secrets/credentials
+echo "Checking for secrets..."
+SECRETS_PATTERN='(AKIA[A-Z0-9]{16}|password\s*=\s*["\x27][^\s]+|api[_-]?key\s*=\s*["\x27][^\s]+|secret[_-]?key\s*=\s*["\x27])'
+
+# Only check staged files
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+if echo "$STAGED_FILES" | xargs grep -lPi "$SECRETS_PATTERN" 2>/dev/null; then
+    echo ""
+    echo "ERROR: Potential secrets detected in staged files!"
+    echo "Please remove credentials before committing."
+    echo "If this is a false positive, use: git commit --no-verify"
+    exit 1
+fi
+
+# 2. Lint staged files
+echo "Running linter..."
+STAGED_JS=$(echo "$STAGED_FILES" | grep -E '\.(js|ts|jsx|tsx)$' || true)
+if [ -n "$STAGED_JS" ]; then
+    echo "$STAGED_JS" | xargs npx eslint --quiet 2>/dev/null
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Lint errors found. Fix them before committing."
+        exit 1
+    fi
+fi
+
+# 3. Check for debug statements
+echo "Checking for debug statements..."
+if echo "$STAGED_FILES" | xargs grep -n 'console\.log\|debugger\|binding\.pry\|import pdb' 2>/dev/null; then
+    echo ""
+    echo "WARNING: Debug statements found in staged files."
+    echo "Remove them before committing, or use --no-verify to skip."
+    exit 1
+fi
+
+# 4. Run formatter (auto-fix)
+echo "Formatting code..."
+if [ -n "$STAGED_JS" ]; then
+    echo "$STAGED_JS" | xargs npx prettier --write 2>/dev/null
+    echo "$STAGED_JS" | xargs git add  # re-stage formatted files
+fi
+
+echo "Pre-commit checks passed!"
+exit 0
+```
+
+```bash
+# Make the hook executable
+chmod +x .git/hooks/pre-commit
+
+# Test it
+echo "const key = 'AKIAIOSFODNN7EXAMPLE';" > secret.js
+git add secret.js
+git commit -m "test"
+# ERROR: Potential secrets detected in staged files!
+# (commit blocked!)
+```
+
+### commit-msg Hook
+
+Validates commit messages to enforce conventions:
+
+```bash
+# .git/hooks/commit-msg
+#!/bin/bash
+
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Enforce conventional commit format
+# type(scope): description
+# Types: feat, fix, docs, style, refactor, test, chore
+PATTERN='^(feat|fix|docs|style|refactor|test|chore)(\([a-z-]+\))?: .{1,72}$'
+
+FIRST_LINE=$(head -1 "$COMMIT_MSG_FILE")
+
+if ! echo "$FIRST_LINE" | grep -Eq "$PATTERN"; then
+    echo ""
+    echo "ERROR: Commit message doesn't follow conventional format."
+    echo ""
+    echo "Expected: type(scope): description"
+    echo "Types: feat, fix, docs, style, refactor, test, chore"
+    echo "Max length: 72 characters"
+    echo ""
+    echo "Examples:"
+    echo "  feat(auth): add OAuth2 login flow"
+    echo "  fix(payments): handle null cart in checkout"
+    echo "  docs: update API documentation"
+    echo ""
+    echo "Your message: $FIRST_LINE"
+    exit 1
+fi
+
+echo "Commit message format OK."
+exit 0
+```
+
+### pre-push Hook
+
+Last chance to catch issues before code reaches the remote:
+
+```bash
+# .git/hooks/pre-push
+#!/bin/bash
+
+# Prevent pushing to main/master directly
+PROTECTED_BRANCHES="^(main|master|production)$"
+CURRENT_BRANCH=$(git branch --show-current)
+
+if echo "$CURRENT_BRANCH" | grep -Eq "$PROTECTED_BRANCHES"; then
+    echo ""
+    echo "ERROR: Direct push to '$CURRENT_BRANCH' is not allowed."
+    echo "Please create a feature branch and open a pull request."
+    echo ""
+    exit 1
+fi
+
+# Run tests before pushing
+echo "Running tests before push..."
+npm test 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "ERROR: Tests failed. Fix them before pushing."
+    exit 1
+fi
+
+echo "Pre-push checks passed."
+exit 0
+```
+
+<Callout type="tip" title="Hook Bypass for Emergencies">
+All client-side hooks can be skipped with `--no-verify`:
+```bash
+git commit --no-verify -m "Emergency fix"
+git push --no-verify
+```
+This exists for genuine emergencies. If your team uses `--no-verify` routinely, the hooks are either too strict or too slow. Fix the hooks rather than bypassing them.
+</Callout>
+
+## Hook Frameworks — Sharing Hooks with Your Team
+
+Local hooks (in `.git/hooks/`) aren't committed to the repository. Hook frameworks solve this by storing hook configurations in committed files.
+
+### Husky (Node.js Projects)
+
+```bash
+# Install husky
+npm install --save-dev husky
+npx husky init
+
+# Creates .husky/ directory (committed to repo)
+# Adds "prepare": "husky" script to package.json
+
+# Add a pre-commit hook
+cat > .husky/pre-commit << 'EOF'
+#!/bin/sh
+npx lint-staged
+EOF
+
+# Configure lint-staged in package.json
+cat > .lintstagedrc << 'EOF'
+{
+  "*.{js,ts,jsx,tsx}": ["eslint --fix", "prettier --write"],
+  "*.{json,md,yml}": ["prettier --write"]
+}
+EOF
+```
+
+### pre-commit Framework (Python Projects)
+
+```yaml
+# .pre-commit-config.yaml (committed to repo)
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: detect-private-key
+      - id: detect-aws-credentials
+
+  - repo: https://github.com/psf/black
+    rev: 24.1.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+```
+
+```bash
+# Install and set up
+pip install pre-commit
+pre-commit install
+
+# Run against all files (first time)
+pre-commit run --all-files
+
+# Now hooks run automatically on every commit
+```
+
+### Server-Side Hooks
+
+Server-side hooks run on the Git server (GitHub, GitLab, etc.) and can't be bypassed by clients:
+
+```bash
+# pre-receive hook (runs on the server before accepting a push)
+#!/bin/bash
+
+while read oldrev newrev refname; do
+    # Reject force pushes to protected branches
+    if [ "$refname" = "refs/heads/main" ]; then
+        # Check if this is a force push (non-fast-forward)
+        if ! git merge-base --is-ancestor "$oldrev" "$newrev" 2>/dev/null; then
+            echo "ERROR: Force push to main is not allowed."
+            exit 1
+        fi
+    fi
+
+    # Check commit message format
+    for commit in $(git rev-list "$oldrev..$newrev"); do
+        msg=$(git log --format=%s -1 "$commit")
+        if ! echo "$msg" | grep -Eq '^(feat|fix|docs|style|refactor|test|chore)'; then
+            echo "ERROR: Commit $commit has invalid message format."
+            echo "Message: $msg"
+            exit 1
+        fi
+    done
+done
+```
+
+## CI/CD Integration
+
+Git events trigger CI/CD pipelines. Understanding this integration is essential for production Git workflows.
+
+### GitHub Actions (Triggered by Git Events)
+
+```yaml
+# .github/workflows/ci.yml
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: dist/
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+      - run: echo "Deploying to production..."
+      # Deploy steps here
+```
+
+### GitLab CI (Triggered by Git Events)
+
+```yaml
+# .gitlab-ci.yml
+stages:
+  - test
+  - build
+  - deploy
+
+test:
+  stage: test
+  script:
+    - npm ci
+    - npm test
+    - npm run lint
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+build:
+  stage: build
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+
+deploy_staging:
+  stage: deploy
+  script:
+    - echo "Deploying to staging..."
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+deploy_production:
+  stage: deploy
+  script:
+    - echo "Deploying to production..."
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+```
+
+### Git Events That Trigger Pipelines
+
+```
+Push events:
+  push to any branch      → run tests
+  push to main             → run tests + deploy to production
+  push to develop          → run tests + deploy to staging
+
+Pull Request events:
+  PR opened                → run tests, post status check
+  PR updated (new commits) → re-run tests
+  PR merged                → trigger deployment
+
+Tag events:
+  tag pushed (v*)          → build release artifacts
+  release created          → deploy to production
+
+Schedule events:
+  cron schedule            → nightly builds, security scans
+```
+
+<Callout type="tip" title="Status Checks as Gatekeepers">
+CI/CD status checks are the backbone of branch protection. When a PR's CI pipeline fails, the merge button is disabled. This ensures no broken code reaches main. Configure these in your repository's branch protection settings: require status checks to pass before merging.
+</Callout>
+
+## Branch Protection Rules
+
+Branch protection prevents accidental (or intentional) damage to important branches. Configure these on your Git hosting platform.
+
+### Essential Protection Rules
+
+```
+Rule                           Why It Matters
+─────────────────────────────  ──────────────────────────────────────
+Require pull request           No direct pushes to main
+Require N approvals            At least 1-2 reviewers must approve
+Dismiss stale approvals        New commits invalidate old approvals
+Require status checks          CI must pass before merge
+Require up-to-date branch      Branch must be current with main
+Require linear history         No merge commits (rebase only)
+Require signed commits         Verify commit authorship
+No force push                  Prevent history rewriting
+No deletions                   Prevent branch deletion
+Restrict who can push          Only admins or bots can push
+CODEOWNERS required reviews    Specific people must review specific files
+```
+
+### CODEOWNERS File
+
+```bash
+# .github/CODEOWNERS (GitHub)
+# or CODEOWNERS (GitLab)
+
+# Default owner for everything
+* @team-lead
+
+# Frontend team owns all frontend code
+/src/frontend/        @frontend-team
+/src/components/      @frontend-team
+*.css                 @frontend-team
+*.scss                @frontend-team
+
+# Backend team owns API and server code
+/src/api/             @backend-team
+/src/server/          @backend-team
+
+# DevOps team owns infrastructure
+/infrastructure/      @devops-team
+Dockerfile            @devops-team
+docker-compose*.yml   @devops-team
+.github/workflows/    @devops-team
+
+# Security team must review auth and crypto
+/src/auth/            @security-team
+/src/crypto/          @security-team
+
+# Database changes need DBA review
+/migrations/          @dba-team
+/src/models/          @backend-team @dba-team
+```
+
+### Setting Up Protection (GitHub CLI)
+
+```bash
+# Using GitHub CLI to configure branch protection
+gh api repos/{owner}/{repo}/branches/main/protection \
+  --method PUT \
+  --field required_status_checks='{"strict":true,"contexts":["ci/test","ci/build"]}' \
+  --field enforce_admins=true \
+  --field required_pull_request_reviews='{"required_approving_review_count":2,"dismiss_stale_reviews":true}' \
+  --field restrictions=null
+```
+
+## Signed Commits — Verify Authorship
+
+Git commit authorship is trivially forgeable — anyone can set their name and email to anything. Signed commits prove that a commit was actually made by the person it claims.
+
+### Why Sign Commits?
+
+```bash
+# Anyone can impersonate you:
+git config user.name "Linus Torvalds"
+git config user.email "torvalds@linux-foundation.org"
+git commit -m "Totally legitimate commit"
+# Git happily records this — no verification!
+
+# Signed commits prevent this by requiring a cryptographic key
+# that only the real author possesses
+```
+
+### GPG Key Setup
+
+```bash
+# Generate a GPG key
+gpg --full-generate-key
+# Choose: RSA and RSA, 4096 bits, key doesn't expire
+# Enter your name and email (must match your Git email)
+
+# List your keys
+gpg --list-secret-keys --keyid-format=long
+# /home/user/.gnupg/secring.gpg
+# sec   rsa4096/ABC123DEF4567890 2026-01-01
+# uid   Your Name <you@company.com>
+
+# Tell Git to use this key
+git config --global user.signingkey ABC123DEF4567890
+
+# Sign all commits by default
+git config --global commit.gpgsign true
+
+# Sign all tags by default
+git config --global tag.gpgsign true
+```
+
+### Making Signed Commits
+
+```bash
+# Sign a specific commit
+git commit -S -m "feat(auth): add OAuth2 support"
+
+# Sign all commits (if configured globally)
+git commit -m "feat(auth): add OAuth2 support"
+# Automatically signed with your GPG key
+
+# Verify a commit's signature
+git log --show-signature -1
+# commit abc123...
+# gpg: Signature made Mon 01 Mar 2026 10:00:00 AM UTC
+# gpg: using RSA key ABC123DEF4567890
+# gpg: Good signature from "Your Name <you@company.com>"
+# Author: Your Name <you@company.com>
+# ...
+
+# Verify all commits in a range
+git log --show-signature v1.0..HEAD
+
+# Check signatures in log output
+git log --format="%G? %h %s" -10
+# G abc1234 feat(auth): add OAuth2 support     (Good signature)
+# N def5678 fix: typo in readme                 (No signature)
+# B ghi9012 chore: update deps                  (Bad signature!)
+```
+
+### Upload Key to GitHub
+
+```bash
+# Export your public key
+gpg --armor --export ABC123DEF4567890
+
+# Add it to GitHub:
+# Settings → SSH and GPG keys → New GPG key → Paste the output
+
+# Now your commits show "Verified" badge on GitHub
+```
+
+<Callout type="tip" title="SSH Signing (Simpler Alternative)">
+As of Git 2.34, you can use SSH keys instead of GPG for signing. This is simpler since most developers already have SSH keys:
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+```
+GitHub, GitLab, and Gitea all support SSH signature verification.
+</Callout>
+
+## .gitattributes — Controlling Git Behavior
+
+`.gitattributes` configures how Git handles specific files:
+
+```bash
+# .gitattributes
+
+# Normalize line endings (LF in repo, native on checkout)
+* text=auto
+
+# Force LF for specific files
+*.sh text eol=lf
+*.py text eol=lf
+Makefile text eol=lf
+
+# Force CRLF for Windows scripts
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files (don't diff, don't merge)
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
+*.zip binary
+
+# Large files handled by Git LFS
+*.psd filter=lfs diff=lfs merge=lfs -text
+*.ai filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+
+# Custom diff drivers
+*.lock linguist-generated
+*.min.js linguist-generated
+
+# Merge strategies
+package-lock.json merge=ours
+yarn.lock merge=ours
+```
+
+## Git LFS — Large File Storage
+
+Git LFS replaces large files with pointer files while storing the actual content on a separate server:
+
+```bash
+# Install Git LFS
+git lfs install
+
+# Track specific file types
+git lfs track "*.psd"
+git lfs track "*.ai"
+git lfs track "*.mp4"
+git lfs track "*.zip"
+
+# This creates/updates .gitattributes
+cat .gitattributes
+# *.psd filter=lfs diff=lfs merge=lfs -text
+# *.ai filter=lfs diff=lfs merge=lfs -text
+
+# Commit the tracking config
+git add .gitattributes
+git commit -m "chore: configure Git LFS for large files"
+
+# Now large files are handled transparently
+cp ~/design-files/mockup.psd .
+git add mockup.psd
+git commit -m "Add design mockup"
+# The PSD is stored in LFS, only a pointer is in the Git repo
+
+# See what's being tracked
+git lfs ls-files
+
+# Check LFS status
+git lfs status
+```
+
+## Monorepo vs Multi-Repo
+
+### Monorepo (One Repository for Everything)
+
+```
+monorepo/
+├── packages/
+│   ├── frontend/
+│   │   ├── package.json
+│   │   └── src/
+│   ├── backend/
+│   │   ├── package.json
+│   │   └── src/
+│   ├── shared/
+│   │   ├── package.json
+│   │   └── src/
+│   └── mobile/
+│       ├── package.json
+│       └── src/
+├── infrastructure/
+│   ├── terraform/
+│   └── kubernetes/
+├── package.json (workspace root)
+└── turbo.json (or nx.json)
+```
+
+### Multi-Repo (Separate Repository per Service)
+
+```
+github.com/company/frontend      ← its own repo
+github.com/company/backend       ← its own repo
+github.com/company/shared-lib    ← its own repo (published as package)
+github.com/company/mobile        ← its own repo
+github.com/company/infrastructure ← its own repo
+```
+
+### Comparison
+
+| Aspect | Monorepo | Multi-Repo |
+|---|---|---|
+| **Code sharing** | Easy (direct imports) | Hard (publish packages) |
+| **Atomic changes** | One PR changes everything | Multiple PRs across repos |
+| **CI/CD** | Complex (what changed?) | Simple (per-repo pipelines) |
+| **Team autonomy** | Less (shared repo rules) | More (own repo, own rules) |
+| **Dependency management** | Centralized | Distributed |
+| **Repository size** | Grows large over time | Stays small per repo |
+| **Tooling required** | Turborepo, Nx, Bazel, Lerna | Package registry (npm, PyPI) |
+| **Used by** | Google, Meta, Microsoft | Netflix, Amazon, Spotify |
+
+### Monorepo Tools
+
+```bash
+# Turborepo (JavaScript/TypeScript)
+npx create-turbo@latest
+# Caches builds, runs tasks in parallel, understands dependencies
+
+# Nx (Multi-language)
+npx create-nx-workspace@latest
+# Advanced dependency graph, affected command, remote caching
+
+# Example: run tests only for packages affected by changes
+npx turbo test --filter="...[main...HEAD]"
+npx nx affected --target=test --base=main
+```
+
+<Callout type="tip" title="Monorepo Decision Guide">
+Choose monorepo if: teams share a lot of code, you want atomic cross-project changes, and you're willing to invest in tooling (Turborepo, Nx, Bazel).
+
+Choose multi-repo if: teams are autonomous, services are loosely coupled, you want simple per-repo CI/CD, and you publish shared code as packages.
+
+Many organizations use a hybrid: monorepos per team or per domain, with shared libraries as separate repos published to a package registry.
+</Callout>
+
+## Git Performance at Scale
+
+Large repositories need special techniques to stay fast:
+
+### Shallow Clones
+
+```bash
+# Clone only the last N commits (no full history)
+git clone --depth 1 https://github.com/company/large-repo.git
+# Much faster for CI/CD where you don't need history
+
+# Deepen later if needed
+git fetch --deepen=100
+
+# Unshallow (get full history)
+git fetch --unshallow
+```
+
+### Partial Clones
+
+```bash
+# Clone without blob data (download on demand)
+git clone --filter=blob:none https://github.com/company/repo.git
+# Fetches tree structure but downloads file contents only when accessed
+
+# Clone without blobs larger than 1MB
+git clone --filter=blob:limit=1m https://github.com/company/repo.git
+```
+
+### Sparse Checkout
+
+```bash
+# Only check out specific directories (useful for monorepos)
+git clone --sparse https://github.com/company/monorepo.git
+cd monorepo
+
+# Check out only the frontend package
+git sparse-checkout set packages/frontend shared/utils
+
+# Add more directories later
+git sparse-checkout add packages/backend
+
+# List what's checked out
+git sparse-checkout list
+
+# Disable sparse checkout (get everything)
+git sparse-checkout disable
+```
+
+### Commit Graph (Faster Log/Blame)
+
+```bash
+# Generate commit-graph file for faster traversal
+git commit-graph write --reachable
+
+# Enable automatic commit-graph updates
+git config --global fetch.writeCommitGraph true
+
+# This speeds up: git log, git blame, git merge-base, etc.
+```
+
+## Security Best Practices
+
+### Secrets Scanning
+
+```bash
+# git-secrets (AWS tool, works for any secrets)
+git secrets --install
+git secrets --register-aws
+
+# Scan for secrets
+git secrets --scan
+git secrets --scan-history  # scan all history
+
+# Add custom patterns
+git secrets --add 'PRIVATE_KEY'
+git secrets --add-provider -- cat /path/to/secret-patterns.txt
+```
+
+### .gitignore for Security
+
+```bash
+# .gitignore — MUST include sensitive files
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Credentials
+credentials.json
+service-account-key.json
+*.pem
+*.key
+*.p12
+
+# IDE secrets
+.idea/
+.vscode/settings.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+node_modules/
+dist/
+build/
+*.pyc
+__pycache__/
+
+# Logs
+*.log
+npm-debug.log*
+```
+
+### Removing Secrets from History
+
+```bash
+# If a secret was committed, removing it from the current commit isn't enough.
+# It's still in the Git history!
+
+# Option 1: BFG Repo Cleaner (recommended)
+# Download: https://rtyley.github.io/bfg-repo-cleaner/
+java -jar bfg.jar --replace-text passwords.txt my-repo.git
+cd my-repo.git
+git reflog expire --expire=now --all
+git gc --prune=now --aggressive
+git push --force
+
+# Option 2: git filter-repo (built-in, Python required)
+pip install git-filter-repo
+git filter-repo --invert-paths --path secrets.env
+
+# CRITICAL: After removing secrets from history,
+# you MUST rotate the compromised credentials immediately.
+# Removing from history doesn't un-expose them.
+```
+
+<Callout type="warning" title="Rotate Secrets Immediately">
+If a secret is pushed to a public repository (even for a few seconds), consider it compromised. Bots continuously scan public repos for credentials. Removing the commit is not enough — the secret may have already been copied. Always rotate (change) the compromised credential immediately, then clean up the history.
+</Callout>
+
+<Exercise number={1} title="Git Hooks">
+
+```bash
+# Set up pre-commit and commit-msg hooks that enforce standards
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+mkdir -p src tests
+
+echo "initial" > src/app.js
+git add . && git commit -q -m "feat: initial commit"
+
+echo ""
+echo "=== Setting Up Git Hooks ==="
+echo ""
+
+# === Hook 1: pre-commit ===
+cat > .git/hooks/pre-commit << 'HOOKEOF'
+#!/bin/bash
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+ERRORS=0
+
+# Get staged files
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+echo -e "${GREEN}Running pre-commit checks...${NC}"
+echo ""
+
+# Check 1: No secrets
+echo "  [1/4] Checking for secrets..."
+SECRET_PATTERNS='(AKIA[A-Z0-9]{16}|password\s*[:=]\s*["\x27][^\s]+|api[_-]?key\s*[:=]\s*["\x27][^\s]+|BEGIN (RSA|DSA|EC) PRIVATE KEY)'
+FOUND_SECRETS=$(echo "$STAGED" | xargs grep -lPi "$SECRET_PATTERNS" 2>/dev/null || true)
+if [ -n "$FOUND_SECRETS" ]; then
+    echo -e "  ${RED}FAIL: Potential secrets found in:${NC}"
+    echo "$FOUND_SECRETS" | sed 's/^/    /'
+    ERRORS=$((ERRORS + 1))
+else
+    echo -e "  ${GREEN}PASS: No secrets detected${NC}"
+fi
+
+# Check 2: No debug statements
+echo "  [2/4] Checking for debug statements..."
+DEBUG_PATTERNS='console\.log\|debugger\|binding\.pry\|import pdb\|breakpoint()'
+FOUND_DEBUG=$(echo "$STAGED" | xargs grep -ln "$DEBUG_PATTERNS" 2>/dev/null || true)
+if [ -n "$FOUND_DEBUG" ]; then
+    echo -e "  ${YELLOW}WARN: Debug statements found in:${NC}"
+    echo "$FOUND_DEBUG" | sed 's/^/    /'
+    echo "    (This is a warning — commit will proceed)"
+else
+    echo -e "  ${GREEN}PASS: No debug statements${NC}"
+fi
+
+# Check 3: No large files
+echo "  [3/4] Checking file sizes..."
+MAX_SIZE=500000  # 500KB
+LARGE_FILES=""
+for file in $STAGED; do
+    if [ -f "$file" ]; then
+        SIZE=$(wc -c < "$file" 2>/dev/null || echo 0)
+        if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            LARGE_FILES="$LARGE_FILES\n    $file ($(( SIZE / 1024 ))KB)"
+        fi
+    fi
+done
+if [ -n "$LARGE_FILES" ]; then
+    echo -e "  ${RED}FAIL: Large files detected (max ${MAX_SIZE} bytes):${NC}"
+    echo -e "$LARGE_FILES"
+    ERRORS=$((ERRORS + 1))
+else
+    echo -e "  ${GREEN}PASS: No oversized files${NC}"
+fi
+
+# Check 4: No TODO/FIXME in new code
+echo "  [4/4] Checking for TODO/FIXME..."
+TODO_COUNT=$(echo "$STAGED" | xargs grep -c 'TODO\|FIXME\|HACK\|XXX' 2>/dev/null | grep -v ':0$' | wc -l || echo 0)
+if [ "$TODO_COUNT" -gt 0 ]; then
+    echo -e "  ${YELLOW}INFO: Found TODO/FIXME markers (${TODO_COUNT} files)${NC}"
+else
+    echo -e "  ${GREEN}PASS: No TODO markers${NC}"
+fi
+
+echo ""
+if [ $ERRORS -gt 0 ]; then
+    echo -e "${RED}Pre-commit failed with $ERRORS error(s).${NC}"
+    echo -e "${YELLOW}Use 'git commit --no-verify' to bypass (not recommended).${NC}"
+    exit 1
+else
+    echo -e "${GREEN}All pre-commit checks passed!${NC}"
+    exit 0
+fi
+HOOKEOF
+chmod +x .git/hooks/pre-commit
+
+# === Hook 2: commit-msg ===
+cat > .git/hooks/commit-msg << 'HOOKEOF'
+#!/bin/bash
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+COMMIT_MSG_FILE=$1
+FIRST_LINE=$(head -1 "$COMMIT_MSG_FILE")
+
+# Conventional commit format
+PATTERN='^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\([a-zA-Z0-9_-]+\))?(!)?: .{1,72}$'
+
+if ! echo "$FIRST_LINE" | grep -Eq "$PATTERN"; then
+    echo ""
+    echo -e "${RED}ERROR: Invalid commit message format.${NC}"
+    echo ""
+    echo "Expected: type(scope): description"
+    echo ""
+    echo "Valid types:"
+    echo "  feat     — new feature"
+    echo "  fix      — bug fix"
+    echo "  docs     — documentation"
+    echo "  style    — formatting (no code change)"
+    echo "  refactor — restructuring (no feature/fix)"
+    echo "  test     — adding/updating tests"
+    echo "  chore    — maintenance tasks"
+    echo "  ci       — CI/CD changes"
+    echo "  perf     — performance improvement"
+    echo "  build    — build system changes"
+    echo "  revert   — reverting a commit"
+    echo ""
+    echo "Your message: '$FIRST_LINE'"
+    echo ""
+    exit 1
+fi
+
+echo -e "${GREEN}Commit message format OK.${NC}"
+exit 0
+HOOKEOF
+chmod +x .git/hooks/commit-msg
+
+echo "=== Hooks Installed ==="
+echo "  pre-commit: secrets, debug statements, file size, TODO markers"
+echo "  commit-msg: conventional commit format"
+echo ""
+
+# === Test the hooks ===
+
+echo "=== Test 1: Commit with secrets (should FAIL) ==="
+echo 'const key = "AKIAIOSFODNN7EXAMPLE";' > src/secret.js
+git add src/secret.js
+git commit -m "feat: add config" 2>&1 || true
+echo ""
+
+# Clean up the secret file
+git restore --staged src/secret.js
+rm src/secret.js
+
+echo "=== Test 2: Bad commit message (should FAIL) ==="
+echo "valid code" > src/feature.js
+git add src/feature.js
+git commit -m "added stuff" 2>&1 || true
+echo ""
+
+echo "=== Test 3: Valid commit (should PASS) ==="
+git commit -m "feat(core): add new feature module" 2>&1
+echo ""
+
+echo "=== Test 4: Another valid commit type ==="
+echo "// fixed bug" >> src/feature.js
+git add src/feature.js
+git commit -m "fix(core): resolve edge case in feature module" 2>&1
+echo ""
+
+echo "=== Git log shows conventional commits ==="
+git log --oneline
+echo ""
+
+echo "=== Hook files ==="
+ls -la .git/hooks/pre-commit .git/hooks/commit-msg
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<Exercise number={2} title="Branch Protection">
+
+```bash
+# Simulate branch protection rules and test that they work
+# (Since we can't use GitHub API, we'll simulate with Git hooks)
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+
+mkdir -p src
+echo "production code v1" > src/app.js
+git add . && git commit -q -m "feat: initial production code"
+git tag v1.0.0
+
+echo ""
+echo "=== Setting Up Branch Protection via Hooks ==="
+echo ""
+
+# === pre-push hook that simulates branch protection ===
+cat > .git/hooks/pre-push << 'HOOKEOF'
+#!/bin/bash
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+CURRENT_BRANCH=$(git branch --show-current)
+
+# Protected branches
+PROTECTED="main master production"
+
+for branch in $PROTECTED; do
+    if [ "$CURRENT_BRANCH" = "$branch" ]; then
+        echo -e "${RED}============================================${NC}"
+        echo -e "${RED}  BRANCH PROTECTION: Push to '$branch' blocked${NC}"
+        echo -e "${RED}============================================${NC}"
+        echo ""
+        echo "Protected branch rules for '$branch':"
+        echo "  - No direct pushes (use pull requests)"
+        echo "  - Required status checks: ci/test, ci/build"
+        echo "  - Required reviewers: 2"
+        echo "  - No force push"
+        echo "  - No branch deletion"
+        echo ""
+        echo "To contribute:"
+        echo "  1. Create a feature branch: git switch -c feature/my-change"
+        echo "  2. Push the feature branch: git push -u origin feature/my-change"
+        echo "  3. Open a pull request"
+        echo ""
+        exit 1
+    fi
+done
+
+echo -e "${GREEN}Push to '$CURRENT_BRANCH' allowed.${NC}"
+exit 0
+HOOKEOF
+chmod +x .git/hooks/pre-push
+
+# === update hook that simulates server-side protection ===
+cat > .git/hooks/pre-receive.simulation << 'HOOKEOF'
+#!/bin/bash
+# This simulates what GitHub/GitLab branch protection does server-side
+# In reality, these are configured via the hosting platform's UI or API
+
+echo "=== Server-Side Branch Protection Rules ==="
+echo ""
+echo "Branch: main"
+echo "  [x] Require pull request before merging"
+echo "  [x] Require 2 approving reviews"
+echo "  [x] Dismiss stale pull request approvals"
+echo "  [x] Require status checks to pass: ci/test, ci/build, ci/lint"
+echo "  [x] Require branches to be up to date"
+echo "  [x] Require signed commits"
+echo "  [x] Do not allow force pushes"
+echo "  [x] Do not allow deletions"
+echo "  [x] Require CODEOWNERS review"
+echo ""
+echo "Branch: production"
+echo "  [x] All rules from 'main' plus:"
+echo "  [x] Restrict pushes to: deploy-bot, release-manager"
+echo ""
+HOOKEOF
+chmod +x .git/hooks/pre-receive.simulation
+
+# === Create CODEOWNERS ===
+mkdir -p .github
+cat > .github/CODEOWNERS << 'EOF'
+# Default owner
+* @team-lead @senior-dev
+
+# Frontend
+/src/frontend/ @frontend-team
+*.css @frontend-team
+*.jsx @frontend-team
+
+# Backend
+/src/api/ @backend-team
+/src/models/ @backend-team
+
+# DevOps
+/infrastructure/ @devops-team
+Dockerfile @devops-team
+*.yml @devops-team
+
+# Security-sensitive
+/src/auth/ @security-team
+/src/crypto/ @security-team
+.env* @security-team @team-lead
+EOF
+git add . && git commit -q -m "chore: add CODEOWNERS for branch protection"
+
+echo "=== CODEOWNERS File ==="
+cat .github/CODEOWNERS
+echo ""
+
+echo "=== Test 1: Direct push to main (should be BLOCKED) ==="
+echo ""
+# Simulate pushing to a remote by running the hook directly
+.git/hooks/pre-push 2>&1 || true
+echo ""
+
+echo "=== Test 2: Push from feature branch (should be ALLOWED) ==="
+git switch -c feature/new-feature
+echo "new feature" > src/feature.js
+git add . && git commit -q -m "feat: add new feature"
+echo ""
+.git/hooks/pre-push 2>&1
+echo ""
+
+echo "=== Test 3: Simulate PR Merge Workflow ==="
+echo ""
+
+# Show what a proper workflow looks like
+echo "Step 1: Developer creates feature branch"
+echo "  Branch: feature/new-feature"
+echo "  Commits: $(git log --oneline main..HEAD | wc -l)"
+git log --oneline main..HEAD
+echo ""
+
+echo "Step 2: Developer pushes and creates PR"
+echo "  PR: feature/new-feature → main"
+echo "  Changed files:"
+git diff --stat main..HEAD
+echo ""
+
+echo "Step 3: CI runs status checks"
+echo "  [PASS] ci/test — All 127 tests passed"
+echo "  [PASS] ci/build — Build succeeded"
+echo "  [PASS] ci/lint — No linting errors"
+echo ""
+
+echo "Step 4: Code review"
+echo "  [APPROVED] @senior-dev: 'Looks good!'"
+echo "  [APPROVED] @team-lead: 'Approved, nice work.'"
+echo "  Required reviews: 2/2"
+echo ""
+
+echo "Step 5: CODEOWNERS check"
+echo "  Modified: src/feature.js"
+echo "  Required reviewer: @team-lead @senior-dev (from: * rule)"
+echo "  [SATISFIED] Both owners approved"
+echo ""
+
+echo "Step 6: Merge!"
+git switch main
+git merge --no-ff feature/new-feature -m "Merge PR #42: feat: add new feature
+
+Approved-by: @senior-dev
+Approved-by: @team-lead
+CI-Status: all checks passed"
+echo ""
+
+echo "=== Final State ==="
+git log --oneline --graph -5
+echo ""
+
+echo "=== Show Server-Side Protection Rules ==="
+.git/hooks/pre-receive.simulation
+echo ""
+
+# Show the protection simulation summary
+echo "=== Protection Summary ==="
+echo "Branch protection prevented:"
+echo "  - Direct pushes to main (must use PR)"
+echo "  - Merging without 2 approving reviews"
+echo "  - Merging with failing CI checks"
+echo "  - Merging without CODEOWNERS approval"
+echo "  - Force pushes to protected branches"
+echo ""
+echo "These protections are configured on GitHub/GitLab,"
+echo "not in Git itself. The pre-push hook simulates client-side"
+echo "protection, while the real enforcement happens server-side."
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</Exercise>
+
+<MiniProject title="Git Production Setup">
+
+```bash
+cat > ~/git-production-setup.sh << 'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+# Git Production Setup Tool
+# Sets up a production-ready repository with hooks, protection, CI, and security
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+usage() {
+    echo -e "${BLUE}${BOLD}Git Production Setup${NC}"
+    echo ""
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  --hooks           Set up Git hooks (pre-commit, commit-msg, pre-push)"
+    echo "  --gitignore       Generate a comprehensive .gitignore"
+    echo "  --gitattributes   Generate .gitattributes for line endings and LFS"
+    echo "  --codeowners      Generate CODEOWNERS template"
+    echo "  --ci-github       Generate GitHub Actions CI config"
+    echo "  --ci-gitlab       Generate GitLab CI config"
+    echo "  --security        Set up security scanning"
+    echo "  --all             Set up everything"
+    echo "  --check           Check current repository setup"
+    echo ""
+}
+
+check_git_repo() {
+    if ! git rev-parse --git-dir &>/dev/null; then
+        echo -e "${RED}Error: Not in a git repository.${NC}"
+        echo "Run 'git init' first or cd into a git repository."
+        exit 1
+    fi
+}
+
+setup_hooks() {
+    echo -e "${BLUE}${BOLD}Setting up Git hooks...${NC}"
+    echo ""
+
+    local hooks_dir=".git/hooks"
+
+    # pre-commit hook
+    cat > "$hooks_dir/pre-commit" << 'HOOKEOF'
+#!/bin/bash
+# Production pre-commit hook
+# Checks: secrets, file size, merge conflicts, debug statements
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$STAGED" ] && exit 0
+
+ERRORS=0
+
+# Check for secrets
+SECRET_PATTERNS='(AKIA[A-Z0-9]{16}|password\s*[:=]\s*["\x27][^\s]+|BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY|api[_-]?key\s*[:=]\s*["\x27][a-zA-Z0-9])'
+if echo "$STAGED" | xargs grep -lPi "$SECRET_PATTERNS" 2>/dev/null; then
+    echo "ERROR: Potential secrets detected! Remove them before committing."
+    ERRORS=$((ERRORS + 1))
+fi
+
+# Check for merge conflict markers
+if echo "$STAGED" | xargs grep -l '^<<<<<<< \|^=======$\|^>>>>>>> ' 2>/dev/null; then
+    echo "ERROR: Merge conflict markers found in staged files."
+    ERRORS=$((ERRORS + 1))
+fi
+
+# Check for large files (> 1MB)
+for file in $STAGED; do
+    if [ -f "$file" ]; then
+        SIZE=$(wc -c < "$file" 2>/dev/null || echo 0)
+        if [ "$SIZE" -gt 1048576 ]; then
+            echo "ERROR: $file is $(( SIZE / 1024 ))KB (max 1MB). Use Git LFS for large files."
+            ERRORS=$((ERRORS + 1))
+        fi
+    fi
+done
+
+[ $ERRORS -gt 0 ] && exit 1
+exit 0
+HOOKEOF
+    chmod +x "$hooks_dir/pre-commit"
+    echo -e "  ${GREEN}pre-commit hook installed${NC}"
+
+    # commit-msg hook
+    cat > "$hooks_dir/commit-msg" << 'HOOKEOF'
+#!/bin/bash
+# Enforce conventional commit messages
+FIRST_LINE=$(head -1 "$1")
+PATTERN='^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\([a-zA-Z0-9_-]+\))?(!)?: .{1,72}$'
+if ! echo "$FIRST_LINE" | grep -Eq "$PATTERN"; then
+    echo "ERROR: Commit message doesn't follow conventional format."
+    echo "Expected: type(scope): description"
+    echo "Got: $FIRST_LINE"
+    exit 1
+fi
+HOOKEOF
+    chmod +x "$hooks_dir/commit-msg"
+    echo -e "  ${GREEN}commit-msg hook installed${NC}"
+
+    # pre-push hook
+    cat > "$hooks_dir/pre-push" << 'HOOKEOF'
+#!/bin/bash
+# Prevent direct push to protected branches
+CURRENT_BRANCH=$(git branch --show-current)
+PROTECTED="main master production"
+for branch in $PROTECTED; do
+    if [ "$CURRENT_BRANCH" = "$branch" ]; then
+        echo "ERROR: Direct push to '$branch' is not allowed. Use a pull request."
+        exit 1
+    fi
+done
+exit 0
+HOOKEOF
+    chmod +x "$hooks_dir/pre-push"
+    echo -e "  ${GREEN}pre-push hook installed${NC}"
+
+    echo ""
+}
+
+setup_gitignore() {
+    echo -e "${BLUE}${BOLD}Generating .gitignore...${NC}"
+
+    cat > .gitignore << 'EOF'
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Build output
+dist/
+build/
+out/
+*.o
+*.so
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+credentials.json
+service-account*.json
+
+# IDE and editor
+.idea/
+.vscode/settings.json
+.vscode/launch.json
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+htmlcov/
+.coverage
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Package manager locks (uncomment if needed)
+# package-lock.json
+# yarn.lock
+EOF
+
+    git add .gitignore 2>/dev/null || true
+    echo -e "  ${GREEN}.gitignore created${NC}"
+    echo ""
+}
+
+setup_gitattributes() {
+    echo -e "${BLUE}${BOLD}Generating .gitattributes...${NC}"
+
+    cat > .gitattributes << 'EOF'
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Force LF for these files
+*.sh text eol=lf
+*.py text eol=lf
+*.rb text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.jsx text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+
+# Force CRLF for Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.tgz binary
+
+# Git LFS (uncomment and modify as needed)
+# *.psd filter=lfs diff=lfs merge=lfs -text
+# *.ai filter=lfs diff=lfs merge=lfs -text
+# *.mp4 filter=lfs diff=lfs merge=lfs -text
+# *.mov filter=lfs diff=lfs merge=lfs -text
+
+# Generated files (don't count in language stats)
+*-lock.json linguist-generated
+*.lock linguist-generated
+*.min.js linguist-generated
+*.min.css linguist-generated
+
+# Merge strategy for lock files
+package-lock.json merge=ours
+yarn.lock merge=ours
+EOF
+
+    git add .gitattributes 2>/dev/null || true
+    echo -e "  ${GREEN}.gitattributes created${NC}"
+    echo ""
+}
+
+setup_codeowners() {
+    echo -e "${BLUE}${BOLD}Generating CODEOWNERS template...${NC}"
+
+    mkdir -p .github
+
+    cat > .github/CODEOWNERS << 'EOF'
+# CODEOWNERS — Define code ownership for pull request reviews
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Each line defines a file pattern and the owner(s) required to review changes.
+# The last matching pattern takes precedence.
+#
+# Customize the team names and usernames below for your organization.
+
+# Default: team lead reviews everything not covered below
+* @your-org/team-leads
+
+# Frontend
+# /src/frontend/    @your-org/frontend-team
+# /src/components/  @your-org/frontend-team
+# *.css             @your-org/frontend-team
+# *.scss            @your-org/frontend-team
+
+# Backend
+# /src/api/         @your-org/backend-team
+# /src/models/      @your-org/backend-team
+# /src/services/    @your-org/backend-team
+
+# Infrastructure
+# /infrastructure/  @your-org/devops-team
+# Dockerfile        @your-org/devops-team
+# docker-compose*   @your-org/devops-team
+# *.yml             @your-org/devops-team
+
+# Security-sensitive files
+# /src/auth/        @your-org/security-team
+# /src/crypto/      @your-org/security-team
+# .env*             @your-org/security-team
+EOF
+
+    git add .github/CODEOWNERS 2>/dev/null || true
+    echo -e "  ${GREEN}.github/CODEOWNERS template created${NC}"
+    echo -e "  ${YELLOW}NOTE: Edit CODEOWNERS to add your team names.${NC}"
+    echo ""
+}
+
+setup_ci_github() {
+    echo -e "${BLUE}${BOLD}Generating GitHub Actions CI config...${NC}"
+
+    mkdir -p .github/workflows
+
+    cat > .github/workflows/ci.yml << 'EOF'
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test -- --coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: dist/
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run security audit
+        run: npm audit --audit-level=high
+      - name: Check for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+EOF
+
+    git add .github/workflows/ci.yml 2>/dev/null || true
+    echo -e "  ${GREEN}.github/workflows/ci.yml created${NC}"
+    echo ""
+}
+
+setup_ci_gitlab() {
+    echo -e "${BLUE}${BOLD}Generating GitLab CI config...${NC}"
+
+    cat > .gitlab-ci.yml << 'EOF'
+stages:
+  - lint
+  - test
+  - build
+  - security
+  - deploy
+
+default:
+  image: node:20-alpine
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+lint:
+  stage: lint
+  script:
+    - npm ci
+    - npm run lint
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+test:
+  stage: test
+  script:
+    - npm ci
+    - npm test -- --coverage
+  coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+
+build:
+  stage: build
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+
+security:
+  stage: security
+  script:
+    - npm audit --audit-level=high
+  allow_failure: true
+
+deploy_staging:
+  stage: deploy
+  script:
+    - echo "Deploying to staging..."
+  environment:
+    name: staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+deploy_production:
+  stage: deploy
+  script:
+    - echo "Deploying to production..."
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  when: manual
+EOF
+
+    git add .gitlab-ci.yml 2>/dev/null || true
+    echo -e "  ${GREEN}.gitlab-ci.yml created${NC}"
+    echo ""
+}
+
+setup_security() {
+    echo -e "${BLUE}${BOLD}Setting up security scanning...${NC}"
+
+    # Create a secret patterns file for scanning
+    mkdir -p .github
+    cat > .github/secret-patterns.txt << 'EOF'
+# Secret scanning patterns
+AKIA[A-Z0-9]{16}
+(?i)(password|passwd|pwd)\s*[:=]\s*['\"][^\s'\"]+
+(?i)(api[_-]?key|apikey)\s*[:=]\s*['\"][^\s'\"]+
+(?i)(secret[_-]?key|secretkey)\s*[:=]\s*['\"][^\s'\"]+
+(?i)(access[_-]?token|accesstoken)\s*[:=]\s*['\"][^\s'\"]+
+(?i)(auth[_-]?token|authtoken)\s*[:=]\s*['\"][^\s'\"]+
+BEGIN (RSA|DSA|EC|OPENSSH|PGP) PRIVATE KEY
+(?i)ghp_[A-Za-z0-9_]{36}
+(?i)gho_[A-Za-z0-9_]{36}
+(?i)glpat-[A-Za-z0-9_-]{20}
+EOF
+
+    # Create a security scanning script
+    cat > .github/scan-secrets.sh << 'SCANEOF'
+#!/bin/bash
+# Scan repository for secrets
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+PATTERNS_FILE=".github/secret-patterns.txt"
+FOUND=0
+
+if [ ! -f "$PATTERNS_FILE" ]; then
+    echo "Warning: $PATTERNS_FILE not found. Skipping scan."
+    exit 0
+fi
+
+echo "Scanning for secrets..."
+
+# Check staged files (for pre-commit) or all tracked files
+if [ "$1" = "--staged" ]; then
+    FILES=$(git diff --cached --name-only --diff-filter=ACM)
+else
+    FILES=$(git ls-files)
+fi
+
+while IFS= read -r pattern; do
+    # Skip comments and empty lines
+    [[ "$pattern" =~ ^#.*$ ]] && continue
+    [ -z "$pattern" ] && continue
+
+    matches=$(echo "$FILES" | xargs grep -lPn "$pattern" 2>/dev/null || true)
+    if [ -n "$matches" ]; then
+        echo -e "${RED}ALERT: Pattern match found:${NC}"
+        echo "  Pattern: $pattern"
+        echo "  Files: $matches"
+        FOUND=$((FOUND + 1))
+    fi
+done < "$PATTERNS_FILE"
+
+if [ $FOUND -gt 0 ]; then
+    echo ""
+    echo -e "${RED}Found $FOUND potential secret pattern(s)!${NC}"
+    exit 1
+else
+    echo -e "${GREEN}No secrets found.${NC}"
+    exit 0
+fi
+SCANEOF
+    chmod +x .github/scan-secrets.sh
+
+    git add .github/secret-patterns.txt .github/scan-secrets.sh 2>/dev/null || true
+    echo -e "  ${GREEN}Secret scanning patterns created${NC}"
+    echo -e "  ${GREEN}Security scan script created${NC}"
+    echo ""
+}
+
+check_setup() {
+    echo -e "${BLUE}${BOLD}Repository Production Readiness Check${NC}"
+    echo ""
+
+    local score=0
+    local total=0
+
+    check_item() {
+        local name="$1"
+        local check="$2"
+        total=$((total + 1))
+        if eval "$check" 2>/dev/null; then
+            echo -e "  ${GREEN}[PASS]${NC} $name"
+            score=$((score + 1))
+        else
+            echo -e "  ${RED}[FAIL]${NC} $name"
+        fi
+    }
+
+    echo "Git Configuration:"
+    check_item "Git hooks: pre-commit" "[ -x .git/hooks/pre-commit ]"
+    check_item "Git hooks: commit-msg" "[ -x .git/hooks/commit-msg ]"
+    check_item "Git hooks: pre-push" "[ -x .git/hooks/pre-push ]"
+    echo ""
+
+    echo "Repository Files:"
+    check_item ".gitignore exists" "[ -f .gitignore ]"
+    check_item ".gitattributes exists" "[ -f .gitattributes ]"
+    check_item "CODEOWNERS exists" "[ -f .github/CODEOWNERS ] || [ -f CODEOWNERS ]"
+    echo ""
+
+    echo "CI/CD Configuration:"
+    check_item "GitHub Actions config" "[ -f .github/workflows/ci.yml ]"
+    check_item "GitLab CI config" "[ -f .gitlab-ci.yml ]"
+    echo ""
+
+    echo "Security:"
+    check_item "Secret scanning patterns" "[ -f .github/secret-patterns.txt ]"
+    check_item "Security scan script" "[ -x .github/scan-secrets.sh ]"
+    check_item ".env in .gitignore" "grep -q '\.env' .gitignore 2>/dev/null"
+    check_item "No secrets in repo" "! .github/scan-secrets.sh 2>/dev/null | grep -q 'ALERT'"
+    echo ""
+
+    echo "Git Settings:"
+    check_item "User name configured" "[ -n \"$(git config user.name)\" ]"
+    check_item "User email configured" "[ -n \"$(git config user.email)\" ]"
+    echo ""
+
+    local pct=$((score * 100 / (total > 0 ? total : 1)))
+    echo -e "${BOLD}Score: ${score}/${total} (${pct}%)${NC}"
+
+    if [ $pct -ge 90 ]; then
+        echo -e "${GREEN}Excellent! Your repository is production-ready.${NC}"
+    elif [ $pct -ge 70 ]; then
+        echo -e "${YELLOW}Good, but some items need attention.${NC}"
+    elif [ $pct -ge 50 ]; then
+        echo -e "${YELLOW}Fair. Several important items are missing.${NC}"
+    else
+        echo -e "${RED}Needs work. Run '$0 --all' to set up everything.${NC}"
+    fi
+}
+
+# Main dispatch
+check_git_repo
+
+case "${1:---check}" in
+    --hooks)         setup_hooks ;;
+    --gitignore)     setup_gitignore ;;
+    --gitattributes) setup_gitattributes ;;
+    --codeowners)    setup_codeowners ;;
+    --ci-github)     setup_ci_github ;;
+    --ci-gitlab)     setup_ci_gitlab ;;
+    --security)      setup_security ;;
+    --all)
+        setup_hooks
+        setup_gitignore
+        setup_gitattributes
+        setup_codeowners
+        setup_ci_github
+        setup_ci_gitlab
+        setup_security
+        echo -e "${GREEN}${BOLD}All production setup complete!${NC}"
+        echo ""
+        check_setup
+        ;;
+    --check)
+        check_setup
+        ;;
+    --help|-h)
+        usage
+        ;;
+    *)
+        echo -e "${RED}Unknown option: $1${NC}"
+        usage
+        exit 1
+        ;;
+esac
+SCRIPT
+
+chmod +x ~/git-production-setup.sh
+
+echo "=== Git Production Setup Script Created ==="
+echo ""
+
+# Demo the script
+REPO=$(mktemp -d) && cd "$REPO" && git init -q
+echo "demo" > file.txt && git add . && git commit -q -m "feat: initial commit"
+
+echo "=== Demo: Check current state (before setup) ==="
+~/git-production-setup.sh --check
+echo ""
+
+echo "=== Demo: Run full setup ==="
+echo ""
+~/git-production-setup.sh --all
+echo ""
+
+echo "=== Demo: Files created ==="
+echo "Repository files:"
+find . -not -path './.git/*' -not -path './.git' -type f | sort
+echo ""
+
+echo "=== Demo: Hook test ==="
+echo "Creating a test commit with proper format..."
+echo "test" >> file.txt
+git add file.txt
+git commit -m "feat: add test content" 2>&1
+echo ""
+
+echo "Testing bad commit message..."
+echo "test2" >> file.txt
+git add file.txt
+git commit -m "bad message" 2>&1 || true
+echo ""
+
+echo "Script saved to: ~/git-production-setup.sh"
+echo "Usage: ~/git-production-setup.sh --all"
+
+# Clean up
+cd / && rm -rf "$REPO"
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- **Git hooks** automate quality checks: pre-commit for linting/secrets, commit-msg for format, pre-push for tests
+- Use **hook frameworks** (Husky, pre-commit) to share hooks with your team via committed configuration files
+- **CI/CD pipelines** trigger on Git events (push, PR, tag) — they are your automated quality gate
+- **Branch protection** rules prevent direct pushes to main, require reviews and passing CI checks
+- **CODEOWNERS** files ensure the right people review changes to code they own
+- **Signed commits** (GPG or SSH) verify authorship and show a "Verified" badge on GitHub/GitLab
+- **.gitattributes** normalizes line endings, handles binary files, and configures Git LFS
+- **Git LFS** stores large files (images, videos, binaries) outside the Git repository for better performance
+- **Monorepo vs multi-repo** is a tradeoff: monorepos simplify code sharing; multi-repos simplify CI/CD and team autonomy
+- **Shallow clones**, **partial clones**, and **sparse checkout** speed up Git operations on large repositories
+- **Always rotate compromised secrets immediately** — removing them from Git history is not enough
+- Security is layers: `.gitignore` prevents accidents, hooks catch mistakes, CI scans for secrets, branch protection enforces process
+
+## Congratulations — You've Completed the Git Module!
+
+<Callout type="tip" title="Achievement Unlocked: Git Master">
+You've traveled from `git init` to production-grade Git workflows. You now have the skills to:
+
+- **Create and manage repositories** with proper configuration
+- **Branch, merge, and rebase** with confidence
+- **Resolve conflicts** quickly and correctly
+- **Undo any mistake** with reset, revert, and reflog
+- **Search history** with log, blame, and bisect
+- **Cherry-pick** surgical changes between branches
+- **Stash and worktree** for effortless context switching
+- **Choose branching strategies** that fit your team
+- **Secure repositories** with hooks, protection, and signed commits
+- **Integrate Git with CI/CD** for automated quality gates
+
+These aren't just Git skills — they're professional software engineering practices. Every team you join, every project you contribute to, and every production system you manage will benefit from what you've learned here.
+
+Git is the foundation of modern software development. You now own that foundation.
+</Callout>
+
+## What's Next
+
+The Git module is complete. From here, the DevOps journey continues with **containers, CI/CD pipelines, infrastructure as code, and cloud platforms** — all of which build on the Git workflows you've mastered. Every Dockerfile you write, every pipeline you configure, and every infrastructure change you make will live in a Git repository, protected by the practices you learned in this module.

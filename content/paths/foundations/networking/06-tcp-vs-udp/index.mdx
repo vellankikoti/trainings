@@ -1,0 +1,723 @@
+---
+title: "TCP vs UDP"
+description: "Understand the two transport protocols that move data across the internet. Know when reliability (TCP) matters and when speed (UDP) wins."
+order: 6
+xpReward: 100
+estimatedMinutes: 30
+prerequisites:
+  - 05-http-and-https
+objectives:
+  - Explain how TCP ensures reliable delivery
+  - Understand UDP's speed-first approach
+  - Compare TCP and UDP for different use cases
+  - Analyze TCP connections with ss and netstat
+tags:
+  - networking
+  - tcp
+  - udp
+  - transport
+---
+
+<Callout type="story" title="The Story">
+Your video streaming service is buffering despite fast bandwidth. You investigate: the streaming protocol uses TCP. Every dropped packet triggers a retransmission, creating a cascade of delays. Switching to UDP-based streaming solves it — a few dropped pixels are better than constant stuttering. TCP guarantees delivery; UDP guarantees speed. Knowing which to use (and why) is fundamental to networking.
+</Callout>
+
+## The Transport Layer
+
+The transport layer (Layer 4 in the OSI model) sits between the application and the network. Its job is to take data from an application and deliver it to the right application on another machine. The two protocols that do this — TCP and UDP — take fundamentally different approaches.
+
+```
+Application Layer (HTTP, DNS, SSH)
+        ↓
+Transport Layer (TCP or UDP)  ← You are here
+        ↓
+Network Layer (IP)
+        ↓
+Data Link / Physical (Ethernet, WiFi)
+```
+
+Think of it this way: IP gets packets to the right machine. The transport layer gets data to the right application on that machine — and decides how much effort to spend making sure it arrives.
+
+## TCP — Transmission Control Protocol
+
+TCP is **connection-oriented**. Before any data flows, the two sides establish a connection. Every byte sent is tracked, acknowledged, and retransmitted if lost. This makes TCP reliable but adds overhead.
+
+### The Three-Way Handshake
+
+Every TCP connection starts with a three-way handshake:
+
+```
+Client                          Server
+  |                               |
+  |  ----  SYN (seq=100)  ---->   |   Step 1: Client says "I want to connect"
+  |                               |
+  |  <--- SYN-ACK (seq=300,      |   Step 2: Server says "OK, I acknowledge"
+  |        ack=101)  ----         |
+  |                               |
+  |  ----  ACK (seq=101,  ---->   |   Step 3: Client confirms
+  |        ack=301)               |
+  |                               |
+  |   Connection ESTABLISHED      |
+```
+
+```bash
+# Watch the three-way handshake happen in real time
+# Terminal 1: Start a packet capture
+sudo tcpdump -i lo port 9999 -c 10 2>/dev/null &
+
+# Terminal 2: Start a listener and connect to it
+nc -l 9999 &
+sleep 1
+echo "hello" | nc localhost 9999
+```
+
+### TCP Flags
+
+Each TCP segment carries flags that control the connection:
+
+| Flag | Name | Purpose |
+|------|------|---------|
+| `SYN` | Synchronize | Initiate a connection |
+| `ACK` | Acknowledge | Confirm received data |
+| `FIN` | Finish | Gracefully close connection |
+| `RST` | Reset | Forcefully abort connection |
+| `PSH` | Push | Deliver data immediately (don't buffer) |
+| `URG` | Urgent | Data should be prioritized |
+
+```bash
+# See TCP flags in action with tcpdump
+# The flags show as [S] = SYN, [.] = ACK, [S.] = SYN-ACK,
+# [F.] = FIN-ACK, [R] = RST, [P.] = PSH-ACK
+sudo tcpdump -i any tcp -c 20 2>/dev/null | head -20
+```
+
+### Reliable Delivery
+
+TCP guarantees every byte arrives, in order. Here is how:
+
+```
+Sender                          Receiver
+  |                               |
+  |  --- Segment 1 (seq=1) --->   |
+  |  --- Segment 2 (seq=2) --->   |   Segment 2 lost!
+  |  --- Segment 3 (seq=3) --->   |
+  |                               |
+  |  <--- ACK 1  ----             |   "Got segment 1"
+  |  <--- ACK 1  ----             |   "Still waiting for 2" (duplicate ACK)
+  |                               |
+  |  --- Segment 2 (seq=2) --->   |   Retransmit!
+  |                               |
+  |  <--- ACK 3  ----             |   "Got everything up to 3"
+```
+
+- **Sequence numbers** track every byte
+- **Acknowledgments** confirm receipt
+- **Retransmission** resends lost data
+- **Ordering** reassembles out-of-order packets
+
+### TCP Sliding Window
+
+TCP does not wait for each segment to be acknowledged before sending the next. The **sliding window** allows multiple segments in flight:
+
+```
+Window size = 4 segments
+
+|  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |
+|---- sent, ACKed ----|--- in flight ---|-- not yet sent --|
+                       ^                ^
+                    window start     window end
+```
+
+```bash
+# Check the current TCP window sizes on your connections
+ss -ti | head -30
+# Look for: wscale, rto, rtt, cwnd (congestion window)
+```
+
+### Flow Control
+
+TCP prevents a fast sender from overwhelming a slow receiver:
+
+- The receiver advertises a **receive window** — how much data it can accept
+- The sender never sends more than the window allows
+- If the receiver is busy, it shrinks the window (even to zero)
+
+### Congestion Control
+
+TCP also prevents overwhelming the network itself:
+
+- **Slow start** — begin with a small congestion window, double it each round trip
+- **Congestion avoidance** — once a threshold is hit, grow linearly
+- **Fast retransmit** — three duplicate ACKs trigger immediate retransmission
+- **Fast recovery** — halve the window instead of restarting from scratch
+
+<Callout type="tip" title="Why This Matters for DevOps">
+TCP congestion control is why a new connection is slower than an established one. The first few round trips are spent ramping up. This is also why TCP connection reuse (HTTP keep-alive, connection pooling) is so important for performance.
+</Callout>
+
+### Connection Termination
+
+Closing a TCP connection uses a four-way handshake:
+
+```
+Client                          Server
+  |                               |
+  |  ----  FIN  ----------->      |   "I'm done sending"
+  |  <---  ACK  -----------       |   "Got it"
+  |                               |
+  |  <---  FIN  -----------       |   "I'm done sending too"
+  |  ----  ACK  ----------->      |   "Got it"
+  |                               |
+  |   Connection CLOSED           |
+```
+
+After the final ACK, the client enters **TIME_WAIT** for 2x the maximum segment lifetime (typically 60 seconds). This prevents old delayed packets from being mistaken for new connections.
+
+## UDP — User Datagram Protocol
+
+UDP is the opposite of TCP: **connectionless**, **unreliable**, and **fast**. No handshake, no acknowledgments, no ordering. You send a datagram and hope it arrives.
+
+```
+Sender                          Receiver
+  |                               |
+  |  --- Datagram 1 ---------->   |   Received
+  |  --- Datagram 2 ----X         |   Lost! Nobody knows.
+  |  --- Datagram 3 ---------->   |   Received
+  |                               |
+  |   No connection. No ACKs.     |
+  |   No retransmission.          |
+```
+
+### UDP Characteristics
+
+```
+UDP Header (8 bytes total — minimal overhead):
++------------------+------------------+
+|   Source Port     |   Dest Port      |
++------------------+------------------+
+|   Length          |   Checksum       |
++------------------+------------------+
+|          Data (payload)             |
++-------------------------------------+
+
+TCP Header (20-60 bytes — significant overhead):
++------------------+------------------+
+|   Source Port     |   Dest Port      |
++------------------+------------------+
+|         Sequence Number             |
++-------------------------------------+
+|      Acknowledgment Number          |
++-------------------------------------+
+| Offset | Flags  |   Window Size     |
++------------------+------------------+
+|   Checksum       |   Urgent Pointer |
++------------------+------------------+
+|       Options (variable)            |
++-------------------------------------+
+```
+
+UDP's simplicity is its strength:
+
+- **No connection setup** — no handshake delay
+- **No state tracking** — server handles more clients
+- **No retransmission** — no cascading delays
+- **No ordering** — application handles if needed
+- **Small header** — 8 bytes vs TCP's 20-60 bytes
+
+## TCP vs UDP Comparison
+
+| Feature | TCP | UDP |
+|---------|-----|-----|
+| Connection | Connection-oriented (handshake) | Connectionless |
+| Reliability | Guaranteed delivery | Best-effort delivery |
+| Ordering | Data arrives in order | No ordering guarantee |
+| Speed | Slower (overhead) | Faster (minimal overhead) |
+| Header size | 20-60 bytes | 8 bytes |
+| Flow control | Yes (window-based) | No |
+| Congestion control | Yes | No |
+| Error checking | Checksum + retransmission | Checksum only |
+| Broadcast/Multicast | No | Yes |
+| Use case | When every byte must arrive | When speed beats perfection |
+
+## When to Use TCP
+
+TCP is the right choice when **data integrity matters more than speed**:
+
+```bash
+# HTTP/HTTPS (web traffic) — TCP port 80/443
+curl -v https://example.com 2>&1 | grep "Connected"
+
+# SSH (remote access) — TCP port 22
+# Every keystroke must arrive, in order
+ss -t state established | grep ssh
+
+# FTP (file transfer) — TCP port 21
+# A corrupted file is worse than a slow download
+
+# Email (SMTP/IMAP/POP3) — TCP ports 25/143/110/993/995
+# Missing email content is unacceptable
+
+# Database connections — TCP ports 3306/5432/6379
+# A lost query or corrupted result is catastrophic
+ss -t state established | grep -E "3306|5432|6379"
+```
+
+## When to Use UDP
+
+UDP is the right choice when **speed matters more than perfection**:
+
+```bash
+# DNS queries — UDP port 53
+# Fast lookups; retry if no response
+dig @8.8.8.8 example.com
+
+# Video/Audio streaming — UDP
+# A dropped frame is invisible; a delayed frame causes buffering
+# Protocols: RTP, WebRTC
+
+# Online gaming — UDP
+# Stale position data is worse than missing one update
+# Player position at T=1s is useless at T=2s
+
+# VoIP (Voice over IP) — UDP
+# A small audio glitch is better than a delayed conversation
+
+# DHCP — UDP ports 67/68
+# Can't use TCP — you don't have an IP yet!
+
+# Check UDP listeners on your system
+ss -ulnp
+```
+
+<Callout type="warning" title="DNS Uses Both">
+DNS typically uses UDP for queries (fast, small messages). But for zone transfers between DNS servers or responses larger than 512 bytes, DNS switches to TCP. This is why firewalls need to allow both TCP and UDP on port 53.
+</Callout>
+
+## TCP Connection States
+
+Understanding connection states is critical for debugging:
+
+```bash
+# View all TCP connection states
+ss -tan | awk '{print $1}' | sort | uniq -c | sort -rn
+
+# Common states you'll encounter:
+```
+
+| State | Meaning | Concern? |
+|-------|---------|----------|
+| `ESTABLISHED` | Active connection | Normal |
+| `LISTEN` | Waiting for connections | Normal for servers |
+| `TIME_WAIT` | Connection closed, waiting for stragglers | Normal; too many = problem |
+| `CLOSE_WAIT` | Remote side closed, local hasn't | Usually a bug (app not closing connections) |
+| `SYN_SENT` | Handshake initiated, waiting for response | Timeout = can't reach server |
+| `SYN_RECV` | Handshake received, waiting for ACK | Too many = SYN flood attack |
+| `FIN_WAIT1` | Closing initiated | Normal during teardown |
+| `FIN_WAIT2` | Close acknowledged, waiting for remote FIN | Normal during teardown |
+| `LAST_ACK` | Waiting for final ACK | Normal during teardown |
+
+```bash
+# Debugging: Too many TIME_WAIT connections
+ss -tan state time-wait | wc -l
+
+# Debugging: CLOSE_WAIT indicates a connection leak
+ss -tan state close-wait
+# The local application received a FIN but hasn't closed the socket
+# This is almost always an application bug
+
+# Debugging: Lots of SYN_RECV might indicate a SYN flood
+ss -tan state syn-recv | wc -l
+```
+
+## TCP Analysis Tools
+
+### Using `ss` (Socket Statistics)
+
+```bash
+# Show all TCP connections with details
+ss -tanp
+
+# Show only established connections
+ss -t state established
+
+# Show connections to a specific port
+ss -tan dport = :443
+
+# Show connections from a specific source
+ss -tan src 192.168.1.0/24
+
+# Show timer information (retransmit, keepalive)
+ss -to
+
+# Show detailed TCP internal info
+ss -ti
+# Look for: cwnd (congestion window), rtt (round trip time),
+#           retrans (retransmissions), bytes_sent, bytes_received
+
+# Count connections per state
+ss -tan | awk 'NR>1 {print $1}' | sort | uniq -c | sort -rn
+```
+
+### Using `netstat` (Legacy but Common)
+
+```bash
+# Show all TCP connections
+netstat -tan 2>/dev/null || echo "netstat not available — use ss instead"
+
+# Show listening ports with process names
+netstat -tlnp 2>/dev/null
+
+# Show statistics
+netstat -s 2>/dev/null | head -30
+```
+
+### Using `tcpdump`
+
+```bash
+# Capture TCP traffic on port 80
+sudo tcpdump -i any port 80 -c 10 2>/dev/null
+
+# Capture only SYN packets (new connections)
+sudo tcpdump -i any 'tcp[tcpflags] & tcp-syn != 0' -c 5 2>/dev/null
+
+# Capture with full packet details
+sudo tcpdump -i any -vv port 443 -c 5 2>/dev/null
+```
+
+## TCP Performance Tuning
+
+```bash
+# View current TCP settings
+sysctl net.ipv4.tcp_keepalive_time 2>/dev/null
+sysctl net.ipv4.tcp_keepalive_intvl 2>/dev/null
+sysctl net.ipv4.tcp_keepalive_probes 2>/dev/null
+
+# TCP keepalive — detect dead connections
+# Default: send probe after 7200s (2 hours) of idle
+# For servers, you want this lower:
+# sysctl -w net.ipv4.tcp_keepalive_time=600    # 10 minutes
+# sysctl -w net.ipv4.tcp_keepalive_intvl=60    # 60s between probes
+# sysctl -w net.ipv4.tcp_keepalive_probes=5    # 5 probes before giving up
+
+# View TCP window scaling and buffer sizes
+sysctl net.ipv4.tcp_window_scaling 2>/dev/null
+sysctl net.core.rmem_max 2>/dev/null
+sysctl net.core.wmem_max 2>/dev/null
+
+# TIME_WAIT tuning — reuse TIME_WAIT sockets
+sysctl net.ipv4.tcp_tw_reuse 2>/dev/null
+
+# View TCP congestion control algorithm
+sysctl net.ipv4.tcp_congestion_control 2>/dev/null
+# Common: cubic (default), bbr (Google's algorithm — better for high-latency)
+```
+
+<Callout type="tip" title="BBR Congestion Control">
+Google's BBR (Bottleneck Bandwidth and Round-trip) congestion control algorithm can significantly improve throughput on high-latency links. Many cloud providers now use it by default. Check with `sysctl net.ipv4.tcp_congestion_control`.
+</Callout>
+
+<Exercise number={1} title="TCP Connection Analysis">
+
+Examine TCP connections, states, and ports on your system:
+
+```bash
+# 1. View all TCP connections and their states
+ss -tan
+
+# 2. Count connections by state
+echo "=== Connection States ==="
+ss -tan | awk 'NR>1 {print $1}' | sort | uniq -c | sort -rn
+
+# 3. Show listening TCP services
+echo ""
+echo "=== Listening TCP Services ==="
+ss -tlnp
+
+# 4. Show established connections with process info
+echo ""
+echo "=== Established Connections ==="
+ss -tanp state established
+
+# 5. Check for TIME_WAIT accumulation
+echo ""
+echo "=== TIME_WAIT Count ==="
+ss -tan state time-wait | wc -l
+
+# 6. Check for CLOSE_WAIT (potential connection leaks)
+echo ""
+echo "=== CLOSE_WAIT Count ==="
+ss -tan state close-wait | wc -l
+
+# 7. View TCP socket summary statistics
+echo ""
+echo "=== Socket Summary ==="
+ss -s
+
+# 8. Show detailed TCP info for established connections
+echo ""
+echo "=== TCP Internal Details (first 5) ==="
+ss -ti state established | head -20
+
+# 9. Check TCP kernel parameters
+echo ""
+echo "=== TCP Keepalive Settings ==="
+sysctl net.ipv4.tcp_keepalive_time 2>/dev/null
+sysctl net.ipv4.tcp_keepalive_intvl 2>/dev/null
+sysctl net.ipv4.tcp_keepalive_probes 2>/dev/null
+
+# 10. Check congestion control algorithm
+echo ""
+echo "=== Congestion Control ==="
+sysctl net.ipv4.tcp_congestion_control 2>/dev/null
+```
+
+</Exercise>
+
+<Exercise number={2} title="TCP vs UDP in Action">
+
+Demonstrate reliable vs unreliable delivery using netcat:
+
+```bash
+# --- Part 1: TCP with netcat (reliable) ---
+echo "=== TCP Demonstration ==="
+
+# Start a TCP listener in background
+nc -l 12345 > /tmp/tcp_received.txt &
+TCP_LISTENER=$!
+sleep 1
+
+# Send data via TCP
+echo "Line 1: Hello TCP" | nc -q 1 localhost 12345
+sleep 1
+
+# Start another listener
+nc -l 12345 > /tmp/tcp_received2.txt &
+TCP_LISTENER2=$!
+sleep 1
+
+echo "Line 2: TCP guarantees delivery" | nc -q 1 localhost 12345
+sleep 1
+
+echo "TCP received:"
+cat /tmp/tcp_received.txt 2>/dev/null
+cat /tmp/tcp_received2.txt 2>/dev/null
+
+# Clean up
+kill $TCP_LISTENER $TCP_LISTENER2 2>/dev/null
+
+# --- Part 2: UDP with netcat (unreliable) ---
+echo ""
+echo "=== UDP Demonstration ==="
+
+# Start a UDP listener
+nc -u -l 12346 > /tmp/udp_received.txt &
+UDP_LISTENER=$!
+sleep 1
+
+# Send data via UDP (notice -u flag)
+echo "Hello UDP" | nc -u -q 1 localhost 12346
+sleep 1
+
+echo "UDP received:"
+cat /tmp/udp_received.txt 2>/dev/null
+
+kill $UDP_LISTENER 2>/dev/null
+
+# --- Part 3: Compare the protocols side by side ---
+echo ""
+echo "=== Side-by-Side Comparison ==="
+
+# Check what's listening on TCP vs UDP
+echo "TCP listeners:"
+ss -tlnp 2>/dev/null | head -5
+
+echo ""
+echo "UDP listeners:"
+ss -ulnp 2>/dev/null | head -5
+
+# --- Part 4: TCP connection states during transfer ---
+echo ""
+echo "=== TCP Connection States During Transfer ==="
+nc -l 12347 &
+LISTENER=$!
+sleep 1
+
+# Connect but don't close
+nc localhost 12347 &
+CLIENT=$!
+sleep 1
+
+# Observe the ESTABLISHED state
+ss -tan | grep 12347
+
+# Clean up
+kill $LISTENER $CLIENT 2>/dev/null
+
+# Clean up temp files
+rm -f /tmp/tcp_received.txt /tmp/tcp_received2.txt /tmp/udp_received.txt
+```
+
+</Exercise>
+
+<MiniProject title="Connection Monitor">
+
+Build a script that monitors TCP connections, tracks states, and identifies potential issues:
+
+```bash
+cat > ~/connection-monitor.sh << 'SCRIPT'
+#!/bin/bash
+# Connection Monitor
+# Monitors TCP connections, tracks states, and identifies issues
+
+THRESHOLD_TIMEWAIT=100
+THRESHOLD_CLOSEWAIT=10
+THRESHOLD_SYNRECV=50
+INTERVAL="${1:-5}"
+ITERATIONS="${2:-6}"
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+print_header() {
+    echo "============================================="
+    echo "  TCP Connection Monitor"
+    echo "  Interval: ${INTERVAL}s | Iterations: ${ITERATIONS}"
+    echo "============================================="
+}
+
+check_states() {
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    echo ""
+    echo "--- $timestamp ---"
+
+    # Count connections by state
+    declare -A states
+    while IFS= read -r state; do
+        states["$state"]=$(( ${states["$state"]:-0} + 1 ))
+    done < <(ss -tan | awk 'NR>1 {print $1}')
+
+    # Display state counts
+    printf "%-15s %s\n" "STATE" "COUNT"
+    printf "%-15s %s\n" "-----" "-----"
+    for state in ESTAB LISTEN TIME-WAIT CLOSE-WAIT SYN-SENT SYN-RECV FIN-WAIT-1 FIN-WAIT-2 LAST-ACK; do
+        count=${states["$state"]:-0}
+        if [ "$count" -gt 0 ]; then
+            printf "%-15s %s\n" "$state" "$count"
+        fi
+    done
+
+    # Check for issues
+    echo ""
+    echo "--- Health Checks ---"
+
+    # Check TIME_WAIT accumulation
+    tw_count=${states["TIME-WAIT"]:-0}
+    if [ "$tw_count" -gt "$THRESHOLD_TIMEWAIT" ]; then
+        echo -e "${RED}[ALERT]${NC} TIME_WAIT connections: $tw_count (threshold: $THRESHOLD_TIMEWAIT)"
+        echo "  Possible cause: High connection churn without connection reuse"
+        echo "  Check: sysctl net.ipv4.tcp_tw_reuse"
+        echo "  Top TIME_WAIT destinations:"
+        ss -tan state time-wait | awk 'NR>1 {print $4}' | sort | uniq -c | sort -rn | head -5
+    else
+        echo -e "${GREEN}[OK]${NC} TIME_WAIT: $tw_count (threshold: $THRESHOLD_TIMEWAIT)"
+    fi
+
+    # Check CLOSE_WAIT (connection leak)
+    cw_count=${states["CLOSE-WAIT"]:-0}
+    if [ "$cw_count" -gt "$THRESHOLD_CLOSEWAIT" ]; then
+        echo -e "${RED}[ALERT]${NC} CLOSE_WAIT connections: $cw_count (threshold: $THRESHOLD_CLOSEWAIT)"
+        echo "  Possible cause: Application not closing sockets after remote disconnect"
+        echo "  Processes with CLOSE_WAIT:"
+        ss -tanp state close-wait | awk 'NR>1 {print $6}' | sort | uniq -c | sort -rn | head -5
+    else
+        echo -e "${GREEN}[OK]${NC} CLOSE_WAIT: $cw_count (threshold: $THRESHOLD_CLOSEWAIT)"
+    fi
+
+    # Check SYN_RECV (possible SYN flood)
+    sr_count=${states["SYN-RECV"]:-0}
+    if [ "$sr_count" -gt "$THRESHOLD_SYNRECV" ]; then
+        echo -e "${RED}[ALERT]${NC} SYN_RECV connections: $sr_count (threshold: $THRESHOLD_SYNRECV)"
+        echo "  Possible cause: SYN flood attack or slow application accept()"
+        echo "  Sources:"
+        ss -tan state syn-recv | awk 'NR>1 {print $4}' | sort | uniq -c | sort -rn | head -5
+    else
+        echo -e "${GREEN}[OK]${NC} SYN_RECV: $sr_count (threshold: $THRESHOLD_SYNRECV)"
+    fi
+
+    # Show top connections by remote address
+    echo ""
+    echo "--- Top 5 Remote Addresses (by connection count) ---"
+    ss -tan state established | awk 'NR>1 {print $5}' | \
+        sed 's/:[0-9]*$//' | sort | uniq -c | sort -rn | head -5
+
+    # Show listening services
+    echo ""
+    echo "--- Listening Services ---"
+    ss -tlnp | awk 'NR>1 {printf "  %-25s %s\n", $4, $6}' | head -10
+}
+
+generate_report() {
+    echo ""
+    echo "============================================="
+    echo "  Summary Report"
+    echo "============================================="
+
+    echo ""
+    echo "Total TCP connections: $(ss -tan | wc -l)"
+    echo "Listening services: $(ss -tln | tail -n +2 | wc -l)"
+
+    echo ""
+    echo "TCP Kernel Parameters:"
+    echo "  Keepalive time:   $(sysctl -n net.ipv4.tcp_keepalive_time 2>/dev/null || echo 'N/A')s"
+    echo "  Keepalive intvl:  $(sysctl -n net.ipv4.tcp_keepalive_intvl 2>/dev/null || echo 'N/A')s"
+    echo "  Keepalive probes: $(sysctl -n net.ipv4.tcp_keepalive_probes 2>/dev/null || echo 'N/A')"
+    echo "  TW reuse:         $(sysctl -n net.ipv4.tcp_tw_reuse 2>/dev/null || echo 'N/A')"
+    echo "  Congestion ctrl:  $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo 'N/A')"
+
+    echo ""
+    echo "Socket Statistics:"
+    ss -s 2>/dev/null
+}
+
+# Main
+print_header
+
+for (( i=1; i<=ITERATIONS; i++ )); do
+    check_states
+    if [ "$i" -lt "$ITERATIONS" ]; then
+        sleep "$INTERVAL"
+    fi
+done
+
+generate_report
+
+echo ""
+echo "Monitor complete."
+SCRIPT
+
+chmod +x ~/connection-monitor.sh
+
+# Run with 3-second interval, 3 iterations for demo
+~/connection-monitor.sh 3 3
+```
+
+</MiniProject>
+
+## Key Takeaways
+
+- **TCP is connection-oriented** — three-way handshake, guaranteed delivery, ordered, flow and congestion control
+- **UDP is connectionless** — no handshake, best-effort delivery, no ordering, minimal overhead
+- Use **TCP** for HTTP, SSH, database connections, email, file transfer — anything where data must be complete
+- Use **UDP** for DNS queries, streaming, gaming, VoIP — anything where speed matters more than perfection
+- **TCP connection states** tell you what is happening: too many TIME_WAIT means connection churn, CLOSE_WAIT means a connection leak
+- `ss -tan` is your primary tool for TCP connection analysis; `ss -s` for a quick summary
+- TCP performance depends on **keepalive settings**, **window sizes**, and **congestion control** algorithms
+- DNS uses both protocols: UDP for queries, TCP for zone transfers and large responses
+
+## What's Next
+
+You understand how TCP and UDP move data, but how does the OS know which application should receive that data? In **Ports and Sockets**, you'll learn how port numbers identify services, how sockets enable communication, and how to debug the most common DevOps headache: "port already in use."
