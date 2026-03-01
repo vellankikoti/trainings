@@ -1,5 +1,13 @@
 "use client";
 
+import { MatchingQuestion } from "./MatchingQuestion";
+import { DebuggingQuestion } from "./DebuggingQuestion";
+
+interface MatchingPair {
+  left: string;
+  right: string;
+}
+
 interface QuestionCardProps {
   questionNumber: number;
   totalQuestions: number;
@@ -8,6 +16,9 @@ interface QuestionCardProps {
     type: string;
     question: string;
     options?: string[];
+    matchingPairs?: MatchingPair[];
+    codeSnippet?: string;
+    codeLanguage?: string;
   };
   selectedAnswer: number | boolean | string | undefined;
   onAnswer: (answer: number | boolean | string) => void;
@@ -22,6 +33,32 @@ export function QuestionCard({
   onAnswer,
   disabled = false,
 }: QuestionCardProps) {
+  if (question.type === "matching") {
+    return (
+      <MatchingQuestion
+        questionNumber={questionNumber}
+        totalQuestions={totalQuestions}
+        question={question}
+        selectedAnswer={selectedAnswer as string | undefined}
+        onAnswer={onAnswer}
+        disabled={disabled}
+      />
+    );
+  }
+
+  if (question.type === "debugging") {
+    return (
+      <DebuggingQuestion
+        questionNumber={questionNumber}
+        totalQuestions={totalQuestions}
+        question={question}
+        selectedAnswer={selectedAnswer as number | undefined}
+        onAnswer={onAnswer}
+        disabled={disabled}
+      />
+    );
+  }
+
   return (
     <div>
       <div className="mb-2 text-sm text-muted-foreground">

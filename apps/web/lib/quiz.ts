@@ -4,15 +4,26 @@ import { glob } from "glob";
 
 const QUIZ_DIR = path.join(process.cwd(), "..", "..", "content", "quizzes");
 
+export interface MatchingPair {
+  left: string;
+  right: string;
+}
+
 export interface QuizQuestion {
   id: string;
-  type: "multiple_choice" | "true_false" | "code_completion";
+  type: "multiple_choice" | "true_false" | "code_completion" | "matching" | "debugging";
   question: string;
   options?: string[];
   correctAnswer: number | boolean | string;
   explanation: string;
   referenceLesson?: string;
   difficulty?: "easy" | "medium" | "hard";
+  /** For matching questions: pairs to match */
+  matchingPairs?: MatchingPair[];
+  /** For debugging questions: the code/log snippet with the bug */
+  codeSnippet?: string;
+  /** For debugging questions: the language of the code snippet */
+  codeLanguage?: string;
 }
 
 export interface Quiz {
@@ -145,7 +156,22 @@ export function scoreQuiz(
   let correct = 0;
   const results = quiz.questions.map((q) => {
     const userAnswer = answers[q.id];
-    const isCorrect = userAnswer === q.correctAnswer;
+    let isCorrect = false;
+
+    if (q.type === "matching") {
+      // For matching, the answer is a JSON string of the user's ordered matches
+      // correctAnswer is also a JSON string of the correct order
+      try {
+        const userOrder = typeof userAnswer === "string" ? JSON.parse(userAnswer) : userAnswer;
+        const correctOrder = typeof q.correctAnswer === "string" ? JSON.parse(q.correctAnswer as string) : q.correctAnswer;
+        isCorrect = JSON.stringify(userOrder) === JSON.stringify(correctOrder);
+      } catch {
+        isCorrect = false;
+      }
+    } else {
+      isCorrect = userAnswer === q.correctAnswer;
+    }
+
     if (isCorrect) correct++;
 
     return {

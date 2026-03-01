@@ -108,7 +108,7 @@
 
 ### TASK-045: Build quiz question types: matching and debugging
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-043
 - **Estimated effort:** L
@@ -302,7 +302,7 @@
 
 ### TASK-053: Build certificate PDF generation
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-052
 - **Estimated effort:** L
@@ -758,7 +758,7 @@
 
 ### TASK-073: Set up Sentry error tracking
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P1
 - **Depends on:** TASK-003
 - **Estimated effort:** M
@@ -972,7 +972,7 @@
 
 ### TASK-082: Write tests for API routes
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-080, TASK-035, TASK-042
 - **Estimated effort:** L
@@ -995,7 +995,7 @@
 
 ### TASK-083: Write component tests for MDX components
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-080, TASK-032
 - **Estimated effort:** M
@@ -1021,7 +1021,7 @@
 
 ### TASK-084: Set up GitHub Discussions integration
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-008
 - **Estimated effort:** M
@@ -1086,7 +1086,7 @@
 
 ### TASK-087: Create content statistics dashboard
 
-- **Status:** [ ] Not Started
+- **Status:** [x] Complete
 - **Priority:** P2
 - **Depends on:** TASK-086
 - **Estimated effort:** M
