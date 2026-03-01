@@ -1,0 +1,98 @@
+[
+  {
+    "id": "first_steps",
+    "title": "First Steps",
+    "description": "Complete your first lesson",
+    "icon": "footprints",
+    "xpReward": 50,
+    "criteria": { "type": "lessons_completed", "count": 1 }
+  },
+  {
+    "id": "getting_started",
+    "title": "Getting Started",
+    "description": "Complete 5 lessons",
+    "icon": "rocket",
+    "xpReward": 100,
+    "criteria": { "type": "lessons_completed", "count": 5 }
+  },
+  {
+    "id": "dedicated_learner",
+    "title": "Dedicated Learner",
+    "description": "Complete 25 lessons",
+    "icon": "book-open",
+    "xpReward": 250,
+    "criteria": { "type": "lessons_completed", "count": 25 }
+  },
+  {
+    "id": "century_club",
+    "title": "Century Club",
+    "description": "Complete 100 lessons",
+    "icon": "trophy",
+    "xpReward": 500,
+    "criteria": { "type": "lessons_completed", "count": 100 }
+  },
+  {
+    "id": "week_warrior",
+    "title": "Week Warrior",
+    "description": "Maintain a 7-day streak",
+    "icon": "flame",
+    "xpReward": 100,
+    "criteria": { "type": "streak", "count": 7 }
+  },
+  {
+    "id": "month_master",
+    "title": "Month Master",
+    "description": "Maintain a 30-day streak",
+    "icon": "calendar",
+    "xpReward": 500,
+    "criteria": { "type": "streak", "count": 30 }
+  },
+  {
+    "id": "perfect_score",
+    "title": "Perfect Score",
+    "description": "Score 100% on any quiz",
+    "icon": "star",
+    "xpReward": 75,
+    "criteria": { "type": "perfect_quiz", "count": 1 }
+  },
+  {
+    "id": "quiz_master",
+    "title": "Quiz Master",
+    "description": "Score 100% on 10 quizzes",
+    "icon": "award",
+    "xpReward": 250,
+    "criteria": { "type": "perfect_quiz", "count": 10 }
+  },
+  {
+    "id": "builder",
+    "title": "Builder",
+    "description": "Complete 10 mini projects",
+    "icon": "hammer",
+    "xpReward": 300,
+    "criteria": { "type": "projects_completed", "count": 10 }
+  },
+  {
+    "id": "module_master",
+    "title": "Module Master",
+    "description": "Complete your first module",
+    "icon": "package",
+    "xpReward": 150,
+    "criteria": { "type": "modules_completed", "count": 1 }
+  },
+  {
+    "id": "path_pioneer",
+    "title": "Path Pioneer",
+    "description": "Complete your first learning path",
+    "icon": "map",
+    "xpReward": 500,
+    "criteria": { "type": "paths_completed", "count": 1 }
+  },
+  {
+    "id": "exercise_enthusiast",
+    "title": "Exercise Enthusiast",
+    "description": "Complete 50 exercises",
+    "icon": "dumbbell",
+    "xpReward": 200,
+    "criteria": { "type": "exercises_completed", "count": 50 }
+  }
+]

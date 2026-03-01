@@ -1,0 +1,21 @@
+{
+  "name": "@devops-engineers/content-validator",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "validate": "tsx src/index.ts",
+    "lint": "echo 'no lint configured'",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "glob": "^11.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
