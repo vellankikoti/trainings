@@ -1,0 +1,53 @@
+import Link from "next/link";
+import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { Button } from "@/components/ui/button";
+import { Logo } from "./Logo";
+import { MobileNav } from "./MobileNav";
+import { ThemeToggle } from "./ThemeToggle";
+
+const NAV_ITEMS = [
+  { label: "Learning Paths", href: "/paths" },
+  { label: "Projects", href: "/projects" },
+  { label: "Blog", href: "/blog" },
+];
+
+export function Header() {
+  return (
+    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="container mx-auto flex h-16 items-center justify-between px-4">
+        <div className="flex items-center gap-6">
+          <MobileNav />
+          <Logo />
+          <nav className="hidden items-center gap-6 md:flex">
+            {NAV_ITEMS.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <SignedOut>
+            <Button variant="ghost" asChild>
+              <Link href="/sign-in">Sign In</Link>
+            </Button>
+            <Button asChild>
+              <Link href="/sign-up">Get Started</Link>
+            </Button>
+          </SignedOut>
+          <SignedIn>
+            <Button variant="ghost" asChild>
+              <Link href="/dashboard">Dashboard</Link>
+            </Button>
+            <UserButton afterSignOutUrl="/" />
+          </SignedIn>
+        </div>
+      </div>
+    </header>
+  );
+}
