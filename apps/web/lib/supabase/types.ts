@@ -87,6 +87,7 @@ export interface Database {
           public_profile?: boolean;
           updated_at?: string;
         };
+        Relationships: [];
       };
       lesson_progress: {
         Row: {
@@ -125,6 +126,14 @@ export interface Database {
           time_spent_seconds?: number;
           xp_earned?: number;
         };
+        Relationships: [
+          {
+            foreignKeyName: "lesson_progress_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       exercise_progress: {
         Row: {
@@ -154,6 +163,14 @@ export interface Database {
           completed_at?: string | null;
           attempts?: number;
         };
+        Relationships: [
+          {
+            foreignKeyName: "exercise_progress_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       module_progress: {
         Row: {
@@ -189,6 +206,14 @@ export interface Database {
           started_at?: string | null;
           completed_at?: string | null;
         };
+        Relationships: [
+          {
+            foreignKeyName: "module_progress_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       path_progress: {
         Row: {
@@ -221,6 +246,14 @@ export interface Database {
           started_at?: string | null;
           completed_at?: string | null;
         };
+        Relationships: [
+          {
+            foreignKeyName: "path_progress_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       quiz_attempts: {
         Row: {
@@ -265,6 +298,14 @@ export interface Database {
           xp_earned?: number;
           attempted_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "quiz_attempts_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       quiz_responses: {
         Row: {
@@ -291,6 +332,14 @@ export interface Database {
           correct?: boolean;
           time_spent_seconds?: number | null;
         };
+        Relationships: [
+          {
+            foreignKeyName: "quiz_responses_attempt_id_fkey";
+            columns: ["attempt_id"];
+            referencedRelation: "quiz_attempts";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       project_progress: {
         Row: {
@@ -326,6 +375,14 @@ export interface Database {
           repository_url?: string | null;
           xp_earned?: number;
         };
+        Relationships: [
+          {
+            foreignKeyName: "project_progress_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       certificates: {
         Row: {
@@ -364,6 +421,14 @@ export interface Database {
           verification_code?: string;
           public_url?: string | null;
         };
+        Relationships: [
+          {
+            foreignKeyName: "certificates_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       user_achievements: {
         Row: {
@@ -384,6 +449,14 @@ export interface Database {
           achievement_id?: string;
           unlocked_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "user_achievements_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       daily_activity: {
         Row: {
@@ -416,8 +489,17 @@ export interface Database {
           xp_earned?: number;
           time_spent_seconds?: number;
         };
+        Relationships: [
+          {
+            foreignKeyName: "daily_activity_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
+    Views: Record<string, never>;
     Functions: {
       get_current_profile_id: {
         Args: Record<string, never>;
@@ -425,5 +507,6 @@ export interface Database {
       };
     };
     Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
   };
 }
