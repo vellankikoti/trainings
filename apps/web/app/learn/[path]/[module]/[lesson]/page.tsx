@@ -49,20 +49,20 @@ export default async function LessonPage({ params }: LessonPageProps) {
 
       <div className="mx-auto max-w-[1440px] px-4 py-6 lg:px-8">
         {/* Breadcrumb */}
-        <nav className="mb-6 flex items-center gap-1.5 text-[13px] text-muted-foreground">
-          <Link href="/" className="hover:text-primary transition-colors">
+        <nav className="mb-6 flex items-center gap-1.5 text-[13px]">
+          <Link href="/" className="font-medium text-foreground/60 hover:text-primary transition-colors">
             Home
           </Link>
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-border">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30">
             <path d="m9 18 6-6-6-6" />
           </svg>
-          <Link href={`/paths/${params.path}`} className="hover:text-primary transition-colors">
+          <Link href={`/paths/${params.path}`} className="font-medium text-foreground/60 hover:text-primary transition-colors">
             {pathMeta.title}
           </Link>
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-border">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30">
             <path d="m9 18 6-6-6-6" />
           </svg>
-          <span className="truncate text-foreground font-medium">{lesson.frontmatter.title}</span>
+          <span className="truncate text-foreground font-semibold">{lesson.frontmatter.title}</span>
         </nav>
 
         {/* Three-column layout */}
@@ -99,7 +99,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
               </h1>
 
               {lesson.frontmatter.description && (
-                <p className="mt-4 text-lg leading-relaxed text-muted-foreground max-w-[38rem]">
+                <p className="mt-4 text-lg leading-relaxed text-foreground/70 max-w-[38rem]">
                   {lesson.frontmatter.description}
                 </p>
               )}

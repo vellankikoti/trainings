@@ -1,13 +1,24 @@
 import Stripe from "stripe";
 
 /**
- * Server-side Stripe client.
+ * Server-side Stripe client (lazy-initialized).
  * Only import this in server components and API routes.
  */
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-02-24.acacia",
-  typescript: true,
-});
+let _stripe: Stripe | null = null;
+
+export function getStripe(): Stripe {
+  if (!_stripe) {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      throw new Error("STRIPE_SECRET_KEY is not set");
+    }
+    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: "2025-02-24.acacia",
+      typescript: true,
+    });
+  }
+  return _stripe;
+}
+
 
 /**
  * Stripe product/price configuration.
@@ -55,7 +66,7 @@ export async function createCheckoutSession({
   successUrl: string;
   cancelUrl: string;
 }): Promise<Stripe.Checkout.Session> {
-  return stripe.checkout.sessions.create({
+  return getStripe().checkout.sessions.create({
     mode: "subscription",
     payment_method_types: ["card"],
     line_items: [{ price: priceId, quantity: 1 }],
@@ -79,7 +90,7 @@ export async function createBillingPortalSession({
   customerId: string;
   returnUrl: string;
 }): Promise<Stripe.BillingPortal.Session> {
-  return stripe.billingPortal.sessions.create({
+  return getStripe().billingPortal.sessions.create({
     customer: customerId,
     return_url: returnUrl,
   });
@@ -93,7 +104,7 @@ export async function getOrCreateCustomer(
   userId: string,
 ): Promise<string> {
   // Search for existing customer by email
-  const existing = await stripe.customers.list({
+  const existing = await getStripe().customers.list({
     email,
     limit: 1,
   });
@@ -103,7 +114,7 @@ export async function getOrCreateCustomer(
   }
 
   // Create new customer
-  const customer = await stripe.customers.create({
+  const customer = await getStripe().customers.create({
     email,
     metadata: { userId },
   });
@@ -119,5 +130,5 @@ export function constructWebhookEvent(
   signature: string,
 ): Stripe.Event {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-  return stripe.webhooks.constructEvent(body, signature, webhookSecret);
+  return getStripe().webhooks.constructEvent(body, signature, webhookSecret);
 }

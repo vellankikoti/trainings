@@ -67,8 +67,8 @@ export function LessonSidebar({
                 isCurrent
                   ? "bg-primary/10 text-primary font-semibold shadow-sm"
                   : isPast
-                    ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                    : "text-muted-foreground/60 hover:bg-muted/50 hover:text-foreground"
+                    ? "text-foreground/70 hover:bg-muted/50 hover:text-foreground"
+                    : "text-foreground/50 hover:bg-muted/50 hover:text-foreground"
               }`}
             >
               <span
@@ -77,7 +77,7 @@ export function LessonSidebar({
                     ? "bg-primary text-white shadow-sm"
                     : isPast
                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-muted text-muted-foreground/60"
+                      : "bg-muted text-muted-foreground"
                 }`}
               >
                 {isPast ? (

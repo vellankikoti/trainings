@@ -46,8 +46,8 @@ export async function POST(request: Request) {
       }
 
       // Get subscription details
-      const { stripe } = await import("@/lib/stripe");
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const { getStripe } = await import("@/lib/stripe");
+      const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
 
       // Determine plan from price
       const priceId = subscription.items.data[0]?.price.id;
