@@ -1,7 +1,13 @@
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   output: process.env.NEXT_OUTPUT_MODE === "standalone" ? "standalone" : undefined,
+  outputFileTracingRoot: resolve(__dirname, "../../"),
   transpilePackages: [],
   images: {
     formats: ["image/avif", "image/webp"],
@@ -17,6 +23,9 @@ const nextConfig = {
     ],
   },
   experimental: {
+    outputFileTracingIncludes: {
+      "/learn/**": ["../../content/**"],
+    },
     optimizePackageImports: [
       "@clerk/nextjs",
       "sonner",
