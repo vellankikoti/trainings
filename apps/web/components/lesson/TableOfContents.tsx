@@ -34,25 +34,27 @@ export function TableOfContents({ headings }: { headings: Heading[] }) {
   if (headings.length === 0) return null;
 
   return (
-    <nav className="space-y-0.5">
-      <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+    <nav className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
+      <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
         On this page
       </p>
-      {headings.map((h) => (
-        <a
-          key={h.id}
-          href={`#${h.id}`}
-          className={`block rounded-md py-1.5 text-[13px] leading-snug transition-colors ${
-            h.depth === 3 ? "pl-4" : h.depth === 4 ? "pl-8" : "pl-0"
-          } ${
-            activeId === h.id
-              ? "font-medium text-primary"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {h.text}
-        </a>
-      ))}
+      <div className="space-y-0.5 border-l-2 border-border/60">
+        {headings.map((h) => (
+          <a
+            key={h.id}
+            href={`#${h.id}`}
+            className={`block py-1.5 text-[13px] leading-snug transition-all ${
+              h.depth === 3 ? "pl-6" : h.depth === 4 ? "pl-9" : "pl-3"
+            } ${
+              activeId === h.id
+                ? "font-semibold text-primary border-l-2 border-primary -ml-[2px]"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {h.text}
+          </a>
+        ))}
+      </div>
     </nav>
   );
 }

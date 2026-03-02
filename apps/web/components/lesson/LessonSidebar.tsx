@@ -24,33 +24,37 @@ export function LessonSidebar({
   currentLessonSlug,
 }: LessonSidebarProps) {
   const currentIndex = lessons.findIndex((l) => l.slug === currentLessonSlug);
+  const progressPercent = lessons.length > 0 ? Math.round(((currentIndex + 1) / lessons.length) * 100) : 0;
 
   return (
-    <nav className="space-y-1">
-      {/* Module title */}
-      <div className="mb-4">
+    <nav className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="border-b border-border/60 bg-muted/30 p-4">
         <Link
           href={`/paths/${pathSlug}`}
-          className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
         >
-          &larr; Back to Path
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+          Back to Path
         </Link>
-        <h3 className="mt-2 text-sm font-bold text-foreground">{moduleTitle}</h3>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-500"
-            style={{
-              width: `${lessons.length > 0 ? Math.round(((currentIndex + 1) / lessons.length) * 100) : 0}%`,
-            }}
-          />
+        <h3 className="mt-2 text-sm font-bold text-foreground leading-tight">{moduleTitle}</h3>
+        <div className="mt-3 flex items-center gap-2">
+          <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-500"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          <span className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+            {progressPercent}%
+          </span>
         </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Lesson {currentIndex + 1} of {lessons.length}
-        </p>
       </div>
 
       {/* Lesson list */}
-      <div className="space-y-0.5">
+      <div className="p-2 max-h-[calc(100vh-16rem)] overflow-y-auto">
         {lessons.map((lesson, i) => {
           const isCurrent = lesson.slug === currentLessonSlug;
           const isPast = i < currentIndex;
@@ -59,34 +63,32 @@ export function LessonSidebar({
             <Link
               key={lesson.slug}
               href={`/learn/${pathSlug}/${moduleSlug}/${lesson.slug}`}
-              className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+              className={`group flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13px] transition-all ${
                 isCurrent
-                  ? "bg-primary/10 text-primary font-medium"
+                  ? "bg-primary/10 text-primary font-semibold shadow-sm"
                   : isPast
                     ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                    : "text-muted-foreground/70 hover:bg-muted/50 hover:text-foreground"
+                    : "text-muted-foreground/60 hover:bg-muted/50 hover:text-foreground"
               }`}
             >
-              {/* Number badge */}
               <span
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${
                   isCurrent
-                    ? "bg-primary text-white"
+                    ? "bg-primary text-white shadow-sm"
                     : isPast
                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-muted text-muted-foreground"
+                      : "bg-muted text-muted-foreground/60"
                 }`}
               >
                 {isPast ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
                 ) : (
                   i + 1
                 )}
               </span>
-
-              <span className="truncate">{lesson.title}</span>
+              <span className="truncate leading-tight">{lesson.title}</span>
             </Link>
           );
         })}
