@@ -130,6 +130,21 @@
   background: transparent !important;
   box-shadow: none !important;
   ring: none !important;
+  color: hsl(220 14% 82%);
+}
+/* Ensure all code text inside the editor is readable on dark bg */
+.code-editor-block pre code {
+  color: hsl(220 14% 82%);
+}
+.code-editor-block pre code [data-line] span {
+  /* Fallback: if shiki doesn't set a color, use the readable default */
+}
+/* Plain text code blocks (no language / no syntax highlighting) */
+.code-editor-block pre code:not([data-language]) {
+  color: hsl(220 14% 82%);
+}
+.code-editor-block pre code:not([data-language]) [data-line] {
+  color: hsl(220 14% 82%);
 }
 .prose pre code {
   background: transparent !important;
