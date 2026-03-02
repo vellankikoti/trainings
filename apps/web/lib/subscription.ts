@@ -25,11 +25,11 @@ const FREE_SUBSCRIPTION: Subscription = {
 export async function getSubscription(userId: string): Promise<Subscription> {
   const supabase = createAdminClient();
 
-  const { data } = await supabase
+  const { data } = (await supabase
     .from("subscriptions")
     .select("*")
     .eq("user_id", userId)
-    .single();
+    .single()) as any;
 
   if (!data) {
     return FREE_SUBSCRIPTION;

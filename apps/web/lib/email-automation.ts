@@ -45,11 +45,11 @@ export async function getEmailPreferences(
   userId: string,
 ): Promise<EmailPreferences> {
   const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("profiles")
+  const { data } = (await (supabase
+    .from("profiles") as any)
     .select("email_preferences")
     .eq("id", userId)
-    .single();
+    .single()) as any;
 
   return { ...DEFAULT_PREFERENCES, ...(data?.email_preferences ?? {}) };
 }
@@ -60,8 +60,8 @@ export async function updateEmailPreferences(
 ): Promise<void> {
   const supabase = createAdminClient();
   const current = await getEmailPreferences(userId);
-  await supabase
-    .from("profiles")
+  await (supabase
+    .from("profiles") as any)
     .update({ email_preferences: { ...current, ...preferences } })
     .eq("id", userId);
 }
@@ -404,11 +404,11 @@ export async function processWelcomeSequence(): Promise<{
   const day3End = new Date(day3Date);
   day3End.setHours(23, 59, 59, 999);
 
-  const { data: day3Users } = await supabase
-    .from("profiles")
+  const { data: day3Users } = (await (supabase
+    .from("profiles") as any)
     .select("id, display_name, email, created_at")
     .gte("created_at", day3Start.toISOString())
-    .lte("created_at", day3End.toISOString());
+    .lte("created_at", day3End.toISOString())) as any;
 
   let day3Sent = 0;
   for (const user of day3Users || []) {
@@ -428,11 +428,11 @@ export async function processWelcomeSequence(): Promise<{
   const day7End = new Date(day7Date);
   day7End.setHours(23, 59, 59, 999);
 
-  const { data: day7Users } = await supabase
-    .from("profiles")
+  const { data: day7Users } = (await (supabase
+    .from("profiles") as any)
     .select("id, display_name, email, created_at")
     .gte("created_at", day7Start.toISOString())
-    .lte("created_at", day7End.toISOString());
+    .lte("created_at", day7End.toISOString())) as any;
 
   let day7Sent = 0;
   for (const user of day7Users || []) {
@@ -465,10 +465,10 @@ export async function processInactiveUserEmails(): Promise<{
     type: EmailType;
     key: "day7Sent" | "day14Sent" | "day30Sent";
   }> = [
-    { days: 7, type: "inactive_7d", key: "day7Sent" },
-    { days: 14, type: "inactive_14d", key: "day14Sent" },
-    { days: 30, type: "inactive_30d", key: "day30Sent" },
-  ];
+      { days: 7, type: "inactive_7d", key: "day7Sent" },
+      { days: 14, type: "inactive_14d", key: "day14Sent" },
+      { days: 30, type: "inactive_30d", key: "day30Sent" },
+    ];
 
   for (const interval of intervals) {
     const targetDate = new Date(now);
@@ -479,34 +479,34 @@ export async function processInactiveUserEmails(): Promise<{
     targetEnd.setHours(23, 59, 59, 999);
 
     // Find users whose last activity was exactly N days ago
-    const { data: inactiveUsers } = await supabase
-      .from("daily_activity")
+    const { data: inactiveUsers } = (await (supabase
+      .from("daily_activity") as any)
       .select("user_id, date")
       .gte("date", targetStart.toISOString())
-      .lte("date", targetEnd.toISOString());
+      .lte("date", targetEnd.toISOString())) as any;
 
     if (!inactiveUsers) continue;
 
-    const userIds = [...new Set(inactiveUsers.map((a) => a.user_id))];
+    const userIds = [...new Set((inactiveUsers as any[]).map((a: any) => a.user_id))];
 
     // Verify they haven't been active since
     for (const userId of userIds) {
-      const { count } = await supabase
-        .from("daily_activity")
+      const { count } = (await (supabase
+        .from("daily_activity") as any)
         .select("id", { count: "exact", head: true })
         .eq("user_id", userId)
-        .gt("date", targetEnd.toISOString());
+        .gt("date", targetEnd.toISOString())) as any;
 
       if (count && count > 0) continue; // User has been active since — skip
 
-      const { data: profile } = await supabase
-        .from("profiles")
+      const { data: profile } = (await (supabase
+        .from("profiles") as any)
         .select("email, display_name")
         .eq("id", userId)
-        .single();
+        .single()) as any;
 
       if (profile?.email) {
-        const sent = await sendAutomatedEmail(userId, profile.email, interval.type, {
+        const sent = await sendAutomatedEmail(userId, profile.email as string, interval.type, {
           name: profile.display_name || "there",
         });
         if (sent) results[interval.key]++;

@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   const { plan, interval } = validated.data;
 
   // Get price ID
-  const planConfig = PLANS[plan];
+  const planConfig = (PLANS as any)[plan];
   const priceId =
     interval === "monthly"
       ? planConfig.stripePriceIdMonthly

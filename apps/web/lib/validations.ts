@@ -70,7 +70,7 @@ export const profileUpdateSchema = z.object({
 export function validateBody<T>(
   schema: z.ZodSchema<T>,
   data: unknown,
-): { data: T; error: null } | { data: null; error: string } {
+): { data: any; error: string | null } {
   const result = schema.safeParse(data);
   if (!result.success) {
     const errors = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);

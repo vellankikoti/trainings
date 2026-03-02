@@ -54,7 +54,7 @@ export async function POST(request: Request) {
       const plan = determinePlan(priceId);
 
       // Upsert subscription record
-      const { error } = await supabase.from("subscriptions").upsert(
+      const { error } = (await (supabase.from("subscriptions") as any).upsert(
         {
           user_id: userId,
           stripe_customer_id: customerId,
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
           ).toISOString(),
         },
         { onConflict: "user_id" },
-      );
+      )) as any;
 
       if (error) {
         console.error("Failed to create subscription:", error);
@@ -88,8 +88,8 @@ export async function POST(request: Request) {
       const priceId = subscription.items.data[0]?.price.id;
       const plan = determinePlan(priceId);
 
-      const { error } = await supabase
-        .from("subscriptions")
+      const { error } = (await (supabase
+        .from("subscriptions") as any)
         .update({
           plan,
           status: subscription.status === "active" ? "active" : subscription.status as string,
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
           ).toISOString(),
           cancel_at_period_end: subscription.cancel_at_period_end,
         })
-        .eq("stripe_subscription_id", subscriptionId);
+        .eq("stripe_subscription_id", subscriptionId)) as any;
 
       if (error) {
         console.error("Failed to update subscription:", error);
@@ -113,13 +113,13 @@ export async function POST(request: Request) {
       const subscription = event.data.object as Stripe.Subscription;
       const subscriptionId = subscription.id;
 
-      const { error } = await supabase
-        .from("subscriptions")
+      const { error } = (await (supabase
+        .from("subscriptions") as any)
         .update({
           status: "canceled",
           plan: "free",
         })
-        .eq("stripe_subscription_id", subscriptionId);
+        .eq("stripe_subscription_id", subscriptionId)) as any;
 
       if (error) {
         console.error("Failed to cancel subscription:", error);
@@ -132,10 +132,10 @@ export async function POST(request: Request) {
       const subscriptionId = invoice.subscription as string;
 
       if (subscriptionId) {
-        const { error } = await supabase
-          .from("subscriptions")
+        const { error } = (await (supabase
+          .from("subscriptions") as any)
           .update({ status: "past_due" })
-          .eq("stripe_subscription_id", subscriptionId);
+          .eq("stripe_subscription_id", subscriptionId)) as any;
 
         if (error) {
           console.error("Failed to mark subscription as past_due:", error);

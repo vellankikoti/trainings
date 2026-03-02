@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: validated.error }, { status: 400 });
   }
 
-  const { type, title, pathSlug, moduleSlug, description } = validated.data;
+  const { type, title, pathSlug, moduleSlug, description } = validated.data as any;
 
   try {
     const result = await generateCertificate(profileId, type, title, {

@@ -21,11 +21,11 @@ export async function POST() {
 
   // Get the user's Stripe customer ID
   const supabase = createAdminClient();
-  const { data: subscription } = await supabase
+  const { data: subscription } = (await supabase
     .from("subscriptions")
     .select("stripe_customer_id")
     .eq("user_id", profileId)
-    .single();
+    .single()) as any;
 
   if (!subscription?.stripe_customer_id) {
     return NextResponse.json(

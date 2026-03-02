@@ -30,50 +30,50 @@ export async function getTeamMembers(
   const supabase = createAdminClient();
 
   // Get the admin's subscription to find the team
-  const { data: adminSub } = await supabase
+  const { data: adminSub } = (await supabase
     .from("subscriptions")
     .select("stripe_customer_id")
     .eq("user_id", adminUserId)
     .eq("plan", "team")
-    .single();
+    .single()) as any;
 
   if (!adminSub?.stripe_customer_id) {
     return [];
   }
 
   // Get all team members (users sharing the same Stripe customer)
-  const { data: teamSubs } = await supabase
+  const { data: teamSubs } = (await supabase
     .from("subscriptions")
     .select("user_id")
-    .eq("stripe_customer_id", adminSub.stripe_customer_id);
+    .eq("stripe_customer_id", adminSub.stripe_customer_id)) as any;
 
   if (!teamSubs || teamSubs.length === 0) {
     return [];
   }
 
-  const userIds = teamSubs.map((s) => s.user_id);
+  const userIds = teamSubs.map((s: any) => s.user_id);
 
   // Get profiles for team members
-  const { data: profiles } = await supabase
+  const { data: profiles } = (await supabase
     .from("profiles")
     .select("id, display_name, username, avatar_url, level, total_xp, created_at")
-    .in("id", userIds);
+    .in("id", userIds)) as any;
 
   if (!profiles) return [];
 
   // Get lesson completion counts
-  const { data: progress } = await supabase
+  const { data: progress } = (await supabase
     .from("lesson_progress")
     .select("user_id")
     .in("user_id", userIds)
-    .eq("status", "completed");
+    .eq("status", "completed")) as any;
 
   const completionCounts = new Map<string, number>();
   for (const p of progress || []) {
     completionCounts.set(p.user_id, (completionCounts.get(p.user_id) || 0) + 1);
   }
 
-  return profiles.map((p) => ({
+  return profiles.map((p: any) => ({
     id: p.id,
     displayName: p.display_name,
     username: p.username,

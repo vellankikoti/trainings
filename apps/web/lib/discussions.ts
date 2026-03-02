@@ -28,8 +28,8 @@ export async function getDiscussions(
   const supabase = createAdminClient();
 
   // Get top-level discussions (no parent)
-  const { data, error } = await supabase
-    .from("discussions")
+  const { data, error } = (await (supabase
+    .from("discussions") as any)
     .select(`
       id,
       user_id,
@@ -49,7 +49,7 @@ export async function getDiscussions(
     .eq("is_deleted", false)
     .is("parent_id", null)
     .order("created_at", { ascending: false })
-    .limit(50);
+    .limit(50)) as any;
 
   if (error || !data) {
     console.error("Failed to fetch discussions:", error);
@@ -57,11 +57,11 @@ export async function getDiscussions(
   }
 
   // Get vote counts for all discussions
-  const discussionIds = data.map((d) => d.id);
-  const { data: votes } = await supabase
-    .from("discussion_votes")
+  const discussionIds = (data as any[]).map((d: any) => d.id);
+  const { data: votes } = (await (supabase
+    .from("discussion_votes") as any)
     .select("discussion_id, vote_type")
-    .in("discussion_id", discussionIds);
+    .in("discussion_id", discussionIds)) as any;
 
   const voteCounts = new Map<string, { upvotes: number; downvotes: number }>();
   for (const vote of votes || []) {
@@ -72,8 +72,8 @@ export async function getDiscussions(
   }
 
   // Get replies for all discussions
-  const { data: replies } = await supabase
-    .from("discussions")
+  const { data: replies } = (await (supabase
+    .from("discussions") as any)
     .select(`
       id,
       user_id,
@@ -92,7 +92,7 @@ export async function getDiscussions(
     .eq("lesson_slug", lessonSlug)
     .eq("is_deleted", false)
     .in("parent_id", discussionIds)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })) as any;
 
   const repliesMap = new Map<string, Discussion[]>();
   for (const reply of replies || []) {
@@ -113,10 +113,10 @@ export async function getDiscussions(
       updatedAt: reply.updated_at,
       author: profile
         ? {
-            displayName: profile.display_name,
-            username: profile.username,
-            avatarUrl: profile.avatar_url,
-          }
+          displayName: profile.display_name,
+          username: profile.username,
+          avatarUrl: profile.avatar_url,
+        }
         : undefined,
       upvotes: 0,
       downvotes: 0,
@@ -124,7 +124,7 @@ export async function getDiscussions(
     repliesMap.set(reply.parent_id!, parentReplies);
   }
 
-  return data.map((d) => {
+  return (data as any[]).map((d: any) => {
     const profile = d.profiles as unknown as {
       display_name: string | null;
       username: string | null;
@@ -143,10 +143,10 @@ export async function getDiscussions(
       updatedAt: d.updated_at,
       author: profile
         ? {
-            displayName: profile.display_name,
-            username: profile.username,
-            avatarUrl: profile.avatar_url,
-          }
+          displayName: profile.display_name,
+          username: profile.username,
+          avatarUrl: profile.avatar_url,
+        }
         : undefined,
       upvotes: counts.upvotes,
       downvotes: counts.downvotes,
@@ -166,8 +166,8 @@ export async function createDiscussion(
 ): Promise<Discussion | null> {
   const supabase = createAdminClient();
 
-  const { data, error } = await supabase
-    .from("discussions")
+  const { data, error } = (await (supabase
+    .from("discussions") as any)
     .insert({
       user_id: userId,
       lesson_slug: lessonSlug,
@@ -175,7 +175,7 @@ export async function createDiscussion(
       parent_id: parentId || null,
     })
     .select("*")
-    .single();
+    .single()) as any;
 
   if (error || !data) {
     console.error("Failed to create discussion:", error);
@@ -202,10 +202,10 @@ export async function createDiscussion(
 export async function flagDiscussion(discussionId: string): Promise<boolean> {
   const supabase = createAdminClient();
 
-  const { error } = await supabase
-    .from("discussions")
+  const { error } = (await (supabase
+    .from("discussions") as any)
     .update({ is_flagged: true })
-    .eq("id", discussionId);
+    .eq("id", discussionId)) as any;
 
   return !error;
 }
@@ -219,11 +219,11 @@ export async function deleteDiscussion(
 ): Promise<boolean> {
   const supabase = createAdminClient();
 
-  const { error } = await supabase
-    .from("discussions")
+  const { error } = (await (supabase
+    .from("discussions") as any)
     .update({ is_deleted: true })
     .eq("id", discussionId)
-    .eq("user_id", userId);
+    .eq("user_id", userId)) as any;
 
   return !error;
 }
@@ -239,18 +239,18 @@ export async function voteDiscussion(
   const supabase = createAdminClient();
 
   // Remove existing vote if any
-  await supabase
-    .from("discussion_votes")
+  (await (supabase
+    .from("discussion_votes") as any)
     .delete()
     .eq("discussion_id", discussionId)
-    .eq("user_id", userId);
+    .eq("user_id", userId));
 
   // Insert new vote
-  const { error } = await supabase.from("discussion_votes").insert({
+  const { error } = (await (supabase.from("discussion_votes") as any).insert({
     discussion_id: discussionId,
     user_id: userId,
     vote_type: voteType,
-  });
+  })) as any;
 
   return !error;
 }
