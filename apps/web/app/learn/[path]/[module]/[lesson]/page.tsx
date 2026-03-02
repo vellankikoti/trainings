@@ -47,16 +47,16 @@ export default async function LessonPage({ params }: LessonPageProps) {
       <div className="mx-auto max-w-[1440px] px-4 py-6 lg:px-8">
         {/* Breadcrumb */}
         <nav className="mb-6 flex items-center gap-1.5 text-[13px]">
-          <Link href="/" className="font-medium text-foreground/60 hover:text-primary transition-colors">
+          <Link href="/" className="font-medium text-foreground/50 hover:text-primary transition-colors">
             Home
           </Link>
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/25">
             <path d="m9 18 6-6-6-6" />
           </svg>
-          <Link href={`/paths/${params.path}`} className="font-medium text-foreground/60 hover:text-primary transition-colors">
+          <Link href={`/paths/${params.path}`} className="font-medium text-foreground/50 hover:text-primary transition-colors">
             {pathMeta.title}
           </Link>
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/25">
             <path d="m9 18 6-6-6-6" />
           </svg>
           <span className="truncate text-foreground font-semibold">{lesson.frontmatter.title}</span>
@@ -96,7 +96,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
               </h1>
 
               {lesson.frontmatter.description && (
-                <p className="mt-4 text-lg leading-relaxed text-foreground/70 max-w-[38rem]">
+                <p className="mt-4 text-lg leading-relaxed text-foreground/80 max-w-[38rem]">
                   {lesson.frontmatter.description}
                 </p>
               )}
@@ -104,7 +104,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
               {/* Meta row */}
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 {lesson.frontmatter.estimatedMinutes && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-foreground/60">
                     <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="10" />
                       <polyline points="12 6 12 12 16 14" />
@@ -112,7 +112,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
                     {lesson.frontmatter.estimatedMinutes} min read
                   </span>
                 )}
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-foreground/60">
                   <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
                   </svg>
@@ -146,7 +146,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-primary">
                           <path d="M20 6 9 17l-5-5" />
                         </svg>
-                        <span className="text-sm leading-snug text-foreground/80">{obj}</span>
+                        <span className="text-sm leading-snug text-foreground">{obj}</span>
                       </div>
                     ))}
                   </div>

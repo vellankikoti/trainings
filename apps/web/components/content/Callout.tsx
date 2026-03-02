@@ -137,7 +137,7 @@ export function Callout({ type = "info", title, children }: CalloutProps) {
           {title || config.defaultTitle}
         </span>
       </div>
-      <div className="mt-3 text-[0.938rem] leading-relaxed text-foreground/90 [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:mt-2 [&>ul]:list-disc [&>ul]:pl-5 [&>ol]:mt-2 [&>ol]:list-decimal [&>ol]:pl-5 [&_code]:rounded-md [&_code]:bg-foreground/[0.06] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm [&_code]:font-medium">
+      <div className="mt-3 text-[0.938rem] leading-relaxed text-foreground [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:mt-2 [&>ul]:list-disc [&>ul]:pl-5 [&>ol]:mt-2 [&>ol]:list-decimal [&>ol]:pl-5 [&_code]:rounded-md [&_code]:bg-foreground/[0.06] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm [&_code]:font-medium">
         {children}
       </div>
     </div>

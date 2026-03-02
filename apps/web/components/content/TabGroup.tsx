@@ -39,7 +39,7 @@ export function TabGroup({ children }: TabGroupProps) {
           </button>
         ))}
       </div>
-      <div className="p-5 text-[0.938rem] leading-relaxed text-foreground/90 [&>p]:mb-3 [&>p:last-child]:mb-0 [&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm [&_code]:font-medium" role="tabpanel">
+      <div className="p-5 text-[0.938rem] leading-relaxed text-foreground [&>p]:mb-3 [&>p:last-child]:mb-0 [&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm [&_code]:font-medium" role="tabpanel">
         {tabs[activeIndex]}
       </div>
     </div>

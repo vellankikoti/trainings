@@ -35,7 +35,7 @@ export function TableOfContents({ headings }: { headings: Heading[] }) {
 
   return (
     <nav className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
-      <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+      <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-foreground/50">
         On this page
       </p>
       <div className="space-y-0.5 border-l-2 border-border/60">
@@ -48,7 +48,7 @@ export function TableOfContents({ headings }: { headings: Heading[] }) {
             } ${
               activeId === h.id
                 ? "font-semibold text-primary border-l-2 border-primary -ml-[2px]"
-                : "text-muted-foreground hover:text-foreground"
+                : "text-foreground/70 hover:text-foreground"
             }`}
           >
             {h.text}

@@ -29,10 +29,10 @@ export function LessonSidebar({
   return (
     <nav className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border/60 bg-muted/30 p-4">
+      <div className="border-b border-border/60 bg-muted/40 px-4 py-4">
         <Link
           href={`/paths/${pathSlug}`}
-          className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
+          className="inline-flex items-center gap-1 text-xs font-semibold text-foreground/60 hover:text-primary transition-colors"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m15 18-6-6 6-6" />
@@ -40,14 +40,14 @@ export function LessonSidebar({
           Back to Path
         </Link>
         <h3 className="mt-2 text-sm font-bold text-foreground leading-tight">{moduleTitle}</h3>
-        <div className="mt-3 flex items-center gap-2">
-          <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className="mt-3 flex items-center gap-2.5">
+          <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-border/80">
             <div
               className="h-full rounded-full bg-primary transition-all duration-500"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
-          <span className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+          <span className="text-[11px] font-bold text-foreground/50 tabular-nums">
             {progressPercent}%
           </span>
         </div>
@@ -65,10 +65,8 @@ export function LessonSidebar({
               href={`/learn/${pathSlug}/${moduleSlug}/${lesson.slug}`}
               className={`group flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13px] transition-all ${
                 isCurrent
-                  ? "bg-primary/10 text-primary font-semibold shadow-sm"
-                  : isPast
-                    ? "text-foreground/70 hover:bg-muted/50 hover:text-foreground"
-                    : "text-foreground/50 hover:bg-muted/50 hover:text-foreground"
+                  ? "bg-primary/10 font-semibold shadow-sm"
+                  : "hover:bg-muted/60"
               }`}
             >
               <span
@@ -77,7 +75,7 @@ export function LessonSidebar({
                     ? "bg-primary text-white shadow-sm"
                     : isPast
                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-muted text-muted-foreground"
+                      : "bg-muted text-foreground/50"
                 }`}
               >
                 {isPast ? (
@@ -88,7 +86,15 @@ export function LessonSidebar({
                   i + 1
                 )}
               </span>
-              <span className="truncate leading-tight">{lesson.title}</span>
+              <span className={`truncate leading-tight ${
+                isCurrent
+                  ? "text-primary"
+                  : isPast
+                    ? "text-foreground/70 group-hover:text-foreground"
+                    : "text-foreground/80 group-hover:text-foreground"
+              }`}>
+                {lesson.title}
+              </span>
             </Link>
           );
         })}
