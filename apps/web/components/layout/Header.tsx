@@ -14,36 +14,36 @@ const NAV_ITEMS = [
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-8">
           <MobileNav />
           <Logo />
-          <nav aria-label="Main navigation" className="hidden items-center gap-6 md:flex">
+          <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 {item.label}
               </Link>
             ))}
           </nav>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <SearchDialog />
           <ThemeToggle />
           <SignedOut>
-            <Button variant="ghost" asChild>
+            <Button variant="ghost" size="sm" asChild className="ml-1">
               <Link href="/sign-in">Sign In</Link>
             </Button>
-            <Button asChild>
+            <Button size="sm" asChild>
               <Link href="/sign-up">Get Started</Link>
             </Button>
           </SignedOut>
           <SignedIn>
-            <Button variant="ghost" asChild>
+            <Button variant="ghost" size="sm" asChild className="ml-1">
               <Link href="/dashboard">Dashboard</Link>
             </Button>
             <UserButton afterSignOutUrl="/" />
