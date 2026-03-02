@@ -15,7 +15,7 @@ const NAV_ITEMS = [
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <div className="flex items-center gap-8">
           <MobileNav />
