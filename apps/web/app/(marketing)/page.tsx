@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 
 const LEARNING_PATHS = [
   {
+    slug: "foundations",
     title: "Foundations",
     description: "Linux, Networking, Git, Shell Scripting",
     modules: 6,
@@ -12,6 +13,7 @@ const LEARNING_PATHS = [
     badgeClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
   },
   {
+    slug: "containerization",
     title: "Containerization",
     description: "Docker, Podman, Container Security",
     modules: 5,
@@ -20,6 +22,7 @@ const LEARNING_PATHS = [
     badgeClass: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400",
   },
   {
+    slug: "orchestration",
     title: "Orchestration",
     description: "Kubernetes, Helm, Service Mesh",
     modules: 6,
@@ -28,6 +31,7 @@ const LEARNING_PATHS = [
     badgeClass: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400",
   },
   {
+    slug: "iac-cloud",
     title: "Infrastructure as Code",
     description: "Terraform, Ansible, Pulumi",
     modules: 5,
@@ -36,6 +40,7 @@ const LEARNING_PATHS = [
     badgeClass: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
   },
   {
+    slug: "cicd-gitops",
     title: "CI/CD & Automation",
     description: "GitHub Actions, Jenkins, ArgoCD, GitOps",
     modules: 6,
@@ -44,6 +49,7 @@ const LEARNING_PATHS = [
     badgeClass: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",
   },
   {
+    slug: "observability",
     title: "Cloud & SRE",
     description: "AWS, GCP, Monitoring, Incident Response",
     modules: 8,
@@ -173,12 +179,13 @@ export default function HomePage() {
         </div>
         <div className="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {LEARNING_PATHS.map((path) => (
-            <div
-              key={path.title}
-              className={`group rounded-xl border border-border/60 bg-card p-6 shadow-sm transition-all hover:border-border hover:shadow-md ${path.color} border-l-4`}
+            <Link
+              key={path.slug}
+              href={`/paths/${path.slug}`}
+              className={`group rounded-xl border border-border/60 bg-card p-6 shadow-sm transition-all hover:border-primary/40 hover:shadow-md ${path.color} border-l-4`}
             >
               <div className="flex items-start justify-between gap-3">
-                <h3 className="text-lg font-semibold text-card-foreground">
+                <h3 className="text-lg font-semibold text-card-foreground group-hover:text-primary transition-colors">
                   {path.title}
                 </h3>
                 <Badge
@@ -191,10 +198,15 @@ export default function HomePage() {
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 {path.description}
               </p>
-              <div className="mt-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                {path.modules} modules
+              <div className="mt-4 flex items-center justify-between">
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {path.modules} modules
+                </span>
+                <span className="text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                  View Path →
+                </span>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </section>
