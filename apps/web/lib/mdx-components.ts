@@ -1,3 +1,4 @@
+import React from "react";
 import { CodeBlock } from "@/components/content/CodeBlock";
 import { Callout } from "@/components/content/Callout";
 import { TabGroup, Tab } from "@/components/content/TabGroup";
@@ -24,17 +25,13 @@ export const mdxComponents = {
 
   // Override standard HTML elements
   pre: (props: React.ComponentProps<"pre">) => {
-    // rehype-pretty-code wraps code in pre > code, pass through
-    return props as any;
+    return React.createElement("pre", props);
   },
   table: (props: React.ComponentProps<"table">) => {
-    const { ...rest } = props;
-    return {
-      type: "div",
-      props: {
-        className: "my-4 overflow-x-auto",
-        children: { type: "table", props: { className: "w-full", ...rest } },
-      },
-    } as any;
+    return React.createElement(
+      "div",
+      { className: "my-4 overflow-x-auto" },
+      React.createElement("table", { className: "w-full", ...props }),
+    );
   },
 };
