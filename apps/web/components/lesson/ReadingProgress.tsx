@@ -1,11 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 
 export function ReadingProgress() {
   const [progress, setProgress] = useState(0);
+  const pathname = usePathname();
+
+  const isLessonPage = pathname?.startsWith("/learn/");
 
   useEffect(() => {
+    if (!isLessonPage) return;
+
     function updateProgress() {
       const scrollTop = window.scrollY;
       const docHeight =
@@ -18,16 +24,14 @@ export function ReadingProgress() {
     window.addEventListener("scroll", updateProgress, { passive: true });
     updateProgress();
     return () => window.removeEventListener("scroll", updateProgress);
-  }, []);
+  }, [isLessonPage]);
 
-  if (progress === 0) return null;
+  if (!isLessonPage || progress === 0) return null;
 
   return (
-    <div className="fixed top-16 left-0 right-0 z-50 h-[2px]">
-      <div
-        className="h-full bg-primary transition-[width] duration-200 ease-out"
-        style={{ width: `${progress}%` }}
-      />
-    </div>
+    <div
+      className="h-[2px] bg-primary transition-[width] duration-200 ease-out"
+      style={{ width: `${progress}%` }}
+    />
   );
 }

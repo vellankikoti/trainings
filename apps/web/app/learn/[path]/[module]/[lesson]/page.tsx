@@ -7,7 +7,6 @@ import { LessonContent } from "@/components/lesson/LessonContent";
 import { TableOfContents } from "@/components/lesson/TableOfContents";
 import { LessonNav } from "@/components/lesson/LessonNav";
 import { LessonSidebar } from "@/components/lesson/LessonSidebar";
-import { ReadingProgress } from "@/components/lesson/ReadingProgress";
 
 interface LessonPageProps {
   params: { path: string; module: string; lesson: string };
@@ -45,8 +44,6 @@ export default async function LessonPage({ params }: LessonPageProps) {
 
   return (
     <>
-      <ReadingProgress />
-
       <div className="mx-auto max-w-[1440px] px-4 py-6 lg:px-8">
         {/* Breadcrumb */}
         <nav className="mb-6 flex items-center gap-1.5 text-[13px]">

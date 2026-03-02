@@ -5,6 +5,7 @@ import { Logo } from "./Logo";
 import { MobileNav } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
 import { SearchDialog } from "./SearchDialog";
+import { ReadingProgress } from "@/components/lesson/ReadingProgress";
 
 const NAV_ITEMS = [
   { label: "Learning Paths", href: "/paths" },
@@ -49,6 +50,10 @@ export function Header() {
             <UserButton afterSignOutUrl="/" />
           </SignedIn>
         </div>
+      </div>
+      {/* Reading progress — sits at the absolute bottom of the header, replacing the border */}
+      <div className="absolute bottom-0 left-0 right-0">
+        <ReadingProgress />
       </div>
     </header>
   );
