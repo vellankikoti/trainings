@@ -19,11 +19,13 @@ interface QuizQuestionProps {
 export function Quiz({ children }: QuizProps) {
   const questions = Children.toArray(children).filter(
     (child): child is React.ReactElement<QuizQuestionProps> =>
-      isValidElement(child),
+      isValidElement(child) && child.props.options,
   );
 
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [submitted, setSubmitted] = useState(false);
+
+  if (questions.length === 0) return null;
 
   const totalQuestions = questions.length;
   const correctCount = questions.filter((q, i) => {
@@ -54,7 +56,7 @@ export function Quiz({ children }: QuizProps) {
               {qIndex + 1}. {q.props.question}
             </p>
             <div className="space-y-1 pl-4">
-              {q.props.options.map((option, oIndex) => {
+              {(q.props.options || []).map((option, oIndex) => {
                 const isSelected = answers[qIndex] === oIndex;
                 const isCorrect = oIndex === q.props.answer;
                 let optionClass = "border p-2 rounded cursor-pointer text-sm";
