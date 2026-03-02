@@ -1,5 +1,6 @@
 import React from "react";
 import { CodeBlock } from "@/components/content/CodeBlock";
+import { CodePre } from "@/components/content/CodePre";
 import { Callout } from "@/components/content/Callout";
 import { TabGroup, Tab } from "@/components/content/TabGroup";
 import { Exercise } from "@/components/content/Exercise";
@@ -42,9 +43,8 @@ export const mdxComponents = {
       },
     );
   },
-  pre: (props: React.ComponentProps<"pre">) => {
-    return React.createElement("pre", props);
-  },
+  // VS Code-style code blocks — wraps every <pre> from rehype-pretty-code
+  pre: CodePre,
   table: (props: React.ComponentProps<"table">) => {
     return React.createElement(
       "div",

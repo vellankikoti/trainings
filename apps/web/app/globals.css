@@ -122,7 +122,14 @@
 .prose pre {
   overflow-x: auto;
   max-width: 100%;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+/* Inside the editor wrapper, pre has no shadow/margin of its own */
+.code-editor-block pre {
+  margin: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  ring: none !important;
 }
 .prose pre code {
   background: transparent !important;
@@ -339,30 +346,39 @@
 }
 
 /* ─── Code Block Styling for rehype-pretty-code ─── */
-.prose pre > code {
+.prose pre > code,
+.code-editor-block pre > code {
   display: grid;
   counter-reset: line;
   padding: 1rem 0;
+  font-size: 0.875rem;
+  line-height: 1.7;
 }
-.prose pre > code > [data-line] {
-  padding: 0 1.25rem;
+.prose pre > code > [data-line],
+.code-editor-block pre > code > [data-line] {
+  padding: 0 1.25rem 0 0;
   border-left: 2px solid transparent;
 }
-.prose pre > code > [data-line]::before {
+.prose pre > code > [data-line]::before,
+.code-editor-block pre > code > [data-line]::before {
   counter-increment: line;
   content: counter(line);
   display: inline-block;
-  width: 1.5rem;
+  width: 2rem;
   margin-right: 1.25rem;
+  padding-left: 0.75rem;
   text-align: right;
-  color: hsl(215 16% 35%);
+  color: hsl(220 10% 32%);
   font-size: 0.8em;
+  user-select: none;
 }
-.prose pre > code[data-line-numbers-max-digits="1"] > [data-line]::before {
-  width: 0.75rem;
+.prose pre > code[data-line-numbers-max-digits="1"] > [data-line]::before,
+.code-editor-block pre > code[data-line-numbers-max-digits="1"] > [data-line]::before {
+  width: 1.25rem;
 }
-.prose pre > code[data-line-numbers-max-digits="3"] > [data-line]::before {
-  width: 2.25rem;
+.prose pre > code[data-line-numbers-max-digits="3"] > [data-line]::before,
+.code-editor-block pre > code[data-line-numbers-max-digits="3"] > [data-line]::before {
+  width: 2.75rem;
 }
 .prose [data-rehype-pretty-code-figure] {
   position: relative;
@@ -371,24 +387,34 @@
 .prose [data-rehype-pretty-code-figure] pre {
   margin: 0;
 }
+/* Hide the default title — our CodePre header handles it */
+.code-editor-block [data-rehype-pretty-code-title] {
+  display: none;
+}
 .prose [data-rehype-pretty-code-title] {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.625rem 1.25rem;
-  background: hsl(215 28% 13%);
-  border-bottom: 1px solid hsl(215 25% 18%);
+  background: hsl(220 13% 14%);
+  border-bottom: 1px solid hsl(220 10% 18%);
   border-radius: 0.75rem 0.75rem 0 0;
   font-family: var(--font-mono);
   font-size: 0.8rem;
-  color: hsl(215 16% 57%);
+  color: hsl(220 10% 54%);
 }
 .prose [data-rehype-pretty-code-title] + pre {
   border-radius: 0 0 0.75rem 0.75rem;
 }
-.prose [data-highlighted-line] {
-  background: hsl(213 94% 54% / 0.1);
+/* Highlighted line */
+.prose [data-highlighted-line],
+.code-editor-block [data-highlighted-line] {
+  background: hsl(213 94% 54% / 0.08);
   border-left-color: hsl(213 94% 54%);
+}
+/* Hover effect on code lines */
+.code-editor-block pre > code > [data-line]:hover {
+  background: hsl(220 10% 100% / 0.03);
 }
 
 /* ─── Strong/Bold Enhancement ─── */
