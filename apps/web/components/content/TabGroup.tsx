@@ -20,17 +20,18 @@ export function TabGroup({ children }: TabGroupProps) {
   const [activeIndex, setActiveIndex] = useState(0);
 
   return (
-    <div className="my-4 overflow-hidden rounded-lg border">
-      <div className="flex border-b bg-muted" role="tablist">
+    <div className="not-prose my-6 overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-border/60 bg-muted/30 px-2 pt-2" role="tablist">
         {tabs.map((tab, i) => (
           <button
             key={i}
             role="tab"
             aria-selected={i === activeIndex}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
+            className={`rounded-t-lg px-4 py-2.5 text-sm font-medium transition-all ${
               i === activeIndex
-                ? "border-b-2 border-primary bg-background text-foreground"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-card text-foreground shadow-sm border border-border/60 border-b-card -mb-px"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
             onClick={() => setActiveIndex(i)}
           >
@@ -38,7 +39,7 @@ export function TabGroup({ children }: TabGroupProps) {
           </button>
         ))}
       </div>
-      <div className="p-4" role="tabpanel">
+      <div className="p-5 text-[0.938rem] leading-relaxed [&>p]:mb-3 [&>p:last-child]:mb-0 [&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm" role="tabpanel">
         {tabs[activeIndex]}
       </div>
     </div>

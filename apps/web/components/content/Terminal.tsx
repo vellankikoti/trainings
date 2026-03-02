@@ -3,21 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface TerminalProps {
-  /** Initial commands to display in the terminal history */
   initialCommands?: string[];
-  /** Map of commands to their output. Supports simple command simulation */
   commands?: Record<string, string>;
-  /** Terminal title shown in the header bar */
   title?: string;
-  /** Height of the terminal in pixels */
   height?: number;
-  /** Whether the terminal is read-only (no input) */
   readOnly?: boolean;
-  /** Custom prompt string */
   prompt?: string;
-  /** Username shown in prompt */
   user?: string;
-  /** Hostname shown in prompt */
   hostname?: string;
 }
 
@@ -69,13 +61,11 @@ export function Terminal({
       if (!trimmed) return "";
       if (trimmed === "clear") return "__CLEAR__";
 
-      // Handle echo command
       if (trimmed.startsWith("echo ")) {
         const arg = trimmed.slice(5).replace(/^["']|["']$/g, "");
         return arg;
       }
 
-      // Handle unknown commands
       if (allCommands[trimmed]) {
         return allCommands[trimmed];
       }
@@ -85,7 +75,6 @@ export function Terminal({
     [allCommands]
   );
 
-  // Run initial commands on mount
   useEffect(() => {
     if (initialCommands.length > 0) {
       const entries: HistoryEntry[] = [];
@@ -99,7 +88,6 @@ export function Terminal({
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (terminalRef.current) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
@@ -161,21 +149,26 @@ export function Terminal({
   }, []);
 
   return (
-    <div className="my-4 overflow-hidden rounded-lg border border-border">
+    <div className="not-prose my-6 overflow-hidden rounded-xl border border-border/60 shadow-lg">
       {/* Terminal header */}
-      <div className="flex items-center gap-2 bg-muted px-4 py-2">
+      <div className="flex items-center gap-2 bg-[hsl(215,28%,13%)] px-4 py-2.5">
         <div className="flex gap-1.5">
-          <div className="h-3 w-3 rounded-full bg-red-500" />
-          <div className="h-3 w-3 rounded-full bg-yellow-500" />
-          <div className="h-3 w-3 rounded-full bg-green-500" />
+          <div className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
+          <div className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
+          <div className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
         </div>
-        <span className="ml-2 text-xs text-muted-foreground">{title}</span>
+        <span className="ml-2 font-mono text-xs text-[hsl(215,16%,50%)]">{title}</span>
+        {!readOnly && (
+          <span className="ml-auto rounded-md bg-white/[0.06] px-2 py-0.5 font-mono text-[10px] text-[hsl(215,16%,50%)]">
+            interactive
+          </span>
+        )}
       </div>
 
       {/* Terminal body */}
       <div
         ref={terminalRef}
-        className="overflow-y-auto bg-[#1e1e2e] p-4 font-mono text-sm text-[#cdd6f4] cursor-text"
+        className="overflow-y-auto overflow-x-auto bg-[hsl(215,28%,10%)] p-4 font-mono text-sm leading-relaxed text-[hsl(210,40%,90%)] cursor-text"
         style={{ height }}
         onClick={focusInput}
         role="textbox"
@@ -185,11 +178,11 @@ export function Terminal({
         {history.map((entry, i) => (
           <div key={i} className="mb-1">
             <div>
-              <span className="text-[#a6e3a1]">{promptStr}</span>{" "}
+              <span className="text-emerald-400">{promptStr}</span>{" "}
               <span>{entry.command}</span>
             </div>
             {entry.output && (
-              <pre className="whitespace-pre-wrap text-[#cdd6f4]">
+              <pre className="whitespace-pre-wrap text-[hsl(210,40%,90%)]">
                 {entry.output}
               </pre>
             )}
@@ -198,7 +191,7 @@ export function Terminal({
 
         {!readOnly && (
           <form onSubmit={handleSubmit} className="flex">
-            <span className="text-[#a6e3a1]">{promptStr}</span>
+            <span className="text-emerald-400">{promptStr}</span>
             <span>&nbsp;</span>
             <input
               ref={inputRef}
@@ -206,7 +199,7 @@ export function Terminal({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="flex-1 bg-transparent text-[#cdd6f4] outline-none caret-[#f5e0dc]"
+              className="flex-1 bg-transparent text-[hsl(210,40%,90%)] outline-none caret-[#f5e0dc]"
               autoFocus
               spellCheck={false}
               autoComplete="off"

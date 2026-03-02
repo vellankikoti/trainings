@@ -34,14 +34,16 @@ export function TableOfContents({ headings }: { headings: Heading[] }) {
   if (headings.length === 0) return null;
 
   return (
-    <nav className="space-y-1 text-sm">
-      <p className="mb-3 font-semibold">On this page</p>
+    <nav className="space-y-0.5">
+      <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        On this page
+      </p>
       {headings.map((h) => (
         <a
           key={h.id}
           href={`#${h.id}`}
-          className={`block py-1 transition-colors ${
-            h.depth === 3 ? "pl-4" : h.depth === 4 ? "pl-8" : ""
+          className={`block rounded-md py-1.5 text-[13px] leading-snug transition-colors ${
+            h.depth === 3 ? "pl-4" : h.depth === 4 ? "pl-8" : "pl-0"
           } ${
             activeId === h.id
               ? "font-medium text-primary"

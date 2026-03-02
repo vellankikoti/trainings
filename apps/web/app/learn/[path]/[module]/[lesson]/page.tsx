@@ -6,7 +6,8 @@ import { getModule, getPath } from "@/lib/content";
 import { LessonContent } from "@/components/lesson/LessonContent";
 import { TableOfContents } from "@/components/lesson/TableOfContents";
 import { LessonNav } from "@/components/lesson/LessonNav";
-import { Badge } from "@/components/ui/badge";
+import { LessonSidebar } from "@/components/lesson/LessonSidebar";
+import { ReadingProgress } from "@/components/lesson/ReadingProgress";
 
 interface LessonPageProps {
   params: { path: string; module: string; lesson: string };
@@ -33,7 +34,6 @@ export default async function LessonPage({ params }: LessonPageProps) {
 
   if (!lesson || !pathMeta || !moduleMeta) notFound();
 
-  // Find prev/next lessons
   const lessonIndex = moduleMeta.lessons.findIndex(
     (l) => l.slug === params.lesson,
   );
@@ -44,76 +44,133 @@ export default async function LessonPage({ params }: LessonPageProps) {
       : null;
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Breadcrumb */}
-      <nav className="mb-6 text-sm text-muted-foreground">
-        <Link href="/" className="hover:text-foreground">
-          Home
-        </Link>
-        <span className="mx-2">/</span>
-        <Link href={`/paths/${params.path}`} className="hover:text-foreground">
-          {pathMeta.title}
-        </Link>
-        <span className="mx-2">/</span>
-        <span>{moduleMeta.title}</span>
-        <span className="mx-2">/</span>
-        <span className="text-foreground">{lesson.frontmatter.title}</span>
-      </nav>
+    <>
+      <ReadingProgress />
 
-      <div className="flex gap-8">
-        {/* Main content */}
-        <div className="min-w-0 flex-1">
-          <div className="mb-8">
-            <Badge variant="secondary">{moduleMeta.title}</Badge>
-            <h1 className="mt-3 text-3xl font-bold">
-              {lesson.frontmatter.title}
-            </h1>
-            {lesson.frontmatter.description && (
-              <p className="mt-2 text-lg text-muted-foreground">
-                {lesson.frontmatter.description}
-              </p>
-            )}
-            {lesson.frontmatter.estimatedMinutes && (
-              <p className="mt-2 text-sm text-muted-foreground">
-                Estimated time: {lesson.frontmatter.estimatedMinutes} minutes |
-                XP: {lesson.frontmatter.xpReward || 25}
-              </p>
-            )}
-          </div>
+      <div className="mx-auto max-w-[1400px] px-4 py-8 lg:px-8">
+        {/* Breadcrumb */}
+        <nav className="mb-8 flex items-center gap-2 text-sm text-muted-foreground">
+          <Link href="/" className="hover:text-foreground transition-colors">
+            Home
+          </Link>
+          <span className="text-border">/</span>
+          <Link href={`/paths/${params.path}`} className="hover:text-foreground transition-colors">
+            {pathMeta.title}
+          </Link>
+          <span className="text-border">/</span>
+          <span className="truncate text-foreground font-medium">{lesson.frontmatter.title}</span>
+        </nav>
 
-          {/* Learning Objectives */}
-          {lesson.frontmatter.objectives &&
-            lesson.frontmatter.objectives.length > 0 && (
-              <div className="mb-8 rounded-lg border bg-muted/50 p-4">
-                <h2 className="font-semibold">What you&apos;ll learn</h2>
-                <ul className="mt-2 space-y-1">
-                  {lesson.frontmatter.objectives.map((obj, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="text-primary">✓</span>
-                      {obj}
-                    </li>
-                  ))}
-                </ul>
+        {/* Three-column layout */}
+        <div className="flex gap-8">
+          {/* Left sidebar — lesson navigation */}
+          <aside className="hidden w-[260px] shrink-0 xl:block">
+            <div className="sticky top-24">
+              <LessonSidebar
+                pathSlug={params.path}
+                moduleSlug={params.module}
+                moduleTitle={moduleMeta.title}
+                lessons={moduleMeta.lessons}
+                currentLessonSlug={params.lesson}
+              />
+            </div>
+          </aside>
+
+          {/* Main content */}
+          <div className="min-w-0 flex-1">
+            {/* Lesson header */}
+            <header className="mb-10">
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/paths/${params.path}`}
+                  className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+                >
+                  {moduleMeta.title}
+                </Link>
               </div>
-            )}
 
-          <LessonContent source={lesson.source} />
+              <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+                {lesson.frontmatter.title}
+              </h1>
 
-          <LessonNav
-            pathSlug={params.path}
-            moduleSlug={params.module}
-            prevLesson={prevLesson}
-            nextLesson={nextLesson}
-          />
-        </div>
+              {lesson.frontmatter.description && (
+                <p className="mt-3 text-lg leading-relaxed text-muted-foreground">
+                  {lesson.frontmatter.description}
+                </p>
+              )}
 
-        {/* Table of Contents sidebar */}
-        <aside className="hidden w-64 shrink-0 lg:block">
-          <div className="sticky top-24">
-            <TableOfContents headings={lesson.headings} />
+              {/* Meta row */}
+              <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                {lesson.frontmatter.estimatedMinutes && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                    {lesson.frontmatter.estimatedMinutes} min read
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+                    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+                  </svg>
+                  Lesson {lessonIndex + 1} of {moduleMeta.lessons.length}
+                </span>
+                {(lesson.frontmatter.xpReward || 25) && (
+                  <span className="inline-flex items-center gap-1.5 font-medium text-primary">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                    </svg>
+                    {lesson.frontmatter.xpReward || 25} XP
+                  </span>
+                )}
+              </div>
+            </header>
+
+            {/* Learning Objectives */}
+            {lesson.frontmatter.objectives &&
+              lesson.frontmatter.objectives.length > 0 && (
+                <div className="mb-10 rounded-xl border border-primary/20 bg-primary/[0.03] p-5">
+                  <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-primary">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="m9 12 2 2 4-4" />
+                    </svg>
+                    What you&apos;ll learn
+                  </h2>
+                  <ul className="mt-3 space-y-2">
+                    {lesson.frontmatter.objectives.map((obj: string, i: number) => (
+                      <li key={i} className="flex items-start gap-2.5 text-sm text-foreground/80">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-primary">
+                          <path d="M20 6 9 17l-5-5" />
+                        </svg>
+                        {obj}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+            <LessonContent source={lesson.source} />
+
+            <LessonNav
+              pathSlug={params.path}
+              moduleSlug={params.module}
+              prevLesson={prevLesson}
+              nextLesson={nextLesson}
+              currentIndex={lessonIndex}
+              totalLessons={moduleMeta.lessons.length}
+            />
           </div>
-        </aside>
+
+          {/* Right sidebar — Table of Contents */}
+          <aside className="hidden w-[200px] shrink-0 lg:block">
+            <div className="sticky top-24">
+              <TableOfContents headings={lesson.headings} />
+            </div>
+          </aside>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
