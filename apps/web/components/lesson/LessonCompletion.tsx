@@ -3,171 +3,142 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { CompletionReflectionModal } from "./CompletionReflectionModal";
+
+/* ─── Types ─────────────────────────────────────────────────────────────────── */
 
 interface LessonCompletionProps {
   pathSlug: string;
   moduleSlug: string;
   lessonSlug: string;
+  lessonTitle: string;
   xpReward: number;
   initialCompleted?: boolean;
+  keyTakeaways?: string[];
+  reflectionPrompt?: string;
 }
 
-type CompletionState = "idle" | "loading" | "completed";
+type CompletionState = "idle" | "completed";
 
-export function LessonCompletion({
+/* ─── Completion Button + Modal ─────────────────────────────────────────────── */
+
+function LessonCompletion({
   pathSlug,
   moduleSlug,
   lessonSlug,
+  lessonTitle,
   xpReward,
   initialCompleted = false,
+  keyTakeaways,
+  reflectionPrompt,
 }: LessonCompletionProps) {
   const [state, setState] = useState<CompletionState>(
     initialCompleted ? "completed" : "idle",
   );
-  const [xpAwarded, setXpAwarded] = useState<number | null>(
-    initialCompleted ? xpReward : null,
-  );
-  const [showXpAnimation, setShowXpAnimation] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
 
-  const handleComplete = useCallback(async () => {
+  const handleOpenModal = useCallback(() => {
     if (state !== "idle") return;
+    setModalOpen(true);
+  }, [state]);
 
-    setState("loading");
-    setError(null);
+  const handleConfirmCompletion = useCallback(async () => {
+    const res = await fetch("/api/progress/lesson", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pathSlug,
+        moduleSlug,
+        lessonSlug,
+        status: "completed",
+      }),
+    });
 
-    try {
-      const res = await fetch("/api/progress/lesson", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pathSlug,
-          moduleSlug,
-          lessonSlug,
-          status: "completed",
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || "Failed to mark lesson as complete");
-      }
-
-      const data = await res.json();
-      setXpAwarded(data.xpAwarded ?? xpReward);
-      setState("completed");
-
-      // Trigger XP fade-in animation
-      setShowXpAnimation(true);
-    } catch (err) {
-      setState("idle");
-      setError(err instanceof Error ? err.message : "Something went wrong");
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || "Failed to mark lesson as complete");
     }
-  }, [state, pathSlug, moduleSlug, lessonSlug, xpReward]);
+
+    setState("completed");
+  }, [pathSlug, moduleSlug, lessonSlug]);
 
   return (
     <div className="w-full">
       <button
         type="button"
         disabled={state !== "idle"}
-        onClick={handleComplete}
+        onClick={handleOpenModal}
         className={cn(
           "group relative flex w-full items-center justify-center gap-3 rounded-xl px-6 py-4 text-base font-bold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           state === "idle" &&
             "bg-primary text-white shadow-md hover:bg-primary/90 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99]",
-          state === "loading" &&
-            "cursor-not-allowed bg-muted text-muted-foreground",
           state === "completed" &&
             "cursor-default bg-emerald-600 text-white dark:bg-emerald-600",
         )}
       >
         {/* Icon */}
-        {state === "loading" ? (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="shrink-0"
+        >
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+
+        {/* Label */}
+        <span>
+          {state === "idle" && "Mark Lesson as Complete"}
+          {state === "completed" && "Lesson Completed!"}
+        </span>
+
+        {/* XP Badge */}
+        <span
+          className={cn(
+            "ml-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold",
+            state === "idle" && "bg-white/20 text-white",
+            state === "completed" && "bg-white/20 text-white",
+          )}
+        >
           <svg
-            className="size-5 animate-spin"
             xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
-          </svg>
-        ) : (
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
+            width="12"
+            height="12"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="shrink-0"
           >
-            <path d="M20 6 9 17l-5-5" />
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
           </svg>
-        )}
-
-        {/* Label */}
-        <span>
-          {state === "loading" && "Completing..."}
-          {state === "idle" && "Mark Lesson as Complete"}
-          {state === "completed" && "Lesson Completed!"}
+          +{xpReward} XP
         </span>
-
-        {/* XP Badge */}
-        {state !== "loading" && (
-          <span
-            className={cn(
-              "ml-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold transition-all duration-500",
-              state === "idle" && "bg-white/20 text-white",
-              state === "completed" &&
-                "bg-white/20 text-white",
-              showXpAnimation && !initialCompleted && "animate-xp-badge-fade-in",
-            )}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-            </svg>
-            +{xpAwarded ?? xpReward} XP
-          </span>
-        )}
       </button>
 
-      {/* Error message */}
-      {error && (
-        <p className="mt-2 text-center text-sm text-destructive">{error}</p>
-      )}
+      {/* Reflection Modal */}
+      <CompletionReflectionModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        lessonTitle={lessonTitle}
+        keyTakeaways={keyTakeaways}
+        reflectionPrompt={reflectionPrompt}
+        xpReward={xpReward}
+        onConfirm={handleConfirmCompletion}
+      />
     </div>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  LessonCompletionSection                                                   */
-/*  A full-width wrapper placed between lesson content and navigation.        */
-/* -------------------------------------------------------------------------- */
+/* ─── LessonCompletionSection ───────────────────────────────────────────────── */
+/*  Full-width wrapper placed between lesson content and navigation.            */
 
 interface LessonCompletionSectionProps extends LessonCompletionProps {
   prevLesson?: { slug: string; title: string } | null;
@@ -178,8 +149,11 @@ export function LessonCompletionSection({
   pathSlug,
   moduleSlug,
   lessonSlug,
+  lessonTitle,
   xpReward,
   initialCompleted = false,
+  keyTakeaways,
+  reflectionPrompt,
   prevLesson,
   nextLesson,
 }: LessonCompletionSectionProps) {
@@ -190,13 +164,16 @@ export function LessonCompletionSection({
         Ready to continue?
       </p>
 
-      {/* Completion button */}
+      {/* Completion button (opens reflection modal) */}
       <LessonCompletion
         pathSlug={pathSlug}
         moduleSlug={moduleSlug}
         lessonSlug={lessonSlug}
+        lessonTitle={lessonTitle}
         xpReward={xpReward}
         initialCompleted={initialCompleted}
+        keyTakeaways={keyTakeaways}
+        reflectionPrompt={reflectionPrompt}
       />
 
       {/* Prev / Next navigation */}
@@ -240,13 +217,13 @@ export function LessonCompletionSection({
           </Link>
         ) : (
           <Link
-            href={`/paths/${pathSlug}`}
+            href={`/learn/${pathSlug}/${moduleSlug}`}
             className="group flex items-center justify-end gap-3 rounded-xl border-2 border-emerald-500/20 bg-emerald-500/[0.03] p-4 text-right transition-all hover:border-emerald-500/50 hover:bg-emerald-500/[0.06] hover:shadow-md"
           >
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600/70 dark:text-emerald-400/70">Module Complete</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600/70 dark:text-emerald-400/70">Course Complete</p>
               <p className="truncate text-sm font-bold text-foreground group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
-                Back to Path Overview
+                Back to Course Overview
               </p>
             </div>
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-sm">

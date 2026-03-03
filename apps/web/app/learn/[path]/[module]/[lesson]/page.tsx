@@ -8,8 +8,8 @@ import { getProfileId } from "@/lib/progress";
 import { createAdminClient } from "@/lib/supabase/server";
 import { LessonContent } from "@/components/lesson/LessonContent";
 import { TableOfContents } from "@/components/lesson/TableOfContents";
+import { KeyTakeaways } from "@/components/lesson/KeyTakeaways";
 import { LessonCompletionSection } from "@/components/lesson/LessonCompletion";
-import { LessonProgressTracker } from "@/components/lesson/LessonProgressTracker";
 
 interface LessonPageProps {
   params: Promise<{ path: string; module: string; lesson: string }>;
@@ -81,14 +81,6 @@ export default async function LessonPage({ params }: LessonPageProps) {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-6 lg:px-8">
-      {/* Auto-track lesson as in_progress on visit */}
-      <LessonProgressTracker
-        pathSlug={pathSlug}
-        moduleSlug={moduleSlug}
-        lessonSlug={lessonSlug}
-        skip={isCompleted}
-      />
-
       {/* Breadcrumb */}
       <nav
         aria-label="Breadcrumb"
@@ -114,9 +106,12 @@ export default async function LessonPage({ params }: LessonPageProps) {
         >
           <path d="m9 18 6-6-6-6" />
         </svg>
-        <span className="font-medium text-foreground/50">
+        <Link
+          href={`/learn/${pathSlug}/${moduleSlug}`}
+          className="font-medium text-foreground/50 transition-colors hover:text-primary"
+        >
           {moduleMeta.title}
-        </span>
+        </Link>
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="12"
@@ -146,7 +141,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
           {/* Lesson header */}
           <header className="mb-12">
             <Link
-              href={`/paths/${pathSlug}`}
+              href={`/learn/${pathSlug}/${moduleSlug}`}
               className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
             >
               <svg
@@ -287,13 +282,19 @@ export default async function LessonPage({ params }: LessonPageProps) {
 
           <LessonContent source={lesson.source} />
 
+          {/* Key Takeaways — shown at the end of content */}
+          <KeyTakeaways takeaways={lesson.frontmatter.key_takeaways ?? []} />
+
           {/* Completion + Navigation */}
           <LessonCompletionSection
             pathSlug={pathSlug}
             moduleSlug={moduleSlug}
             lessonSlug={lessonSlug}
+            lessonTitle={lesson.frontmatter.title}
             xpReward={xpReward}
             initialCompleted={isCompleted}
+            keyTakeaways={lesson.frontmatter.key_takeaways}
+            reflectionPrompt={lesson.frontmatter.reflection_prompt}
             prevLesson={prevLesson}
             nextLesson={nextLesson}
           />

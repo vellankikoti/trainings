@@ -16,6 +16,12 @@ tags:
   - internals
   - objects
   - architecture
+key_takeaways:
+  - Git has three areas — working directory, staging area, and repository — and data flows through them in order
+  - Every piece of content in Git is stored as an object (blob, tree, or commit) identified by a SHA-1 hash
+  - Branches are lightweight pointers to commits, not copies of files
+  - HEAD is a pointer to your current branch, which in turn points to the latest commit
+reflection_prompt: "Draw out the three areas (working directory, staging, repository) on paper. Can you trace how a file change becomes a commit?"
 ---
 
 <Callout type="story" title="The Story">

@@ -335,28 +335,36 @@ export function LearningSidebar({
 
             return (
               <div key={mod.slug} className="mb-1">
-                {/* Module header button */}
-                <button
-                  type="button"
-                  onClick={() => toggleModule(mod.slug)}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[13px] font-semibold transition-colors hover:bg-muted/60"
-                  aria-expanded={isExpanded}
-                  aria-controls={`module-${mod.slug}`}
-                >
-                  <ChevronIcon
-                    className={cn(
-                      "shrink-0 text-foreground/40 transition-transform duration-200",
-                      isExpanded && "rotate-90",
-                    )}
-                  />
-                  <span className="flex-1 truncate text-foreground/90">
-                    {mod.title}
-                  </span>
-                  <span className="shrink-0 text-[10px] font-medium tabular-nums text-foreground/40">
-                    {moduleCompletedCount}/{mod.lessons.length}
-                  </span>
-                  <ModuleStatusIcon status={moduleStatus} />
-                </button>
+                {/* Module header — title links to Course Overview, chevron toggles accordion */}
+                <div className="group flex items-center rounded-lg transition-colors hover:bg-muted/60">
+                  <button
+                    type="button"
+                    onClick={() => toggleModule(mod.slug)}
+                    className="flex shrink-0 items-center justify-center p-2 pl-3"
+                    aria-expanded={isExpanded}
+                    aria-controls={`module-${mod.slug}`}
+                    aria-label={isExpanded ? `Collapse ${mod.title}` : `Expand ${mod.title}`}
+                  >
+                    <ChevronIcon
+                      className={cn(
+                        "shrink-0 text-foreground/40 transition-transform duration-200",
+                        isExpanded && "rotate-90",
+                      )}
+                    />
+                  </button>
+                  <Link
+                    href={`/learn/${pathSlug}/${mod.slug}`}
+                    className="flex flex-1 items-center gap-2 py-2.5 pr-3 text-[13px] font-semibold"
+                  >
+                    <span className="flex-1 truncate text-foreground/90 transition-colors group-hover:text-primary">
+                      {mod.title}
+                    </span>
+                    <span className="shrink-0 text-[10px] font-medium tabular-nums text-foreground/40">
+                      {moduleCompletedCount}/{mod.lessons.length}
+                    </span>
+                    <ModuleStatusIcon status={moduleStatus} />
+                  </Link>
+                </div>
 
                 {/* Lesson list (collapsible) */}
                 <div

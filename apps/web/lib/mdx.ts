@@ -19,6 +19,10 @@ export interface LessonFrontmatter {
   prerequisites?: string[];
   objectives?: string[];
   tags?: string[];
+  /** Short bullet-point takeaways shown in a card at the bottom of the lesson and inside the completion modal */
+  key_takeaways?: string[];
+  /** A reflective question shown in the completion modal to deepen learning */
+  reflection_prompt?: string;
 }
 
 export interface CompiledLesson {

@@ -5,7 +5,8 @@ export interface NavItem {
 
 /** Primary navigation links shown in Header, MobileNav, and Footer */
 export const NAV_ITEMS: NavItem[] = [
-  { label: "Learning Paths", href: "/paths" },
+  { label: "Paths", href: "/paths" },
+  { label: "Courses", href: "/courses" },
   { label: "Blog", href: "/blog" },
   { label: "About", href: "/about" },
 ];
