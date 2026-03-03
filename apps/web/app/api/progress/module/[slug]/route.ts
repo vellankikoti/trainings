@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { getProfileId, getModuleProgress } from "@/lib/progress";
+import { ensureProfile, getModuleProgress } from "@/lib/progress";
 
 interface RouteParams {
   params: { slug: string };
@@ -22,7 +22,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     );
   }
 
-  const profileId = await getProfileId(clerkId);
+  const profileId = await ensureProfile(clerkId);
   if (!profileId) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }

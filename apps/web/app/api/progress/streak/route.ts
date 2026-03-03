@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { getProfileId } from "@/lib/progress";
+import { ensureProfile } from "@/lib/progress";
 import { updateStreak } from "@/lib/streaks";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import { streakSchema, validateBody } from "@/lib/validations";
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
 
   const { activityType, xpEarned } = validated.data;
 
-  const profileId = await getProfileId(clerkId);
+  const profileId = await ensureProfile(clerkId);
   if (!profileId) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }

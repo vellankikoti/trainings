@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { getProfileId } from "@/lib/progress";
+import { ensureProfile } from "@/lib/progress";
 import { getAllAchievements, checkAchievements } from "@/lib/achievements";
 
 export async function GET() {
@@ -9,7 +9,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const profileId = await getProfileId(clerkId);
+  const profileId = await ensureProfile(clerkId);
   if (!profileId) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }

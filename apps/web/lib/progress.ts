@@ -1,3 +1,4 @@
+import { currentUser } from "@clerk/nextjs/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { XP_REWARDS } from "@/lib/xp";
 import { calculateLevel } from "@/lib/levels";
@@ -19,6 +20,60 @@ export async function getProfileId(clerkId: string): Promise<string | null> {
     .eq("clerk_id", clerkId)
     .single();
   return data?.id ?? null;
+}
+
+/**
+ * Ensure a profile exists for the given Clerk user. If not, create one
+ * just-in-time from Clerk user data. Returns the profile ID.
+ *
+ * This handles the case where the Clerk webhook missed creating the profile
+ * (e.g., webhook wasn't configured, or the user signed up before the
+ * webhook was set up).
+ */
+export async function ensureProfile(clerkId: string): Promise<string | null> {
+  // First try the fast path — profile already exists
+  const existingId = await getProfileId(clerkId);
+  if (existingId) return existingId;
+
+  // Profile doesn't exist — create one from Clerk data
+  try {
+    const user = await currentUser();
+    if (!user || user.id !== clerkId) return null;
+
+    const displayName =
+      [user.firstName, user.lastName].filter(Boolean).join(" ") || null;
+    const githubAccount = user.externalAccounts?.find(
+      (acc) => acc.provider === "oauth_github",
+    );
+
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("profiles")
+      .insert({
+        clerk_id: clerkId,
+        display_name: displayName,
+        avatar_url: user.imageUrl,
+        username: user.username,
+        github_username: githubAccount?.username || null,
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      // Handle race condition — profile may have been created between our check and insert
+      if (error.code === "23505") {
+        // Unique constraint violation — profile was created concurrently
+        return getProfileId(clerkId);
+      }
+      console.error("Failed to auto-create profile:", error);
+      return null;
+    }
+
+    return data?.id ?? null;
+  } catch (err) {
+    console.error("ensureProfile error:", err);
+    return null;
+  }
 }
 
 /**

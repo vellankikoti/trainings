@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { getProfileByClerkId, updateProfile } from "@/lib/profile";
+import { ensureProfile } from "@/lib/progress";
 import { profileUpdateSchema, validateBody } from "@/lib/validations";
 
 export async function GET() {
@@ -10,7 +11,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const profile = await getProfileByClerkId(userId);
+  let profile = await getProfileByClerkId(userId);
+
+  // Auto-create profile if missing (webhook may have missed)
+  if (!profile) {
+    await ensureProfile(userId);
+    profile = await getProfileByClerkId(userId);
+  }
 
   if (!profile) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
