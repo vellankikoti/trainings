@@ -15,7 +15,7 @@
 - [ ] Design incident scenario schema (YAML-based definitions)
 - [ ] Build incident orchestration controller
 - [ ] Implement fault injection integration (Gremlin or LitmusChaos)
-- [ ] Create 10+ incident scenarios (CPU spike, memory leak, network partition, DNS failure, disk full, pod crash loop, certificate expiry, config drift, deployment rollback, cascading failure)
+- [ ] Create 30+ incident scenarios (CPU spike, memory leak, network partition, DNS failure, disk full, pod crash loop, certificate expiry, config drift, deployment rollback, cascading failure)
 - [ ] Build incident timer and severity escalation system
 
 **Database:** `simulation_definitions`, `simulation_attempts` tables exist (empty)

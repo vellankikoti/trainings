@@ -553,3 +553,94 @@ export async function sendModuleCompletionEmail(
     nextModuleName,
   });
 }
+
+/**
+ * Process monthly summary emails for all active users.
+ * Intended to be called by cron on the 1st of each month.
+ */
+export async function processMonthlySummaries(): Promise<{
+  sent: number;
+  skipped: number;
+}> {
+  const supabase = createAdminClient();
+
+  // Get the date range for last month
+  const now = new Date();
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+
+  // Find users who were active last month
+  const { data: activeUsers } = (await (supabase
+    .from("daily_activity") as any)
+    .select("user_id")
+    .gte("activity_date", lastMonthStart.toISOString().split("T")[0])
+    .lte("activity_date", lastMonthEnd.toISOString().split("T")[0])) as any;
+
+  if (!activeUsers || activeUsers.length === 0) {
+    return { sent: 0, skipped: 0 };
+  }
+
+  const userIds = [...new Set((activeUsers as any[]).map((a: any) => a.user_id))];
+  let sent = 0;
+  let skipped = 0;
+
+  for (const userId of userIds) {
+    try {
+      // Get user profile
+      const { data: profile } = (await (supabase
+        .from("profiles") as any)
+        .select("email, display_name, total_xp, current_level, current_streak")
+        .eq("id", userId)
+        .single()) as any;
+
+      if (!profile?.email) {
+        skipped++;
+        continue;
+      }
+
+      // Count lessons completed last month
+      const { count: lessonsCount } = (await (supabase
+        .from("lesson_progress") as any)
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("status", "completed")
+        .gte("completed_at", lastMonthStart.toISOString())
+        .lte("completed_at", lastMonthEnd.toISOString())) as any;
+
+      // Sum XP earned last month
+      const { data: activityData } = (await (supabase
+        .from("daily_activity") as any)
+        .select("xp_earned")
+        .eq("user_id", userId)
+        .gte("activity_date", lastMonthStart.toISOString().split("T")[0])
+        .lte("activity_date", lastMonthEnd.toISOString().split("T")[0])) as any;
+
+      const monthlyXP = (activityData ?? []).reduce(
+        (sum: number, d: any) => sum + (d.xp_earned ?? 0),
+        0,
+      );
+
+      const didSend = await sendAutomatedEmail(
+        userId,
+        profile.email as string,
+        "monthly_summary",
+        {
+          name: profile.display_name || "there",
+          stats: {
+            lessonsCompleted: lessonsCount ?? 0,
+            xpEarned: monthlyXP,
+            currentStreak: profile.current_streak ?? 0,
+            level: profile.current_level ?? 1,
+          },
+        },
+      );
+
+      if (didSend) sent++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  return { sent, skipped };
+}

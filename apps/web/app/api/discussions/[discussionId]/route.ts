@@ -1,7 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { getProfileId } from "@/lib/progress";
-import { deleteDiscussion, flagDiscussion, voteDiscussion } from "@/lib/discussions";
+import {
+  deleteDiscussion,
+  flagDiscussion,
+  hideDiscussion,
+  unflagDiscussion,
+  voteDiscussion,
+} from "@/lib/discussions";
+import { getAuthContext } from "@/lib/auth";
 import { z } from "zod";
 import { validateBody } from "@/lib/validations";
 
@@ -13,8 +20,10 @@ const voteSchema = z.object({
   voteType: z.enum(["upvote", "downvote"]),
 });
 
+const MODERATOR_ROLES = ["trainer", "institute_admin", "admin", "super_admin"];
+
 const actionSchema = z.object({
-  action: z.enum(["flag", "vote"]),
+  action: z.enum(["flag", "vote", "hide", "dismiss"]),
   voteType: z.enum(["upvote", "downvote"]).optional(),
 });
 
@@ -52,6 +61,30 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: voteValidated.error }, { status: 400 });
     }
     const success = await voteDiscussion(discussionId, profileId, voteType);
+    return NextResponse.json({ success });
+  }
+
+  // Moderation actions — require elevated role
+  if (action === "hide" || action === "dismiss") {
+    try {
+      const ctx = await getAuthContext();
+      if (!ctx || !MODERATOR_ROLES.includes(ctx.role)) {
+        return NextResponse.json(
+          { error: "Moderator role required" },
+          { status: 403 },
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        { error: "Moderator role required" },
+        { status: 403 },
+      );
+    }
+
+    const success =
+      action === "hide"
+        ? await hideDiscussion(discussionId)
+        : await unflagDiscussion(discussionId);
     return NextResponse.json({ success });
   }
 

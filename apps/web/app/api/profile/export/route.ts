@@ -1,155 +1,225 @@
 import { NextResponse } from "next/server";
-import { renderToBuffer } from "@react-pdf/renderer";
+import { auth } from "@clerk/nextjs/server";
 import { createAdminClient } from "@/lib/supabase/server";
-import { getAuthContext, AuthError } from "@/lib/auth";
-import { calculateLevel } from "@/lib/levels";
-import { getDomainLabel } from "@/lib/skills/domains";
-import { CareerProfilePDF } from "./career-pdf";
 
+export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/profile/export
+ *
+ * GDPR-compliant data export endpoint.
+ * Returns all user data as a downloadable JSON file.
+ */
 export async function GET() {
   try {
-    const ctx = await getAuthContext();
-    if (!ctx) {
+    const { userId: clerkId } = await auth();
+    if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const supabase = createAdminClient();
 
-    const { data: profile } = await supabase
+    // Resolve the Supabase profile UUID from the Clerk ID
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("*")
-      .eq("id", ctx.userId)
+      .eq("clerk_id", clerkId)
       .single();
 
-    if (!profile) {
+    if (profileError || !profile) {
       return NextResponse.json(
         { error: "Profile not found" },
         { status: 404 },
       );
     }
 
+    const userId = profile.id;
+
+    // Fetch all user data in parallel
     const [
-      { data: skillScores },
+      { data: lessonProgress },
+      { data: moduleProgress },
+      { data: pathProgress },
+      { data: quizAttempts },
+      { data: xpLog },
+      { data: dailyActivity },
+      { data: certificates },
       { data: userBadges },
       { data: badgeDefs },
-      { count: lessonsCount },
-      { count: modulesCount },
-      { count: labsCount },
-      { count: quizCount },
-      { data: pathProgress },
+      { data: userAchievements },
+      { data: discussions },
+      { data: events },
+      { data: exerciseProgress },
+      { data: labSessions },
+      { data: skillScores },
+      { data: projectProgress },
+      { data: simulationAttempts },
+      { data: notifications },
+      { data: jobApplications },
+      { data: activeTimeLog },
     ] = await Promise.all([
       supabase
-        .from("skill_scores")
-        .select("domain, composite_score, theory_score, lab_score, quiz_score, percentile")
-        .eq("user_id", ctx.userId)
-        .order("composite_score", { ascending: false }),
+        .from("lesson_progress")
+        .select("*")
+        .eq("user_id", userId)
+        .order("completed_at", { ascending: false }),
+      supabase
+        .from("module_progress")
+        .select("*")
+        .eq("user_id", userId)
+        .order("completed_at", { ascending: false }),
+      supabase
+        .from("path_progress")
+        .select("*")
+        .eq("user_id", userId)
+        .order("started_at", { ascending: false }),
+      supabase
+        .from("quiz_attempts")
+        .select("*")
+        .eq("user_id", userId)
+        .order("attempted_at", { ascending: false }),
+      supabase
+        .from("xp_log")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("daily_activity")
+        .select("*")
+        .eq("user_id", userId)
+        .order("activity_date", { ascending: false }),
+      supabase
+        .from("certificates")
+        .select("*")
+        .eq("user_id", userId)
+        .order("issued_at", { ascending: false }),
       supabase
         .from("user_badges")
-        .select("badge_id, earned_at")
-        .eq("user_id", ctx.userId)
+        .select("*")
+        .eq("user_id", userId)
         .order("earned_at", { ascending: false }),
       supabase
         .from("badge_definitions")
-        .select("id, name, tier")
+        .select("id, name, description, category, tier")
         .eq("is_active", true),
       supabase
-        .from("lesson_progress")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", ctx.userId)
-        .eq("status", "completed"),
+        .from("user_achievements")
+        .select("*")
+        .eq("user_id", userId)
+        .order("unlocked_at", { ascending: false }),
       supabase
-        .from("module_progress")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", ctx.userId)
-        .eq("percentage", 100),
+        .from("discussions")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("events")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("exercise_progress")
+        .select("*")
+        .eq("user_id", userId)
+        .order("completed_at", { ascending: false }),
       supabase
         .from("lab_sessions")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", ctx.userId)
-        .eq("status", "completed"),
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
       supabase
-        .from("quiz_attempts")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", ctx.userId),
+        .from("skill_scores")
+        .select("*")
+        .eq("user_id", userId)
+        .order("calculated_at", { ascending: false }),
       supabase
-        .from("path_progress")
-        .select("path_slug, modules_completed, modules_total, percentage")
-        .eq("user_id", ctx.userId)
-        .gt("percentage", 0),
+        .from("project_progress")
+        .select("*")
+        .eq("user_id", userId)
+        .order("started_at", { ascending: false }),
+      supabase
+        .from("simulation_attempts")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("job_applications")
+        .select("*")
+        .eq("user_id", userId)
+        .order("applied_at", { ascending: false }),
+      supabase
+        .from("active_time_log")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
     ]);
 
-    const levelObj = calculateLevel(profile.total_xp);
+    // Enrich badges with their definitions
     const badgeDefMap = new Map(
       (badgeDefs ?? []).map((d) => [d.id, d]),
     );
 
-    const badges = (userBadges ?? []).map((b) => {
+    const enrichedBadges = (userBadges ?? []).map((b) => {
       const def = badgeDefMap.get(b.badge_id);
       return {
-        name: def?.name ?? b.badge_id,
-        tier: def?.tier ?? "bronze",
-        earnedAt: b.earned_at,
+        ...b,
+        badge_name: def?.name ?? null,
+        badge_description: def?.description ?? null,
+        badge_category: def?.category ?? null,
+        badge_tier: def?.tier ?? null,
       };
     });
 
-    const skills = (skillScores ?? []).map((s) => ({
-      domain: getDomainLabel(s.domain),
-      compositeScore: Math.round(s.composite_score),
-      theoryScore: Math.round(s.theory_score),
-      labScore: Math.round(s.lab_score),
-      quizScore: Math.round(s.quiz_score),
-      percentile: s.percentile,
-    }));
+    // Strip internal Clerk ID from the exported profile for privacy
+    const { clerk_id: _clerkId, ...exportableProfile } = profile;
 
-    const paths = (pathProgress ?? []).map((p) => ({
-      pathSlug: p.path_slug,
-      completed: p.modules_completed,
-      total: p.modules_total,
-      percentage: p.percentage,
-    }));
-
-    const pdfData = {
-      displayName: profile.display_name || profile.username || "Learner",
-      username: profile.username,
-      bio: profile.bio,
-      locationCity: profile.location_city,
-      locationCountry: profile.location_country,
-      githubUsername: profile.github_username,
-      level: levelObj.level,
-      levelTitle: levelObj.title,
-      totalXp: profile.total_xp,
-      currentStreak: profile.current_streak,
-      longestStreak: profile.longest_streak,
-      memberSince: profile.created_at,
-      lessonsCompleted: lessonsCount ?? 0,
-      modulesCompleted: modulesCount ?? 0,
-      labsCompleted: labsCount ?? 0,
-      quizzesAttempted: quizCount ?? 0,
-      skills,
-      badges,
-      paths,
+    const exportData = {
+      export_info: {
+        exported_at: new Date().toISOString(),
+        format_version: "1.0",
+        description:
+          "Complete data export for GDPR compliance. Contains all personal data associated with your account.",
+      },
+      profile: exportableProfile,
+      lesson_progress: lessonProgress ?? [],
+      exercise_progress: exerciseProgress ?? [],
+      module_progress: moduleProgress ?? [],
+      path_progress: pathProgress ?? [],
+      quiz_attempts: quizAttempts ?? [],
+      xp_log: xpLog ?? [],
+      daily_activity: dailyActivity ?? [],
+      certificates: certificates ?? [],
+      badges: enrichedBadges,
+      achievements: userAchievements ?? [],
+      discussions: discussions ?? [],
+      events: events ?? [],
+      lab_sessions: labSessions ?? [],
+      skill_scores: skillScores ?? [],
+      project_progress: projectProgress ?? [],
+      simulation_attempts: simulationAttempts ?? [],
+      notifications: notifications ?? [],
+      job_applications: jobApplications ?? [],
+      active_time_log: activeTimeLog ?? [],
     };
 
-    const buffer = await renderToBuffer(CareerProfilePDF(pdfData));
-    const uint8 = new Uint8Array(buffer);
+    const jsonString = JSON.stringify(exportData, null, 2);
 
-    const filename = `${profile.username || "profile"}-career-profile.pdf`;
-    return new NextResponse(uint8, {
+    return new NextResponse(jsonString, {
+      status: 200,
       headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Type": "application/json",
+        "Content-Disposition": 'attachment; filename="my-data-export.json"',
       },
     });
   } catch (err) {
-    if (err instanceof AuthError) {
-      return NextResponse.json(
-        { error: err.message },
-        { status: err.statusCode },
-      );
-    }
-    console.error("PDF export error:", err);
+    console.error("GDPR data export error:", err);
     return NextResponse.json(
-      { error: "Failed to generate PDF" },
+      { error: "Failed to export data" },
       { status: 500 },
     );
   }

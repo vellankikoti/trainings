@@ -254,3 +254,94 @@ export async function voteDiscussion(
 
   return !error;
 }
+
+// ─── Moderation Functions ────────────────────────────────────────────────────
+
+/**
+ * Get all flagged discussions for moderation queue.
+ */
+export async function getFlaggedDiscussions(): Promise<Discussion[]> {
+  const supabase = createAdminClient();
+
+  const { data, error } = (await (supabase
+    .from("discussions") as any)
+    .select(`
+      id,
+      user_id,
+      lesson_slug,
+      parent_id,
+      content,
+      is_flagged,
+      created_at,
+      updated_at,
+      profiles!discussions_user_id_fkey (
+        display_name,
+        username,
+        avatar_url
+      )
+    `)
+    .eq("is_flagged", true)
+    .eq("is_deleted", false)
+    .order("created_at", { ascending: false })
+    .limit(100)) as any;
+
+  if (error || !data) {
+    console.error("Failed to fetch flagged discussions:", error);
+    return [];
+  }
+
+  return (data as any[]).map((d: any) => {
+    const profile = d.profiles as unknown as {
+      display_name: string | null;
+      username: string | null;
+      avatar_url: string | null;
+    };
+    return {
+      id: d.id,
+      userId: d.user_id,
+      lessonSlug: d.lesson_slug,
+      parentId: d.parent_id,
+      content: d.content,
+      isFlagged: d.is_flagged,
+      createdAt: d.created_at,
+      updatedAt: d.updated_at,
+      author: profile
+        ? {
+          displayName: profile.display_name,
+          username: profile.username,
+          avatarUrl: profile.avatar_url,
+        }
+        : undefined,
+      upvotes: 0,
+      downvotes: 0,
+    };
+  });
+}
+
+/**
+ * Admin/moderator: hide a discussion (soft-delete without requiring owner).
+ */
+export async function hideDiscussion(discussionId: string): Promise<boolean> {
+  const supabase = createAdminClient();
+
+  const { error } = (await (supabase
+    .from("discussions") as any)
+    .update({ is_deleted: true })
+    .eq("id", discussionId)) as any;
+
+  return !error;
+}
+
+/**
+ * Admin/moderator: unflag a discussion (dismiss the flag).
+ */
+export async function unflagDiscussion(discussionId: string): Promise<boolean> {
+  const supabase = createAdminClient();
+
+  const { error } = (await (supabase
+    .from("discussions") as any)
+    .update({ is_flagged: false })
+    .eq("id", discussionId)) as any;
+
+  return !error;
+}

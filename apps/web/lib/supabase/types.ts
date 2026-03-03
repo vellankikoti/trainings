@@ -47,6 +47,7 @@ export interface Database {
           location_city: string | null;
           location_country: string | null;
           profile_visibility: string;
+          deletion_requested_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -76,6 +77,7 @@ export interface Database {
           location_city?: string | null;
           location_country?: string | null;
           profile_visibility?: string;
+          deletion_requested_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -105,6 +107,7 @@ export interface Database {
           location_city?: string | null;
           location_country?: string | null;
           profile_visibility?: string;
+          deletion_requested_at?: string | null;
           updated_at?: string;
         };
         Relationships: [];
