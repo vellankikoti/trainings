@@ -17,6 +17,8 @@ const FOOTER_LINKS = [
   {
     title: "Legal",
     links: [
+      { label: "Privacy Policy", href: "/privacy" },
+      { label: "Terms of Service", href: "/terms" },
       { label: "MIT License", href: "https://github.com/vellankikoti/trainings/blob/main/LICENSE" },
     ],
   },
