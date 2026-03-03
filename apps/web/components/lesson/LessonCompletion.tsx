@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { CompletionReflectionModal } from "./CompletionReflectionModal";
 
@@ -32,6 +33,7 @@ function LessonCompletion({
   keyTakeaways,
   reflectionPrompt,
 }: LessonCompletionProps) {
+  const router = useRouter();
   const [state, setState] = useState<CompletionState>(
     initialCompleted ? "completed" : "idle",
   );
@@ -60,7 +62,11 @@ function LessonCompletion({
     }
 
     setState("completed");
-  }, [pathSlug, moduleSlug, lessonSlug]);
+
+    // Re-fetch server component data so the sidebar, progress bar,
+    // and lesson checkmarks update without a full page reload
+    router.refresh();
+  }, [pathSlug, moduleSlug, lessonSlug, router]);
 
   return (
     <div className="w-full">
