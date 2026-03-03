@@ -9,7 +9,7 @@ function Pulse({ className }: { className?: string }) {
 
 export function ContinueLearningSkeleton() {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-6 shadow-[var(--shadow-sm)]">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1 space-y-3">
           <Pulse className="h-3 w-28" />
@@ -25,7 +25,7 @@ export function ContinueLearningSkeleton() {
 
 export function RecommendedNextSkeleton() {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)]">
       <Pulse className="h-3 w-32" />
       <div className="mt-3 space-y-2">
         {Array.from({ length: 3 }).map((_, i) => (
@@ -48,7 +48,7 @@ export function StatsStripSkeleton() {
       {Array.from({ length: 4 }).map((_, i) => (
         <div
           key={i}
-          className="rounded-xl border border-border/60 bg-card p-4 shadow-sm"
+          className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)]"
         >
           <div className="flex items-center gap-3">
             <Pulse className="h-10 w-10 shrink-0 rounded-lg" />
@@ -65,7 +65,7 @@ export function StatsStripSkeleton() {
 
 export function StreakSkeleton() {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)]">
       <div className="flex items-center justify-between">
         <Pulse className="h-5 w-16" />
         <Pulse className="h-4 w-24" />
@@ -87,7 +87,7 @@ export function StreakSkeleton() {
 
 export function CoursesSkeleton() {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-sm lg:col-span-2">
+    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)] lg:col-span-2">
       <Pulse className="mb-4 h-5 w-24" />
       <div className="space-y-3">
         {Array.from({ length: 3 }).map((_, i) => (
@@ -107,7 +107,7 @@ export function CoursesSkeleton() {
 
 export function BadgesSkeleton() {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)]">
       <Pulse className="mb-4 h-5 w-20" />
       <div className="flex flex-wrap gap-3">
         {Array.from({ length: 5 }).map((_, i) => (
@@ -120,7 +120,7 @@ export function BadgesSkeleton() {
 
 export function HeatmapSkeleton() {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)]">
       <Pulse className="mb-4 h-5 w-32" />
       <div className="flex gap-0.5">
         {Array.from({ length: 26 }).map((_, col) => (
@@ -141,7 +141,7 @@ export function BottomGridSkeleton() {
       {Array.from({ length: 3 }).map((_, i) => (
         <div
           key={i}
-          className="rounded-xl border border-border/60 bg-card p-5 shadow-sm"
+          className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)]"
         >
           <Pulse className="mb-4 h-5 w-28" />
           <div className="space-y-3">

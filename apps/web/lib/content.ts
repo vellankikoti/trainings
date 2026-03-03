@@ -1,7 +1,35 @@
 import fs from "fs";
 import path from "path";
 
-const CONTENT_DIR = path.join(process.cwd(), "..", "..", "content", "paths");
+/**
+ * Resolve the content directory robustly for both local dev (monorepo)
+ * and production (Vercel standalone output).
+ */
+function resolveContentDir(): string {
+  const candidates = [
+    process.env.CONTENT_DIR, // explicit override
+    path.join(process.cwd(), "..", "..", "content", "paths"), // monorepo: apps/web -> root
+    path.join(process.cwd(), "content", "paths"), // standalone output
+    path.join(process.cwd(), "..", "content", "paths"), // alternate monorepo layout
+  ].filter(Boolean) as string[];
+
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(dir)) return dir;
+    } catch {
+      // permission or path error, try next
+    }
+  }
+
+  console.error(
+    "[content] Content directory not found. Tried:",
+    candidates.join(", "),
+  );
+  // Return the monorepo default — will fail gracefully downstream
+  return path.join(process.cwd(), "..", "..", "content", "paths");
+}
+
+const CONTENT_DIR = resolveContentDir();
 
 export interface PathMeta {
   id: string;

@@ -1,31 +1,34 @@
 import Link from "next/link";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
 import { Button } from "@/components/ui/button";
-import { PUBLIC_NAV_ITEMS, getNavItemsForRole } from "@/lib/nav-config";
+import { PUBLIC_NAV_ITEMS } from "@/lib/nav-config";
 import { Logo } from "./Logo";
 import { MobileNav } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
 import { SearchDialog } from "./SearchDialog";
-import { RoleNav } from "./RoleNav";
 import { ReadingProgress } from "@/components/lesson/ReadingProgress";
 import { NotificationCenter } from "./NotificationCenter";
-import { createAdminClient } from "@/lib/supabase/server";
-import type { Role } from "@/lib/auth/rbac";
 
-export async function Header() {
-  const navItems = await getAuthNavItems();
-
+export function Header() {
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-      <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <div className="flex items-center gap-8">
+    <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/95 backdrop-blur-sm shadow-[var(--shadow-xs)]">
+      <div className="flex h-14 items-center justify-between px-4 lg:px-6">
+        <div className="flex items-center gap-6">
           <MobileNav />
-          <Logo />
+          {/* Logo visible on mobile, hidden on desktop (sidebar has it) */}
+          <div className="lg:hidden">
+            <Logo />
+          </div>
 
-          {/* Auth-aware navigation */}
+          {/* Public nav — only for signed-out visitors */}
           <SignedOut>
-            <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
+            <div className="hidden lg:block">
+              <Logo />
+            </div>
+            <nav
+              aria-label="Main navigation"
+              className="hidden items-center gap-1 md:flex"
+            >
               {PUBLIC_NAV_ITEMS.map((item) => (
                 <Link
                   key={item.href}
@@ -37,9 +40,6 @@ export async function Header() {
               ))}
             </nav>
           </SignedOut>
-          <SignedIn>
-            <RoleNav items={navItems} />
-          </SignedIn>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -65,27 +65,4 @@ export async function Header() {
       </div>
     </header>
   );
-}
-
-/**
- * Fetch the current user's role and return the appropriate nav items.
- * Falls back to learner items if no profile exists yet.
- */
-async function getAuthNavItems() {
-  try {
-    const { userId } = await auth();
-    if (!userId) return getNavItemsForRole("learner");
-
-    const supabase = createAdminClient();
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("clerk_id", userId)
-      .single();
-
-    const role = (profile?.role ?? "learner") as Role;
-    return getNavItemsForRole(role);
-  } catch {
-    return getNavItemsForRole("learner");
-  }
 }

@@ -46,7 +46,7 @@ export function StreakDisplay({ stats, activityDays, streakRecovery }: StreakDis
     : 100;
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)] transition-all duration-200 hover:shadow-[var(--shadow-md)]">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Streak</h3>
         <div className="flex items-center gap-1 text-sm text-muted-foreground">

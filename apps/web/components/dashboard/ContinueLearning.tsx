@@ -42,7 +42,7 @@ export function ContinueLearning({ resumeTarget }: ContinueLearningProps) {
   const lessonHref = `/learn/${resumeTarget.pathSlug}/${resumeTarget.moduleSlug}/${resumeTarget.lessonSlug}`;
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-6 shadow-[var(--shadow-md)]">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

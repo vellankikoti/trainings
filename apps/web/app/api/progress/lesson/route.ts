@@ -38,12 +38,25 @@ export async function POST(request: Request) {
     status,
   );
 
-  // Update streak and daily activity on completion
+  // Update streak and daily activity on completion — AWAIT to ensure
+  // data is persisted before the client can fetch dashboard data
+  let streakResult: {
+    streak: number;
+    streakXPAwarded: boolean;
+    milestone: number | null;
+  } | null = null;
+
   if (status === "completed" && result.xpAwarded > 0) {
-    updateStreak(profileId, "lesson", result.xpAwarded).catch((err) =>
-      console.error("Streak update failed:", err),
-    );
+    try {
+      streakResult = await updateStreak(profileId, "lesson", result.xpAwarded);
+    } catch (err) {
+      console.error("Streak update failed:", err);
+    }
   }
 
-  return NextResponse.json(result);
+  // Return enriched response with full server-authoritative state
+  return NextResponse.json({
+    ...result,
+    streak: streakResult,
+  });
 }

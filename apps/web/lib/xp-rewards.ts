@@ -100,12 +100,19 @@ export async function awardXPWithLog(
       .single();
 
     if (existing) {
+      // Fetch actual current totals instead of returning misleading zeros
+      const { data: currentProfile } = await supabase
+        .from("profiles")
+        .select("total_xp, current_level")
+        .eq("id", userId)
+        .single();
+
       return {
         awarded: false,
         amount: 0,
-        newTotal: 0,
+        newTotal: currentProfile?.total_xp ?? 0,
         leveledUp: false,
-        newLevel: 0,
+        newLevel: currentProfile?.current_level ?? 0,
         reason: `Duplicate: ${dedupKey}`,
       };
     }

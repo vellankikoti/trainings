@@ -19,21 +19,21 @@ function ActiveCourseCard({ course }: { course: ActiveCourse }) {
     : `/paths/${course.pathSlug}`;
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm transition-shadow hover:shadow-md">
+    <div className="group rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)] transition-all duration-200 hover:shadow-[var(--shadow-hover)] hover:border-primary/20">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-muted-foreground">
+          <p className="text-xs font-semibold text-primary/70">
             {course.pathTitle}
           </p>
-          <h3 className="mt-1 truncate text-sm font-bold text-foreground">
+          <h3 className="mt-1.5 truncate text-sm font-bold text-foreground">
             {course.moduleTitle}
           </h3>
         </div>
-        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+        <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
           {course.difficulty}
         </span>
       </div>
-      <div className="mt-3">
+      <div className="mt-4">
         <ProgressBar
           value={course.progress}
           size="md"
@@ -47,9 +47,9 @@ function ActiveCourseCard({ course }: { course: ActiveCourse }) {
         </p>
         <Link
           href={courseHref}
-          className="text-xs font-semibold text-primary transition-colors hover:text-primary/80"
+          className="text-xs font-semibold text-primary transition-colors hover:text-primary/80 group-hover:underline"
         >
-          Continue
+          Continue →
         </Link>
       </div>
     </div>
@@ -58,7 +58,7 @@ function ActiveCourseCard({ course }: { course: ActiveCourse }) {
 
 function CompletedCourseCard({ course }: { course: CompletedCourse }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)] transition-all duration-200 hover:shadow-[var(--shadow-md)]">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-bold text-foreground">

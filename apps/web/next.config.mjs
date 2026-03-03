@@ -25,6 +25,9 @@ const nextConfig = {
   experimental: {
     outputFileTracingIncludes: {
       "/learn/**": ["../../content/**"],
+      "/api/**": ["../../content/**"],
+      "/dashboard/**": ["../../content/**"],
+      "/paths/**": ["../../content/**"],
     },
     optimizePackageImports: [
       "@clerk/nextjs",

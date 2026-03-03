@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --color-background: hsl(0 0% 100%);
+  --color-background: hsl(220 20% 97%);
   --color-foreground: hsl(215 25% 12%);
   --color-card: hsl(0 0% 100%);
   --color-card-foreground: hsl(215 25% 12%);
@@ -532,10 +532,19 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* ─── Elevation System ─── */
+:root {
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.06), 0 4px 6px rgba(0, 0, 0, 0.04);
+  --shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.08), 0 4px 10px rgba(0, 0, 0, 0.04);
+}
+
 /* ─── Light Mode ─── */
 :root {
   --radius: 0.625rem;
-  --background: hsl(210 33% 99%);
+  --background: hsl(220 20% 97%);
   --foreground: hsl(215 25% 12%);
   --card: hsl(0 0% 100%);
   --card-foreground: hsl(215 25% 12%);
@@ -570,6 +579,11 @@
 
 /* ─── Dark Mode ─── */
 .dark {
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3), 0 4px 6px rgba(0, 0, 0, 0.2);
+  --shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.35), 0 4px 10px rgba(0, 0, 0, 0.2);
   --background: hsl(215 28% 7%);
   --foreground: hsl(210 40% 96%);
   --card: hsl(215 25% 11%);

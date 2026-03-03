@@ -127,7 +127,11 @@ export async function updateLessonProgress(
   moduleSlug: string,
   lessonSlug: string,
   status: "in_progress" | "completed",
-): Promise<{ xpAwarded: number; leveledUp: boolean }> {
+): Promise<{
+  xpAwarded: number;
+  leveledUp: boolean;
+  moduleProgress?: { percentage: number; completed: boolean };
+}> {
   const supabase = createAdminClient();
 
   // Check if already exists
@@ -184,12 +188,14 @@ export async function updateLessonProgress(
   }
 
   // Award XP if earned
+  let moduleProgress: { percentage: number; completed: boolean } | undefined;
+
   if (xpAwarded > 0) {
     const result = await awardLessonXP(userId, pathSlug, moduleSlug, lessonSlug);
     leveledUp = result.leveledUp;
 
-    // Update module progress
-    await recalculateModuleProgress(userId, pathSlug, moduleSlug);
+    // Update module progress (now returns progress data)
+    moduleProgress = await recalculateModuleProgress(userId, pathSlug, moduleSlug);
 
     // Trigger skill score + badge evaluation
     try {
@@ -200,7 +206,7 @@ export async function updateLessonProgress(
     }
   }
 
-  return { xpAwarded, leveledUp };
+  return { xpAwarded, leveledUp, moduleProgress };
 }
 
 /**
@@ -261,7 +267,7 @@ async function recalculateModuleProgress(
   userId: string,
   pathSlug: string,
   moduleSlug: string,
-): Promise<void> {
+): Promise<{ percentage: number; completed: boolean }> {
   const supabase = createAdminClient();
 
   // Use content metadata for total lesson count (source of truth)
@@ -278,46 +284,100 @@ async function recalculateModuleProgress(
     .eq("module_slug", moduleSlug);
 
   const completed = lessons?.filter((l) => l.status === "completed").length ?? 0;
-  const total = totalFromContent > 0 ? totalFromContent : (lessons?.length ?? 0);
+
+  // SAFETY: Never use lesson_progress count as the total.
+  // If content metadata is unavailable, track progress but never auto-complete.
+  if (totalFromContent === 0) {
+    console.warn(
+      `[progress] Module ${pathSlug}/${moduleSlug}: content metadata unavailable, cannot determine total lessons. Storing partial progress only.`,
+    );
+    // Still record what we know, but percentage stays proportional to started lessons
+    const startedCount = lessons?.length ?? 0;
+    const safePercentage = startedCount > 0
+      ? Math.min(Math.round((completed / startedCount) * 100), 99) // cap at 99%
+      : 0;
+
+    const { data: existing } = await supabase
+      .from("module_progress")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("path_slug", pathSlug)
+      .eq("module_slug", moduleSlug)
+      .single();
+
+    const updates = {
+      lessons_total: 0, // unknown
+      lessons_completed: completed,
+      percentage: safePercentage,
+    };
+
+    if (existing) {
+      await supabase.from("module_progress").update(updates).eq("id", existing.id);
+    } else {
+      await supabase.from("module_progress").insert({
+        user_id: userId,
+        path_slug: pathSlug,
+        module_slug: moduleSlug,
+        started_at: new Date().toISOString(),
+        ...updates,
+      });
+    }
+    return { percentage: safePercentage, completed: false };
+  }
+
+  const total = totalFromContent;
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const isReallyComplete = completed >= total && total > 0;
 
   const { data: existing } = await supabase
     .from("module_progress")
-    .select("id")
+    .select("id, completed_at")
     .eq("user_id", userId)
     .eq("path_slug", pathSlug)
     .eq("module_slug", moduleSlug)
     .single();
 
-  const updates = {
-    lessons_total: total,
-    lessons_completed: completed,
-    percentage,
-    ...(percentage === 100
-      ? { completed_at: new Date().toISOString() }
-      : {}),
-  };
+  // Determine completed_at value
+  let completedAt: string | null | undefined;
+  if (isReallyComplete && !existing?.completed_at) {
+    completedAt = new Date().toISOString();
+  } else if (!isReallyComplete && existing?.completed_at) {
+    completedAt = null; // Clear false completion (data repair)
+  }
 
   if (existing) {
+    const updateData: Record<string, unknown> = {
+      lessons_total: total,
+      lessons_completed: completed,
+      percentage,
+    };
+    if (completedAt !== undefined) {
+      updateData.completed_at = completedAt;
+    }
     await supabase
       .from("module_progress")
-      .update(updates)
+      .update(updateData)
       .eq("id", existing.id);
   } else {
     await supabase.from("module_progress").insert({
       user_id: userId,
       path_slug: pathSlug,
       module_slug: moduleSlug,
+      lessons_total: total,
+      lessons_completed: completed,
+      percentage,
       started_at: new Date().toISOString(),
-      ...updates,
+      ...(completedAt ? { completed_at: completedAt } : {}),
     });
   }
 
   // If module completed, award bonus XP and recalculate path
-  if (percentage === 100) {
+  if (isReallyComplete) {
     await awardModuleXP(userId, pathSlug, moduleSlug);
     await recalculatePathProgress(userId, pathSlug);
   }
+
+  return { percentage, completed: isReallyComplete };
 }
 
 /**
