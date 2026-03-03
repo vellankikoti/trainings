@@ -1,11 +1,11 @@
 ---
 title: "The Boot Process"
 description: "Follow the journey from pressing the power button to a fully running Linux system. Understanding the boot process is critical for debugging servers that refuse to start."
-order: 3
+order: 5
 xpReward: 100
 estimatedMinutes: 30
 prerequisites:
-  - 02-linux-architecture
+  - 04-linux-architecture
 objectives:
   - Trace the five stages of the Linux boot process
   - Explain the role of BIOS/UEFI, GRUB, and the init system
@@ -225,4 +225,4 @@ systemd-analyze blame 2>/dev/null | head -5 || echo "N/A"
 
 ## What's Next
 
-In the next lesson, **Installing Linux**, you'll set up your own Linux environment — whether that's WSL on Windows, a virtual machine, or a cloud instance. You'll have a real system to practice on for every lesson that follows.
+Now that you understand how Linux is structured and boots, it's time to start working with files. In **Filesystem Navigation**, you'll master `cd`, `ls`, `find`, and `locate` — the commands you'll use more than any others as a DevOps engineer.
