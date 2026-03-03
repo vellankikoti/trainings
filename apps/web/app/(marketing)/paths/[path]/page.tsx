@@ -39,9 +39,7 @@ export default function PathPage({ params }: PathPageProps) {
   if (!data) notFound();
 
   const colors = COLOR_MAP[data.color] || COLOR_MAP.blue;
-  const firstModuleHref = data.modulesData.length > 0
-    ? `/learn/${data.slug}/${data.modulesData[0].slug}`
-    : `/paths/${data.slug}`;
+  const pathDashboardHref = `/learn/${data.slug}`;
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-12 md:py-16">
@@ -74,12 +72,12 @@ export default function PathPage({ params }: PathPageProps) {
         </div>
 
         {/* Progress overlay for authenticated users */}
-        <PathProgressOverlay pathSlug={data.slug} firstLessonHref={firstModuleHref} />
+        <PathProgressOverlay pathSlug={data.slug} firstLessonHref={pathDashboardHref} />
 
         {/* CTA */}
         <div className="mt-8">
           <Button size="lg" asChild>
-            <Link href={firstModuleHref}>
+            <Link href={pathDashboardHref}>
               Explore Courses
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="ml-1">
                 <path d="m9 18 6-6-6-6" />
@@ -178,7 +176,7 @@ export default function PathPage({ params }: PathPageProps) {
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Button size="lg" asChild className="w-full bg-white text-blue-700 hover:bg-blue-50 sm:w-auto">
-            <Link href={firstModuleHref}>Get Started Free</Link>
+            <Link href={pathDashboardHref}>Get Started Free</Link>
           </Button>
           <Button size="lg" variant="outline" asChild className="w-full border-white/30 text-white hover:bg-white/10 hover:text-white sm:w-auto">
             <Link href="/paths">Browse All Paths</Link>

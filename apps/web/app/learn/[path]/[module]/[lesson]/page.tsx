@@ -81,31 +81,11 @@ export default async function LessonPage({ params }: LessonPageProps) {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-6 lg:px-8">
-      {/* Breadcrumb */}
+      {/* Breadcrumb — course-scoped (no path link) */}
       <nav
         aria-label="Breadcrumb"
         className="mb-6 flex items-center gap-1.5 text-[13px]"
       >
-        <Link
-          href={`/paths/${pathSlug}`}
-          className="font-medium text-foreground/50 transition-colors hover:text-primary"
-        >
-          {pathMeta.title}
-        </Link>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="text-foreground/25"
-        >
-          <path d="m9 18 6-6-6-6" />
-        </svg>
         <Link
           href={`/learn/${pathSlug}/${moduleSlug}`}
           className="font-medium text-foreground/50 transition-colors hover:text-primary"
