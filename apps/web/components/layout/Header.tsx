@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
-import { NAV_ITEMS } from "@/lib/nav-config";
+import { PUBLIC_NAV_ITEMS, AUTH_NAV_ITEMS } from "@/lib/nav-config";
 import { Logo } from "./Logo";
 import { MobileNav } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
@@ -15,18 +15,36 @@ export function Header() {
         <div className="flex items-center gap-8">
           <MobileNav />
           <Logo />
-          <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
-            {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+
+          {/* ── Auth-aware navigation ── */}
+          <SignedOut>
+            <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
+              {PUBLIC_NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </SignedOut>
+          <SignedIn>
+            <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
+              {AUTH_NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </SignedIn>
         </div>
+
         <div className="flex items-center gap-1.5">
           <SearchDialog />
           <ThemeToggle />
@@ -39,9 +57,6 @@ export function Header() {
             </Button>
           </SignedOut>
           <SignedIn>
-            <Button variant="ghost" size="sm" asChild className="ml-1">
-              <Link href="/dashboard">Dashboard</Link>
-            </Button>
             <UserButton afterSignOutUrl="/" />
           </SignedIn>
         </div>

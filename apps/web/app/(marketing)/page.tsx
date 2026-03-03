@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -107,7 +109,16 @@ const STEPS = [
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  /* ── Auth-aware redirect ──
+   * Logged-in users are taken straight to their personalized Dashboard.
+   * The marketing homepage is only for acquisition / logged-out visitors.
+   */
+  const { userId } = await auth();
+  if (userId) {
+    redirect("/dashboard");
+  }
+
   return (
     <>
       {/* Hero */}

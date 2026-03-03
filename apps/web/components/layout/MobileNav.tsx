@@ -10,7 +10,7 @@ import {
   SheetTrigger,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { NAV_ITEMS } from "@/lib/nav-config";
+import { PUBLIC_NAV_ITEMS, AUTH_NAV_ITEMS } from "@/lib/nav-config";
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
@@ -39,28 +39,18 @@ export function MobileNav() {
       <SheetContent side="left" className="w-72">
         <SheetTitle className="text-lg font-bold">DEVOPS ENGINEERS</SheetTitle>
         <nav className="mt-6 flex flex-col gap-4">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="text-lg font-medium transition-colors hover:text-primary"
-            >
-              {item.label}
-            </Link>
-          ))}
-          <SignedIn>
-            <div className="border-t border-border/60 pt-4">
+          {/* ── Auth-aware nav items ── */}
+          <SignedOut>
+            {PUBLIC_NAV_ITEMS.map((item) => (
               <Link
-                href="/dashboard"
+                key={item.href}
+                href={item.href}
                 onClick={() => setOpen(false)}
                 className="text-lg font-medium transition-colors hover:text-primary"
               >
-                Dashboard
+                {item.label}
               </Link>
-            </div>
-          </SignedIn>
-          <SignedOut>
+            ))}
             <div className="border-t border-border/60 pt-4 flex flex-col gap-3">
               <Link
                 href="/sign-in"
@@ -78,6 +68,28 @@ export function MobileNav() {
               </Link>
             </div>
           </SignedOut>
+
+          <SignedIn>
+            {AUTH_NAV_ITEMS.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className="text-lg font-medium transition-colors hover:text-primary"
+              >
+                {item.label}
+              </Link>
+            ))}
+            <div className="border-t border-border/60 pt-4 flex flex-col gap-3">
+              <Link
+                href="/settings"
+                onClick={() => setOpen(false)}
+                className="text-lg font-medium text-muted-foreground transition-colors hover:text-primary"
+              >
+                Settings
+              </Link>
+            </div>
+          </SignedIn>
         </nav>
       </SheetContent>
     </Sheet>
