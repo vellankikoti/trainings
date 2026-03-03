@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { constructWebhookEvent } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/server";
+import { handleOrgSubscriptionEvent } from "@/lib/billing/stripe-org";
 import type Stripe from "stripe";
 
 /**
@@ -147,6 +148,13 @@ export async function POST(request: Request) {
     default:
       // Unhandled event type — log but don't error
       console.log(`Unhandled Stripe event: ${event.type}`);
+  }
+
+  // Also handle org billing events (checkout + subscription lifecycle)
+  try {
+    await handleOrgSubscriptionEvent(event);
+  } catch (err) {
+    console.error("Org billing webhook error:", err);
   }
 
   return NextResponse.json({ received: true });

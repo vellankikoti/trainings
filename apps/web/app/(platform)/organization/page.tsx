@@ -87,12 +87,18 @@ export default async function OrganizationDashboard() {
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link
             href="/organization/analytics"
             className="rounded-lg border border-border px-4 py-2 text-sm font-semibold transition-colors hover:bg-muted"
           >
             Analytics
+          </Link>
+          <Link
+            href="/organization/billing"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-semibold transition-colors hover:bg-muted"
+          >
+            Billing
           </Link>
           <Link
             href="/organization/candidates"

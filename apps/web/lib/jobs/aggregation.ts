@@ -326,29 +326,38 @@ export async function aggregateJobs(
   let inserted = 0;
   let skipped = 0;
 
-  // Upsert into database
+  // Insert new jobs, skip duplicates via unique index
   for (const job of unique) {
-    const { error } = await supabase.from("job_postings").upsert(
-      {
-        source: job.source,
-        external_id: job.externalId,
-        external_url: job.externalUrl,
-        title: job.title,
-        description: job.description,
-        company_name: job.companyName,
-        location_city: job.locationCity,
-        location_country: job.locationCountry,
-        is_remote: job.isRemote,
-        salary_min: job.salaryMin,
-        salary_max: job.salaryMax,
-        salary_currency: job.salaryCurrency,
-        required_skills: job.requiredSkills,
-        employment_type: job.employmentType,
-        posted_at: job.postedAt,
-        is_active: true,
-      },
-      { onConflict: "source,external_id", ignoreDuplicates: true },
-    );
+    // Check if already exists
+    const { count } = await supabase
+      .from("job_postings")
+      .select("id", { count: "exact", head: true })
+      .eq("source", job.source)
+      .eq("external_id", job.externalId);
+
+    if (count && count > 0) {
+      skipped++;
+      continue;
+    }
+
+    const { error } = await supabase.from("job_postings").insert({
+      source: job.source,
+      external_id: job.externalId,
+      external_url: job.externalUrl,
+      title: job.title,
+      description: job.description,
+      company_name: job.companyName,
+      location_city: job.locationCity,
+      location_country: job.locationCountry,
+      is_remote: job.isRemote,
+      salary_min: job.salaryMin,
+      salary_max: job.salaryMax,
+      salary_currency: job.salaryCurrency,
+      required_skills: job.requiredSkills,
+      employment_type: job.employmentType,
+      posted_at: job.postedAt,
+      is_active: true,
+    });
 
     if (error) {
       skipped++;
