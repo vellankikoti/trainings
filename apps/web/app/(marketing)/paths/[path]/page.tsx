@@ -127,7 +127,10 @@ export default function PathPage({ params }: PathPageProps) {
 
         <div className="mt-8 flex flex-wrap gap-3">
           <Button size="lg" asChild>
-            <Link href="/sign-up">
+            <Link href={data.modulesData.length > 0 && data.modulesData[0].lessons.length > 0
+              ? `/learn/${data.slug}/${data.modulesData[0].slug}/${data.modulesData[0].lessons[0].slug}`
+              : `/paths/${data.slug}`
+            }>
               Start This Path Free
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-1">
                 <path d="M5 12h14" />
@@ -179,17 +182,18 @@ export default function PathPage({ params }: PathPageProps) {
                 <div className="border-t border-border/60 bg-muted/30 px-5 py-4 md:px-6">
                   <div className="grid gap-1.5 sm:grid-cols-2">
                     {mod.lessons.map((lesson, i) => (
-                      <div
+                      <Link
                         key={lesson.slug}
-                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-background"
+                        href={`/learn/${data.slug}/${mod.slug}/${lesson.slug}`}
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-background hover:text-primary"
                       >
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-medium bg-primary/10 text-primary">
                           {i + 1}
                         </span>
-                        <span className="text-muted-foreground">
+                        <span className="text-foreground/70 transition-colors group-hover:text-primary">
                           {lesson.title}
                         </span>
-                      </div>
+                      </Link>
                     ))}
                   </div>
                 </div>
@@ -234,7 +238,10 @@ export default function PathPage({ params }: PathPageProps) {
             asChild
             className="w-full bg-white text-blue-700 hover:bg-blue-50 sm:w-auto"
           >
-            <Link href="/sign-up">Get Started Free</Link>
+            <Link href={data.modulesData.length > 0 && data.modulesData[0].lessons.length > 0
+              ? `/learn/${data.slug}/${data.modulesData[0].slug}/${data.modulesData[0].lessons[0].slug}`
+              : `/paths/${data.slug}`
+            }>Get Started Free</Link>
           </Button>
           <Button
             size="lg"

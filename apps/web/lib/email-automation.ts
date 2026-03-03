@@ -137,7 +137,7 @@ function welcomeDay7Email(name: string) {
           how a Finnish student changed the world.
         </p>
         <div style="margin-top: 24px; text-align: center;">
-          <a href="${APP_URL}/learn/linux/what-is-linux"
+          <a href="${APP_URL}/learn/foundations/linux/01-the-linux-story"
              style="display: inline-block; background-color: #3b82f6; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600;">
             Read Your First Lesson (10 min)
           </a>

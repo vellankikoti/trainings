@@ -12,7 +12,6 @@ import {
 
 const NAV_ITEMS = [
   { label: "Learning Paths", href: "/paths" },
-  { label: "Projects", href: "/projects" },
   { label: "Blog", href: "/blog" },
   { label: "About", href: "/about" },
 ];

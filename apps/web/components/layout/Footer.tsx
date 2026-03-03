@@ -5,26 +5,22 @@ const FOOTER_LINKS = [
     title: "Platform",
     links: [
       { label: "Learning Paths", href: "/paths" },
-      { label: "Projects", href: "/projects" },
-      { label: "Certificates", href: "/certificates" },
       { label: "Blog", href: "/blog" },
+      { label: "About", href: "/about" },
     ],
   },
   {
     title: "Community",
     links: [
-      { label: "About", href: "/about" },
-      { label: "Contributing", href: "/contributing" },
-      { label: "Code of Conduct", href: "/code-of-conduct" },
       { label: "GitHub", href: "https://github.com/vellankikoti/trainings" },
+      { label: "Contributing", href: "https://github.com/vellankikoti/trainings/blob/main/CONTRIBUTING.md" },
+      { label: "Code of Conduct", href: "https://github.com/vellankikoti/trainings/blob/main/CODE_OF_CONDUCT.md" },
     ],
   },
   {
     title: "Legal",
     links: [
-      { label: "MIT License", href: "/license" },
-      { label: "Privacy", href: "/privacy" },
-      { label: "Terms", href: "/terms" },
+      { label: "MIT License", href: "https://github.com/vellankikoti/trainings/blob/main/LICENSE" },
     ],
   },
 ];
