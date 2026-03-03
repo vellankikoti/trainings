@@ -20,7 +20,7 @@ jobs:
     # Only run when Vercel secrets are configured
     if: ${{ vars.VERCEL_CONFIGURED == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v4
 
