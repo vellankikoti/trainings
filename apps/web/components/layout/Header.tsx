@@ -1,14 +1,21 @@
 import Link from "next/link";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
 import { Button } from "@/components/ui/button";
-import { PUBLIC_NAV_ITEMS, AUTH_NAV_ITEMS } from "@/lib/nav-config";
+import { PUBLIC_NAV_ITEMS, getNavItemsForRole } from "@/lib/nav-config";
 import { Logo } from "./Logo";
 import { MobileNav } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
 import { SearchDialog } from "./SearchDialog";
+import { RoleNav } from "./RoleNav";
 import { ReadingProgress } from "@/components/lesson/ReadingProgress";
+import { NotificationCenter } from "./NotificationCenter";
+import { createAdminClient } from "@/lib/supabase/server";
+import type { Role } from "@/lib/auth/rbac";
 
-export function Header() {
+export async function Header() {
+  const navItems = await getAuthNavItems();
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
@@ -16,7 +23,7 @@ export function Header() {
           <MobileNav />
           <Logo />
 
-          {/* ── Auth-aware navigation ── */}
+          {/* Auth-aware navigation */}
           <SignedOut>
             <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
               {PUBLIC_NAV_ITEMS.map((item) => (
@@ -31,17 +38,7 @@ export function Header() {
             </nav>
           </SignedOut>
           <SignedIn>
-            <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
-              {AUTH_NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
+            <RoleNav items={navItems} />
           </SignedIn>
         </div>
 
@@ -57,14 +54,38 @@ export function Header() {
             </Button>
           </SignedOut>
           <SignedIn>
+            <NotificationCenter />
             <UserButton afterSignOutUrl="/" />
           </SignedIn>
         </div>
       </div>
-      {/* Reading progress — sits at the absolute bottom of the header, replacing the border */}
+      {/* Reading progress — sits at the absolute bottom of the header */}
       <div className="absolute bottom-0 left-0 right-0">
         <ReadingProgress />
       </div>
     </header>
   );
+}
+
+/**
+ * Fetch the current user's role and return the appropriate nav items.
+ * Falls back to learner items if no profile exists yet.
+ */
+async function getAuthNavItems() {
+  try {
+    const { userId } = await auth();
+    if (!userId) return getNavItemsForRole("learner");
+
+    const supabase = createAdminClient();
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("clerk_id", userId)
+      .single();
+
+    const role = (profile?.role ?? "learner") as Role;
+    return getNavItemsForRole(role);
+  } catch {
+    return getNavItemsForRole("learner");
+  }
 }

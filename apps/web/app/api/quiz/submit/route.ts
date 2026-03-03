@@ -1,7 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { getQuizById, scoreQuiz } from "@/lib/quiz";
-import { getProfileId, awardXP } from "@/lib/progress";
+import { getProfileId } from "@/lib/progress";
+import { awardXPWithLog } from "@/lib/xp-rewards";
+import { updateStreak } from "@/lib/streaks";
+import { recalculateSkillScores } from "@/lib/skills/score-calculator";
+import { evaluateBadges } from "@/lib/badges";
 import { createAdminClient } from "@/lib/supabase/server";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import { quizSubmitSchema, validateBody } from "@/lib/validations";
@@ -89,11 +93,41 @@ export async function POST(request: Request) {
     await supabase.from("quiz_responses").insert(responses);
   }
 
-  // Award XP
+  // Award XP with logging and dedup
   let leveledUp = false;
   if (xpEarned > 0) {
-    const result = await awardXP(profileId, xpEarned, "quiz_complete");
+    const source = scoring.score === 100 ? "quiz_perfect" : "quiz_pass";
+    const attemptNum = (previousAttempts ?? 0) + 1;
+    const result = await awardXPWithLog({
+      userId: profileId,
+      amount: xpEarned,
+      source,
+      sourceId: quizId,
+      dedupKey: `${source}:${quizId}:attempt${attemptNum}`,
+      metadata: { score: scoring.score, passed: scoring.passed },
+    });
     leveledUp = result.leveledUp;
+  }
+
+  // Update streak and daily activity
+  if (xpEarned > 0) {
+    updateStreak(profileId, "quiz", xpEarned).catch((err) =>
+      console.error("Streak update failed:", err),
+    );
+  }
+
+  // Trigger skill score recalculation + badge evaluation
+  let newBadges: Array<{ id: string; name: string; tier: string }> = [];
+  try {
+    await recalculateSkillScores(profileId);
+    const badgeResult = await evaluateBadges(profileId);
+    newBadges = badgeResult.newBadges.map((b) => ({
+      id: b.id,
+      name: b.name,
+      tier: b.tier,
+    }));
+  } catch (err) {
+    console.error("Post-quiz processing failed:", err);
   }
 
   return NextResponse.json({
@@ -103,6 +137,7 @@ export async function POST(request: Request) {
     passed: scoring.passed,
     xpEarned,
     leveledUp,
+    newBadges,
     results: scoring.results,
   });
 }

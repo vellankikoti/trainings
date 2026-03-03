@@ -1,7 +1,11 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getModulesForPath } from "@/lib/content";
 import { XP_REWARDS } from "@/lib/xp";
 import { calculateLevel } from "@/lib/levels";
+import { recalculateSkillScores } from "@/lib/skills/score-calculator";
+import { evaluateBadges } from "@/lib/badges";
+import { awardLessonXP, awardExerciseXP, awardModuleXP, awardPathXP } from "@/lib/xp-rewards";
 import type { Database } from "@/lib/supabase/types";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -181,11 +185,19 @@ export async function updateLessonProgress(
 
   // Award XP if earned
   if (xpAwarded > 0) {
-    const result = await awardXP(userId, xpAwarded, "lesson_complete");
+    const result = await awardLessonXP(userId, pathSlug, moduleSlug, lessonSlug);
     leveledUp = result.leveledUp;
 
     // Update module progress
     await recalculateModuleProgress(userId, pathSlug, moduleSlug);
+
+    // Trigger skill score + badge evaluation
+    try {
+      await recalculateSkillScores(userId);
+      await evaluateBadges(userId);
+    } catch (err) {
+      console.error("Post-lesson processing failed:", err);
+    }
   }
 
   return { xpAwarded, leveledUp };
@@ -238,8 +250,8 @@ export async function updateExerciseProgress(
     });
   }
 
-  const result = await awardXP(userId, XP_REWARDS.EXERCISE_COMPLETE, "exercise_complete");
-  return { xpAwarded: XP_REWARDS.EXERCISE_COMPLETE, leveledUp: result.leveledUp };
+  const result = await awardExerciseXP(userId, lessonSlug, exerciseId);
+  return { xpAwarded: result.awarded ? result.amount : 0, leveledUp: result.leveledUp };
 }
 
 /**
@@ -252,7 +264,12 @@ async function recalculateModuleProgress(
 ): Promise<void> {
   const supabase = createAdminClient();
 
-  // Count total and completed lessons for this module
+  // Use content metadata for total lesson count (source of truth)
+  const modules = getModulesForPath(pathSlug);
+  const moduleMeta = modules.find((m) => m.slug === moduleSlug);
+  const totalFromContent = moduleMeta?.lessonsCount ?? 0;
+
+  // Count completed lessons from DB
   const { data: lessons } = await supabase
     .from("lesson_progress")
     .select("status")
@@ -260,8 +277,8 @@ async function recalculateModuleProgress(
     .eq("path_slug", pathSlug)
     .eq("module_slug", moduleSlug);
 
-  const total = lessons?.length ?? 0;
   const completed = lessons?.filter((l) => l.status === "completed").length ?? 0;
+  const total = totalFromContent > 0 ? totalFromContent : (lessons?.length ?? 0);
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   const { data: existing } = await supabase
@@ -298,7 +315,7 @@ async function recalculateModuleProgress(
 
   // If module completed, award bonus XP and recalculate path
   if (percentage === 100) {
-    await awardXP(userId, XP_REWARDS.MODULE_COMPLETE, "module_complete");
+    await awardModuleXP(userId, pathSlug, moduleSlug);
     await recalculatePathProgress(userId, pathSlug);
   }
 }
@@ -312,14 +329,18 @@ async function recalculatePathProgress(
 ): Promise<void> {
   const supabase = createAdminClient();
 
+  // Use content metadata for total module count (source of truth)
+  const contentModules = getModulesForPath(pathSlug);
+  const totalFromContent = contentModules.length;
+
   const { data: modules } = await supabase
     .from("module_progress")
     .select("percentage")
     .eq("user_id", userId)
     .eq("path_slug", pathSlug);
 
-  const total = modules?.length ?? 0;
   const completed = modules?.filter((m) => m.percentage === 100).length ?? 0;
+  const total = totalFromContent > 0 ? totalFromContent : (modules?.length ?? 0);
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   const { data: existing } = await supabase
@@ -353,7 +374,7 @@ async function recalculatePathProgress(
   }
 
   if (percentage === 100) {
-    await awardXP(userId, XP_REWARDS.PATH_COMPLETE, "path_complete");
+    await awardPathXP(userId, pathSlug);
   }
 }
 

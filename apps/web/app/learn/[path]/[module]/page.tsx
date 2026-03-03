@@ -68,6 +68,9 @@ export default async function CourseOverviewPage({ params }: CoursePageProps) {
   const moduleIndex = allModules.findIndex((m) => m.slug === moduleSlug);
   const courseNumber = moduleIndex + 1;
   const totalCourses = allModules.length;
+  const nextModule = moduleIndex < allModules.length - 1
+    ? allModules[moduleIndex + 1]
+    : null;
 
   const { completedSlugs, totalXpEarned } = await getCourseCompletionData(
     pathSlug,
@@ -139,6 +142,70 @@ export default async function CourseOverviewPage({ params }: CoursePageProps) {
         </div>
       )}
 
+      {/* Completion summary — shown when module is 100% done */}
+      {isComplete && (
+        <div className="mt-8 rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-50/30 p-6 dark:border-emerald-800/40 dark:from-emerald-950/30 dark:to-transparent">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-md">
+              <TrophyIcon />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-lg font-bold text-emerald-800 dark:text-emerald-300">
+                Course Complete!
+              </h3>
+              <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400/80">
+                You&apos;ve completed all {totalLessons} lessons in {moduleMeta.title}.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                  <BoltIcon /> {totalXpEarned} XP earned
+                </span>
+                <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                  <BookIcon /> {totalLessons} lessons
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Next module CTA */}
+          {nextModule ? (
+            <Link
+              href={`/learn/${pathSlug}/${nextModule.slug}`}
+              className="mt-5 flex items-center gap-3 rounded-xl border border-emerald-200 bg-white p-4 transition-all hover:border-primary/40 hover:shadow-md dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:hover:border-primary/40"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+                  Next Course
+                </p>
+                <p className="text-sm font-bold text-foreground">
+                  {nextModule.title}
+                </p>
+              </div>
+            </Link>
+          ) : (
+            <div className="mt-5 rounded-xl border border-emerald-200 bg-white p-4 text-center dark:border-emerald-800/40 dark:bg-emerald-950/20">
+              <p className="text-sm font-semibold text-foreground">
+                You&apos;ve completed all courses in {pathMeta.title}!
+              </p>
+              <Link
+                href="/paths"
+                className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
+              >
+                Explore more paths
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* CTA Button */}
       <div className="mt-8">
         <Link
@@ -146,7 +213,7 @@ export default async function CourseOverviewPage({ params }: CoursePageProps) {
           className="inline-flex items-center gap-2.5 rounded-xl bg-primary px-6 py-3.5 text-base font-bold text-white shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
         >
           {isComplete
-            ? "Review Course"
+            ? "Review Lessons"
             : isStarted
               ? "Continue Course"
               : "Start Course"}
@@ -248,4 +315,8 @@ function BoltIcon() {
 
 function SignalIcon() {
   return (<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 20h.01" /><path d="M7 20v-4" /><path d="M12 20v-8" /><path d="M17 20V8" /></svg>);
+}
+
+function TrophyIcon() {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" /><path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20 7 22" /><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20 17 22" /><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" /></svg>);
 }

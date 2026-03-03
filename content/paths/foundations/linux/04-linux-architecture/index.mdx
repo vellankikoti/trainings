@@ -1,235 +1,448 @@
 ---
 title: "Linux Architecture"
-description: "Understand the layers that make up a Linux system — from hardware to kernel to user space — and how they work together to power every server on the internet."
+description: "The four layers that make every Linux system tick — and why understanding them changes how you think about Docker, Kubernetes, and everything else."
 order: 4
 xpReward: 100
 estimatedMinutes: 35
 prerequisites:
   - 03-terminal-mastery
 objectives:
-  - Describe the four layers of Linux architecture
-  - Explain what the kernel does and why it matters
-  - Navigate the Filesystem Hierarchy Standard (FHS)
-  - Identify key directories and their purposes
+  - Describe the four layers of a Linux system and how they talk to each other
+  - Explain what the kernel actually does and why it matters for containers
+  - Navigate the Filesystem Hierarchy Standard like a map
+  - Use /proc and /sys to read live system data
 tags:
   - linux
   - architecture
   - fundamentals
+key_takeaways:
+  - Linux has four layers — hardware, kernel, shell, applications — and they communicate through system calls
+  - The kernel is why Docker containers work — they share the host's kernel instead of needing their own
+  - Every directory in Linux has a purpose defined by the Filesystem Hierarchy Standard
+  - /proc and /sys are goldmines of live system information — you'll use them for monitoring and debugging
+reflection_prompt: "Now that you know about kernel space and user space, can you think of why containers (Docker) are faster than virtual machines? Hint — it's related to which layer they share."
 ---
 
-<Callout type="story" title="The Story">
-When you type a command like `ls /home`, a remarkable chain of events unfolds. Your keystrokes travel from hardware through layers of software — the shell interprets your input, the kernel talks to the filesystem driver, the driver reads from the physical disk, and the results flow back up through those same layers to appear on your screen. All of this happens in milliseconds. Understanding these layers is the first step to truly mastering Linux.
+<Callout type="story" title="Let me tell you why this matters">
+When I first learned about Linux architecture, I thought, "OK, this is textbook stuff. When will I actually use this?" Then I started working with Docker. And suddenly, everything clicked.
+
+Docker containers aren't mini virtual machines. They're processes running in user space that share the host's Linux kernel. That's why containers start in milliseconds instead of minutes. That's why Alpine Linux images are 5MB instead of 500MB. That's why Kubernetes can run hundreds of containers on a single node.
+
+Understanding Linux architecture isn't academic. It's the reason the entire container ecosystem exists. And once you see it, you can't unsee it.
 </Callout>
 
-## The Four Layers of Linux
+## The Four Layers — A Bird's Eye View
 
-Every Linux system is built from four layers stacked on top of each other:
+Every Linux system is built from four layers stacked on top of each other. Everything you'll ever do in DevOps happens within or between these layers.
 
 ```text
-┌─────────────────────────────────────┐
-│        User Applications            │  ← Firefox, vim, docker, kubectl
-├─────────────────────────────────────┤
-│        Shell & Utilities            │  ← bash, ls, grep, awk, systemd
-├─────────────────────────────────────┤
-│           Linux Kernel              │  ← Memory, processes, drivers, I/O
-├─────────────────────────────────────┤
-│            Hardware                 │  ← CPU, RAM, disk, network card
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│  Layer 4: USER APPLICATIONS                          │
+│  nginx, docker, kubectl, terraform, your scripts     │
+├─────────────────────────────────────────────────────┤
+│  Layer 3: SHELL & SYSTEM UTILITIES                   │
+│  bash, ls, grep, systemd, awk, curl                  │
+├─────────────────────────────────────────────────────┤
+│  Layer 2: THE LINUX KERNEL                           │
+│  Process mgmt, memory, drivers, networking, security │
+├─────────────────────────────────────────────────────┤
+│  Layer 1: HARDWARE                                   │
+│  CPU, RAM, disk, network card, GPU                   │
+└─────────────────────────────────────────────────────┘
 ```
 
-### Layer 1: Hardware
+Let me walk you through each one.
 
-The physical components — CPU, RAM, storage, network interfaces. The kernel is the only software that talks directly to hardware.
+## Layer 1: Hardware — The Physical Stuff
 
-### Layer 2: The Linux Kernel
+This is the actual machine — CPU, memory, storage, network interfaces. Whether it's a physical server in a data center, an EC2 instance in AWS, or your laptop — there's always hardware at the bottom.
 
-The kernel is the heart of Linux. It manages:
-
-- **Process management** — Creating, scheduling, and terminating processes
-- **Memory management** — Allocating RAM, virtual memory, swapping
-- **Device drivers** — Communicating with hardware (disk, network, USB)
-- **File systems** — Reading and writing data (ext4, xfs, btrfs)
-- **Networking** — TCP/IP stack, routing, firewalls
-- **Security** — User permissions, SELinux, cgroups
-
-<Callout type="info">
-The kernel runs in **kernel space** — a privileged area of memory with direct hardware access. Everything else runs in **user space** — isolated from hardware for safety.
-</Callout>
-
-### Layer 3: Shell and System Utilities
-
-The shell (bash, zsh) interprets your commands and sends them to the kernel. System utilities (`ls`, `cp`, `grep`, `systemd`) are programs that use kernel services through **system calls**.
-
-### Layer 4: User Applications
-
-Everything you run — web servers (nginx), databases (PostgreSQL), container runtimes (Docker), and your own scripts. These applications use libraries and system calls to interact with the kernel.
-
-## The Filesystem Hierarchy Standard (FHS)
-
-Linux organizes everything in a single directory tree starting from `/` (root). Every directory has a specific purpose:
+Here's the thing most people miss: **only the kernel talks directly to hardware.** Nothing else can. Not your applications, not your shell, not even root. Everything goes through the kernel. This is a fundamental security and stability design — if every program could talk directly to hardware, one buggy app could crash the entire system.
 
 ```bash
-/
-├── bin/       # Essential user commands (ls, cp, mv)
-├── boot/      # Boot loader files (kernel, initramfs)
-├── dev/       # Device files (disks, terminals, null)
-├── etc/       # System configuration files
-├── home/      # User home directories
-├── lib/       # Shared libraries
-├── media/     # Mount point for removable media
-├── mnt/       # Temporary mount points
-├── opt/       # Optional/third-party software
-├── proc/      # Virtual filesystem for process info
-├── root/      # Root user's home directory
-├── run/       # Runtime variable data
-├── sbin/      # System administration commands
-├── srv/       # Data for services (web, FTP)
-├── sys/       # Virtual filesystem for kernel/hardware
-├── tmp/       # Temporary files (cleared on reboot)
-├── usr/       # User programs and data
-└── var/       # Variable data (logs, databases, mail)
-```
+# See your hardware from Linux's perspective:
 
-<Callout type="tip" title="Memory Trick">
-The most important directories for DevOps engineers: `/etc` (configuration), `/var/log` (logs), `/home` (user data), `/tmp` (scratch space), and `/proc` (live system info).
-</Callout>
+# CPU — how many cores, what model
+lscpu | head -10
 
-## Everything Is a File
+# Memory — total RAM
+cat /proc/meminfo | head -3
 
-Linux treats almost everything as a file. This is one of its most powerful design decisions:
-
-| What it is | File path | Example |
-|---|---|---|
-| Hard disk | `/dev/sda` | `fdisk /dev/sda` |
-| CPU info | `/proc/cpuinfo` | `cat /proc/cpuinfo` |
-| Memory info | `/proc/meminfo` | `cat /proc/meminfo` |
-| Null device | `/dev/null` | `command > /dev/null` |
-| Random data | `/dev/urandom` | `head -c 32 /dev/urandom \| base64` |
-| Network stats | `/proc/net/dev` | `cat /proc/net/dev` |
-
-This means you can read system information the same way you read a text file — using `cat`, `grep`, or any text processing tool.
-
-<Exercise number={1} title="Explore the Architecture">
-
-Run these commands to explore each layer of your Linux system:
-
-```bash
-# Kernel version and info
-uname -a
-
-# CPU architecture
-lscpu | head -5
-
-# Memory details
-cat /proc/meminfo | head -5
-
-# Block devices (disks)
+# Disk devices
 lsblk
 
-# Filesystem hierarchy - list top-level directories
-ls -la /
+# Network interfaces
+ip link show
 ```
 
-What kernel version are you running? How many CPUs does your system have?
+## Layer 2: The Kernel — The Brain
+
+The kernel is the most important piece of software on any Linux system. It's the bridge between hardware and everything else. Here's what it manages:
+
+**Process Management** — Every program running on your system is a process. The kernel creates them, schedules them across CPU cores, pauses and resumes them, and cleans them up when they're done. Right now, your Linux system probably has 100+ processes running simultaneously, and the kernel is juggling all of them.
+
+**Memory Management** — The kernel decides which processes get how much RAM. When physical memory runs out, it moves less-used data to swap (disk). It also creates the illusion that each process has its own private memory space (virtual memory), even though they're all sharing the same physical RAM.
+
+**Device Drivers** — Every piece of hardware needs a driver — software that speaks its specific language. The kernel either includes these drivers or loads them as modules. When you plug in a USB drive and it just works? That's the kernel loading the right driver.
+
+**File Systems** — When you save a file, the kernel translates "save this data to /home/you/document.txt" into the specific disk operations needed for your filesystem (ext4, xfs, btrfs). Different filesystems organize data differently, but the kernel presents them all through the same interface.
+
+**Networking** — The entire TCP/IP stack lives in the kernel. Sending a packet, receiving a connection, routing traffic, applying firewall rules — all kernel territory.
+
+<Callout type="info" title="Kernel Space vs. User Space — This is key">
+The kernel runs in a special, privileged area of memory called **kernel space**. It has unrestricted access to hardware and memory.
+
+Everything else — your shell, your applications, Docker, Kubernetes, everything — runs in **user space**. User space programs can't touch hardware directly. They have to ask the kernel to do it for them.
+
+This separation is the reason Linux is so stable. A buggy application can crash itself, but it can't crash the kernel or the whole system (usually). This is also why containers work — they run in user space and share the kernel, which is a much lighter form of isolation than running a whole separate kernel (like a virtual machine does).
+</Callout>
+
+## Layer 3: Shell and System Utilities
+
+This is the layer where you've been working. The shell (bash) reads your commands, interprets them, and asks the kernel to execute them using **system calls**.
+
+System calls are the API between user space and kernel space. Every time a program needs the kernel to do something, it makes a system call:
+
+| When you run... | The shell makes this system call... | The kernel does this... |
+|---|---|---|
+| `ls /home` | `opendir()`, `readdir()` | Reads directory entries from the filesystem |
+| `cat file.txt` | `open()`, `read()` | Opens the file and reads bytes from disk |
+| `mkdir new-dir` | `mkdir()` | Creates a new directory entry on the filesystem |
+| `ping google.com` | `socket()`, `sendto()` | Creates a network connection and sends packets |
+| `ps aux` | reads `/proc` filesystem | Returns process info from kernel data structures |
+
+You don't need to memorize system calls. Just understand the concept: **user space programs ask the kernel to do things on their behalf**. The kernel is the gatekeeper.
+
+```bash
+# Want to actually SEE the system calls a command makes?
+# strace traces every system call in real time:
+strace ls /home 2>&1 | head -20
+
+# You'll see calls like openat(), getdents64(), write()
+# That's ls talking to the kernel
+```
+
+<Callout type="tip" title="strace is a superpower">
+When something mysterious is happening — a program hangs, a file won't open, a connection fails — `strace` shows you exactly what that program is trying to do at the kernel level. You'll use this for debugging in real SRE work. Senior engineers use strace all the time.
+</Callout>
+
+## Layer 4: User Applications
+
+This is everything you install and run — web servers (nginx), databases (PostgreSQL), container runtimes (Docker), orchestrators (Kubernetes), and your own scripts. These applications use libraries (like glibc) that wrap system calls into friendlier APIs.
+
+Here's a question that might click something for you: **where does Docker fit in these layers?**
+
+Docker is a Layer 4 application that heavily leverages Layer 2 (kernel) features. Specifically, it uses:
+- **cgroups** — kernel feature that limits CPU and memory per process group
+- **namespaces** — kernel feature that isolates what a process can see (its own filesystem, network, processes)
+- **overlay filesystem** — kernel feature for layered filesystems
+
+Docker doesn't create virtual machines. It asks the kernel to isolate processes using features the kernel already has. That's why containers are so lightweight. And that's why understanding the kernel matters — you need to understand what's actually happening underneath the abstractions.
+
+## The Filesystem Hierarchy Standard — Your Map
+
+Every Linux system organizes its files the same way. This is defined by the **Filesystem Hierarchy Standard (FHS)**, and once you learn it, you can navigate any Linux server in the world.
+
+```text
+/                          ← The root. Everything starts here.
+├── bin/                   ← Essential commands (ls, cp, mv, cat)
+├── boot/                  ← Kernel and bootloader files
+├── dev/                   ← Device files (your disks, terminals, etc.)
+├── etc/                   ← Configuration files. THE most important dir for DevOps.
+├── home/                  ← User home directories
+├── lib/                   ← Shared libraries (like DLLs on Windows)
+├── media/                 ← Where USB drives and CDs get mounted
+├── mnt/                   ← Temporary mount points
+├── opt/                   ← Optional/third-party software
+├── proc/                  ← Virtual filesystem — live process and kernel info
+├── root/                  ← Home directory for the root user
+├── run/                   ← Runtime data (PIDs, sockets, etc.)
+├── sbin/                  ← System admin commands (ifconfig, iptables)
+├── srv/                   ← Data for services (web servers, FTP, etc.)
+├── sys/                   ← Virtual filesystem — hardware and driver info
+├── tmp/                   ← Temporary files (wiped on reboot)
+├── usr/                   ← User programs, libraries, docs
+└── var/                   ← Variable data — logs, databases, cache
+```
+
+<Callout type="info" title="The five directories you'll visit most">
+In your daily DevOps work, you'll spend 90% of your time in these:
+
+1. **`/etc`** — Where all configuration lives. Nginx config? `/etc/nginx/`. SSH config? `/etc/ssh/`. System hostname? `/etc/hostname`. Every service you configure, the config is in `/etc`.
+
+2. **`/var/log`** — Where all logs live. Application crashing? `tail -f /var/log/syslog`. Nginx errors? `/var/log/nginx/error.log`. This is where you go to understand what happened.
+
+3. **`/home`** — Where users live. Your scripts, your dotfiles, your SSH keys.
+
+4. **`/tmp`** — Scratch space. Need to download something temporarily? Put it in `/tmp`. It's cleaned on reboot.
+
+5. **`/proc`** — Live system info. Want to know CPU count, memory usage, process details, or network stats? Read a file in `/proc`. It's not a real filesystem — it's the kernel exposing information as files.
+</Callout>
+
+<Exercise number={1} title="Explore Your System's Architecture">
+
+Let's map out your system layer by layer. Run each command and notice which layer of the architecture it reveals:
+
+```bash
+# LAYER 1: Hardware
+echo "=== HARDWARE ==="
+echo "CPU: $(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)"
+echo "Cores: $(nproc)"
+echo "Memory: $(free -h | grep Mem | awk '{print $2}')"
+echo "Disks:"
+lsblk -d 2>/dev/null | grep -v loop | tail -n +2
+
+# LAYER 2: Kernel
+echo ""
+echo "=== KERNEL ==="
+echo "Version: $(uname -r)"
+echo "Architecture: $(uname -m)"
+echo "Uptime: $(uptime -p 2>/dev/null || uptime)"
+
+# LAYER 3: Shell & Utilities
+echo ""
+echo "=== SHELL ==="
+echo "Shell: $SHELL"
+echo "Bash version: $(bash --version | head -1)"
+echo "Core utilities: $(ls /usr/bin | wc -l) programs in /usr/bin"
+
+# LAYER 4: Applications
+echo ""
+echo "=== APPLICATIONS ==="
+echo "Running processes: $(ps aux | wc -l)"
+echo "Installed packages: $(dpkg -l 2>/dev/null | wc -l || rpm -qa 2>/dev/null | wc -l)"
+```
+
+Look at that output. You just surveyed all four layers of your Linux system with simple commands. Every one of those commands used system calls to ask the kernel for information, and the kernel read from hardware (or its own data structures) to provide answers.
 
 </Exercise>
 
-<Exercise number={2} title="Investigate /proc">
+## /proc — The Kernel's Public Diary
 
-The `/proc` directory is a virtual filesystem that provides real-time system information:
+`/proc` is one of the most fascinating things about Linux. It's a **virtual filesystem** — the files don't exist on disk. They're generated by the kernel in real-time when you read them.
+
+Every running process gets a directory in `/proc` named by its PID (process ID). And there are special files that expose system-wide information.
 
 ```bash
-# How long has the system been up? (in seconds)
-cat /proc/uptime
+# Your own process information:
+echo "My shell's PID: $$"
+ls /proc/$$/ | head -20
 
-# How many processes are running?
-ls /proc | grep -c '^[0-9]'
+# What command started your shell?
+cat /proc/$$/cmdline | tr '\0' ' '; echo
 
-# What command started process 1?
-cat /proc/1/cmdline 2>/dev/null; echo
+# Your process's memory map:
+cat /proc/$$/maps | head -5
 
-# Current system load
-cat /proc/loadavg
+# System-wide information:
+cat /proc/cpuinfo | head -10       # CPU details
+cat /proc/meminfo | head -5        # Memory details
+cat /proc/uptime                    # System uptime in seconds
+cat /proc/loadavg                  # System load averages
+cat /proc/net/dev                  # Network interface stats
 ```
 
-Explore `/proc` further. Can you find your own process?
+<Callout type="tip" title="Why /proc matters for monitoring">
+Almost every monitoring tool you'll use in DevOps — Prometheus node exporter, Datadog agent, Grafana agent — reads from `/proc` and `/sys` to collect metrics. When Prometheus reports CPU usage, it's reading `/proc/stat`. When it reports memory, it's reading `/proc/meminfo`. When it reports disk I/O, it's reading `/proc/diskstats`.
+
+Understanding `/proc` means understanding what your monitoring tools actually measure.
+</Callout>
+
+<Exercise number={2} title="Dive Into /proc">
+
+Let's use `/proc` to answer real questions about your system:
+
+```bash
+# 1. How many processes are currently running?
+ls /proc | grep -c '^[0-9]'
+
+# 2. What is PID 1? (The first process — the parent of everything)
+cat /proc/1/cmdline 2>/dev/null | tr '\0' ' '; echo
+
+# 3. How long has the system been up? (First number = seconds since boot)
+cat /proc/uptime
+
+# 4. What are the current load averages?
+cat /proc/loadavg
+# Three numbers: 1-minute, 5-minute, 15-minute average
+
+# 5. How much memory is free?
+grep MemAvailable /proc/meminfo
+
+# 6. What filesystem types does your kernel support?
+cat /proc/filesystems | head -10
+
+# BONUS: Find YOUR process in /proc
+echo "My PID is $$"
+cat /proc/$$/status | head -15
+# Look for: Name, State, Pid, PPid (parent PID), Threads, VmSize
+```
 
 <CollapsibleSolution>
 
-```bash
-# Find your shell's process ID
-echo $$
+Here's what each answer tells you:
 
-# Look at your process info
-cat /proc/$$/status | head -10
-
-# See the command that started your shell
-cat /proc/$$/cmdline; echo
-```
+1. **Process count** — A typical minimal Linux system has 50-150 processes. A busy server might have 300+.
+2. **PID 1** — Should be `/sbin/init` or `/lib/systemd/systemd`. This is the init system — the parent of ALL other processes.
+3. **Uptime** — First number is total seconds. Divide by 86400 for days.
+4. **Load averages** — These represent how many processes want to use the CPU. If the number is higher than your CPU core count, your system is overloaded.
+5. **MemAvailable** — This is the memory that's actually available for new programs (more useful than "free" memory, because Linux uses free memory as cache).
+6. **Filesystem types** — Shows what your kernel can mount: ext4, xfs, tmpfs, proc, sysfs, etc.
 
 </CollapsibleSolution>
-
 </Exercise>
 
-## System Calls: The Bridge
+## Everything Is a File — And This Changes Everything
 
-When a program needs the kernel to do something (read a file, create a process, send network data), it makes a **system call**. Common system calls include:
-
-- `open()` — Open a file
-- `read()` / `write()` — Read/write data
-- `fork()` — Create a new process
-- `exec()` — Run a program
-- `socket()` — Create a network connection
-
-You don't call these directly (usually), but every command you run uses them behind the scenes.
+You've heard this before, but let me show you why it's so powerful:
 
 ```bash
-# See the system calls made by a simple command
-strace ls / 2>&1 | head -20
+# Your hard disk is a file:
+ls -la /dev/sda 2>/dev/null || ls -la /dev/vda 2>/dev/null
+
+# The null device — a black hole that eats data:
+echo "This goes nowhere" > /dev/null
+# Great for silencing output: command 2>/dev/null
+
+# Random data generator:
+head -c 32 /dev/urandom | base64
+# Just generated a random 32-byte string. Useful for tokens and passwords.
+
+# Your terminal is a file:
+tty
+# Shows something like /dev/pts/0
+
+# You can write to terminals:
+echo "Hello from another dimension" > $(tty)
 ```
 
-<MiniProject title="System Architecture Report">
+The beauty of this design: because everything is a file, you can use the SAME tools (cat, grep, awk, echo) to read CPU info, check memory, monitor network traffic, and generate random data. One toolkit, infinite uses.
 
-Create a comprehensive system report that reveals your Linux architecture:
+<MiniProject title="Build a System Dashboard">
+
+Let's combine everything you've learned into a real-time system dashboard. This is actually how monitoring scripts work under the hood:
 
 ```bash
-echo "========================================="
-echo "  LINUX ARCHITECTURE REPORT"
-echo "========================================="
+cat > ~/devops-learning/system-dashboard.sh << 'DASHBOARD'
+#!/bin/bash
+# System Architecture Dashboard
+# Reads from /proc, /sys, and system commands
+
+clear
+echo "╔══════════════════════════════════════════════╗"
+echo "║        LINUX SYSTEM DASHBOARD                ║"
+echo "║        $(date '+%Y-%m-%d %H:%M:%S')                 ║"
+echo "╚══════════════════════════════════════════════╝"
 echo ""
-echo "--- KERNEL ---"
-echo "Version: $(uname -r)"
-echo "Architecture: $(uname -m)"
-echo "Hostname: $(hostname)"
+
+# --- KERNEL INFO ---
+echo "▸ KERNEL"
+echo "  Version:      $(uname -r)"
+echo "  Architecture: $(uname -m)"
+echo "  Hostname:     $(hostname)"
 echo ""
-echo "--- CPU ---"
-echo "Model: $(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2)"
-echo "Cores: $(nproc)"
+
+# --- CPU ---
+echo "▸ CPU"
+echo "  Model:  $(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)"
+echo "  Cores:  $(nproc)"
+LOAD=$(cat /proc/loadavg)
+echo "  Load:   $LOAD"
 echo ""
-echo "--- MEMORY ---"
-free -h | head -2
+
+# --- MEMORY ---
+echo "▸ MEMORY"
+TOTAL=$(grep MemTotal /proc/meminfo | awk '{printf "%.1f GB", $2/1024/1024}')
+AVAIL=$(grep MemAvailable /proc/meminfo | awk '{printf "%.1f GB", $2/1024/1024}')
+echo "  Total:     $TOTAL"
+echo "  Available: $AVAIL"
 echo ""
-echo "--- STORAGE ---"
-df -h / | tail -1
+
+# --- DISK ---
+echo "▸ DISK"
+df -h / | tail -1 | awk '{printf "  Root: %s used of %s (%s)\n", $3, $2, $5}'
 echo ""
-echo "--- DIRECTORIES ---"
-echo "Config files: $(ls /etc | wc -l) items in /etc"
-echo "Log files: $(ls /var/log 2>/dev/null | wc -l) items in /var/log"
-echo "Running processes: $(ls /proc | grep -c '^[0-9]')"
+
+# --- PROCESSES ---
+echo "▸ PROCESSES"
+echo "  Total:   $(ls /proc | grep -c '^[0-9]')"
+echo "  PID 1:   $(cat /proc/1/cmdline 2>/dev/null | tr '\0' ' ')"
+echo ""
+
+# --- NETWORK ---
+echo "▸ NETWORK"
+ip -4 addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print "  " $NF ": " $2}'
+echo ""
+
+# --- TOP 5 DIRECTORIES BY SIZE ---
+echo "▸ TOP 5 DIRECTORIES IN /var"
+du -sh /var/*/ 2>/dev/null | sort -rh | head -5 | awk '{print "  " $0}'
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Dashboard complete. All data sourced from /proc and system commands."
+DASHBOARD
+
+chmod +x ~/devops-learning/system-dashboard.sh
+bash ~/devops-learning/system-dashboard.sh
 ```
 
-Save this as `arch-report.sh` and run it with `bash arch-report.sh`.
+Look at what you just built. A dashboard that reads from `/proc`, uses system commands, and presents useful information — all in a bash script. This is exactly how tools like `htop`, `glances`, and even Prometheus node exporter work at their core. They read the same files.
 
 </MiniProject>
 
-## Key Takeaways
+## Let's Make Sure This Clicked
 
-- Linux has four layers: hardware, kernel, shell/utilities, and user applications
-- The kernel manages processes, memory, devices, filesystems, and networking
-- The Filesystem Hierarchy Standard gives every directory a clear purpose
-- `/proc` is a virtual filesystem that exposes live system information
-- "Everything is a file" is the design principle that makes Linux powerful and scriptable
+<Quiz>
+<QuizQuestion
+  question="A Docker container runs an nginx web server. Which layers of the Linux architecture does it use?"
+  options={[
+    "Only Layer 4 (Applications)",
+    "Layers 3 and 4 (Shell and Applications)",
+    "Layers 2, 3, and 4 (Kernel, Shell, Applications) — sharing the host's kernel",
+    "All four layers — it brings its own kernel"
+  ]}
+  answer={2}
+  explanation="Docker containers run in user space (Layers 3 and 4) and share the host's kernel (Layer 2). They don't include their own kernel — that's what makes them so lightweight compared to virtual machines. The kernel's cgroups and namespaces provide the isolation."
+/>
+<QuizQuestion
+  question="Where do you find the configuration file for the SSH service?"
+  options={[
+    "/home/ssh/config",
+    "/var/ssh/sshd_config",
+    "/etc/ssh/sshd_config",
+    "/proc/ssh/config"
+  ]}
+  answer={2}
+  explanation="/etc is THE directory for system configuration. Almost every service stores its config there. SSH lives at /etc/ssh/sshd_config, Nginx at /etc/nginx/nginx.conf, and so on. Learning this convention means you can find configs on any server."
+/>
+<QuizQuestion
+  question="You want to check how much memory is available on a server. Which file in /proc would you read?"
+  options={[
+    "/proc/cpuinfo",
+    "/proc/meminfo",
+    "/proc/memory",
+    "/proc/sys/mem"
+  ]}
+  answer={1}
+  explanation="/proc/meminfo contains real-time memory information. Specifically, look for 'MemAvailable' — that's the most useful metric because it accounts for reclaimable cache. This is the same file that monitoring tools like Prometheus node exporter read."
+/>
+<QuizQuestion
+  question="Why can't a regular program (like nginx or docker) talk directly to hardware?"
+  options={[
+    "They don't have the right libraries installed",
+    "Hardware only speaks binary",
+    "Only the kernel runs in kernel space with direct hardware access; everything else must use system calls",
+    "They need root permissions first"
+  ]}
+  answer={2}
+  explanation="The separation between kernel space and user space is fundamental to Linux's stability and security. Programs in user space must make system calls to request kernel services. Even root can't bypass this — root has elevated user space privileges, but still goes through the kernel."
+/>
+</Quiz>
 
-## What's Next
+## What's Coming Next
 
-In the next lesson, **The Boot Process**, you'll trace what happens from the moment you press the power button to when you see a login prompt. Understanding the boot process is essential for debugging servers that won't start.
+You now understand what's happening inside a Linux system — from the hardware at the bottom to the applications at the top, with the kernel as the brain connecting it all.
+
+In the next lesson — **The Boot Process** — we'll trace what happens from the moment you press the power button to when you see a login prompt. Understanding boot is critical because when a server won't start (and at some point, one won't), you need to know exactly where in the chain things broke.
+
+The architecture you just learned is the foundation. Everything from here builds on it.

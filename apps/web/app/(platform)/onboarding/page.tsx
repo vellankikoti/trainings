@@ -7,9 +7,21 @@ import { Progress } from "@/components/ui/progress";
 import { StepExperience } from "./components/StepExperience";
 import { StepTime } from "./components/StepTime";
 import { StepGoal } from "./components/StepGoal";
+import { StepAccount } from "./components/StepAccount";
 import { StepRecommendation } from "./components/StepRecommendation";
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
+
+function getRecommendedPath(experience: string): string {
+  switch (experience) {
+    case "some_devops":
+      return "platform-engineering";
+    case "developer":
+      return "containerization";
+    default:
+      return "foundations";
+  }
+}
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -17,6 +29,8 @@ export default function OnboardingPage() {
   const [experience, setExperience] = useState("");
   const [weeklyHours, setWeeklyHours] = useState("");
   const [goal, setGoal] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [publicProfile, setPublicProfile] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const progress = (step / TOTAL_STEPS) * 100;
@@ -25,11 +39,14 @@ export default function OnboardingPage() {
     (step === 1 && experience) ||
     (step === 2 && weeklyHours) ||
     (step === 3 && goal) ||
-    step === 4;
+    step === 4 || // account step — display name is optional
+    step === 5;
 
   async function handleComplete() {
     setSaving(true);
     try {
+      const recommendedPath = getRecommendedPath(experience);
+
       await fetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -37,15 +54,14 @@ export default function OnboardingPage() {
           experience_level: experience,
           weekly_hours: weeklyHours,
           primary_goal: goal,
-          recommended_path:
-            experience === "some_devops"
-              ? "orchestration"
-              : experience === "developer"
-                ? "containerization"
-                : "foundations",
+          recommended_path: recommendedPath,
+          ...(displayName.trim() ? { display_name: displayName.trim() } : {}),
+          public_profile: publicProfile,
         }),
       });
-      router.push("/dashboard");
+
+      // Navigate to the recommended path to start learning
+      router.push(`/paths/${recommendedPath}`);
     } catch {
       setSaving(false);
     }
@@ -76,6 +92,14 @@ export default function OnboardingPage() {
         )}
         {step === 3 && <StepGoal value={goal} onChange={setGoal} />}
         {step === 4 && (
+          <StepAccount
+            displayName={displayName}
+            onDisplayNameChange={setDisplayName}
+            publicProfile={publicProfile}
+            onPublicProfileChange={setPublicProfile}
+          />
+        )}
+        {step === 5 && (
           <StepRecommendation
             experience={experience}
             weeklyHours={weeklyHours}

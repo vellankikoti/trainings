@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { ensureProfile, updateExerciseProgress } from "@/lib/progress";
+import { updateStreak } from "@/lib/streaks";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import { exerciseProgressSchema, validateBody } from "@/lib/validations";
 
@@ -30,5 +31,13 @@ export async function POST(request: Request) {
   }
 
   const result = await updateExerciseProgress(profileId, lessonSlug, exerciseId);
+
+  // Update streak and daily activity on completion
+  if (result.xpAwarded > 0) {
+    updateStreak(profileId, "exercise", result.xpAwarded).catch((err) =>
+      console.error("Streak update failed:", err),
+    );
+  }
+
   return NextResponse.json(result);
 }

@@ -1,12 +1,33 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { getProfileId } from "@/lib/progress";
 import { getFullDashboardData } from "@/lib/dashboard";
+import { getUserBadges } from "@/lib/badges";
+import { getXPHistory } from "@/lib/xp-rewards";
+import { getStreakRecoveryInfo } from "@/lib/streaks";
 import { ContinueLearning } from "@/components/dashboard/ContinueLearning";
 import { StatsStrip } from "@/components/dashboard/StatsStrip";
 import { MyCourses } from "@/components/dashboard/MyCourses";
 import { PathProgress } from "@/components/dashboard/PathProgress";
+import { SkillOverview } from "@/components/dashboard/SkillOverview";
+import { ActivityHeatmap } from "@/components/dashboard/ActivityHeatmap";
+import { StreakDisplay } from "@/components/dashboard/StreakDisplay";
+import { BadgeShowcase } from "@/components/dashboard/BadgeShowcase";
+import { XPBreakdown } from "@/components/dashboard/XPBreakdown";
+import { RecommendedNext } from "@/components/dashboard/RecommendedNext";
+import { DashboardErrorBoundary } from "@/components/dashboard/DashboardError";
+import {
+  ContinueLearningSkeleton,
+  RecommendedNextSkeleton,
+  StatsStripSkeleton,
+  StreakSkeleton,
+  CoursesSkeleton,
+  BadgesSkeleton,
+  HeatmapSkeleton,
+  BottomGridSkeleton,
+} from "@/components/dashboard/DashboardSkeleton";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -69,11 +90,9 @@ export default async function DashboardPage() {
     );
   }
 
-  const data = await getFullDashboardData(profileId);
-
   return (
     <div className="space-y-8">
-      {/* Header */}
+      {/* Header — renders immediately */}
       <div>
         <h1 className="text-3xl font-bold">
           Welcome back{user?.firstName ? `, ${user.firstName}` : ""}
@@ -83,20 +102,99 @@ export default async function DashboardPage() {
         </p>
       </div>
 
+      {/* Main dashboard content with Suspense boundaries */}
+      <DashboardErrorBoundary section="dashboard">
+        <Suspense fallback={
+          <>
+            <ContinueLearningSkeleton />
+            <RecommendedNextSkeleton />
+            <StatsStripSkeleton />
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <StreakSkeleton />
+              <CoursesSkeleton />
+            </div>
+            <BadgesSkeleton />
+            <HeatmapSkeleton />
+            <BottomGridSkeleton />
+          </>
+        }>
+          <DashboardContent profileId={profileId} />
+        </Suspense>
+      </DashboardErrorBoundary>
+    </div>
+  );
+}
+
+/** Async server component that fetches and renders all dashboard data */
+async function DashboardContent({ profileId }: { profileId: string }) {
+  const [data, badgeData, xpHistory, streakRecovery] = await Promise.all([
+    getFullDashboardData(profileId),
+    getUserBadges(profileId),
+    getXPHistory(profileId),
+    getStreakRecoveryInfo(profileId),
+  ]);
+
+  return (
+    <>
       {/* Continue Learning Hero */}
-      <ContinueLearning resumeTarget={data.resumeTarget} />
+      <DashboardErrorBoundary section="continue learning">
+        <ContinueLearning resumeTarget={data.resumeTarget} />
+      </DashboardErrorBoundary>
+
+      {/* Recommended Next Actions */}
+      <DashboardErrorBoundary section="recommendations">
+        <RecommendedNext actions={data.recommendedNext} />
+      </DashboardErrorBoundary>
 
       {/* Stats */}
-      <StatsStrip stats={data.stats} />
+      <DashboardErrorBoundary section="stats">
+        <StatsStrip stats={data.stats} />
+      </DashboardErrorBoundary>
 
-      {/* My Courses */}
-      <MyCourses
-        activeCourses={data.activeCourses}
-        completedCourses={data.completedCourses}
-      />
+      {/* Streak + Courses side by side on large screens */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <DashboardErrorBoundary section="streak">
+          <StreakDisplay
+            stats={data.stats}
+            activityDays={data.activityHeatmap}
+            streakRecovery={streakRecovery}
+          />
+        </DashboardErrorBoundary>
+        <div className="lg:col-span-2">
+          <DashboardErrorBoundary section="courses">
+            <MyCourses
+              activeCourses={data.activeCourses}
+              completedCourses={data.completedCourses}
+            />
+          </DashboardErrorBoundary>
+        </div>
+      </div>
 
-      {/* Learning Path Progress */}
-      <PathProgress paths={data.pathProgress} />
-    </div>
+      {/* Badges */}
+      <DashboardErrorBoundary section="badges">
+        <BadgeShowcase
+          earned={badgeData.earned}
+          totalAvailable={badgeData.earned.length + badgeData.available.length}
+        />
+      </DashboardErrorBoundary>
+
+      {/* Activity Heatmap */}
+      <DashboardErrorBoundary section="activity heatmap">
+        <ActivityHeatmap data={data.activityHeatmap} />
+      </DashboardErrorBoundary>
+
+      {/* XP Progress, Skill Scores & Path Progress */}
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+        <DashboardErrorBoundary section="XP breakdown">
+          <XPBreakdown stats={data.stats} history={xpHistory} />
+        </DashboardErrorBoundary>
+        <DashboardErrorBoundary section="skill overview">
+          <SkillOverview skills={data.skillScores} />
+        </DashboardErrorBoundary>
+        <DashboardErrorBoundary section="path progress">
+          <PathProgress paths={data.pathProgress} />
+        </DashboardErrorBoundary>
+      </div>
+    </>
   );
 }

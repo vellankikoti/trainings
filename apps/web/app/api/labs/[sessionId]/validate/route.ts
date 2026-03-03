@@ -6,12 +6,12 @@ import {
   markExerciseCompleted,
   touchSession,
 } from "@/lib/labs/container-manager";
+import { validateExerciseById } from "@/lib/labs/validation-engine";
 import { z } from "zod";
 import { validateBody } from "@/lib/validations";
 
 const validateSchema = z.object({
   exerciseId: z.string().min(1).max(200),
-  validationCommand: z.string().min(1).max(1000).optional(),
 });
 
 interface RouteParams {
@@ -21,9 +21,9 @@ interface RouteParams {
 /**
  * POST /api/labs/[sessionId]/validate — Validate an exercise in the lab.
  *
- * In production, this would run the validation command inside the Docker
- * container and check the exit code. For MVP, it accepts the validation
- * and marks the exercise as complete.
+ * Runs the exercise validation checks against the running container.
+ * If the container is simulated (no real Docker), falls back to
+ * marking the exercise as complete directly (MVP behavior).
  */
 export async function POST(request: Request, { params }: RouteParams) {
   const { userId: clerkId } = await auth();
@@ -62,12 +62,37 @@ export async function POST(request: Request, { params }: RouteParams) {
   // Update activity timestamp
   touchSession(sessionId);
 
-  // In production, this would:
-  // 1. Execute the validation command in the Docker container
-  // 2. Check the exit code
-  // 3. Capture stdout/stderr for feedback
-  //
-  // For MVP, we mark the exercise as complete directly.
+  // Already completed — idempotent
+  if (session.exercisesCompleted.includes(exerciseId)) {
+    return NextResponse.json({
+      exerciseId,
+      passed: true,
+      message: "Already completed",
+      exercisesCompleted: session.exercisesCompleted,
+    });
+  }
+
+  // Try real validation if a Docker container is attached
+  if (session.containerId && !session.containerId.startsWith("container_")) {
+    const result = await validateExerciseById(
+      session.labType,
+      exerciseId,
+      session.containerId,
+    );
+
+    if (result.passed) {
+      markExerciseCompleted(sessionId, exerciseId);
+    }
+
+    return NextResponse.json({
+      exerciseId,
+      passed: result.passed,
+      message: result.message,
+      exercisesCompleted: session.exercisesCompleted,
+    });
+  }
+
+  // Fallback: simulated container — mark as complete directly
   const success = markExerciseCompleted(sessionId, exerciseId);
 
   if (!success) {
@@ -80,6 +105,7 @@ export async function POST(request: Request, { params }: RouteParams) {
   return NextResponse.json({
     exerciseId,
     passed: true,
+    message: "Validated (simulated environment)",
     exercisesCompleted: session.exercisesCompleted,
   });
 }

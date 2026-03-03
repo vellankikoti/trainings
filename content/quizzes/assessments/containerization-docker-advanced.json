@@ -4,6 +4,8 @@
   "pathSlug": "containerization",
   "title": "Docker Advanced Assessment",
   "description": "Test your advanced Docker knowledge covering build optimization, security hardening, orchestration, monitoring, and production-grade container strategies. 60 questions across 15 lessons.",
+  "lessonSlug": "",
+  "passingScore": 80,
   "settings": {
     "questionsPerAttempt": 35,
     "passingScore": 80,
@@ -124,7 +126,7 @@
       "type": "true_false",
       "question": "Using 'FROM alpine:latest' in a Dockerfile is considered a security best practice because Alpine is a small distribution.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "While Alpine is small and has fewer packages (reducing attack surface), using the 'latest' tag is not a best practice. You should pin to a specific version (e.g., alpine:3.19) for reproducibility and to avoid unexpected changes from upstream updates.",
       "difficulty": "intermediate",
       "lessonRef": "02-image-security"
@@ -224,7 +226,7 @@
       "type": "true_false",
       "question": "Docker containers each run their own separate Linux kernel instance.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "All containers on a host share the same Linux kernel. This is a fundamental difference from VMs. Containers use kernel features (namespaces, cgroups) for isolation, but the kernel itself is shared. This is why containers are so lightweight.",
       "difficulty": "beginner",
       "lessonRef": "04-container-internals"
@@ -354,7 +356,7 @@
       "type": "true_false",
       "question": "Containers on the default bridge network can resolve each other by container name using Docker's built-in DNS.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "The default bridge network does NOT provide DNS resolution between containers. Only user-defined (custom) bridge networks provide automatic DNS resolution by container name. This is a key reason to always use custom networks.",
       "difficulty": "beginner",
       "lessonRef": "06-advanced-networking"
@@ -409,7 +411,7 @@
       "type": "true_false",
       "question": "Docker user namespace remapping maps container root (UID 0) to a non-root user on the host, adding an extra layer of security.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "User namespace remapping (--userns-remap) maps UIDs inside the container to unprivileged UIDs on the host. Even if a process runs as root (UID 0) inside the container, it maps to a non-root user on the host, limiting damage from container breakouts.",
       "difficulty": "advanced",
       "lessonRef": "07-security-hardening"
@@ -464,7 +466,7 @@
       "type": "true_false",
       "question": "Using ARG instructions in a Dockerfile to pass secrets is safe because ARG values are not persisted in the final image layers.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "ARG values are recorded in the image history and can be revealed with 'docker history'. Anyone with access to the image can see build arguments. Use BuildKit secret mounts (--mount=type=secret) instead for sensitive build-time data.",
       "difficulty": "intermediate",
       "lessonRef": "08-secrets-management"
@@ -519,7 +521,7 @@
       "type": "true_false",
       "question": "An image digest (SHA256 hash) is immutable and always refers to the exact same image content, unlike mutable tags.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "Image digests are content-addressable SHA256 hashes of the image manifest. They are immutable -- the same digest always refers to the same content. Tags can be moved to point to different images, but digests guarantee reproducibility.",
       "difficulty": "beginner",
       "lessonRef": "09-registry-management"
@@ -694,7 +696,7 @@
       "type": "true_false",
       "question": "The 'docker events' command provides a real-time stream of events from the Docker daemon including container starts, stops, and image pulls.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "docker events streams real-time events from the daemon including container lifecycle (create, start, stop, die), image events (pull, push), volume events, and network events. It can be filtered by event type, container, and time range.",
       "difficulty": "intermediate",
       "lessonRef": "12-monitoring-logging"
@@ -749,7 +751,7 @@
       "type": "true_false",
       "question": "An exit code of 137 from a Docker container typically indicates the container was killed by an out-of-memory (OOM) event or received SIGKILL.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "Exit code 137 = 128 + 9 (SIGKILL). This commonly occurs when the container exceeds its memory limit and the OOM killer terminates it, or when 'docker kill' is used. Check State.OOMKilled in docker inspect to confirm OOM.",
       "difficulty": "advanced",
       "lessonRef": "13-troubleshooting"
@@ -804,7 +806,7 @@
       "type": "true_false",
       "question": "Docker buildx can use QEMU emulation to build images for CPU architectures different from the host without requiring actual hardware of that architecture.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "Docker buildx uses QEMU user-space emulation to cross-compile for different architectures. For example, you can build ARM64 images on an x86_64 machine. While slower than native builds, this enables multi-arch image creation from a single build machine.",
       "difficulty": "advanced",
       "lessonRef": "14-advanced-build-patterns"
@@ -844,7 +846,7 @@
       "type": "true_false",
       "question": "Kubernetes uses Docker as its only supported container runtime.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "Kubernetes removed direct Docker support (dockershim) in v1.24. It now uses the Container Runtime Interface (CRI) with runtimes like containerd or CRI-O. Docker images still work because they follow OCI standards, but the Docker daemon is no longer needed.",
       "difficulty": "intermediate",
       "lessonRef": "15-beyond-docker"

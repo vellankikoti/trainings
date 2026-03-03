@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { CopyButton } from "./CopyButton";
 
 interface LabEmbedProps {
@@ -24,17 +25,26 @@ export function LabEmbed({ labId, title }: LabEmbedProps) {
             <h3 className="text-base font-bold text-foreground">{title || labId}</h3>
           </div>
         </div>
+        <Link
+          href={`/labs/${labId}`}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+          Open Lab
+        </Link>
       </div>
 
       <div className="p-5 space-y-4">
-        {/* Docker requirement note */}
-        <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 p-4">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground">
+        {/* Browser lab option */}
+        <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-primary">
             <rect width="18" height="18" x="3" y="3" rx="2" />
             <path d="m10 8 4 4-4 4" />
           </svg>
           <p className="text-sm text-muted-foreground">
-            This lab requires Docker to run locally.
+            Practice directly in the browser, or run locally with Docker.
           </p>
         </div>
 

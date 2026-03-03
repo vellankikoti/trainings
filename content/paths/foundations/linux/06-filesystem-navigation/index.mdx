@@ -1,30 +1,42 @@
 ---
 title: "Filesystem Navigation"
-description: "Master the Linux filesystem with cd, ls, pwd, find, locate, and tree. Learn to navigate directories efficiently and locate files instantly."
+description: "Move through the Linux filesystem like you own the place — because soon, you will."
 order: 6
 xpReward: 100
 estimatedMinutes: 40
 prerequisites:
   - 05-boot-process
 objectives:
-  - Navigate the filesystem with cd, ls, and pwd
-  - Understand absolute vs relative paths
-  - Find files with find, locate, and which
-  - Visualize directory structures with tree
+  - Navigate anywhere on a Linux system without getting lost
+  - Read and understand ls -l output at a glance
+  - Find any file on the system using find, locate, and which
+  - Visualize directory structures and build mental maps
 tags:
   - linux
   - filesystem
   - navigation
   - commands
+key_takeaways:
+  - cd, ls, and pwd are your GPS — you'll use them hundreds of times a day
+  - Absolute paths start from root (/), relative paths start from where you are
+  - find is your detective tool for tracking down files by any criteria
+  - On real servers, knowing where config files, logs, and binaries live is half the job
+reflection_prompt: "If someone handed you a server and said 'something changed in the config recently,' how would you use find to track down what changed?"
 ---
 
-<Callout type="story" title="The Story">
-You just joined a DevOps team and your first task is debugging a production issue. "The config file is somewhere in /etc," your lead says. "Find it, check the logs in /var/log, then look at the service definition in /usr/lib/systemd." You need to navigate dozens of directories quickly, find files by name or content, and never get lost. This lesson teaches you exactly that.
+<Callout type="story" title="Your first day on the job">
+Picture this. It's your second week as a junior DevOps engineer. The Slack channel lights up: "Disk space alert on prod-web-03 — 94% full." Your lead glances over and says, "Find out what's eating the disk. Check the logs in /var/log, look at the temp files in /tmp, and see if anyone dumped something big in /opt. Report back in ten minutes."
+
+Ten minutes. You need to jump between directories, list files sorted by size, track down anything that changed recently, and do it all without stumbling around or getting lost.
+
+This lesson gives you those skills. By the end, you'll move through a Linux filesystem the way a local moves through their own neighborhood — no maps needed, no hesitation. You'll know where things are, how to find what you're looking for, and how to spot things that don't belong.
 </Callout>
 
-## Where Am I? — `pwd`
+## Where Am I Right Now? -- `pwd`
 
-At any moment, `pwd` (print working directory) tells you exactly where you are:
+Let me start with the simplest command in Linux, because it solves the most fundamental question: where am I?
+
+`pwd` stands for **print working directory**. It tells you your exact location in the filesystem, every single time, with zero ambiguity.
 
 ```bash
 pwd
@@ -35,64 +47,118 @@ pwd
 # /etc/nginx
 ```
 
-Your shell prompt often shows the current directory, but `pwd` gives you the full absolute path — no ambiguity.
+Here's the thing -- your shell prompt usually shows your current directory, but it often abbreviates it. You might see `~` instead of `/home/ubuntu`, or just the last folder name. When you're SSH'd into a server at 2 AM troubleshooting something, and you've been jumping between directories for twenty minutes, `pwd` is the command that grounds you. It's your "You Are Here" pin on the map.
 
-## Listing Directory Contents — `ls`
+<Callout type="tip" title="When pwd saves you from yourself">
+I've seen engineers accidentally edit the wrong config file because they thought they were in `/etc/nginx` when they were actually in `/etc/apache2`. A quick `pwd` before editing anything on a production server is a habit that will save you someday. Make it automatic.
+</Callout>
 
-`ls` is the command you'll type most often. Master its options:
+## Seeing What's Around You -- `ls`
+
+If `pwd` tells you where you are, `ls` tells you what's here. You'll type this command more than almost any other in your career. Let's make sure you really know it.
+
+### The Basics
 
 ```bash
-# Basic listing
+# Plain ls — just the names
 ls
 
-# Long format with permissions, owner, size, date
+# Long format — the one you'll actually use
 ls -l
 
-# Show hidden files (dotfiles)
+# Show hidden files (files starting with a dot)
 ls -a
 
-# Combined: all files, long format, human-readable sizes
+# The combo you'll type a thousand times: all files, long format, human-readable sizes
 ls -lah
-
-# Sort by modification time (newest first)
-ls -lt
-
-# Sort by size (largest first)
-ls -lS
-
-# Reverse any sort order
-ls -ltr    # oldest first
 ```
 
-### Understanding `ls -l` Output
+Let me be honest: you're going to live in `ls -lah` mode. The `-l` gives you details, the `-a` shows hidden files (and in Linux, a surprising amount of important stuff is hidden), and the `-h` makes file sizes readable -- `4.2K` instead of `4296`.
+
+### Sorting -- Because Order Matters
+
+```bash
+# Sort by modification time — newest first
+ls -lt
+
+# Sort by modification time — oldest first (reverse)
+ls -ltr
+
+# Sort by size — largest first
+ls -lS
+
+# Sort by size — smallest first
+ls -lSr
+```
+
+Here's a real scenario where sorting matters: you're investigating that disk space alert. You SSH into the server and need to find the biggest files in `/var/log`:
+
+```bash
+ls -lSh /var/log
+```
+
+The largest files appear at the top. In two seconds, you can see that `syslog` is 2.3 GB and that's your culprit. Without the sort flag, you'd be scrolling through dozens of files trying to eyeball which one is biggest.
+
+### Reading `ls -l` Output Like a Pro
+
+This is one of those things that looks intimidating the first time you see it, but once someone walks you through it, you'll read it as naturally as reading a sentence. Let me break down every piece:
 
 ```bash
 ls -l /etc/passwd
 # -rw-r--r-- 1 root root 2847 Jan 15 10:32 /etc/passwd
-#  |  |  |   |  |    |    |    |             |
-#  |  |  |   |  |    |    |    timestamp     filename
-#  |  |  |   |  |    |    size in bytes
-#  |  |  |   |  |    group owner
-#  |  |  |   |  file owner
-#  |  |  |   number of hard links
-#  |  |  other permissions
-#  |  group permissions
-#  owner permissions
-#  file type (- = file, d = directory, l = symlink)
 ```
 
-## Changing Directories — `cd`
+Here's what each part means, left to right:
+
+```
+-  rw-  r--  r--  1  root  root  2847  Jan 15 10:32  /etc/passwd
+|  |    |    |    |  |     |     |     |              |
+|  |    |    |    |  |     |     |     |              filename
+|  |    |    |    |  |     |     |     last modified timestamp
+|  |    |    |    |  |     |     size in bytes
+|  |    |    |    |  |     group owner
+|  |    |    |    |  file owner
+|  |    |    |    number of hard links
+|  |    |    permissions for everyone else (other)
+|  |    permissions for the group
+|  permissions for the owner
+file type: - = file, d = directory, l = symlink
+```
+
+Let me translate that `/etc/passwd` line into plain English: "This is a regular file. The owner (root) can read and write it. The group (root) can only read it. Everyone else can only read it. It's 2,847 bytes. It was last touched on January 15th at 10:32 AM."
+
+<Callout type="info" title="Why this matters for DevOps">
+When a web server can't read a config file, or an application can't write to its log directory, the answer is almost always in the `ls -l` output. Wrong owner. Wrong group. Wrong permissions. You'll learn permissions deeply in a later lesson, but start reading `ls -l` output now so it becomes second nature.
+</Callout>
+
+Let's look at a directory listing so you can see how different file types look:
+
+```bash
+ls -la /etc/nginx/
+# drwxr-xr-x 8 root root 4096 Mar  1 09:15 .
+# drwxr-xr-x 92 root root 4096 Feb 28 14:22 ..
+# -rw-r--r-- 1 root root 1077 Feb 28 14:22 fastcgi.conf
+# -rw-r--r-- 1 root root 1482 Feb 28 14:22 nginx.conf
+# lrwxrwxrwx 1 root root   22 Feb 28 14:22 modules -> /usr/lib/nginx/modules
+# drwxr-xr-x 2 root root 4096 Mar  1 09:15 sites-enabled
+```
+
+See how the first character tells you the type? `d` for directory, `-` for regular file, `l` for symlink. That `modules -> /usr/lib/nginx/modules` is a symbolic link pointing somewhere else. Once you can read this at a glance, you have X-ray vision into any directory on any server.
+
+## Moving Around -- `cd`
+
+`cd` is how you move. It stands for **change directory**, and there's more to it than you might expect.
 
 ```bash
 # Go to an absolute path
 cd /var/log
 
-# Go to your home directory (three ways)
+# Go to your home directory — three ways, same result
 cd ~
 cd $HOME
-cd        # cd with no argument = go home
+cd          # cd with no arguments always takes you home
 
-# Go to the previous directory
+# Go to the previous directory you were in (like the "back" button)
 cd -
 
 # Go up one directory
@@ -101,155 +167,386 @@ cd ..
 # Go up two directories
 cd ../..
 
-# Go to a subdirectory
-cd nginx/    # relative to current location
+# Go into a subdirectory (relative to where you are)
+cd nginx/
 ```
 
-### Absolute vs Relative Paths
-
-| Type | Starts with | Example | Meaning |
-|---|---|---|---|
-| Absolute | `/` | `/var/log/nginx/error.log` | Full path from root |
-| Relative | anything else | `../log/nginx/error.log` | Relative to current directory |
-| Home | `~` | `~/scripts/backup.sh` | Relative to home directory |
+That `cd -` trick is a gem. Let me show you why. Say you're bouncing between a config directory and a log directory while debugging:
 
 ```bash
-# These are equivalent if you're in /var:
-cat /var/log/syslog
-cat log/syslog
-
-# These are equivalent if you're /home/ubuntu:
-cat /home/ubuntu/.bashrc
-cat ~/.bashrc
-cat .bashrc
+cd /etc/nginx           # look at the config
+cd /var/log/nginx       # check the logs
+cd -                    # back to /etc/nginx
+cd -                    # back to /var/log/nginx
 ```
 
-<Callout type="tip" title="Pro Tip">
-Use `Tab` completion aggressively. Type the first few characters of a directory name, then press `Tab`. This prevents typos and is faster than typing full paths.
+It's like a toggle switch between two locations. When you're troubleshooting and constantly flipping between config and logs, this saves a surprising amount of time and typing.
+
+## Absolute vs. Relative Paths -- The GPS Analogy
+
+This is one of those concepts that clicks instantly once you have the right mental model. Here's how I think about it.
+
+**Absolute paths** are like a full street address: "742 Evergreen Terrace, Springfield, USA." No matter where you are in the world, that address takes you to the same place. In Linux, absolute paths start with `/` (the root of the filesystem):
+
+```bash
+/var/log/nginx/error.log
+/etc/ssh/sshd_config
+/home/ubuntu/.bashrc
+```
+
+**Relative paths** are like giving directions from where you're standing: "Go two blocks north, turn left." The destination depends on where you start. In Linux, relative paths don't start with `/`:
+
+```bash
+# If you're in /var/log:
+nginx/error.log           # means /var/log/nginx/error.log
+../spool/cron             # means /var/spool/cron (up one, then into spool/cron)
+../../etc/hosts           # means /etc/hosts (up two, then into etc)
+```
+
+**Home-relative paths** use `~` as a shortcut for your home directory:
+
+```bash
+~/scripts/backup.sh       # means /home/ubuntu/scripts/backup.sh
+~/.ssh/config             # means /home/ubuntu/.ssh/config
+```
+
+Here's a quick reference:
+
+| Type | Starts with | Example | What it means |
+|---|---|---|---|
+| Absolute | `/` | `/var/log/nginx/error.log` | Full path from the root -- always the same |
+| Relative | anything else | `../log/nginx/error.log` | From wherever you are right now |
+| Home-relative | `~` | `~/scripts/deploy.sh` | From your home directory |
+
+<Callout type="warning" title="When to use which">
+In scripts, **always use absolute paths**. A script might run from any directory, and a relative path in a script is a bug waiting to happen. I've seen deployment scripts that worked fine when run from `/home/deploy` but broke catastrophically when a cron job ran them from `/`. At the command line, use whatever's fastest -- usually relative paths for nearby files, absolute for anything far away.
 </Callout>
 
-<Exercise number={1} title="Navigation Drill">
+<Exercise number={1} title="Navigate Without Getting Lost">
 
-Practice navigating without using your mouse:
+This drill builds the muscle memory you need. Do each step, and after each one, run `pwd` to confirm you're where you think you are.
 
 ```bash
 # 1. Start from home
 cd ~
 pwd
+# Expected: /home/your-username
 
-# 2. Navigate to /var/log
+# 2. Navigate to /var/log using an absolute path
 cd /var/log
+pwd
+# Expected: /var/log
+
+# 3. List the 10 most recently modified files here
 ls -lt | head -10
 
-# 3. Jump to /etc without using absolute path
+# 4. Jump to /etc using a relative path (not absolute!)
 cd ../../etc
 pwd
+# Expected: /etc
 
-# 4. Go back to the previous directory
+# 5. Go back to /var/log without typing the full path
 cd -
-pwd    # Should be /var/log
+pwd
+# Expected: /var/log
 
-# 5. Go home in one keystroke
+# 6. Go home in one keystroke
 cd
-pwd    # Should be /home/your-username
+pwd
+# Expected: /home/your-username
 
-# 6. Create a practice structure
-mkdir -p ~/nav-practice/{alpha,beta,gamma}/{docs,src,tests}
+# 7. Create a practice directory structure
+mkdir -p ~/nav-practice/{configs,logs,scripts}/{dev,staging,prod}
 
-# 7. Navigate using relative paths only
-cd ~/nav-practice/alpha/src
-cd ../../beta/docs
-cd ../../../gamma/tests
-pwd    # Should be /home/your-username/nav-practice/gamma/tests
+# 8. Navigate through it using only relative paths
+cd ~/nav-practice/configs/dev
+cd ../../logs/prod
+cd ../staging
+cd ../../../
+pwd
+# Expected: /home/your-username
 ```
 
+<CollapsibleSolution>
+
+After completing all steps, the key insights are:
+
+- `cd ../../etc` from `/var/log` works because you go up to `/var`, then up to `/`, then into `etc`
+- `cd -` is a toggle that remembers your previous directory
+- `cd` with no arguments always goes home
+- Relative navigation with `..` is about counting how many levels up you need to go
+
+The `mkdir -p` command with braces `{dev,staging,prod}` creates three subdirectories inside each parent. This brace expansion is a Bash feature you'll use constantly.
+
+</CollapsibleSolution>
 </Exercise>
 
-## Finding Files — `find`
+## Finding Files -- The `find` Command
 
-`find` searches the filesystem in real-time. It's powerful but can be slow on large directory trees:
+Here's where things get powerful. `find` is the Swiss Army knife of file searching. It walks through directories in real time, checking every file against whatever criteria you give it.
+
+The basic pattern is: `find WHERE WHAT-TO-LOOK-FOR`
+
+### Find by Name
 
 ```bash
-# Find by name
+# Find a file by exact name
 find /etc -name "nginx.conf"
 
-# Find by name (case-insensitive)
+# Case-insensitive search (when you're not sure about capitalization)
 find /home -iname "readme*"
 
-# Find by type (f=file, d=directory, l=symlink)
+# Find all YAML config files
+find /etc -name "*.yaml" -o -name "*.yml"
+```
+
+### Find by Type
+
+```bash
+# Only files (not directories)
 find /var/log -type f -name "*.log"
+
+# Only directories
 find /etc -type d -name "nginx"
 
-# Find by size
-find /var/log -size +100M      # files larger than 100MB
-find /tmp -size -1k            # files smaller than 1KB
-
-# Find by modification time
-find /etc -mtime -7            # modified in last 7 days
-find /tmp -mtime +30           # modified more than 30 days ago
-
-# Find by permissions
-find /usr/bin -perm -4000      # find SUID files
-
-# Find and execute a command on results
-find /var/log -name "*.log" -exec ls -lh {} \;
-find /tmp -name "*.tmp" -exec rm {} \;
-
-# Find empty files and directories
-find /home -empty -type f
+# Only symbolic links
+find /etc -type l
 ```
 
-### Common `find` Patterns for DevOps
+### Find by Size -- The Disk Space Saver
+
+Remember that disk space alert from our opening story? Here's how you actually solve it:
 
 ```bash
-# Find large log files eating disk space
-find /var/log -type f -size +50M -exec ls -lh {} \;
+# Files larger than 100MB
+find /var/log -type f -size +100M
 
-# Find config files modified recently (possible unauthorized changes)
+# Files larger than 1GB (the real culprits)
+find / -type f -size +1G 2>/dev/null
+
+# Files smaller than 1KB (often empty or stub files)
+find /tmp -type f -size -1k
+
+# Files between 10MB and 100MB
+find /var -type f -size +10M -size -100M
+```
+
+<Callout type="tip" title="That 2>/dev/null trick">
+When you search from `/` (the root), you'll hit directories you don't have permission to read, and `find` will complain with "Permission denied" over and over. Adding `2>/dev/null` redirects those error messages to the void so you only see actual results. You'll use this pattern all the time.
+</Callout>
+
+### Find by Time -- The Change Detective
+
+This is where `find` becomes invaluable for incident response. When someone says "something changed on the server," time-based search is how you figure out what.
+
+```bash
+# Files modified in the last 24 hours
 find /etc -type f -mtime -1
 
-# Find files owned by a specific user
-find / -user nginx -type f 2>/dev/null
+# Files modified in the last 30 minutes
+find /etc -type f -mmin -30
 
-# Find world-writable files (security concern)
-find / -perm -o+w -type f 2>/dev/null | head -20
+# Files modified more than 7 days ago
+find /tmp -type f -mtime +7
 
-# Find broken symlinks
-find /etc -xtype l
+# Files accessed in the last hour
+find /var/log -type f -amin -60
 ```
 
-## Quick File Search — `locate`
+Let me explain the time units because they trip people up:
+- `-mtime` counts in **days**. `-mtime -1` means "less than 1 day ago" (last 24 hours)
+- `-mmin` counts in **minutes**. `-mmin -30` means "less than 30 minutes ago"
+- The `m` in `mtime` is for **modification** time. There's also `atime` (access) and `ctime` (status change)
 
-`locate` uses a pre-built database, making it much faster than `find`:
+### Find + Action -- Do Something With the Results
+
+Finding files is great. Finding files AND doing something with them in one command? That's where real productivity lives.
 
 ```bash
-# Search for a file by name
+# Find large log files and show their sizes
+find /var/log -type f -size +50M -exec ls -lh {} \;
+
+# Find old temp files and delete them
+find /tmp -type f -mtime +30 -exec rm {} \;
+
+# Find config files and search inside them for a specific string
+find /etc -name "*.conf" -exec grep -l "listen 80" {} \;
+
+# Find recently changed files and copy them to a backup
+find /etc -type f -mmin -60 -exec cp {} /tmp/recent-changes/ \;
+```
+
+That `-exec` syntax looks weird, I know. Here's the pattern: `-exec COMMAND {} \;` The `{}` is a placeholder for each file that `find` discovers, and `\;` marks the end of the command. Think of it as saying "for each file you find, run this command on it."
+
+<Callout type="info" title="The + optimization">
+If you're running `-exec` on thousands of files, using `+` instead of `\;` at the end is much faster. `\;` runs the command once per file. `+` batches files together like `xargs`:
+
+```bash
+# Slow: runs ls once per file
+find /var/log -name "*.log" -exec ls -lh {} \;
+
+# Fast: runs ls once with all files as arguments
+find /var/log -name "*.log" -exec ls -lh {} +
+```
+</Callout>
+
+### Real DevOps `find` Patterns
+
+These are commands I've used on real production servers. Bookmark these:
+
+```bash
+# DISK SPACE: Find the biggest files on the system
+find / -type f -size +100M -exec ls -lh {} + 2>/dev/null | sort -k5 -rh
+
+# SECURITY: Find config files changed in the last day (possible unauthorized changes)
+find /etc -type f -mtime -1 -ls
+
+# SECURITY: Find world-writable files (anyone can modify them)
+find / -type f -perm -o+w 2>/dev/null | head -20
+
+# SECURITY: Find SUID files (run with elevated permissions)
+find / -type f -perm -4000 2>/dev/null
+
+# CLEANUP: Find files owned by a user who no longer exists
+find /home -nouser -type f 2>/dev/null
+
+# CLEANUP: Find empty files and directories
+find /var -empty -type f
+
+# DEBUGGING: Find broken symbolic links
+find /etc -xtype l
+
+# DEBUGGING: Find all files owned by the nginx user
+find / -user nginx -type f 2>/dev/null | head -20
+```
+
+<Exercise number={2} title="The File Detective Challenge">
+
+You're investigating a server. Use `find` to answer these questions:
+
+```bash
+# Set up a practice environment first
+mkdir -p ~/detective-lab/{configs,logs,scripts,temp}
+echo "server_port=8080" > ~/detective-lab/configs/app.conf
+echo "debug=true" > ~/detective-lab/configs/debug.yaml
+dd if=/dev/zero of=~/detective-lab/logs/huge.log bs=1M count=5 2>/dev/null
+touch -t 202301010000 ~/detective-lab/temp/ancient-file.txt
+touch ~/detective-lab/scripts/deploy.sh
+chmod +x ~/detective-lab/scripts/deploy.sh
+touch ~/detective-lab/logs/app.log ~/detective-lab/logs/error.log
+
+# NOW INVESTIGATE:
+
+# 1. Find all .conf and .yaml files in the lab
+find ~/detective-lab -type f \( -name "*.conf" -o -name "*.yaml" \)
+
+# 2. Find files larger than 1MB
+find ~/detective-lab -type f -size +1M
+
+# 3. Find files modified in the last 5 minutes
+find ~/detective-lab -type f -mmin -5
+
+# 4. Find the ancient file (modified more than 365 days ago)
+find ~/detective-lab -type f -mtime +365
+
+# 5. Find executable files
+find ~/detective-lab -type f -executable
+
+# 6. Find all log files and show their sizes in one command
+find ~/detective-lab -name "*.log" -exec ls -lh {} +
+```
+
+<CollapsibleSolution>
+
+Expected results:
+
+1. Should find `app.conf` and `debug.yaml`
+2. Should find `huge.log` (we created it at 5MB)
+3. Should find most files (we just created them), except `ancient-file.txt`
+4. Should find `ancient-file.txt` (we backdated it to Jan 2023)
+5. Should find `deploy.sh` (we made it executable with `chmod +x`)
+6. Should list all three `.log` files with their human-readable sizes
+
+The key insight: `find` lets you combine multiple criteria. In real incidents, you often chain conditions: "find me large log files that were modified recently" becomes `find /var/log -type f -size +100M -mtime -1`.
+
+```bash
+# Clean up when done
+rm -rf ~/detective-lab
+```
+
+</CollapsibleSolution>
+</Exercise>
+
+## Quick Lookups -- `locate`
+
+`find` is powerful, but it's also slow on large filesystems because it checks every single file in real time. When you just need to quickly find where something lives, `locate` is your speed demon.
+
+`locate` works by searching a pre-built database instead of walking the filesystem:
+
+```bash
+# Find any file with "nginx" in the path
 locate nginx.conf
 
 # Case-insensitive search
 locate -i readme
 
-# Update the database (run periodically or after adding files)
-sudo updatedb
+# Count matches instead of listing them
+locate -c "*.service"
 
-# Count matches instead of listing
-locate -c "*.conf"
+# Show only files that actually still exist (database might be stale)
+locate -e nginx.conf
 ```
 
-<Callout type="info">
-`locate` searches a database that's updated periodically (usually via a daily cron job). If you just created a file, `locate` won't find it until you run `sudo updatedb`. Use `find` for real-time searches.
-</Callout>
-
-## Finding Commands — `which` and `type`
+There's one important catch:
 
 ```bash
-# Find where a command binary lives
+# Update the database (must be root)
+sudo updatedb
+```
+
+The `locate` database is typically updated once a day by a cron job. So if you just created a file five minutes ago, `locate` won't know about it until you run `sudo updatedb` or wait for the daily update. For real-time searches, use `find`. For "I know this file exists somewhere, where is it?" searches, use `locate`.
+
+<Callout type="info" title="Installing locate">
+On some minimal server installations, `locate` isn't installed by default. If you get "command not found," install it:
+
+```bash
+# Debian/Ubuntu
+sudo apt install mlocate
+
+# RHEL/CentOS/Fedora
+sudo dnf install mlocate
+
+# Then build the initial database
+sudo updatedb
+```
+</Callout>
+
+## Finding Commands -- `which` and `type`
+
+Sometimes the file you're looking for isn't a config or a log -- it's a command itself. "Which version of Python is running?" "Where does `node` actually live?" "Is `ls` an alias or a real binary?"
+
+### `which` -- Where Does This Command Live?
+
+```bash
 which python3
 # /usr/bin/python3
 
-which -a python    # show all matches in PATH
+which nginx
+# /usr/sbin/nginx
 
-# More detailed: is it a builtin, alias, or binary?
+# Show ALL matches in your PATH (not just the first)
+which -a python
+# /usr/bin/python
+# /usr/local/bin/python
+```
+
+That `-a` flag is important. If you have multiple versions of something installed, `which -a` shows all of them. The first one in the list is the one that runs when you type the command.
+
+### `type` -- The Full Story
+
+`type` goes deeper than `which`. It tells you not just where something lives, but what it actually is:
+
+```bash
 type cd
 # cd is a shell builtin
 
@@ -258,127 +555,296 @@ type ls
 
 type python3
 # python3 is /usr/bin/python3
+
+type mkcd
+# mkcd is a function
 ```
 
-## Visualizing with `tree`
+This matters more than you'd think. I've seen teams spend thirty minutes debugging why a command "wasn't working" only to discover that someone had created an alias that was overriding the real command. `type` reveals the truth.
+
+<Callout type="tip" title="The DevOps detective combo">
+When an application says it can't find a binary, or when the wrong version of something is running, this is your investigation sequence:
 
 ```bash
-# Install tree
+# Where is it?
+which python3
+
+# What exactly is it?
+type python3
+
+# What version?
+python3 --version
+
+# Is there a symlink involved?
+ls -la $(which python3)
+
+# Follow the symlink chain all the way
+readlink -f $(which python3)
+```
+
+This sequence has solved "it works on my machine" problems more times than I can count.
+</Callout>
+
+## Seeing the Big Picture -- `tree`
+
+Sometimes you need to see a directory structure at a glance. `ls` shows you one level. `tree` shows you everything.
+
+```bash
+# Install tree (it's not always there by default)
 sudo apt install tree    # Debian/Ubuntu
 sudo yum install tree    # RHEL/CentOS
+```
 
-# Show directory structure
+```bash
+# Show the structure of a directory
 tree /etc/nginx
+# /etc/nginx
+# ├── conf.d
+# │   └── default.conf
+# ├── fastcgi.conf
+# ├── mime.types
+# ├── modules -> /usr/lib/nginx/modules
+# ├── nginx.conf
+# ├── sites-available
+# │   └── default
+# └── sites-enabled
+#     └── default -> /etc/nginx/sites-available/default
 
-# Limit depth
+# Limit the depth (essential for large directories)
 tree -L 2 /etc
 
-# Show only directories
-tree -d /var/log
+# Show only directories (great for understanding structure)
+tree -d -L 3 /var
 
-# Show with file sizes
+# Show file sizes
 tree -sh /home/ubuntu/project
 
-# Show hidden files
-tree -a ~/
+# Show hidden files too
+tree -a -L 1 ~/
 ```
 
-<Exercise number={2} title="Find the Files">
+<Callout type="warning" title="Be careful with tree">
+Running `tree` on a large directory without the `-L` depth limit can produce thousands of lines of output. Always use `-L 2` or `-L 3` when you're exploring unfamiliar territory. On production servers, `tree -L 2 /` gives you a beautiful high-level map without drowning you in detail.
+</Callout>
 
-Complete these real-world file-finding challenges:
+When I onboard onto a new project or server, one of the first things I run is:
 
 ```bash
-# 1. Find all .conf files in /etc (how many are there?)
-find /etc -name "*.conf" -type f 2>/dev/null | wc -l
-
-# 2. Find the 5 largest files in /var
-find /var -type f -exec du -h {} + 2>/dev/null | sort -rh | head -5
-
-# 3. Find all shell scripts in /usr (files ending in .sh)
-find /usr -name "*.sh" -type f 2>/dev/null | head -10
-
-# 4. Find files modified in the last hour anywhere under /etc
-find /etc -type f -mmin -60 2>/dev/null
-
-# 5. Find where the 'bash' binary actually lives
-which bash
-readlink -f $(which bash)
-
-# 6. Create a project and visualize it
-mkdir -p ~/find-exercise/{src/{components,utils},tests,docs,config}
-touch ~/find-exercise/src/components/{Header,Footer,Nav}.tsx
-touch ~/find-exercise/src/utils/{helpers,format}.ts
-touch ~/find-exercise/tests/{unit,integration}.test.ts
-touch ~/find-exercise/config/{dev,prod}.json
-tree ~/find-exercise
+tree -L 2 -d /opt
+tree -L 2 /etc/nginx
+tree -L 1 /var/log
 ```
 
+In thirty seconds, I have a mental map of how the application is laid out, how the web server is configured, and what log files exist. That mental map pays for itself every time I need to find something later.
+
+<Exercise number={3} title="Build and Explore a Project Layout">
+
+Let's create a realistic project structure and practice every navigation and search tool we've learned:
+
+```bash
+# Create a mock application deployment structure
+mkdir -p ~/devops-lab/{app/{current,releases/{v1.0,v1.1,v2.0},shared/{config,logs,tmp}},monitoring/{alerts,dashboards},infrastructure/{terraform,ansible}}
+
+# Add some files
+echo "port: 8080" > ~/devops-lab/app/shared/config/app.yaml
+echo "log_level: info" > ~/devops-lab/app/shared/config/logging.conf
+echo "db_host: 10.0.1.5" > ~/devops-lab/app/shared/config/database.conf
+touch ~/devops-lab/app/shared/logs/{app.log,error.log,access.log}
+touch ~/devops-lab/monitoring/alerts/{cpu.yaml,memory.yaml,disk.yaml}
+touch ~/devops-lab/infrastructure/terraform/{main.tf,variables.tf,outputs.tf}
+
+# Create a symlink for "current release"
+ln -s ~/devops-lab/app/releases/v2.0 ~/devops-lab/app/current
+
+# NOW: Answer these questions using the tools from this lesson
+
+# 1. Visualize the entire structure
+tree ~/devops-lab
+
+# 2. Find all .yaml files in the project
+find ~/devops-lab -name "*.yaml"
+
+# 3. Find all .conf files and show what's in them
+find ~/devops-lab -name "*.conf" -exec cat {} \;
+
+# 4. Find the symbolic link
+find ~/devops-lab -type l -ls
+
+# 5. What's the total size of the project?
+du -sh ~/devops-lab
+
+# 6. Show only directories, 2 levels deep
+tree -d -L 2 ~/devops-lab
+```
+
+<CollapsibleSolution>
+
+Here's what you should see:
+
+1. `tree` reveals the full layout -- releases with version directories, shared config/logs, monitoring with alert definitions, and infrastructure-as-code files
+2. `find -name "*.yaml"` should return: `app.yaml`, `cpu.yaml`, `memory.yaml`, `disk.yaml`
+3. `find -name "*.conf" -exec cat` shows the contents of `logging.conf` and `database.conf`
+4. The symlink search shows `current -> releases/v2.0` -- this is a real pattern used in deployment tools like Capistrano
+5. `du -sh` gives you the total disk usage of the project
+6. `tree -d -L 2` shows just the directory skeleton -- great for understanding structure without file-level noise
+
+The symlink pattern (`current -> releases/v2.0`) is worth noting. This is exactly how many deployment systems work: deploy new code to a versioned directory, then point the `current` symlink to it. Rolling back is as simple as pointing `current` to an older release directory.
+
+```bash
+# Clean up
+rm -rf ~/devops-lab
+```
+
+</CollapsibleSolution>
 </Exercise>
 
-<MiniProject title="File System Explorer Script">
+<MiniProject title="Server Investigation Script">
 
-Create a script that generates a report about any directory:
+Let's bring everything together. In the real world, when you first SSH into an unfamiliar server, you need to quickly understand what's on it. This script automates that reconnaissance:
 
 ```bash
-cat > ~/fs-explorer.sh << 'SCRIPT'
+cat > ~/server-recon.sh << 'SCRIPT'
 #!/bin/bash
-# File System Explorer — report on any directory
+# Server Reconnaissance Script
+# Run this when you SSH into an unfamiliar server for the first time
 
-TARGET="${1:-.}"    # Default to current directory
+echo "============================================"
+echo "  SERVER RECON REPORT"
+echo "  Generated: $(date)"
+echo "  Hostname:  $(hostname)"
+echo "============================================"
+echo ""
 
-if [ ! -d "$TARGET" ]; then
-    echo "Error: '$TARGET' is not a directory"
-    exit 1
+echo "--- Current Location ---"
+pwd
+echo ""
+
+echo "--- Disk Usage Overview ---"
+df -h / /var /tmp 2>/dev/null | column -t
+echo ""
+
+echo "--- Top 10 Largest Files on System ---"
+find / -type f -size +50M -exec ls -lh {} + 2>/dev/null | sort -k5 -rh | head -10
+echo ""
+
+echo "--- Recently Modified Config Files (last 24h) ---"
+find /etc -type f -mtime -1 2>/dev/null | head -15
+echo "(showing max 15 results)"
+echo ""
+
+echo "--- Log Directory Sizes ---"
+du -sh /var/log/*/ 2>/dev/null | sort -rh | head -10
+echo ""
+
+echo "--- Web Server Check ---"
+if which nginx > /dev/null 2>&1; then
+    echo "Nginx: $(nginx -v 2>&1)"
+    echo "Config: $(find /etc/nginx -name '*.conf' | head -5)"
+elif which apache2 > /dev/null 2>&1; then
+    echo "Apache: $(apache2 -v 2>&1 | head -1)"
+else
+    echo "No web server detected"
 fi
-
-echo "=== File System Report: $TARGET ==="
-echo "Generated: $(date)"
 echo ""
 
-echo "--- Directory Count ---"
-find "$TARGET" -type d 2>/dev/null | wc -l
-
+echo "--- Key Directories ---"
+for dir in /opt /srv /var/www /etc/nginx /etc/apache2; do
+    if [ -d "$dir" ]; then
+        count=$(find "$dir" -maxdepth 1 -not -path "$dir" | wc -l)
+        echo "  $dir ($count items)"
+    fi
+done
 echo ""
-echo "--- File Count ---"
-find "$TARGET" -type f 2>/dev/null | wc -l
 
+echo "--- Running Services Listening on Ports ---"
+ss -tlnp 2>/dev/null | head -10 || netstat -tlnp 2>/dev/null | head -10
 echo ""
-echo "--- Total Size ---"
-du -sh "$TARGET" 2>/dev/null
 
+echo "--- File Type Summary in /etc ---"
+find /etc -type f 2>/dev/null | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -10
 echo ""
-echo "--- 5 Largest Files ---"
-find "$TARGET" -type f -exec du -h {} + 2>/dev/null | sort -rh | head -5
 
-echo ""
-echo "--- File Types ---"
-find "$TARGET" -type f 2>/dev/null | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -10
-
-echo ""
-echo "--- Recently Modified (last 24h) ---"
-find "$TARGET" -type f -mtime -1 2>/dev/null | head -10
-
-echo ""
-echo "--- Directory Structure (2 levels) ---"
-tree -L 2 -d "$TARGET" 2>/dev/null || find "$TARGET" -maxdepth 2 -type d
+echo "============================================"
+echo "  RECON COMPLETE"
+echo "============================================"
 SCRIPT
 
-chmod +x ~/fs-explorer.sh
-~/fs-explorer.sh /etc
+chmod +x ~/server-recon.sh
+
+# Run it
+~/server-recon.sh
 ```
+
+This script uses almost every tool from this lesson: `pwd`, `find` (by size, time, and name), `which`, `du`, and more. Customize it as you learn new commands throughout this course. By the end, you'll have a personalized toolkit that makes you effective on any new server in minutes.
 
 </MiniProject>
 
-## Key Takeaways
+## Let's Check What Stuck
 
-- `pwd` shows where you are; `cd` moves you; `ls` shows what's here
-- Absolute paths start with `/`; relative paths start from your current directory
-- `find` searches in real-time (powerful but slow on large trees)
-- `locate` searches a database (fast but may be stale)
-- `which` and `type` find command locations and types
-- `tree` visualizes directory structures at a glance
-- Use `2>/dev/null` to suppress "Permission denied" noise from `find`
+<Quiz>
+<QuizQuestion
+  question="You're in /var/log/nginx and need to get to /etc/nginx. Which command uses a relative path?"
+  options={[
+    "cd /etc/nginx",
+    "cd ../../etc/nginx",
+    "cd ~/etc/nginx",
+    "cd etc/nginx"
+  ]}
+  answer={1}
+  explanation="From /var/log/nginx, you go up to /var/log (one ..), up to /var (two ..), and that puts you at /var. Then ../../ takes you to /. Then etc/nginx gets you to /etc/nginx. The key: relative paths don't start with /. Option A is an absolute path (starts with /). Option C would look inside your home directory. Option D would look for etc/nginx inside /var/log/nginx."
+/>
+<QuizQuestion
+  question="A server is running low on disk space. Which command finds the biggest files in /var/log?"
+  options={[
+    "ls -la /var/log",
+    "du -sh /var/log",
+    "find /var/log -type f -size +100M -exec ls -lh {} +",
+    "tree -s /var/log"
+  ]}
+  answer={2}
+  explanation="find with -size +100M targets files over 100MB, -type f ensures you only get files (not directories), and -exec ls -lh shows their human-readable sizes. ls -la shows everything but doesn't filter by size. du -sh gives a total but doesn't show individual large files. tree -s shows sizes but doesn't filter."
+/>
+<QuizQuestion
+  question="You need to find which config files in /etc were changed in the last hour. What do you use?"
+  options={[
+    "find /etc -type f -mtime -1",
+    "find /etc -type f -mmin -60",
+    "locate -r '/etc/.*' --mtime -1h",
+    "ls -lt /etc"
+  ]}
+  answer={1}
+  explanation="find with -mmin -60 finds files modified in the last 60 minutes. That's exactly 'the last hour.' Option A uses -mtime -1, which means the last 24 hours — too broad. locate doesn't support time-based filtering. ls -lt only shows the current directory level, not subdirectories."
+/>
+<QuizQuestion
+  question="You type 'which python3' and get /usr/bin/python3, but your app uses a different Python. What should you check next?"
+  options={[
+    "Run python3 --version and hope for the best",
+    "Run 'which -a python3' to see all python3 binaries in your PATH",
+    "Reinstall Python",
+    "Check /etc/python3 for configuration"
+  ]}
+  answer={1}
+  explanation="which -a shows ALL matches for a command in your PATH, not just the first one. There might be another python3 in /usr/local/bin or in a virtual environment. The first match in PATH is what runs, so if the app expects a different version, the PATH order might be wrong. This is an incredibly common issue in DevOps."
+/>
+<QuizQuestion
+  question="What is the difference between 'find' and 'locate'?"
+  options={[
+    "They do the same thing, locate is just an alias for find",
+    "find searches in real-time (slower but current), locate searches a database (faster but potentially stale)",
+    "find only works on local filesystems, locate works over the network",
+    "locate is more powerful but requires root access"
+  ]}
+  answer={1}
+  explanation="find walks the filesystem in real time, checking every file — thorough but slow on large directory trees. locate searches a pre-built database (updated daily via cron), making it nearly instant but potentially missing recently created files. Use find when you need current results or complex filtering. Use locate when you just need to quickly find where something lives."
+/>
+</Quiz>
 
-## What's Next
+## What's Coming Next
 
-You can navigate anywhere and find anything. Now it's time to manipulate files — creating, copying, moving, and deleting. In **File Operations**, you'll learn `cp`, `mv`, `rm`, `mkdir`, `ln`, and the safety habits that prevent catastrophic mistakes.
+You can now navigate to any directory, list and understand its contents, and track down any file on a Linux system -- by name, by size, by time, or by type. That's a genuinely powerful skill set, and it's one you'll use every single day.
+
+But navigating and finding files is only half the story. You also need to actually *do things* with them. In the next lesson, **File Operations**, you'll learn `cp`, `mv`, `rm`, `mkdir`, and `ln` -- creating, copying, moving, and deleting files and directories. More importantly, you'll learn the safety habits that prevent the kind of disaster stories that every DevOps team has (and wishes they didn't).
+
+Before you move on, try this: SSH into any Linux machine you have access to (or use your local VM) and run the server recon script from the Mini Project. Explore the output. Follow up on anything interesting with `find` or `ls -la`. The best way to internalize these commands is to use them with curiosity, not just to complete exercises.
+
+See you in the next one.

@@ -16,6 +16,11 @@ const EDITABLE_FIELDS: (keyof ProfileUpdate)[] = [
   "theme",
   "email_notifications",
   "public_profile",
+  "is_discoverable",
+  "availability",
+  "location_city",
+  "location_country",
+  "profile_visibility",
 ];
 
 export async function getProfileByClerkId(

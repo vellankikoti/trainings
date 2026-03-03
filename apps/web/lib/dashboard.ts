@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/server";
 import { getAllPaths, getModulesForPath, type PathMeta } from "@/lib/content";
+import { getAssessment } from "@/lib/quiz";
 import { calculateLevel, levelProgress } from "@/lib/levels";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -44,21 +45,50 @@ export interface PathProgressSummary {
   color: string;
 }
 
+export interface SkillScoreSummary {
+  domain: string;
+  compositeScore: number;
+  percentile: number | null;
+  theoryScore: number;
+  labScore: number;
+  quizScore: number;
+}
+
+export interface ActivityDay {
+  date: string;
+  xpEarned: number;
+  lessonsCompleted: number;
+  timeSpentSeconds: number;
+}
+
 export interface DashboardStats {
   level: number;
   levelTitle: string;
   levelProgress: number;
   totalXp: number;
   currentStreak: number;
+  longestStreak: number;
   totalLessonsCompleted: number;
+  role: string;
+}
+
+export interface RecommendedAction {
+  type: "lesson" | "quiz" | "path";
+  title: string;
+  subtitle: string;
+  href: string;
+  reason: string;
 }
 
 export interface DashboardData {
   stats: DashboardStats;
   resumeTarget: ResumeTarget | null;
+  recommendedNext: RecommendedAction[];
   activeCourses: ActiveCourse[];
   completedCourses: CompletedCourse[];
   pathProgress: PathProgressSummary[];
+  skillScores: SkillScoreSummary[];
+  activityHeatmap: ActivityDay[];
 }
 
 // ─── Main Function ───────────────────────────────────────────────────────────
@@ -72,17 +102,25 @@ export async function getFullDashboardData(
 ): Promise<DashboardData> {
   const supabase = createAdminClient();
 
+  // Calculate date range for activity heatmap (last 90 days)
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const heatmapStartDate = ninetyDaysAgo.toISOString().split("T")[0];
+
   // Parallel: fetch all DB data + content metadata
   const [
     { data: profile },
     { data: allLessonProgress },
     { data: allModuleProgress },
     { data: allPathProgress },
+    { data: skillScoresData },
+    { data: activityData },
+    { data: passedQuizzes },
   ] = await Promise.all([
     supabase
       .from("profiles")
       .select(
-        "total_xp, current_level, current_streak, longest_streak",
+        "total_xp, current_streak, longest_streak, role",
       )
       .eq("id", profileId)
       .single(),
@@ -99,6 +137,22 @@ export async function getFullDashboardData(
       .from("path_progress")
       .select("path_slug, percentage, modules_total, modules_completed")
       .eq("user_id", profileId),
+    supabase
+      .from("skill_scores")
+      .select("domain, composite_score, percentile, theory_score, lab_score, quiz_score")
+      .eq("user_id", profileId)
+      .order("composite_score", { ascending: false }),
+    supabase
+      .from("daily_activity")
+      .select("activity_date, xp_earned, lessons_completed, time_spent_seconds")
+      .eq("user_id", profileId)
+      .gte("activity_date", heatmapStartDate)
+      .order("activity_date", { ascending: true }),
+    supabase
+      .from("quiz_attempts")
+      .select("quiz_id, module_slug, passed")
+      .eq("user_id", profileId)
+      .eq("passed", true),
   ]);
 
   const lessons = allLessonProgress ?? [];
@@ -122,13 +176,42 @@ export async function getFullDashboardData(
     levelProgress: lvlProgress,
     totalXp,
     currentStreak: profile?.current_streak ?? 0,
+    longestStreak: profile?.longest_streak ?? 0,
     totalLessonsCompleted: completedLessonsCount,
+    role: profile?.role ?? "learner",
   };
 
   // ─── Resume Target ─────────────────────────────────────────────────────
   // Strategy: Find the most recently accessed lesson that is NOT completed,
   // or find the next lesson after the most recently completed one.
   const resumeTarget = computeResumeTarget(lessons, allPaths);
+
+  // Enrich resume target with actual course progress
+  if (resumeTarget) {
+    const modProg = modulesProg.find(
+      (m) =>
+        m.path_slug === resumeTarget.pathSlug &&
+        m.module_slug === resumeTarget.moduleSlug,
+    );
+    if (modProg) {
+      resumeTarget.courseProgress = modProg.percentage;
+    } else {
+      // Compute from lesson data if no module_progress row yet
+      const modules = getModulesForPath(resumeTarget.pathSlug);
+      const moduleMeta = modules.find((m) => m.slug === resumeTarget.moduleSlug);
+      if (moduleMeta && moduleMeta.lessonsCount > 0) {
+        const completedInModule = lessons.filter(
+          (l) =>
+            l.path_slug === resumeTarget.pathSlug &&
+            l.module_slug === resumeTarget.moduleSlug &&
+            l.status === "completed",
+        ).length;
+        resumeTarget.courseProgress = Math.round(
+          (completedInModule / moduleMeta.lessonsCount) * 100,
+        );
+      }
+    }
+  }
 
   // ─── Active & Completed Courses ────────────────────────────────────────
   const activeCourses: ActiveCourse[] = [];
@@ -258,13 +341,195 @@ export async function getFullDashboardData(
     });
   }
 
+  // ─── Skill Scores ───────────────────────────────────────────────────────
+  const skillScores: SkillScoreSummary[] = (skillScoresData ?? []).map((s) => ({
+    domain: s.domain,
+    compositeScore: s.composite_score,
+    percentile: s.percentile,
+    theoryScore: s.theory_score,
+    labScore: s.lab_score,
+    quizScore: s.quiz_score,
+  }));
+
+  // ─── Activity Heatmap ─────────────────────────────────────────────────
+  const activityHeatmap: ActivityDay[] = (activityData ?? []).map((a) => ({
+    date: a.activity_date,
+    xpEarned: a.xp_earned,
+    lessonsCompleted: a.lessons_completed,
+    timeSpentSeconds: a.time_spent_seconds,
+  }));
+
+  // ─── Recommended Next Actions ────────────────────────────────────────
+  const passedQuizModules = new Set(
+    (passedQuizzes ?? [])
+      .map((q) => q.module_slug)
+      .filter((s): s is string => s != null),
+  );
+  const recommendedNext = computeRecommendedNext(
+    lessons,
+    pathsProg,
+    allPaths,
+    activeCourses,
+    passedQuizModules,
+  );
+
   return {
     stats,
     resumeTarget,
+    recommendedNext,
     activeCourses,
     completedCourses,
     pathProgress,
+    skillScores,
+    activityHeatmap,
   };
+}
+
+// ─── Recommendation Logic ────────────────────────────────────────────────────
+
+/** Path prerequisite order for recommendations */
+const PATH_ORDER = [
+  "foundations",
+  "containerization",
+  "cicd-gitops",
+  "iac-cloud",
+  "observability",
+  "platform-engineering",
+];
+
+function computeRecommendedNext(
+  lessons: Array<{
+    lesson_slug: string;
+    path_slug: string;
+    module_slug: string;
+    status: string;
+  }>,
+  pathsProg: Array<{
+    path_slug: string;
+    percentage: number;
+    modules_total: number;
+    modules_completed: number;
+  }>,
+  allPaths: PathMeta[],
+  activeCourses: ActiveCourse[],
+  passedQuizModules: Set<string>,
+): RecommendedAction[] {
+  const actions: RecommendedAction[] = [];
+
+  const completedPathSlugs = new Set(
+    pathsProg.filter((p) => p.percentage === 100).map((p) => p.path_slug),
+  );
+  const startedPathSlugs = new Set(
+    pathsProg.map((p) => p.path_slug),
+  );
+
+  // 1. Suggest continuing highest-priority active course
+  if (activeCourses.length > 0) {
+    const top = activeCourses[0]; // already sorted by most recently accessed
+    actions.push({
+      type: "lesson",
+      title: top.moduleTitle,
+      subtitle: `${top.completedLessons}/${top.totalLessons} lessons · ${top.progress}%`,
+      href: `/learn/${top.pathSlug}/${top.moduleSlug}/${top.resumeLessonSlug}`,
+      reason: "Continue where you left off",
+    });
+  }
+
+  // 2. Suggest module quiz if all lessons completed but quiz not passed
+  for (const pp of pathsProg) {
+    if (pp.percentage === 100) continue;
+
+    const modules = getModulesForPath(pp.path_slug);
+    for (const mod of modules) {
+      // Check if all lessons in this module are completed
+      const moduleLessons = lessons.filter(
+        (l) => l.path_slug === pp.path_slug && l.module_slug === mod.slug,
+      );
+      const completedInModule = moduleLessons.filter(
+        (l) => l.status === "completed",
+      ).length;
+
+      if (completedInModule >= mod.lessonsCount && mod.lessonsCount > 0) {
+        // All lessons done — check if quiz exists and hasn't been passed
+        if (!passedQuizModules.has(mod.slug)) {
+          const assessment = getAssessment(pp.path_slug, mod.slug);
+          if (assessment) {
+            actions.push({
+              type: "quiz",
+              title: `${mod.title} Quiz`,
+              subtitle: `${assessment.questions.length} questions · ${assessment.passingScore}% to pass`,
+              href: `/quiz/${assessment.id}`,
+              reason: "All lessons complete — test your knowledge",
+            });
+            break; // Only suggest one quiz
+          }
+        }
+      }
+    }
+    if (actions.some((a) => a.type === "quiz")) break;
+  }
+
+  // 3. Suggest next path in the learning sequence
+  for (const pathSlug of PATH_ORDER) {
+    if (completedPathSlugs.has(pathSlug) || startedPathSlugs.has(pathSlug)) {
+      continue;
+    }
+
+    const pathMeta = allPaths.find((p) => p.slug === pathSlug);
+    if (!pathMeta) continue;
+
+    // Only suggest if prerequisites are met (previous path completed or it's foundations)
+    const pathIndex = PATH_ORDER.indexOf(pathSlug);
+    const prereqMet =
+      pathIndex === 0 ||
+      completedPathSlugs.has(PATH_ORDER[pathIndex - 1]);
+
+    if (prereqMet) {
+      actions.push({
+        type: "path",
+        title: pathMeta.title,
+        subtitle: `${pathMeta.difficulty} · ${pathMeta.estimatedHours}h estimated`,
+        href: `/paths/${pathMeta.slug}`,
+        reason:
+          pathIndex === 0
+            ? "Recommended starting path"
+            : `Next step after completing ${PATH_ORDER[pathIndex - 1]}`,
+      });
+      break; // Only suggest one new path
+    }
+  }
+
+  // 4. Suggest a new module within an active path
+  for (const pp of pathsProg) {
+    if (pp.percentage === 100) continue;
+
+    const modules = getModulesForPath(pp.path_slug);
+
+    // Find a module with no lesson progress yet
+    for (const mod of modules) {
+      const hasProgress = lessons.some(
+        (l) =>
+          l.path_slug === pp.path_slug &&
+          l.module_slug === mod.slug,
+      );
+      if (hasProgress) continue;
+
+      const pathMeta = allPaths.find((p) => p.slug === pp.path_slug);
+      if (!pathMeta || mod.lessons.length === 0) continue;
+
+      actions.push({
+        type: "lesson",
+        title: mod.title,
+        subtitle: `${mod.lessonsCount} lessons · ${mod.estimatedHours}h`,
+        href: `/learn/${pp.path_slug}/${mod.slug}/${mod.lessons[0].slug}`,
+        reason: `New course in ${pathMeta.title}`,
+      });
+      break; // Only suggest one new module per path
+    }
+  }
+
+  // Limit to 3 recommendations
+  return actions.slice(0, 3);
 }
 
 // ─── Resume Logic ────────────────────────────────────────────────────────────

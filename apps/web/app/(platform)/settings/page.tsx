@@ -32,6 +32,11 @@ export default async function SettingsPage() {
                 bio: profile.bio,
                 github_username: profile.github_username,
                 public_profile: profile.public_profile,
+                is_discoverable: profile.is_discoverable,
+                availability: profile.availability,
+                location_city: profile.location_city,
+                location_country: profile.location_country,
+                profile_visibility: profile.profile_visibility,
               }}
             />
           </div>

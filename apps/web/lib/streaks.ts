@@ -3,16 +3,33 @@ import { XP_REWARDS } from "@/lib/xp";
 import { awardXP } from "@/lib/progress";
 
 /**
+ * Streak milestones that trigger special XP bonuses and badge evaluation.
+ */
+const STREAK_MILESTONES = [7, 14, 30, 60, 100, 200, 365] as const;
+const STREAK_MILESTONE_XP: Record<number, number> = {
+  7: 50,
+  14: 100,
+  30: 250,
+  60: 500,
+  100: 1000,
+  200: 2500,
+  365: 10000,
+};
+
+/** Minimum active minutes to count as a "real" activity day */
+const MIN_ACTIVE_MINUTES = 15;
+
+/**
  * Update streak and daily activity when a user completes any activity.
- * Call this after lesson/exercise/quiz completion.
+ * Call this after lesson/exercise/quiz/lab completion.
  */
 export async function updateStreak(
   userId: string,
-  activityType: "lesson" | "exercise" | "quiz",
+  activityType: "lesson" | "exercise" | "quiz" | "lab",
   xpEarned: number,
-): Promise<{ streak: number; streakXPAwarded: boolean }> {
+): Promise<{ streak: number; streakXPAwarded: boolean; milestone: number | null }> {
   const supabase = createAdminClient();
-  const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  const today = new Date().toISOString().split("T")[0];
 
   // Get current profile
   const { data: profile } = await supabase
@@ -25,10 +42,10 @@ export async function updateStreak(
 
   let newStreak = profile.current_streak;
   let streakXPAwarded = false;
+  let milestone: number | null = null;
 
-  // Calculate streak
   if (profile.last_activity_date === today) {
-    // Already active today — streak stays the same, no streak XP
+    // Already active today — streak stays, no daily streak XP
   } else {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -37,14 +54,43 @@ export async function updateStreak(
     if (profile.last_activity_date === yesterdayStr) {
       // Active yesterday — increment streak
       newStreak = profile.current_streak + 1;
+    } else if (profile.last_activity_date) {
+      // Check for streak freeze (premium users get 1 free freeze per week)
+      const daysSinceLastActivity = getDaysBetween(
+        profile.last_activity_date,
+        today
+      );
+
+      if (daysSinceLastActivity === 2) {
+        // 1 day gap — check if user has a streak freeze available
+        const hasFreezeAvailable = await checkStreakFreeze(supabase, userId);
+        if (hasFreezeAvailable) {
+          newStreak = profile.current_streak + 1;
+          await consumeStreakFreeze(supabase, userId);
+        } else {
+          newStreak = 1;
+        }
+      } else {
+        // Gap > 1 day — reset streak
+        newStreak = 1;
+      }
     } else {
-      // Gap > 1 day — reset streak
+      // First ever activity
       newStreak = 1;
     }
 
-    // Award daily streak XP (only once per day)
+    // Award daily streak XP
     await awardXP(userId, XP_REWARDS.DAILY_STREAK, "daily_streak");
     streakXPAwarded = true;
+
+    // Check milestone
+    milestone = checkMilestone(newStreak);
+    if (milestone) {
+      const milestoneXP = STREAK_MILESTONE_XP[milestone] ?? 0;
+      if (milestoneXP > 0) {
+        await awardXP(userId, milestoneXP, `streak_milestone_${milestone}`);
+      }
+    }
   }
 
   const longestStreak = Math.max(newStreak, profile.longest_streak);
@@ -60,29 +106,178 @@ export async function updateStreak(
     .eq("id", userId);
 
   // Update daily activity
-  const { data: existingActivity } = await supabase
+  await upsertDailyActivity(supabase, userId, today, activityType, xpEarned);
+
+  return { streak: newStreak, streakXPAwarded, milestone };
+}
+
+/**
+ * Validate whether a day counted as a "real" activity day.
+ * Requires either:
+ * - Completing at least 1 lesson, quiz, or lab
+ * - OR having 15+ active minutes
+ *
+ * This is called by the nightly streak validation job.
+ */
+export async function validateDayActivity(
+  userId: string,
+  date: string,
+): Promise<boolean> {
+  const supabase = createAdminClient();
+
+  // Check daily_activity for completions
+  const { data: activity } = await supabase
     .from("daily_activity")
-    .select("id, lessons_completed, exercises_completed, quizzes_completed, xp_earned, time_spent_seconds")
+    .select("lessons_completed, exercises_completed, quizzes_completed")
+    .eq("user_id", userId)
+    .eq("activity_date", date)
+    .single();
+
+  if (activity) {
+    const totalCompletions =
+      activity.lessons_completed +
+      activity.exercises_completed +
+      activity.quizzes_completed;
+    if (totalCompletions > 0) return true;
+  }
+
+  // Check active_time_log for 15+ minutes
+  const startOfDay = `${date}T00:00:00Z`;
+  const endOfDay = `${date}T23:59:59Z`;
+
+  const { data: timeLogs } = await supabase
+    .from("active_time_log")
+    .select("active_seconds")
+    .eq("user_id", userId)
+    .gte("session_start", startOfDay)
+    .lte("session_end", endOfDay);
+
+  if (timeLogs) {
+    const totalMinutes =
+      timeLogs.reduce((sum, log) => sum + log.active_seconds, 0) / 60;
+    if (totalMinutes >= MIN_ACTIVE_MINUTES) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Get streak recovery information — how many days since the streak broke
+ * and what it would take to restart.
+ */
+export async function getStreakRecoveryInfo(userId: string): Promise<{
+  streakBroken: boolean;
+  daysSinceLast: number;
+  canFreeze: boolean;
+}> {
+  const supabase = createAdminClient();
+  const today = new Date().toISOString().split("T")[0];
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("last_activity_date, current_streak")
+    .eq("id", userId)
+    .single();
+
+  if (!profile || !profile.last_activity_date) {
+    return { streakBroken: false, daysSinceLast: 0, canFreeze: false };
+  }
+
+  const daysSinceLast = getDaysBetween(profile.last_activity_date, today);
+  const streakBroken = daysSinceLast > 1;
+  const canFreeze = daysSinceLast === 2;
+
+  return { streakBroken, daysSinceLast, canFreeze };
+}
+
+// ── Helpers ──
+
+function getDaysBetween(dateA: string, dateB: string): number {
+  const a = new Date(dateA);
+  const b = new Date(dateB);
+  return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function checkMilestone(streak: number): number | null {
+  for (const m of STREAK_MILESTONES) {
+    if (streak === m) return m;
+  }
+  return null;
+}
+
+async function checkStreakFreeze(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+): Promise<boolean> {
+  // Check if user has a premium subscription with streak freeze
+  const { data: subscription } = await supabase
+    .from("subscriptions")
+    .select("plan, status")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .single();
+
+  if (!subscription || subscription.plan === "free") return false;
+
+  // Check if freeze was already used this week
+  const weekStart = getWeekStart();
+  const { count } = await supabase
+    .from("events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("event_type", "streak.freeze_used")
+    .gte("created_at", weekStart);
+
+  return (count ?? 0) === 0;
+}
+
+async function consumeStreakFreeze(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+): Promise<void> {
+  await supabase.from("events").insert({
+    user_id: userId,
+    event_type: "streak.freeze_used",
+    data: {},
+  });
+}
+
+function getWeekStart(): string {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(now.setDate(diff));
+  monday.setHours(0, 0, 0, 0);
+  return monday.toISOString();
+}
+
+async function upsertDailyActivity(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  today: string,
+  activityType: string,
+  xpEarned: number,
+): Promise<void> {
+  const { data: existing } = await supabase
+    .from("daily_activity")
+    .select("id, lessons_completed, exercises_completed, quizzes_completed, xp_earned")
     .eq("user_id", userId)
     .eq("activity_date", today)
     .single();
 
-  if (existingActivity) {
+  if (existing) {
     const updates: Record<string, number> = {
-      xp_earned: existingActivity.xp_earned + xpEarned,
+      xp_earned: existing.xp_earned + xpEarned,
     };
     if (activityType === "lesson") {
-      updates.lessons_completed = existingActivity.lessons_completed + 1;
+      updates.lessons_completed = existing.lessons_completed + 1;
     } else if (activityType === "exercise") {
-      updates.exercises_completed = existingActivity.exercises_completed + 1;
+      updates.exercises_completed = existing.exercises_completed + 1;
     } else if (activityType === "quiz") {
-      updates.quizzes_completed = existingActivity.quizzes_completed + 1;
+      updates.quizzes_completed = existing.quizzes_completed + 1;
     }
 
-    await supabase
-      .from("daily_activity")
-      .update(updates)
-      .eq("id", existingActivity.id);
+    await supabase.from("daily_activity").update(updates).eq("id", existing.id);
   } else {
     await supabase.from("daily_activity").insert({
       user_id: userId,
@@ -94,6 +289,4 @@ export async function updateStreak(
       time_spent_seconds: 0,
     });
   }
-
-  return { streak: newStreak, streakXPAwarded };
 }

@@ -1,313 +1,617 @@
 ---
 title: "Terminal Mastery"
-description: "Master the bash terminal with keyboard shortcuts, command history, tab completion, and productivity techniques that separate beginners from power users."
+description: "The keyboard shortcuts, history tricks, and muscle memory that separate someone who uses the terminal from someone who flies through it."
 order: 3
 xpReward: 100
 estimatedMinutes: 35
 prerequisites:
   - 02-installing-linux
 objectives:
-  - Navigate bash efficiently with keyboard shortcuts
-  - Use command history and search to work faster
-  - Master tab completion and globbing
-  - Customize your shell prompt and environment
+  - Navigate the command line at speed with keyboard shortcuts
+  - Search and reuse command history like a pro
+  - Use tab completion to never type a full path again
+  - Customize your shell with aliases and functions
 tags:
   - linux
   - terminal
   - bash
   - productivity
+key_takeaways:
+  - Three shortcuts that change everything — Ctrl+R, Tab, and Ctrl+A/E
+  - Your command history is a goldmine — learn to search it, not retype everything
+  - Aliases and functions let you create your own shortcuts
+  - Speed at the terminal isn't about typing fast — it's about typing less
+reflection_prompt: "Which keyboard shortcut do you think will save you the most time? Try using it 20 times today until it becomes automatic."
 ---
 
-<Callout type="story" title="The Story">
-You've seen experienced engineers fly through the terminal — commands appearing almost instantly, long file paths completed with a single keystroke, previous commands recalled from memory. It looks like magic, but it's not. It's muscle memory built from knowing a handful of keyboard shortcuts and bash features. After this lesson, you'll have the same toolkit.
+<Callout type="story" title="A story about speed">
+I once watched a senior SRE diagnose and fix a production outage in under 4 minutes. Four minutes. From the moment the alert fired to the moment the service was healthy again. Want to know what made that possible?
+
+It wasn't that she knew more than anyone else. It was that she could navigate the terminal without thinking. Commands flowed from her fingers like she was typing a text message. She searched history instead of retyping. She tab-completed instead of spelling out paths. She used shortcuts instead of reaching for the mouse.
+
+She wasn't faster because she was smarter. She was faster because the terminal was muscle memory, and her brain was free to focus on the actual problem.
+
+That's what we're building today. By the end of this lesson, you'll know every trick she used.
 </Callout>
 
-## The Bash Shell
+## First, Let's Talk About Your Shell
 
-When you open a terminal, you're interacting with a **shell** — a program that reads your commands, interprets them, and sends them to the kernel. **Bash** (Bourne Again SHell) is the default on most Linux systems.
+When you open a terminal, you're talking to a program called a **shell**. The shell reads what you type, figures out what you mean, and tells the operating system to do it.
+
+The most common shell is **Bash** (Bourne Again SHell). It's the default on most Linux systems, and it's what we'll use throughout this course.
 
 ```bash
-# Check which shell you're running
+# Which shell are you running right now?
 echo $SHELL
 
-# Check bash version
+# What version?
 bash --version | head -1
 ```
 
-## Essential Keyboard Shortcuts
+Think of Bash as your translator. You speak human. The kernel speaks machine. Bash sits between you and translates in both directions.
 
-These shortcuts work in bash and most Unix shells. Memorize them — they'll save you thousands of keystrokes:
+## The Shortcuts That Change Everything
 
-### Navigation
+I'm going to teach you a bunch of shortcuts. But here's the truth — you only need to memorize three to start. Everything else is bonus. Here are your Big Three:
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl + A` | Jump to beginning of line |
-| `Ctrl + E` | Jump to end of line |
-| `Alt + F` | Jump forward one word |
-| `Alt + B` | Jump backward one word |
-| `Ctrl + L` | Clear the screen |
+### 1. `Ctrl + R` — Search Your History
+
+This is the single most powerful shortcut in bash. Press `Ctrl + R` and start typing any part of a previous command. Bash will find it for you.
+
+```bash
+# Let's say earlier you typed:
+ssh -i ~/keys/production.pem ubuntu@10.0.1.42
+
+# Now you need to run it again.
+# Instead of retyping all of that:
+
+# Press Ctrl + R
+# Type: ssh
+# Bash instantly finds: ssh -i ~/keys/production.pem ubuntu@10.0.1.42
+# Press Enter to run it
+
+# If it finds the wrong match, press Ctrl + R again to cycle through older matches
+# Press Ctrl + G to cancel and go back to a blank prompt
+```
+
+Let's practice this right now:
+
+```bash
+# Run a few commands to build up some history:
+echo "This is my first command"
+ls -la /etc
+cat /etc/hostname
+echo "DevOps is going to be great"
+
+# Now press Ctrl + R and type "DevOps"
+# Watch it find your echo command instantly
+```
+
+<Callout type="tip" title="This alone saves hours">
+Once you build the `Ctrl + R` habit, you'll stop retyping anything. That `kubectl` command you ran 45 minutes ago? `Ctrl + R`, type a few letters, done. That complex `docker` command from yesterday? Same thing. Your history is a personal command library that grows every day.
+</Callout>
+
+### 2. `Tab` — Autocomplete Everything
+
+Press `Tab` once to autocomplete a command, file name, or path. Press it twice to see all possible completions.
+
+```bash
+# Type "system" then press Tab twice:
+system⇥⇥
+# Shows: systemctl  systemd-analyze  systemd-cat  ...
+
+# Type "systemctl sta" then press Tab:
+systemctl sta⇥
+# Completes to: systemctl status
+
+# Type "ls /etc/ho" then press Tab:
+ls /etc/ho⇥
+# Completes to: ls /etc/hostname (or shows options if there are multiple matches)
+```
+
+Here's the rule: **If you're typing a full path or command name, you're working too hard.** Tab does most of it for you.
+
+```bash
+# Instead of typing this:
+cat /etc/systemd/system/multi-user.target.wants/
+
+# Type this:
+cat /etc/sys⇥/sy⇥/mu⇥.ta⇥.wa⇥/
+# Tab fills in each piece as you go
+```
+
+### 3. `Ctrl + A` and `Ctrl + E` — Jump to Start and End
+
+You're editing a long command and realize you need to change something at the beginning:
+
+```bash
+# You've typed this, but want to add "sudo" at the start:
+apt install nginx
+# Don't reach for the Home key or use arrow keys. Press:
+# Ctrl + A → cursor jumps to the beginning
+# Type: sudo
+# Ctrl + E → cursor jumps back to the end
+```
+
+That's it. Those are your Big Three. Master these three shortcuts and you'll already be faster than 80% of terminal users.
+
+<Exercise number={1} title="The Big Three Drill">
+
+Let's build muscle memory. Do each of these steps IN ORDER — don't skip:
+
+**Round 1: History Search**
+```bash
+# Run these commands:
+echo "Round 1: I am learning terminal shortcuts"
+ls /etc/passwd
+cat /proc/cpuinfo | head -5
+whoami && pwd
+
+# Now find each one using Ctrl + R:
+# Press Ctrl+R, type "Round" → should find the echo command
+# Press Ctrl+R, type "passwd" → should find the ls command
+# Press Ctrl+R, type "cpu" → should find the cat command
+```
+
+**Round 2: Tab Completion**
+```bash
+# Complete each of these using Tab (I've marked where to press Tab with ⇥):
+ls /etc/sys⇥          # should become /etc/sysctl.conf or show options
+cat /etc/host⇥         # should become /etc/hostname or /etc/hosts
+systemctl sta⇥ ssh⇥    # should become: systemctl status ssh
+```
+
+**Round 3: Line Navigation**
+```bash
+# Type this command (don't run it yet):
+echo "this command needs sudo at the start"
+# Now: Ctrl+A → go to start → type "sudo " → Ctrl+E → press Enter
+```
+
+How did that feel? Clunky? That's normal. Do it 10 more times today and it'll start feeling natural. By next week, you won't even think about it.
+
+</Exercise>
+
+## The Full Shortcut Arsenal
+
+The Big Three will carry you far. But when you're ready for more, here's the complete toolkit:
+
+### Moving Around
+
+| Shortcut | What It Does | When You'll Use It |
+|---|---|---|
+| `Ctrl + A` | Jump to beginning of line | Add `sudo` to a command you already typed |
+| `Ctrl + E` | Jump to end of line | After editing the middle of a command |
+| `Alt + F` | Jump forward one word | Navigate through long commands |
+| `Alt + B` | Jump backward one word | Same — word by word is faster than character by character |
+| `Ctrl + L` | Clear the screen | When your terminal is cluttered (way better than typing `clear`) |
 
 ### Editing
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl + U` | Delete from cursor to beginning of line |
-| `Ctrl + K` | Delete from cursor to end of line |
-| `Ctrl + W` | Delete the word before cursor |
-| `Alt + D` | Delete the word after cursor |
-| `Ctrl + Y` | Paste last deleted text (yank) |
+| Shortcut | What It Does | When You'll Use It |
+|---|---|---|
+| `Ctrl + U` | Delete from cursor to beginning | Clear a half-typed command and start over |
+| `Ctrl + K` | Delete from cursor to end | Remove the end of a command |
+| `Ctrl + W` | Delete the previous word | Fix a typo in the last word you typed |
+| `Alt + D` | Delete the next word | Remove a word ahead of the cursor |
+| `Ctrl + Y` | Paste what you just deleted | Undo your deletion — Bash remembers what you cut |
 
 ### Control
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl + C` | Kill the current process |
-| `Ctrl + D` | Exit the shell (or send EOF) |
-| `Ctrl + Z` | Suspend the current process |
-| `Ctrl + R` | Reverse search command history |
+| Shortcut | What It Does | When You'll Use It |
+|---|---|---|
+| `Ctrl + C` | Kill the running process | Something is running forever — stop it now |
+| `Ctrl + D` | Exit the shell (or send EOF) | When you want to close the terminal or end input |
+| `Ctrl + Z` | Suspend the running process | Pause something to do something else, then come back |
 
-<Callout type="tip" title="The Big Three">
-If you only learn three shortcuts: `Ctrl + R` (search history), `Ctrl + A/E` (jump to start/end), and `Tab` (autocomplete). These alone will 10x your terminal speed.
+<Callout type="info" title="About Ctrl+C vs Ctrl+Z">
+`Ctrl + C` **kills** the process. It's gone. Dead. `Ctrl + Z` **pauses** it. It's still alive, just sleeping in the background. You can bring it back with `fg` (foreground). This matters when you're editing a file in vim and need to quickly check something — `Ctrl + Z` to pause vim, do your thing, then `fg` to come back.
 </Callout>
 
-## Command History
+## Command History — Your Personal Command Library
 
-Bash remembers every command you type. This history is your most powerful productivity tool.
+Every command you've ever typed is saved. This history is pure gold once you learn how to use it.
 
 ```bash
-# View recent command history
+# See your recent commands:
 history | tail -20
 
-# Run the last command again
+# How many commands have you run total?
+history | wc -l
+```
+
+### History Shortcuts (Beyond Ctrl+R)
+
+```bash
+# Re-run the last command:
 !!
 
-# Run command number 42 from history
+# This is incredibly useful with sudo:
+apt install nginx
+# "Permission denied"
+sudo !!
+# Runs: sudo apt install nginx
+
+# Re-run command #42 from history:
 !42
 
-# Run the last command that started with "ssh"
+# Re-run the last command that started with "ssh":
 !ssh
-
-# Reverse search: press Ctrl+R, then type a search term
-# Press Ctrl+R again to cycle through matches
-# Press Enter to execute, Ctrl+G to cancel
+# Careful with this one — make sure you remember what that command was
 ```
 
-### History Expansion
+### Reusing Pieces of Previous Commands
+
+This is where it gets really clever:
 
 ```bash
-# Reuse the last argument of the previous command
-mkdir /tmp/my-project
+# Grab the LAST ARGUMENT of the previous command:
+mkdir -p /opt/myapp/config
 cd !$
-# cd /tmp/my-project
+# cd /opt/myapp/config — !$ means "last argument"
 
-# Reuse all arguments of the previous command
+# Grab ALL arguments of the previous command:
 echo one two three
 echo !*
-# echo one two three
+# echo one two three — !* means "all arguments"
 
-# Substitute text in the previous command
-cat /etc/hotsname     # typo!
-^hotsname^hostname    # fix and rerun
-# cat /etc/hostname
+# Fix a typo in the last command:
+cat /etc/hotsname
+^hotsname^hostname
+# Runs: cat /etc/hostname — substitutes the typo
 ```
 
-<Exercise number={1} title="Speed Training">
+<Exercise number={2} title="History Power Moves">
 
-Practice these shortcuts until they feel natural:
+Let's practice these history features:
 
-1. Type a long command: `echo "this is a very long command that I am typing"`
-2. Press `Ctrl + A` to jump to the beginning
-3. Press `Ctrl + E` to jump to the end
-4. Press `Ctrl + U` to delete the whole line
-5. Type: `ls /usr/local/bin/some-long-path`
-6. Press `Ctrl + W` to delete the last word
-7. Press `Ctrl + Y` to paste it back
-8. Press `Ctrl + R` and type "echo" — find your earlier command
-9. Press `Ctrl + L` to clear the screen
+```bash
+# Step 1: Run some commands
+mkdir -p /tmp/history-practice/deep/nested/path
+echo "History is powerful"
+ls -la /var/log
 
-Time yourself: how fast can you complete all 9 steps?
+# Step 2: Use !! (repeat last command)
+sudo !!
+# This should run: sudo ls -la /var/log
 
+# Step 3: Use !$ (last argument)
+cd !$
+# You should now be in /var/log
+pwd
+# Verify you're in /var/log
+
+# Step 4: Go back and use history search
+cd ~
+# Press Ctrl+R, type "mkdir"
+# It should find your mkdir command from Step 1
+# Press Enter to run it again (it's safe — mkdir -p doesn't fail if it exists)
+
+# Step 5: Check your history
+history | tail -10
+# See all the commands you just ran, numbered and timestamped
+```
+
+<CollapsibleSolution>
+
+After completing all steps, your terminal session should look something like this:
+
+```bash
+$ mkdir -p /tmp/history-practice/deep/nested/path
+$ echo "History is powerful"
+History is powerful
+$ ls -la /var/log
+# (list of log files)
+$ sudo !!
+sudo ls -la /var/log
+# (same list, but with full permissions visible)
+$ cd !$
+$ pwd
+/var/log
+$ cd ~
+$ pwd
+/home/yourusername
+```
+
+Every step builds on the previous one. That's how real terminal work flows — each command connects to the next.
+
+</CollapsibleSolution>
 </Exercise>
 
-## Tab Completion
+## Tab Completion and Globbing — Type Less, Do More
 
-Press `Tab` to autocomplete commands, file paths, and arguments. Press `Tab` twice to see all options:
+You already know Tab completes things. Let's go deeper.
+
+### Install Better Completion
 
 ```bash
-# Type "sys" then press Tab twice:
-sys⇥⇥
-# Shows: sysctl  systemctl  systemd-*  ...
+# Install enhanced bash completion (more commands get Tab support):
+sudo apt install -y bash-completion
 
-# Type "systemctl st" then press Tab:
-systemctl st⇥
-# Completes to: systemctl status
-
-# File path completion:
-ls /etc/sy⇥
-# Completes to: ls /etc/sysctl.conf  (or shows options)
+# Reload your shell:
+source ~/.bashrc
 ```
 
-<Callout type="info">
-Install `bash-completion` for even better tab completion with command arguments:
+Now Tab works with more commands — try `systemctl status ⇥⇥` and watch it list all services.
+
+### Globbing — Wildcards That Match Patterns
+
+Bash can expand special characters BEFORE running a command. This is called globbing:
+
+| Pattern | Matches | Example |
+|---|---|---|
+| `*` | Anything (any number of characters) | `ls *.log` — all files ending in .log |
+| `?` | Exactly one character | `ls file?.txt` — file1.txt, file2.txt, not file10.txt |
+| `[abc]` | Any one of these characters | `ls file[123].txt` — file1.txt, file2.txt, file3.txt |
+| `[0-9]` | Any digit | `ls log.[0-9]` — log.1, log.2, etc. |
+| `{a,b,c}` | Each of these literally | `mkdir {src,tests,docs}` — creates three directories |
 
 ```bash
-sudo apt install bash-completion
-```
-</Callout>
+# Real-world examples:
 
-## Globbing (Wildcards)
-
-Bash expands special characters before running commands:
-
-| Pattern | Matches |
-|---|---|
-| `*` | Any number of characters |
-| `?` | Exactly one character |
-| `[abc]` | Any one of a, b, or c |
-| `[0-9]` | Any digit |
-| `{a,b,c}` | Comma-separated alternatives |
-
-```bash
-# List all .conf files in /etc
+# List all config files:
 ls /etc/*.conf
 
-# List files starting with "host"
+# Create an entire project structure in one command:
+mkdir -p project/{src,tests,docs,scripts,config}
+
+# List all log files from today:
+ls /var/log/*.log
+
+# Find all files starting with "host":
 ls /etc/host*
-
-# List files with single-char extensions
-ls /etc/*.?
-
-# Create multiple directories at once
-mkdir -p project/{src,tests,docs,config}
 ```
 
-<Exercise number={2} title="Glob Mastery">
-
-Use globbing to complete these tasks:
+<Exercise number={3} title="Globbing Practice">
 
 ```bash
-# 1. List all files in /etc that start with "pass"
-ls /etc/pass*
+# Set up a practice area:
+mkdir -p ~/devops-learning/glob-practice
+cd ~/devops-learning/glob-practice
 
-# 2. Count how many .conf files are in /etc
-ls /etc/*.conf 2>/dev/null | wc -l
+# Create a bunch of files:
+touch app.log error.log debug.log access.log
+touch config.yml config.json config.toml
+touch server1.cfg server2.cfg server3.cfg
+touch notes.txt readme.txt changelog.txt
 
-# 3. Create a project structure with one command
-mkdir -p ~/devops-learning/project-{alpha,beta,gamma}/{src,tests,docs}
+# Now use globbing to work with groups of files:
 
-# 4. List only the project directories you just created
-ls ~/devops-learning/project-*/
+# 1. List only the log files:
+ls *.log
 
-# 5. Remove all the test directories
-rmdir ~/devops-learning/project-*/tests
+# 2. List only the config files (any extension):
+ls config.*
+
+# 3. List server configs with single-digit numbers:
+ls server?.cfg
+
+# 4. List only .txt files:
+ls *.txt
+
+# 5. Count how many .log files exist:
+ls *.log | wc -l
+
+# 6. Create backup copies of all configs in one command:
+mkdir backups
+cp config.* backups/
+
+# 7. Verify the backups:
+ls backups/
+
+# Clean up:
+cd ~/devops-learning
+rm -rf glob-practice
 ```
 
-Verify each step worked with `ls`.
+Notice how you never had to list files one by one? Globbing lets you work with patterns instead of individual names. On a real server with thousands of files, this is essential.
 
 </Exercise>
 
-## Customizing Your Prompt
+## Make the Terminal Yours — Aliases and Functions
 
-The bash prompt is controlled by the `PS1` variable:
-
-```bash
-# See your current prompt
-echo "$PS1"
-
-# Simple prompt: username@hostname:directory$
-export PS1="\u@\h:\w\$ "
-
-# Colorful prompt with git branch (add to ~/.bashrc)
-export PS1='\[\e[32m\]\u@\h\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ '
-```
-
-### Useful Prompt Escape Codes
-
-| Code | Shows |
-|---|---|
-| `\u` | Username |
-| `\h` | Hostname |
-| `\w` | Current directory (full path) |
-| `\W` | Current directory (basename only) |
-| `\t` | Current time (24h) |
-| `\$` | `$` for regular user, `#` for root |
-
-## Aliases: Command Shortcuts
-
-Create short names for commands you use often:
+Here's where it starts feeling like YOUR terminal instead of a generic one. Aliases let you create shortcuts for commands you use all the time.
 
 ```bash
-# Add to ~/.bashrc
+# Instead of typing "ls -la" every time:
 alias ll='ls -la'
+
+# Instead of typing "cd ..":
 alias ..='cd ..'
 alias ...='cd ../..'
-alias gs='git status'
+
+# DevOps shortcuts you'll use daily:
+alias k='kubectl'           # You'll thank me when we get to Kubernetes
+alias d='docker'             # Same for Docker
+alias g='git'                # And Git
+alias tf='terraform'         # And Terraform
+alias gs='git status'        # Most-used git command
 alias gd='git diff'
-alias k='kubectl'
-
-# Reload after editing
-source ~/.bashrc
-
-# List all aliases
-alias
 ```
 
-<MiniProject title="Custom Shell Configuration">
-
-Create a personalized `.bashrc` configuration:
+**Functions** are aliases on steroids — they can take arguments:
 
 ```bash
-cat >> ~/.bashrc << 'CONFIG'
+# Create a directory and immediately cd into it:
+mkcd() { mkdir -p "$1" && cd "$1"; }
 
-# --- Custom DevOps Learning Config ---
+# Usage:
+mkcd ~/projects/my-new-app
+# Creates the directory AND moves into it. One command.
 
-# Aliases
+# Quick port check — is something running on a port?
+port() { ss -tlnp | grep ":$1 "; }
+
+# Usage:
+port 80
+# Shows whatever is listening on port 80
+```
+
+<MiniProject title="Build Your Terminal Configuration">
+
+Let's create a `.bashrc` configuration that you'll carry with you throughout your DevOps career. This is YOUR toolkit:
+
+```bash
+# Back up your current .bashrc first (always back up before changing configs):
+cp ~/.bashrc ~/.bashrc.backup
+
+# Now add your custom configuration:
+cat >> ~/.bashrc << 'MYCONFIG'
+
+# ====================================
+# My DevOps Terminal Configuration
+# ====================================
+
+# --- Navigation Shortcuts ---
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
 alias ll='ls -la --color=auto'
 alias la='ls -A'
-alias ..='cd ..'
-alias ...='cd ../..'
-alias h='history | tail -20'
+alias l='ls -CF'
+
+# --- Quick System Info ---
 alias ports='ss -tlnp'
 alias mem='free -h'
 alias disk='df -h /'
+alias cpu='top -bn1 | head -5'
+alias myip='curl -s ifconfig.me'
 
-# Functions
+# --- Safety Nets ---
+alias rm='rm -i'          # Ask before deleting
+alias cp='cp -i'          # Ask before overwriting
+alias mv='mv -i'          # Ask before overwriting
+
+# --- DevOps Tools (we'll use these later) ---
+alias k='kubectl'
+alias d='docker'
+alias g='git'
+alias tf='terraform'
+alias gs='git status'
+alias gd='git diff'
+alias gl='git log --oneline -10'
+
+# --- Custom Functions ---
 mkcd() { mkdir -p "$1" && cd "$1"; }
+port() { ss -tlnp 2>/dev/null | grep ":$1 " || lsof -i ":$1" 2>/dev/null; }
 extract() {
   case "$1" in
-    *.tar.gz) tar xzf "$1" ;;
+    *.tar.gz)  tar xzf "$1" ;;
     *.tar.bz2) tar xjf "$1" ;;
-    *.zip) unzip "$1" ;;
-    *) echo "Unknown format: $1" ;;
+    *.tar.xz)  tar xf "$1" ;;
+    *.zip)     unzip "$1" ;;
+    *.gz)      gunzip "$1" ;;
+    *) echo "Don't know how to extract: $1" ;;
   esac
 }
 
-# History settings
-export HISTSIZE=10000
-export HISTFILESIZE=20000
-export HISTCONTROL=ignoredups:erasedups
+# --- Better History ---
+export HISTSIZE=10000            # Remember more commands
+export HISTFILESIZE=20000        # Store more in the file
+export HISTCONTROL=ignoredups:erasedups  # No duplicate entries
+shopt -s histappend              # Append to history, don't overwrite
 
-# Colored prompt
-export PS1='\[\e[32m\]\u@\h\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ '
-CONFIG
+# --- Colored Prompt ---
+export PS1='\[\e[32m\]\u\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ '
 
+MYCONFIG
+
+# Reload the configuration:
 source ~/.bashrc
-echo "Shell configured! Try: ll, mkcd test-dir, .."
+
+# Test it:
+echo ""
+echo "Testing your new configuration:"
+echo "================================"
+ll /etc | head -5
+echo ""
+echo "Your aliases:"
+alias | head -10
+echo ""
+echo "Your IP: $(myip 2>/dev/null || echo 'could not reach internet')"
+echo ""
+echo "Configuration loaded successfully."
 ```
 
-Test each alias and function you created.
+Try out your new shortcuts:
+
+```bash
+# Navigation:
+..             # Goes up one directory
+ll             # Detailed file listing
+
+# System info:
+disk           # Shows disk usage
+mem            # Shows memory usage
+
+# Functions:
+mkcd ~/devops-learning/test-dir   # Creates and enters directory
+pwd            # Verify you're in the new directory
+
+# Clean up test:
+cd ~/devops-learning
+rmdir test-dir
+```
+
+This configuration will follow you through the rest of this course and into your career. As you learn new tools, you'll add new aliases. Your `.bashrc` is a living document that grows with you.
 
 </MiniProject>
 
-## Key Takeaways
+## Let's Check What Stuck
 
-- `Ctrl + R` (reverse search), `Tab` (autocomplete), and `Ctrl + A/E` (line navigation) are the shortcuts that matter most
-- Command history (`!!`, `!$`, `!command`) saves retyping
-- Globbing (`*`, `?`, `{}`) lets you work with multiple files at once
-- Aliases and functions in `~/.bashrc` automate your most common commands
-- A well-configured terminal multiplies your productivity
+<Quiz>
+<QuizQuestion
+  question="You typed a long SSH command 30 minutes ago and need to run it again. What's the fastest way?"
+  options={[
+    "Press the Up arrow key 100 times",
+    "Open your history file and manually copy it",
+    "Press Ctrl+R and type a few letters from the command",
+    "Retype the whole thing"
+  ]}
+  answer={2}
+  explanation="Ctrl+R does a reverse search through your entire command history. Type 'ssh' or any part of the command, and Bash finds it instantly. Press Ctrl+R again to cycle through multiple matches. This is the single most time-saving shortcut in the terminal."
+/>
+<QuizQuestion
+  question="You typed 'apt install nginx' and got 'Permission denied.' What's the fastest fix?"
+  options={[
+    "Press Up, Home, type 'sudo ', Enter",
+    "Type 'sudo !!' to rerun the last command with sudo",
+    "Retype the whole command with sudo",
+    "Log out and log in as root"
+  ]}
+  answer={1}
+  explanation="'sudo !!' reruns the last command with sudo prepended. It's one of the most satisfying shortcuts to learn. '!!' expands to the full text of your last command, and 'sudo' runs it with elevated privileges."
+/>
+<QuizQuestion
+  question="What does pressing Tab twice do in bash?"
+  options={[
+    "Inserts a tab character",
+    "Shows all possible completions for what you've typed so far",
+    "Runs the command twice",
+    "Moves to the next field"
+  ]}
+  answer={1}
+  explanation="Single Tab autocompletes if there's only one match. Double Tab shows ALL possible completions when there are multiple matches. This is invaluable for discovering available commands, files, and options."
+/>
+<QuizQuestion
+  question="What's the difference between Ctrl+C and Ctrl+Z?"
+  options={[
+    "They do the same thing",
+    "Ctrl+C copies text, Ctrl+Z undoes it",
+    "Ctrl+C kills the process, Ctrl+Z suspends it (you can resume with 'fg')",
+    "Ctrl+C is for Linux, Ctrl+Z is for Mac"
+  ]}
+  answer={2}
+  explanation="Ctrl+C sends a SIGINT signal that kills the process — it's gone. Ctrl+Z sends SIGTSTP that suspends it — it's still alive, just paused. You can bring it back with 'fg' (foreground). This is important when you're in the middle of editing something and need to quickly check on something else."
+/>
+</Quiz>
 
-## What's Next
+## What's Coming Next
 
-Now that you're comfortable in the terminal, it's time to understand what's running under the hood. In **Linux Architecture**, you'll explore the four layers of a Linux system — hardware, kernel, shell, and applications — and learn the Filesystem Hierarchy Standard that organizes every Linux server.
+You now have the muscle memory foundation that makes everything else easier. Every lesson from here on out will be faster because you can navigate the terminal without thinking about it.
+
+Next up — **Linux Architecture**. We're going to look under the hood at how Linux is actually structured. The kernel, the shell, user space, system calls — understanding this will change how you think about containers, processes, and everything you'll build on top of Linux.
+
+But before you move on — go back to Exercise 1 and do the Big Three drill one more time. Seriously. Muscle memory comes from repetition, not from reading.
+
+See you in the next one.

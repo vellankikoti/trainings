@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { ensureProfile, updateLessonProgress } from "@/lib/progress";
+import { updateStreak } from "@/lib/streaks";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import { lessonProgressSchema, validateBody } from "@/lib/validations";
 
@@ -36,6 +37,13 @@ export async function POST(request: Request) {
     lessonSlug,
     status,
   );
+
+  // Update streak and daily activity on completion
+  if (status === "completed" && result.xpAwarded > 0) {
+    updateStreak(profileId, "lesson", result.xpAwarded).catch((err) =>
+      console.error("Streak update failed:", err),
+    );
+  }
 
   return NextResponse.json(result);
 }

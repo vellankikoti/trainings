@@ -1,304 +1,497 @@
 ---
 title: "Installing Linux"
-description: "Set up your own Linux environment for hands-on learning — choose from WSL, VirtualBox, or a cloud instance depending on your setup."
+description: "Let's get you a real Linux environment — step by step, hand by hand, no matter what computer you're on right now."
 order: 2
 xpReward: 100
 estimatedMinutes: 40
 prerequisites:
   - 01-the-linux-story
 objectives:
-  - Set up a Linux environment on your operating system
-  - Configure WSL 2 on Windows
-  - Create a VirtualBox virtual machine with Ubuntu
-  - Launch and connect to a cloud Linux instance
+  - Set up a working Linux environment on your machine
+  - Configure WSL 2 on Windows (the recommended path)
+  - Create a VirtualBox VM with Ubuntu (if you prefer isolation)
+  - Connect to a cloud instance (the "real server" experience)
 tags:
   - linux
   - installation
   - setup
   - wsl
   - virtualbox
+key_takeaways:
+  - You now have a real Linux system you can use for every lesson going forward
+  - WSL 2 is the fastest path for Windows users — it's what the pros use
+  - Cloud instances give you the closest experience to managing production servers
+  - Your learning environment is documented — that's a real DevOps habit
+reflection_prompt: "Which installation method did you choose and why? Did anything surprise you about how easy (or tricky) it was to get Linux running?"
 ---
 
-<Callout type="story" title="The Story">
-Every DevOps journey starts with a Linux terminal. But getting one running used to mean wiping your hard drive or buying a new computer. Today, you can have a full Linux environment running in minutes — right alongside your current operating system. Let's get you set up.
+<Callout type="story" title="Here's the truth">
+I've seen people spend weeks "researching the perfect Linux setup" before they ever type a single command. Weeks. And you know what the experienced engineers were doing during that time? Practicing. On any Linux they could get their hands on.
+
+The best Linux environment is the one you actually use. So let's get you one in the next 20 minutes. I'm going to walk you through this like I'm sitting right next to you. If something goes wrong, there's a troubleshooting section at the bottom — but for most of you, this is going to be smoother than you expect.
 </Callout>
 
-## Choose Your Path
+## First — Pick Your Path
 
-Pick the option that matches your current operating system and comfort level:
+I'm going to give you four options. Here's my honest take on each one:
+
+| If you're on... | I'd recommend... | Why |
+|---|---|---|
+| **Windows** | WSL 2 | It's what professional developers use daily. Full Linux, zero hassle. |
+| **Mac** | Your built-in Terminal | macOS is Unix-based. 90% of what we learn works natively. |
+| **Any computer** | Browser Playground | Zero setup, start in seconds. Perfect for learning. |
+| **Wanting real server skills** | Cloud Instance | This is the actual job — managing remote servers. |
+
+No option is wrong. They all give you real Linux. Pick the one that gets you practicing fastest.
 
 <TabGroup>
 <Tab label="WSL 2 (Windows)">
 
-**Best for:** Windows users who want a seamless Linux experience
+## Setting Up WSL 2 — Your Linux Inside Windows
 
-WSL 2 (Windows Subsystem for Linux) runs a real Linux kernel inside Windows. It's fast, integrated, and the recommended choice for Windows users.
+This is my top recommendation for Windows users. WSL 2 runs a real Linux kernel inside Windows. Not a simulation. Not an emulator. A real Linux system, fully integrated with your Windows machine.
 
-### Prerequisites
-- Windows 10 version 2004+ or Windows 11
-- Admin access to your machine
+### Before We Start
 
-### Installation
+You need:
+- Windows 10 (version 2004 or later) or Windows 11
+- Admin access to your computer
+- About 10 minutes
+
+### Let's Do This
+
+**Step 1: Open PowerShell as Administrator**
+
+Right-click the Start button → "Windows Terminal (Admin)" or "PowerShell (Admin)"
+
+You should see a blue terminal window. If it asks "Do you want to allow this app to make changes?" — say Yes.
+
+**Step 2: Install WSL**
+
+Type this one command and press Enter:
 
 ```powershell
-# Open PowerShell as Administrator
-
-# 1. Enable WSL
 wsl --install
+```
 
-# This installs Ubuntu by default.
-# Restart your computer when prompted.
+That's it. One command. It will:
+- Enable the WSL feature
+- Download the Linux kernel
+- Install Ubuntu (the default distro)
 
-# 2. After restart, open Ubuntu from the Start menu
-# Set your Unix username and password when prompted
+You'll see progress bars. It takes 2-5 minutes depending on your internet.
 
-# 3. Update the system
+**Step 3: Restart Your Computer**
+
+When it says it's done, restart. I know, restarting is annoying. Do it anyway.
+
+**Step 4: Set Up Your Linux User**
+
+After restart, a terminal window will open automatically (or open "Ubuntu" from the Start menu). It'll ask you to create a username and password.
+
+A few things:
+- **Pick a simple username** — all lowercase, no spaces. Something like `ravi` or `sarah`.
+- **The password won't show as you type** — this freaks everyone out the first time. It's a security feature. Just type your password and press Enter. You can't see it, but it IS being recorded.
+- **Remember this password** — you'll need it whenever you use `sudo` (which is a lot).
+
+```bash
+# After setting username and password, you'll see something like:
+ravi@DESKTOP-ABC123:~$
+
+# That blinking cursor? That's your Linux terminal. You're in.
+```
+
+**Step 5: Update Everything**
+
+Your first real Linux command as a system administrator:
+
+```bash
 sudo apt update && sudo apt upgrade -y
 ```
 
-### Verify Installation
+`sudo` means "run this as the administrator." `apt` is Ubuntu's package manager. You just told your system "check for updates and install them all." This is something you'll do on every server you ever manage.
+
+**Step 6: Install the Tools We'll Need**
 
 ```bash
-# Check you're running WSL 2
-wsl -l -v
-
-# Check Ubuntu version
-lsb_release -a
-
-# Check kernel
-uname -r
-# Should show something like: 5.15.90.1-microsoft-standard-WSL2
+sudo apt install -y curl wget git vim htop tree net-tools
 ```
 
-### Install Essential Tools
+This installs a toolkit of essentials. Don't worry about what each one does yet — we'll cover every single one in upcoming lessons.
 
-```bash
-sudo apt install -y \
-  build-essential \
-  curl \
-  wget \
-  git \
-  vim \
-  htop \
-  tree \
-  net-tools
-```
-
-<Callout type="tip">
-WSL 2 shares your Windows filesystem. Access Windows files at `/mnt/c/`. Access WSL files from Windows at `\\wsl$\Ubuntu\`.
+<Callout type="tip" title="Bonus: Accessing files between Windows and Linux">
+Your Windows C: drive is available inside Linux at `/mnt/c/`. Your Linux files are available from Windows at `\\wsl$\Ubuntu\`. This means you can edit files in VS Code on Windows and run them in Linux. Best of both worlds.
 </Callout>
 
 </Tab>
 <Tab label="VirtualBox (Any OS)">
 
-**Best for:** Users who want a fully isolated Linux environment
+## Setting Up a VirtualBox VM — Full Isolation
 
-VirtualBox creates a virtual machine running its own copy of Linux.
+VirtualBox gives you a completely separate Linux machine running inside your current operating system. It's a bit more setup, but it gives you the clearest picture of "this is a separate computer running Linux."
 
-### Step 1: Download VirtualBox
-Visit virtualbox.org and download the installer for your OS.
+### What You'll Need
 
-### Step 2: Download Ubuntu ISO
-Download Ubuntu Server 22.04 LTS from ubuntu.com/download/server.
+- VirtualBox installed ([virtualbox.org](https://www.virtualbox.org/))
+- Ubuntu Server 22.04 ISO ([ubuntu.com/download/server](https://ubuntu.com/download/server))
+- About 20 minutes
 
-### Step 3: Create the VM
+### Step by Step
 
-1. Open VirtualBox → Click "New"
-2. Name: `ubuntu-lab`, Type: Linux, Version: Ubuntu (64-bit)
-3. Memory: 2048 MB (2 GB minimum)
-4. Hard disk: Create a virtual hard disk, VDI, dynamically allocated, 20 GB
-5. Click "Create"
+**1. Create the VM**
 
-### Step 4: Install Ubuntu
+Open VirtualBox → Click "New" → Fill in:
+- **Name:** `linux-lab`
+- **Type:** Linux
+- **Version:** Ubuntu (64-bit)
+- **Memory:** 2048 MB (2 GB minimum, 4 GB is better if you can spare it)
+- **Hard disk:** Create new, VDI format, dynamically allocated, 20 GB
 
-1. Select your VM → Click "Start"
-2. Select the Ubuntu ISO when prompted
-3. Follow the installer:
-   - Language: English
-   - Install Ubuntu Server
-   - Network: Use defaults
-   - Storage: Use entire disk
-   - Create user: Your name, username, and password
-   - Install OpenSSH server: Yes
-4. Reboot when complete
+Click "Create."
 
-### Step 5: Connect via SSH
+**2. Mount the Ubuntu ISO**
+
+Select your VM → Settings → Storage → Click the empty disk icon → Choose the Ubuntu ISO you downloaded.
+
+**3. Start and Install**
+
+Click "Start." The Ubuntu installer will boot. Follow along:
+
+- **Language:** English
+- **Install:** Ubuntu Server
+- **Network:** Accept the defaults (it'll auto-detect)
+- **Storage:** "Use entire disk" (it's a virtual disk, nothing to worry about)
+- **Your info:** Pick a name, a server name (`linux-lab`), a username, and a password
+- **SSH server:** Yes, install it. We'll need this.
+- **Featured snaps:** Skip all of them
+
+Let it install. Takes 5-10 minutes. Reboot when it asks.
+
+**4. Log In and Update**
+
+After reboot, you'll see a login prompt. Enter your username and password.
 
 ```bash
-# Find your VM's IP address (run inside the VM)
-ip addr show | grep inet
+# First things first:
+sudo apt update && sudo apt upgrade -y
 
-# From your host machine, connect:
-ssh your-username@vm-ip-address
+# Install essentials:
+sudo apt install -y curl wget git vim htop tree net-tools
 ```
+
+**5. Set Up SSH Access (optional but recommended)**
+
+This lets you connect from your normal terminal instead of the VirtualBox window:
+
+```bash
+# Inside the VM, find your IP:
+ip addr show | grep "inet " | grep -v 127.0.0.1
+
+# From your host machine:
+ssh your-username@that-ip-address
+```
+
+<Callout type="info" title="When to use VirtualBox vs. WSL">
+VirtualBox gives you a completely isolated environment — it's great for practicing things like network configuration or disk management where you want to experiment without any risk. WSL is better for daily use because it's faster and more integrated. Both are real Linux.
+</Callout>
 
 </Tab>
 <Tab label="Cloud Instance">
 
-**Best for:** Users who want a real server experience
+## Spinning Up a Cloud Server — The Real Deal
 
-Spin up a Linux server on a cloud provider. Most offer free tiers.
+This option gives you the experience closest to what you'll actually do on the job. You're going to rent a server in a data center somewhere and connect to it over the internet. This is literally how production infrastructure works.
 
-### AWS Free Tier
+### Option A: AWS Free Tier
 
 ```bash
-# 1. Sign up at aws.amazon.com (requires credit card, but won't charge)
-# 2. Go to EC2 → Launch Instance
-# 3. Choose: Ubuntu Server 22.04 LTS
-# 4. Instance type: t2.micro (free tier)
-# 5. Create a key pair (download the .pem file)
-# 6. Launch
+# 1. Go to aws.amazon.com and create an account
+#    (requires credit card, but t2.micro is FREE for 12 months)
+#
+# 2. Go to EC2 → "Launch Instance"
+#    - Name: "linux-lab"
+#    - AMI: Ubuntu Server 22.04 LTS
+#    - Instance type: t2.micro (Free tier eligible)
+#    - Key pair: Create new → download the .pem file → keep it safe
+#    - Security group: Allow SSH (port 22) from your IP
+#    - Click "Launch Instance"
+#
+# 3. Connect from your terminal:
 
-# Connect from your terminal:
-chmod 400 your-key.pem
-ssh -i your-key.pem ubuntu@your-public-ip
+# First, make the key file secure (Linux/Mac):
+chmod 400 ~/Downloads/your-key.pem
+
+# Then connect:
+ssh -i ~/Downloads/your-key.pem ubuntu@your-public-ip-address
 ```
 
-### DigitalOcean
+### Option B: DigitalOcean (Simpler)
 
 ```bash
-# 1. Sign up at digitalocean.com ($200 free credit)
-# 2. Create Droplet → Ubuntu 22.04 → Basic → $6/mo
-# 3. Add SSH key or use password
-# 4. Connect:
+# 1. Go to digitalocean.com (new accounts get $200 free credit)
+#
+# 2. Create → Droplets
+#    - Ubuntu 22.04
+#    - Basic plan → $6/month
+#    - Choose a region close to you
+#    - Authentication: SSH key (recommended) or Password
+#
+# 3. Connect:
 ssh root@your-droplet-ip
 ```
 
-<Callout type="warning">
-Remember to stop or terminate cloud instances when not in use to avoid charges. Set a billing alert as a safety net.
+### After You Connect
+
+No matter which cloud provider you used:
+
+```bash
+# Update the system:
+sudo apt update && sudo apt upgrade -y
+
+# Install essentials:
+sudo apt install -y curl wget git vim htop tree net-tools
+
+# Check your server's specs:
+echo "CPU cores: $(nproc)"
+echo "Memory: $(free -h | grep Mem | awk '{print $2}')"
+echo "Disk: $(df -h / | tail -1 | awk '{print $2}')"
+```
+
+<Callout type="warning" title="Seriously — set a billing alert">
+I've mentored people who forgot about a running instance and got a surprise bill. Go to your cloud provider's billing page RIGHT NOW and set an alert for $5. It takes 30 seconds and saves you from a bad day. Also — stop or terminate your instance when you're done practicing. You can always create a new one.
 </Callout>
 
 </Tab>
 <Tab label="macOS Terminal">
 
-**Best for:** Mac users who want to start immediately
+## macOS — You're Already Closer Than You Think
 
-macOS is built on Unix (BSD), so many Linux commands work natively. For a true Linux environment, use Lima or Docker.
+Here's a nice surprise: macOS is built on Unix (BSD), which is Linux's close cousin. About 90% of the Linux commands we'll learn in this course work natively in your Mac's Terminal app. No installation needed.
+
+### Getting Started
 
 ```bash
-# Your Mac Terminal already supports most commands:
-ls, cd, mkdir, cp, mv, grep, awk, sed, curl, ssh
+# Open Terminal: Applications → Utilities → Terminal
+# Or the fast way: Cmd + Space, type "Terminal", press Enter
 
-# For a full Linux VM using Lima:
+# Verify you're in business:
+whoami
+pwd
+ls
+uname -a
+```
+
+That's it. You're ready for most of this course.
+
+### A Few Differences to Know About
+
+| Linux | macOS | Notes |
+|---|---|---|
+| `apt install` | `brew install` | macOS uses Homebrew as its package manager |
+| `free -h` | `vm_stat` or `top -l 1` | Different memory commands |
+| `ss -tlnp` | `lsof -i -P` | Different network commands |
+| GNU coreutils | BSD coreutils | Some flags differ (e.g., `sed -i` needs `''` on Mac) |
+
+### Install Homebrew (macOS Package Manager)
+
+If you don't have it yet:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then install some tools that match what Linux has:
+
+```bash
+brew install coreutils gnu-sed gawk wget htop tree
+```
+
+### When You'll Need Real Linux
+
+For Docker and Kubernetes lessons later in this course, you'll need actual Linux. When we get there, I'll show you how to set up:
+
+```bash
+# Lima — lightweight Linux VMs for Mac
 brew install lima
 limactl start default
-
-# Access the Linux VM:
 limactl shell default
+# Now you're in a real Ubuntu VM
 ```
+
+But for now, your Mac Terminal is perfect. Let's keep moving.
 
 </Tab>
 </TabGroup>
 
-<Exercise number={1} title="Verify Your Environment">
+## Verification — Let's Make Sure Everything Works
 
-Regardless of which method you chose, run these commands to verify everything works:
+Regardless of which path you chose, run these commands. Every single one should work:
+
+<Exercise number={1} title="The Verification Checklist">
+
+Run each command. If any of them fails, check the troubleshooting section below.
 
 ```bash
-# 1. Check your user
+# 1. Are you logged in?
 whoami
+# Should print your username
 
-# 2. Check the OS
-cat /etc/os-release
+# 2. Where are you?
+pwd
+# Should print something like /home/yourusername
 
-# 3. Check available disk space
-df -h /
+# 3. What system is this?
+cat /etc/os-release | grep PRETTY_NAME
+# Should print your distro name and version
 
-# 4. Check available memory
-free -h
-
-# 5. Check internet connectivity
+# 4. Is the internet working?
 ping -c 3 google.com
+# Should show 3 successful pings
 
-# 6. Check package manager works
-sudo apt update 2>/dev/null || sudo yum check-update 2>/dev/null
+# 5. Does the package manager work?
+sudo apt update 2>/dev/null && echo "Package manager: OK" || echo "Not apt-based (that's fine on macOS)"
+
+# 6. Is disk space available?
+df -h /
+# Should show available space
+
+# 7. Is memory available?
+free -h 2>/dev/null || echo "Memory: $(sysctl hw.memsize 2>/dev/null | awk '{print $2/1073741824 " GB"}')"
 ```
 
-All commands should run without errors.
+Every command worked? You're set. If something failed, read on.
 
 </Exercise>
 
-<Exercise number={2} title="Set Up Your Learning Environment">
+## Setting Up Your Learning Workspace
 
-Configure your system for the rest of this course:
+Before we go further, let's create a home base for all your practice work. This is a habit that every good engineer has — keep your projects organized.
+
+<Exercise number={2} title="Create Your DevOps Workspace">
 
 ```bash
-# Create a directory for course work
-mkdir -p ~/devops-learning
+# Create your learning directory
+mkdir -p ~/devops-learning/linux
 cd ~/devops-learning
 
-# Create a log of your progress
-echo "Started DevOps learning on $(date)" > progress.log
+# Create a progress log (your engineering journal)
+cat > progress.log << 'EOF'
+# DevOps Learning Progress
+# Started: $(date)
+# Goal: Become a job-ready DevOps engineer
 
-# Verify git is installed
+## Completed
+- [x] Lesson 1: The Linux Story
+- [x] Lesson 2: Installing Linux ← you are here
+EOF
+
+# Verify the file was created
+cat progress.log
+
+# Check that git is installed (we'll need it later)
 git --version || sudo apt install -y git
 
-# Set up a basic bash configuration
-echo 'export PS1="\[\e[32m\]\u@\h\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ "' >> ~/.bashrc
+# Set up a nice prompt that shows your current directory
+echo 'export PS1="\[\e[32m\]\u\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ "' >> ~/.bashrc
 source ~/.bashrc
 ```
 
+Notice what we just did? We created a directory, wrote a file, verified a tool was installed, and customized our terminal — all from the command line. You're already using Linux like an engineer.
+
 </Exercise>
 
-## Troubleshooting Installation
+## When Things Go Wrong (Troubleshooting)
 
-<Callout type="danger" title="Common Issues">
+If you hit a wall during installation, don't panic. Here's a fix for every common problem:
 
-**WSL won't install:**
-- Ensure virtualization is enabled in BIOS
-- Run `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`
+<Callout type="danger" title="Common Issues and Fixes">
 
-**VirtualBox VM won't start:**
-- Enable VT-x/AMD-V in BIOS settings
-- Disable Hyper-V if on Windows: `bcdedit /set hypervisorlaunchtype off`
+**"WSL --install does nothing" or "WSL won't start"**
+1. Make sure virtualization is enabled in your BIOS. Restart → press F2/Del during boot → find "VT-x" or "AMD-V" → enable it
+2. Run in PowerShell (Admin): `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`
+3. Restart and try again
 
-**SSH connection refused:**
-- Ensure SSH is installed: `sudo apt install openssh-server`
-- Check it's running: `sudo systemctl status ssh`
-- Check firewall: `sudo ufw allow ssh`
-</Callout>
+**"VirtualBox VM won't start — error about VT-x"**
+- Same BIOS fix as above — enable virtualization
+- On Windows: Disable Hyper-V first: `bcdedit /set hypervisorlaunchtype off` then restart
 
-<MiniProject title="Environment Documentation">
+**"Permission denied" when running commands**
+- Prefix the command with `sudo`: `sudo apt update`
+- If sudo itself fails, you might not have admin privileges. On cloud: check you're using the right user (usually `ubuntu` for AWS, `root` for DigitalOcean)
 
-Create a document that records your Linux environment setup. This is a real DevOps practice — documenting your infrastructure:
-
+**"Connection refused" when trying to SSH**
 ```bash
-cat > ~/devops-learning/my-environment.md << 'REPORT'
-# My Linux Learning Environment
+# On the server, check if SSH is running:
+sudo systemctl status ssh
 
-## Setup Method
-<!-- WSL 2 / VirtualBox / Cloud / macOS -->
+# If it's not installed:
+sudo apt install openssh-server
+sudo systemctl start ssh
+sudo systemctl enable ssh
 
-## System Info
-- **OS:** (output of `cat /etc/os-release | grep PRETTY_NAME`)
-- **Kernel:** (output of `uname -r`)
-- **Architecture:** (output of `uname -m`)
-- **Memory:** (output of `free -h | grep Mem`)
-- **Disk:** (output of `df -h / | tail -1`)
-
-## Installed Tools
-- git: (output of `git --version`)
-- curl: (output of `curl --version | head -1`)
-
-## Date Setup
-<!-- Today's date -->
-REPORT
-
-echo "Created environment documentation at ~/devops-learning/my-environment.md"
+# Check firewall isn't blocking it:
+sudo ufw allow ssh
 ```
 
-Fill in the details. You've just practiced infrastructure documentation.
+**"apt update" gives errors**
+```bash
+# Check internet connectivity first:
+ping -c 3 google.com
+
+# If ping works but apt doesn't, DNS might be off:
+echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+
+# Then retry:
+sudo apt update
+```
+
+</Callout>
+
+Still stuck? That's OK. Debugging installation issues is actually great practice for the job. Try searching the exact error message you see — that's what experienced engineers do too.
+
+<MiniProject title="Document Your Environment">
+
+This is a real DevOps habit — documenting your infrastructure. Let's create a record of what you just set up:
+
+```bash
+cat > ~/devops-learning/my-environment.md << 'EOF'
+# My Linux Learning Environment
+
+## Setup Date
+$(date)
+
+## Setup Method
+<!-- Write which method you used: WSL 2, VirtualBox, Cloud, or macOS -->
+
+## System Information
+EOF
+
+# Now append your actual system info:
+echo "- **OS:** $(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2 || echo 'macOS')" >> ~/devops-learning/my-environment.md
+echo "- **Kernel:** $(uname -r)" >> ~/devops-learning/my-environment.md
+echo "- **Architecture:** $(uname -m)" >> ~/devops-learning/my-environment.md
+echo "- **User:** $(whoami)" >> ~/devops-learning/my-environment.md
+echo "- **Shell:** $SHELL" >> ~/devops-learning/my-environment.md
+echo "" >> ~/devops-learning/my-environment.md
+echo "## Tools Installed" >> ~/devops-learning/my-environment.md
+echo "- git: $(git --version 2>/dev/null || echo 'not installed')" >> ~/devops-learning/my-environment.md
+echo "- curl: $(curl --version 2>/dev/null | head -1 || echo 'not installed')" >> ~/devops-learning/my-environment.md
+echo "- vim: $(vim --version 2>/dev/null | head -1 || echo 'not installed')" >> ~/devops-learning/my-environment.md
+
+# See what you just created:
+echo ""
+echo "--- Your Environment Documentation ---"
+cat ~/devops-learning/my-environment.md
+```
+
+You just wrote documentation for your infrastructure using nothing but the terminal. In real jobs, this same skill is used to document servers, networks, and deployment processes. Muscle memory starts now.
 
 </MiniProject>
 
-## Key Takeaways
+## What's Coming Next
 
-- WSL 2 is the easiest way for Windows users to get a real Linux environment
-- VirtualBox provides a fully isolated virtual machine on any OS
-- Cloud instances give you a real server experience with free tiers available
-- macOS Terminal supports most Linux commands natively
-- Always verify your installation with basic commands before proceeding
+You have a real Linux system. You have a workspace. You've run your first dozen commands.
 
-## What's Next
+In the next lesson — **Terminal Mastery** — I'm going to show you the keyboard shortcuts, history tricks, and tab completion techniques that make experienced engineers look like they're typing at superhuman speed. It's not magic. It's just muscle memory. And after 30 minutes of practice, you'll have it too.
 
-Now that you have a working Linux environment, it's time to master the tool you'll use every day: the terminal. In **Terminal Mastery**, you'll learn bash shortcuts, command history, tab completion, and the skills that make experienced engineers look like wizards.
+See you there.

@@ -34,7 +34,7 @@
       "type": "true_false",
       "question": "Python is only suitable for web development and cannot effectively replace shell scripts for system administration tasks.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "Python is extremely effective for system administration. Modules like os, subprocess, shutil, and pathlib provide comprehensive system interaction capabilities. Many organizations use Python for configuration management, log analysis, deployment automation, and infrastructure provisioning.",
       "difficulty": "beginner",
       "lessonRef": "01-why-python-for-devops"
@@ -164,7 +164,7 @@
       "type": "true_false",
       "question": "In Python, the 'for/else' construct executes the 'else' block only when the loop completes without encountering a 'break' statement.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "Python's for/else is unique: the else block runs only if the loop finishes normally (without break). This is useful for search patterns, e.g., checking if any server is unhealthy and breaking, with the else block confirming all servers are healthy.",
       "difficulty": "intermediate",
       "lessonRef": "05-control-flow"
@@ -309,7 +309,7 @@
       "type": "true_false",
       "question": "When using json.dumps(), the default parameter can be set to a function that handles serialization of objects that are not natively JSON-serializable, such as datetime objects.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "The default parameter accepts a callable that is invoked for objects that cannot be serialized. For example: json.dumps(data, default=str) converts non-serializable objects to strings, and custom functions can handle datetime, Decimal, or other types.",
       "difficulty": "intermediate",
       "lessonRef": "08-working-with-json-yaml"
@@ -349,7 +349,7 @@
       "type": "true_false",
       "question": "Using subprocess.run() with shell=True is considered safe for automation scripts even when incorporating user-provided input into the command string.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "Using shell=True with user input is a major security risk as it enables shell injection attacks. An attacker could inject commands like '; rm -rf /'. Always use a list of arguments without shell=True, or use shlex.quote() if shell=True is absolutely necessary.",
       "difficulty": "intermediate",
       "lessonRef": "09-os-and-subprocess"
@@ -434,7 +434,7 @@
       "type": "true_false",
       "question": "In Python, the 'finally' block in a try/except/finally construct executes regardless of whether an exception was raised or not, making it ideal for cleanup operations like closing connections.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "The 'finally' block always executes, whether the try block succeeds, an exception is caught, or an exception propagates. This makes it ideal for cleanup: closing database connections, releasing file handles, or restoring system state in automation scripts.",
       "difficulty": "beginner",
       "lessonRef": "11-error-handling-logging"
@@ -564,7 +564,7 @@
       "type": "true_false",
       "question": "Paramiko's SFTPClient allows you to transfer files over SSH and supports operations like put(), get(), listdir(), and stat() for remote file management.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "Paramiko's SFTPClient provides full SFTP functionality over SSH. sftp.put(local, remote) uploads files, sftp.get(remote, local) downloads them, sftp.listdir() lists remote directories, and sftp.stat() gets file metadata. It is obtained via client.open_sftp().",
       "difficulty": "intermediate",
       "lessonRef": "14-paramiko-ssh"
@@ -664,7 +664,7 @@
       "type": "true_false",
       "question": "The Kubernetes Python client's watch module allows you to stream real-time events from the cluster, such as pod creation, deletion, and status changes.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "The watch.Watch() class provides a stream() method that wraps list API calls into a streaming interface. This uses the Kubernetes watch API to receive real-time notifications, which is essential for building monitoring tools and custom controllers.",
       "difficulty": "advanced",
       "lessonRef": "16-kubernetes-client"
@@ -764,7 +764,7 @@
       "type": "true_false",
       "question": "The @pytest.mark.parametrize decorator allows running the same test function with multiple sets of input data and expected results.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "@pytest.mark.parametrize('input,expected', [(1, 2), (2, 4)]) runs the test once for each tuple. This reduces code duplication when testing a function with various inputs, and each parameterized case is reported as a separate test result.",
       "difficulty": "advanced",
       "lessonRef": "18-testing-automation"
@@ -804,7 +804,7 @@
       "type": "true_false",
       "question": "Python's psutil library can monitor CPU usage, memory consumption, disk I/O, network statistics, and running processes, making it a comprehensive tool for system monitoring scripts.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "psutil (process and system utilities) provides cross-platform access to system metrics: psutil.cpu_percent(), psutil.virtual_memory(), psutil.disk_io_counters(), psutil.net_io_counters(), and psutil.process_iter(). It is the go-to library for Python monitoring scripts.",
       "difficulty": "intermediate",
       "lessonRef": "19-monitoring-scripts"
@@ -859,7 +859,7 @@
       "type": "true_false",
       "question": "In production Python automation, using 'if __name__ == \"__main__\"' is important because it prevents the script's main logic from executing when the module is imported by other scripts or test suites.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "The 'if __name__ == \"__main__\"' guard ensures that the main execution block only runs when the script is invoked directly, not when it is imported as a module. This is essential for production automation because it allows functions to be reused and tested independently.",
       "difficulty": "beginner",
       "lessonRef": "20-production-automation"

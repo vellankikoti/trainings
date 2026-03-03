@@ -4,6 +4,8 @@
   "pathSlug": "containerization",
   "title": "Docker Fundamentals Assessment",
   "description": "Test your Docker fundamentals knowledge across containers, images, volumes, networking, Compose, and production workflows. 60 questions covering all 15 lessons.",
+  "lessonSlug": "",
+  "passingScore": 80,
   "settings": {
     "questionsPerAttempt": 35,
     "passingScore": 80,
@@ -34,7 +36,7 @@
       "type": "true_false",
       "question": "Docker containers include a full guest operating system, just like virtual machines.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "Containers share the host OS kernel and only package the application and its dependencies, making them much lighter than VMs which include a full guest OS.",
       "difficulty": "beginner",
       "lessonRef": "01-the-docker-story"
@@ -299,7 +301,7 @@
       "type": "true_false",
       "question": "The VOLUME instruction in a Dockerfile creates a named volume that persists data even after the container is removed.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "The VOLUME instruction creates an anonymous volume, not a named volume. Anonymous volumes get random names and while they persist after container removal, they are hard to identify and manage. Use named volumes at runtime for reliable persistence.",
       "difficulty": "advanced",
       "lessonRef": "05-volumes-and-persistence"
@@ -459,7 +461,7 @@
       "type": "true_false",
       "question": "Running a container with the '--privileged' flag gives it full access to all host devices and disables most security features.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "The --privileged flag disables nearly all container security features including seccomp, AppArmor, and capability restrictions. It gives the container access to all host devices. It should be avoided in production unless absolutely necessary.",
       "difficulty": "advanced",
       "lessonRef": "08-docker-security"
@@ -529,7 +531,7 @@
       "type": "true_false",
       "question": "Environment variables defined with the ENV instruction in a Dockerfile cannot be overridden when starting a container.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "ENV values serve as defaults but can be overridden at runtime using docker run -e, docker compose environment sections, or .env files. This is a key feature for configuring containers for different environments.",
       "difficulty": "intermediate",
       "lessonRef": "09-environment-configuration"
@@ -569,7 +571,7 @@
       "type": "true_false",
       "question": "When you pull an image tagged as 'latest', Docker guarantees it is the most recently built version of that image.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "'latest' is just a default tag with no special semantic meaning. It does not automatically track the newest build. It is simply assigned when no tag is specified. Production deployments should always use explicit version tags.",
       "difficulty": "intermediate",
       "lessonRef": "10-working-with-registries"
@@ -624,7 +626,7 @@
       "type": "true_false",
       "question": "In a multi-stage Docker build, all stages are included in the final image.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "Only the last stage (or a stage specified with --target) produces the final image. Previous stages are used during the build process but are discarded from the final image. Only files explicitly copied from earlier stages are included.",
       "difficulty": "intermediate",
       "lessonRef": "11-multi-stage-builds"
@@ -694,7 +696,7 @@
       "type": "true_false",
       "question": "The restart policy 'on-failure:5' will restart a container a maximum of 5 times if it exits with a non-zero exit code.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "The on-failure policy with a max retry count (on-failure:5) restarts the container only when it exits with a non-zero status, up to the specified maximum number of attempts. This prevents infinite restart loops for fatally broken containers.",
       "difficulty": "advanced",
       "lessonRef": "12-health-checks-and-restart-policies"
@@ -749,7 +751,7 @@
       "type": "true_false",
       "question": "Using 'RUN apt-get update && apt-get install -y curl' in a single RUN instruction is better practice than splitting them into two separate RUN instructions.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "Combining apt-get update and install in one RUN prevents a stale package cache problem. If separated, the cached 'update' layer might be used with a newer 'install' layer, causing package-not-found errors. It also reduces the number of layers.",
       "difficulty": "advanced",
       "lessonRef": "13-best-practices"
@@ -804,7 +806,7 @@
       "type": "true_false",
       "question": "The 'docker logs' command can only show logs from currently running containers.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "docker logs can show logs from both running and stopped containers, as long as the container has not been removed. This is essential for debugging containers that have crashed or exited unexpectedly.",
       "difficulty": "intermediate",
       "lessonRef": "14-debugging-and-troubleshooting"
@@ -844,7 +846,7 @@
       "type": "true_false",
       "question": "In a production environment, it is considered best practice to use the 'latest' tag for container images to ensure you always run the newest version.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "Using 'latest' in production is dangerous because it is mutable and unpredictable. You may unknowingly deploy breaking changes. Always use specific version tags or image digests (SHA256) for reproducible and auditable deployments.",
       "difficulty": "advanced",
       "lessonRef": "15-docker-in-production"

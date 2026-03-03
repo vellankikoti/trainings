@@ -89,8 +89,45 @@ export function QuizResults({
                 <span className="font-medium">Question {i + 1}</span>
               </div>
               {question && (
-                <p className="mb-2 text-sm">{question.question}</p>
+                <p className="mb-3 text-sm font-medium">{question.question}</p>
               )}
+
+              {/* Show answer choices with correct/selected highlights */}
+              {question?.options && question.type === "multiple_choice" && (
+                <div className="mb-3 space-y-1.5">
+                  {question.options.map((opt, idx) => {
+                    const isSelected = Number(result.selectedAnswer) === idx;
+                    const isCorrect = Number(result.correctAnswer) === idx;
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm ${
+                          isCorrect
+                            ? "bg-green-100 font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                            : isSelected && !result.correct
+                              ? "bg-red-100 text-red-800 line-through dark:bg-red-900/30 dark:text-red-300"
+                              : "text-muted-foreground"
+                        }`}
+                      >
+                        {isCorrect && <span className="text-green-600">✓</span>}
+                        {isSelected && !isCorrect && <span className="text-red-600">✗</span>}
+                        {!isCorrect && !isSelected && <span className="w-4" />}
+                        {opt}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* True/False answer display */}
+              {question?.type === "true_false" && !result.correct && (
+                <p className="mb-2 text-sm">
+                  <span className="text-red-600">Your answer: {String(result.selectedAnswer)}</span>
+                  {" — "}
+                  <span className="text-green-600">Correct: {String(result.correctAnswer)}</span>
+                </p>
+              )}
+
               <p className="text-sm text-muted-foreground">
                 {result.explanation}
               </p>

@@ -34,7 +34,7 @@
       "type": "true_false",
       "question": "Shell scripts can only be used for simple file manipulation tasks and are not suitable for orchestrating complex workflows.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "Shell scripts are used for a wide range of tasks including complex deployments, monitoring pipelines, backup orchestration, CI/CD automation, and system provisioning. They excel at composing existing CLI tools into sophisticated workflows.",
       "difficulty": "beginner",
       "lessonRef": "01-why-shell-scripting"
@@ -449,7 +449,7 @@
       "type": "true_false",
       "question": "When redirecting output in bash, '2>&1' redirects standard error (fd 2) to the same destination as standard output (fd 1).",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "File descriptor 2 is stderr, and file descriptor 1 is stdout. The syntax '2>&1' duplicates fd 1 onto fd 2, sending stderr to wherever stdout is currently going. This is commonly used as 'command > file.log 2>&1' to capture both streams.",
       "difficulty": "intermediate",
       "lessonRef": "09-file-operations"
@@ -534,7 +534,7 @@
       "type": "true_false",
       "question": "With 'set -e' enabled, a command that fails inside an if condition will cause the script to exit immediately.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "'set -e' does NOT trigger script exit for commands that are part of a condition test (if, while, until, ||, &&). This is by design -- you need to be able to test for failure. For example, 'if ! grep -q pattern file; then ...' works correctly even with 'set -e'.",
       "difficulty": "intermediate",
       "lessonRef": "11-error-handling"
@@ -589,7 +589,7 @@
       "type": "true_false",
       "question": "You can selectively enable debug tracing for a portion of a script by placing 'set -x' before the section and 'set +x' after it.",
       "options": ["True", "False"],
-      "correctAnswer": "True",
+      "correctAnswer": true,
       "explanation": "Shell options can be toggled within a script. 'set -x' turns on command tracing and 'set +x' turns it off. This is useful for debugging specific sections without flooding the output with traces from the entire script. The same pattern works with other options like 'set -e'.",
       "difficulty": "intermediate",
       "lessonRef": "12-debugging"
@@ -689,7 +689,7 @@
       "type": "true_false",
       "question": "Variables modified inside a subshell (created with parentheses) affect the parent shell's environment.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "A subshell (spawned with parentheses or pipes) creates a copy of the parent shell's environment. Any variable changes, directory changes, or other state modifications inside the subshell are lost when it exits. This is a common gotcha, especially with 'command | while read' where the while loop runs in a subshell.",
       "difficulty": "advanced",
       "lessonRef": "14-advanced-patterns"
@@ -804,7 +804,7 @@
       "type": "true_false",
       "question": "Using '#!/bin/sh' instead of '#!/bin/bash' in the shebang guarantees that the script will work on any POSIX-compliant system, even if it uses bash-specific features like arrays.",
       "options": ["True", "False"],
-      "correctAnswer": "False",
+      "correctAnswer": false,
       "explanation": "/bin/sh is a POSIX shell that may not be bash (on Debian/Ubuntu it is dash, on Alpine it is busybox ash). Bash-specific features like arrays, [[ ]], (( )), process substitution <(), and associative arrays will fail under /bin/sh. If your script uses bash features, always use #!/bin/bash or #!/usr/bin/env bash.",
       "difficulty": "advanced",
       "lessonRef": "16-production-scripting"

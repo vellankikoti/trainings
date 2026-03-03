@@ -29,10 +29,10 @@ const PATH_RECOMMENDATIONS: Record<
     estimatedWeeks: 10,
   },
   some_devops: {
-    path: "orchestration",
-    title: "Orchestration Path",
+    path: "platform-engineering",
+    title: "Platform Engineering Path",
     description:
-      "Level up your existing DevOps skills with Kubernetes, Helm, and service mesh. Master production-grade orchestration.",
+      "Level up your existing DevOps skills with Kubernetes, Helm, and platform engineering. Master production-grade orchestration and developer platforms.",
     estimatedWeeks: 8,
   },
 };
