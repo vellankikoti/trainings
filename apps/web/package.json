@@ -61,7 +61,7 @@
     "@types/react": "^18.3.20",
     "@types/react-dom": "^18.3.6",
     "@vitejs/plugin-react": "^5.1.4",
-    "eslint": "^8.57.1",
+    "eslint": "^10.0.2",
     "eslint-config-next": "^14.2.35",
     "jsdom": "^28.1.0",
     "shadcn": "^3.8.5",
