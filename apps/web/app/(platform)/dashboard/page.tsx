@@ -1,62 +1,102 @@
 import type { Metadata } from "next";
-import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+import { auth, currentUser } from "@clerk/nextjs/server";
+import { getProfileId } from "@/lib/progress";
+import { getFullDashboardData } from "@/lib/dashboard";
+import { ContinueLearning } from "@/components/dashboard/ContinueLearning";
+import { StatsStrip } from "@/components/dashboard/StatsStrip";
+import { MyCourses } from "@/components/dashboard/MyCourses";
+import { PathProgress } from "@/components/dashboard/PathProgress";
 
 export const metadata: Metadata = {
   title: "Dashboard",
 };
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const [{ userId: clerkId }, user] = await Promise.all([
+    auth(),
+    currentUser(),
+  ]);
+
+  if (!clerkId) {
+    return (
+      <div className="py-12 text-center">
+        <p className="text-muted-foreground">Please sign in to view your dashboard.</p>
+      </div>
+    );
+  }
+
+  const profileId = await getProfileId(clerkId);
+
+  // New user — no profile yet
+  if (!profileId) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold">
+            Welcome{user?.firstName ? `, ${user.firstName}` : ""}
+          </h1>
+          <p className="mt-2 text-muted-foreground">
+            Start your DevOps journey today.
+          </p>
+        </div>
+        <div className="rounded-xl border border-dashed border-border/80 p-12 text-center">
+          <h2 className="text-lg font-semibold">No progress yet</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Choose a learning path to get started.
+          </p>
+          <Link
+            href="/paths"
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+          >
+            Browse Learning Paths
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const data = await getFullDashboardData(profileId);
+
   return (
     <div className="space-y-8">
+      {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <h1 className="text-3xl font-bold">
+          Welcome back{user?.firstName ? `, ${user.firstName}` : ""}
+        </h1>
         <p className="mt-2 text-muted-foreground">
-          Welcome back! Continue your DevOps journey.
+          Continue your DevOps journey.
         </p>
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid gap-4 md:grid-cols-4">
-        {[
-          { label: "Level", value: "1" },
-          { label: "Total XP", value: "0" },
-          { label: "Current Streak", value: "0 days" },
-          { label: "Lessons Done", value: "0" },
-        ].map((stat) => (
-          <Card key={stat.label}>
-            <CardContent className="p-4">
-              <div className="text-sm text-muted-foreground">{stat.label}</div>
-              <div className="text-2xl font-bold">{stat.value}</div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* Continue Learning Hero */}
+      <ContinueLearning resumeTarget={data.resumeTarget} />
 
-      {/* Continue Learning */}
-      <div>
-        <h2 className="text-xl font-semibold">Continue Learning</h2>
-        <Card className="mt-4">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <Badge variant="secondary">Foundations Path</Badge>
-                <h3 className="mt-2 text-lg font-medium">
-                  Linux Fundamentals
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  Start your journey with the Linux operating system
-                </p>
-              </div>
-              <div className="text-right">
-                <div className="text-sm text-muted-foreground">0% complete</div>
-                <Progress value={0} className="mt-2 w-32" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Stats */}
+      <StatsStrip stats={data.stats} />
+
+      {/* My Courses */}
+      <MyCourses
+        activeCourses={data.activeCourses}
+        completedCourses={data.completedCourses}
+      />
+
+      {/* Learning Path Progress */}
+      <PathProgress paths={data.pathProgress} />
     </div>
   );
 }

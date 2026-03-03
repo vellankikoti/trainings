@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { SignedIn, SignedOut } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -9,12 +10,7 @@ import {
   SheetTrigger,
   SheetTitle,
 } from "@/components/ui/sheet";
-
-const NAV_ITEMS = [
-  { label: "Learning Paths", href: "/paths" },
-  { label: "Blog", href: "/blog" },
-  { label: "About", href: "/about" },
-];
+import { NAV_ITEMS } from "@/lib/nav-config";
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
@@ -53,6 +49,35 @@ export function MobileNav() {
               {item.label}
             </Link>
           ))}
+          <SignedIn>
+            <div className="border-t border-border/60 pt-4">
+              <Link
+                href="/dashboard"
+                onClick={() => setOpen(false)}
+                className="text-lg font-medium transition-colors hover:text-primary"
+              >
+                Dashboard
+              </Link>
+            </div>
+          </SignedIn>
+          <SignedOut>
+            <div className="border-t border-border/60 pt-4 flex flex-col gap-3">
+              <Link
+                href="/sign-in"
+                onClick={() => setOpen(false)}
+                className="text-lg font-medium transition-colors hover:text-primary"
+              >
+                Sign In
+              </Link>
+              <Link
+                href="/sign-up"
+                onClick={() => setOpen(false)}
+                className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+              >
+                Get Started
+              </Link>
+            </div>
+          </SignedOut>
         </nav>
       </SheetContent>
     </Sheet>

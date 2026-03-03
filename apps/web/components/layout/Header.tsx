@@ -1,17 +1,12 @@
 import Link from "next/link";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
+import { NAV_ITEMS } from "@/lib/nav-config";
 import { Logo } from "./Logo";
 import { MobileNav } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
 import { SearchDialog } from "./SearchDialog";
 import { ReadingProgress } from "@/components/lesson/ReadingProgress";
-
-const NAV_ITEMS = [
-  { label: "Learning Paths", href: "/paths" },
-  { label: "Blog", href: "/blog" },
-  { label: "About", href: "/about" },
-];
 
 export function Header() {
   return (

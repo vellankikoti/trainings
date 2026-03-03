@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getAllPaths, getPathWithModules } from "@/lib/content";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PathProgressOverlay } from "@/components/paths/PathProgressOverlay";
 
 interface PathPageProps {
   params: { path: string };
@@ -124,6 +125,16 @@ export default function PathPage({ params }: PathPageProps) {
             </div>
           </div>
         </div>
+
+        {/* Progress overlay for authenticated users */}
+        <PathProgressOverlay
+          pathSlug={data.slug}
+          firstLessonHref={
+            data.modulesData.length > 0 && data.modulesData[0].lessons.length > 0
+              ? `/learn/${data.slug}/${data.modulesData[0].slug}/${data.modulesData[0].lessons[0].slug}`
+              : `/paths/${data.slug}`
+          }
+        />
 
         <div className="mt-8 flex flex-wrap gap-3">
           <Button size="lg" asChild>

@@ -1,13 +1,10 @@
 import Link from "next/link";
+import { NAV_ITEMS } from "@/lib/nav-config";
 
 const FOOTER_LINKS = [
   {
     title: "Platform",
-    links: [
-      { label: "Learning Paths", href: "/paths" },
-      { label: "Blog", href: "/blog" },
-      { label: "About", href: "/about" },
-    ],
+    links: NAV_ITEMS,
   },
   {
     title: "Community",
