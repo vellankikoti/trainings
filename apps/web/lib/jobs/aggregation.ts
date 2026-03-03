@@ -166,9 +166,122 @@ const adzunaProvider: JobProvider = {
   },
 };
 
+// ─── Remotive (Free, No Key) ─────────────────────────────────────────────────
+
+const remotiveProvider: JobProvider = {
+  name: "remotive",
+
+  isConfigured() {
+    return true; // Always available — no API key needed
+  },
+
+  async fetchJobs(query: string): Promise<ExternalJob[]> {
+    // Remotive uses category-based filtering, not free text search
+    // Map common DevOps queries to Remotive categories
+    const categoryMap: Record<string, string> = {
+      devops: "devops",
+      sre: "devops",
+      "site reliability": "devops",
+      kubernetes: "devops",
+      cloud: "devops",
+      software: "software-dev",
+      data: "data",
+      qa: "qa",
+    };
+
+    const category =
+      Object.entries(categoryMap).find(([key]) =>
+        query.toLowerCase().includes(key),
+      )?.[1] ?? "devops";
+
+    const res = await fetch(
+      `https://remotive.com/api/remote-jobs?category=${category}&limit=50`,
+      { next: { revalidate: 21600 } }, // cache 6 hours
+    );
+
+    if (!res.ok) return [];
+    const data = await res.json();
+
+    return (data.jobs ?? []).map(
+      (j: Record<string, unknown>): ExternalJob => ({
+        source: "remotive",
+        externalId: String(j.id ?? ""),
+        externalUrl: String(j.url ?? ""),
+        title: String(j.title ?? ""),
+        description: j.description ? String(j.description) : null,
+        companyName: String(j.company_name ?? ""),
+        locationCity: null,
+        locationCountry: null,
+        isRemote: true, // Remotive is all remote jobs
+        salaryMin: null,
+        salaryMax: null,
+        salaryCurrency: "USD",
+        requiredSkills: Array.isArray(j.tags)
+          ? (j.tags as string[]).slice(0, 10)
+          : [],
+        employmentType: j.job_type
+          ? String(j.job_type).toLowerCase()
+          : null,
+        postedAt: j.publication_date
+          ? String(j.publication_date)
+          : new Date().toISOString(),
+      }),
+    );
+  },
+};
+
+// ─── Arbeitnow (Free, No Key) ───────────────────────────────────────────────
+
+const arbeitnowProvider: JobProvider = {
+  name: "arbeitnow",
+
+  isConfigured() {
+    return true; // Always available — no API key needed
+  },
+
+  async fetchJobs(_query: string, page = 1): Promise<ExternalJob[]> {
+    const res = await fetch(
+      `https://www.arbeitnow.com/api/job-board-api?page=${page}`,
+      { next: { revalidate: 21600 } },
+    );
+
+    if (!res.ok) return [];
+    const data = await res.json();
+
+    return (data.data ?? []).map(
+      (j: Record<string, unknown>): ExternalJob => ({
+        source: "arbeitnow",
+        externalId: String(j.slug ?? ""),
+        externalUrl: String(j.url ?? ""),
+        title: String(j.title ?? ""),
+        description: j.description ? String(j.description) : null,
+        companyName: String(j.company_name ?? ""),
+        locationCity: j.location ? String(j.location) : null,
+        locationCountry: null,
+        isRemote: j.remote === true,
+        salaryMin: null,
+        salaryMax: null,
+        salaryCurrency: "EUR",
+        requiredSkills: Array.isArray(j.tags)
+          ? (j.tags as string[]).slice(0, 10)
+          : [],
+        employmentType: null,
+        postedAt: j.created_at
+          ? new Date((j.created_at as number) * 1000).toISOString()
+          : new Date().toISOString(),
+      }),
+    );
+  },
+};
+
 // ─── Aggregation Engine ──────────────────────────────────────────────────────
 
-const providers: JobProvider[] = [jsearchProvider, adzunaProvider];
+const providers: JobProvider[] = [
+  remotiveProvider,   // Free, no key — remote tech jobs
+  arbeitnowProvider,  // Free, no key — EU tech jobs
+  adzunaProvider,     // Free with registration — global
+  jsearchProvider,    // Free tier ~500 req/month — Google Jobs
+];
 
 /**
  * Fetch jobs from all configured providers and upsert into database.
