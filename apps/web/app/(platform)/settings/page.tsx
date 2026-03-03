@@ -55,6 +55,22 @@ export default async function SettingsPage() {
         </section>
 
         <section>
+          <h2 className="mb-4 text-xl font-semibold">Career Profile</h2>
+          <div className="rounded-lg border p-6">
+            <p className="text-sm text-muted-foreground">
+              Download a PDF of your career profile including skills, badges, and learning progress. Share it with recruiters or include it in job applications.
+            </p>
+            <a
+              href="/api/profile/export"
+              download
+              className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Download Career Profile (PDF)
+            </a>
+          </div>
+        </section>
+
+        <section>
           <h2 className="mb-4 text-xl font-semibold text-red-600">
             Danger Zone
           </h2>

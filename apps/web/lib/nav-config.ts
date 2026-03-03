@@ -24,8 +24,8 @@ export const PUBLIC_NAV_ITEMS: NavItem[] = [
  */
 export const AUTH_NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/dashboard" },
-  { label: "Courses", href: "/courses" },
   { label: "Paths", href: "/paths" },
+  { label: "Jobs", href: "/jobs" },
 ];
 
 /**

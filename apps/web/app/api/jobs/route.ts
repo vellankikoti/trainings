@@ -1,0 +1,87 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { createAdminClient } from "@/lib/supabase/server";
+import { requireAuth, AuthError } from "@/lib/auth";
+
+/**
+ * GET /api/jobs?skills=linux,docker&location=remote&type=full_time&page=1&limit=20
+ *
+ * Public job search API for learners. Only shows active, non-expired postings.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    await requireAuth();
+
+    const url = new URL(request.url);
+    const skills = url.searchParams.get("skills")?.split(",").filter(Boolean);
+    const location = url.searchParams.get("location");
+    const isRemote = url.searchParams.get("remote");
+    const employmentType = url.searchParams.get("type");
+    const search = url.searchParams.get("q");
+    const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+    const limit = Math.min(
+      50,
+      Math.max(1, Number(url.searchParams.get("limit")) || 20),
+    );
+    const offset = (page - 1) * limit;
+
+    const supabase = createAdminClient();
+
+    let query = supabase
+      .from("job_postings")
+      .select("*", { count: "exact" })
+      .eq("is_active", true);
+
+    // Filter expired jobs
+    query = query.or(
+      `expires_at.is.null,expires_at.gt.${new Date().toISOString()}`,
+    );
+
+    if (search) {
+      query = query.or(
+        `title.ilike.%${search}%,company_name.ilike.%${search}%,description.ilike.%${search}%`,
+      );
+    }
+
+    if (isRemote === "true") {
+      query = query.eq("is_remote", true);
+    }
+
+    if (employmentType) {
+      query = query.eq("employment_type", employmentType);
+    }
+
+    if (location) {
+      query = query.or(
+        `location_city.ilike.%${location}%,location_country.ilike.%${location}%`,
+      );
+    }
+
+    if (skills && skills.length > 0) {
+      query = query.overlaps("required_skills", skills);
+    }
+
+    query = query
+      .order("posted_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    const { data, count } = await query;
+
+    return NextResponse.json({
+      jobs: data ?? [],
+      total: count ?? 0,
+      page,
+      limit,
+    });
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json(
+        { error: err.message },
+        { status: err.statusCode },
+      );
+    }
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
