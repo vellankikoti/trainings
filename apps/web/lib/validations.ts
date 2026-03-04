@@ -212,6 +212,66 @@ export const candidateInteractionSchema = z.object({
   notes: z.string().max(1000).optional(),
 });
 
+// ── Invitation schemas ──────────────────────────────────────────────
+
+export const invitationCreateSchema = z.object({
+  email: z.string().email().max(255),
+  entity_type: z.enum(["organization", "institute"]),
+  entity_id: z.string().uuid(),
+  role: z.enum(["trainer", "institute_admin", "recruiter", "org_admin"]),
+  message: z.string().max(500).optional(),
+});
+
+export const invitationBulkSchema = z.object({
+  entity_type: z.enum(["organization", "institute"]),
+  entity_id: z.string().uuid(),
+  role: z.enum(["trainer", "institute_admin", "recruiter", "org_admin"]),
+  emails: z.array(z.string().email().max(255)).min(1).max(50),
+});
+
+// ── Self-service registration schemas ────────────────────────────────
+
+const RESERVED_SLUGS = ["admin", "api", "auth", "dashboard", "settings", "help", "support", "billing", "app", "www"];
+
+const registrationSlug = z.string().min(2).max(50)
+  .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, "Slug must be lowercase letters, numbers, and hyphens")
+  .refine((s) => !RESERVED_SLUGS.includes(s), { message: "This URL is reserved" });
+
+export const orgRegisterSchema = z.object({
+  name: z.string().min(2).max(100).trim(),
+  slug: registrationSlug,
+  description: z.string().max(1000).optional(),
+  website: z.string().url().max(300).optional().or(z.literal("")),
+  company_size: z.string().max(50).optional(),
+  location_city: z.string().max(100).optional(),
+  location_country: z.string().max(100).optional(),
+  billing_email: z.string().email().max(255),
+});
+
+export const instituteRegisterSchema = z.object({
+  name: z.string().min(2).max(100).trim(),
+  slug: registrationSlug,
+  description: z.string().max(1000).optional(),
+  website: z.string().url().max(300).optional().or(z.literal("")),
+  billing_email: z.string().email().max(255),
+});
+
+// ── Approval schemas ─────────────────────────────────────────────────
+
+export const approvalActionSchema = z.object({
+  notes: z.string().max(500).optional(),
+});
+
+export const rejectionSchema = z.object({
+  reason: z.string().min(10).max(500),
+});
+
+// ── Member management schemas ────────────────────────────────────────
+
+export const memberRoleUpdateSchema = z.object({
+  role: z.enum(["trainer", "institute_admin", "recruiter", "org_admin"]),
+});
+
 /**
  * Helper to validate request body against a Zod schema.
  * Returns the parsed data or null (with error response).

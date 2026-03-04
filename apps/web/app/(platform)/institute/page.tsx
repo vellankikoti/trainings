@@ -20,11 +20,25 @@ export default async function InstituteDashboard() {
   if (!ctx.instituteId) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
-        <div className="text-center">
+        <div className="text-center max-w-md">
           <h1 className="text-2xl font-bold">No Institute Assigned</h1>
           <p className="mt-2 text-muted-foreground">
-            You are not assigned to any institute. Contact an admin.
+            You are not assigned to any institute. Register a new institute or accept an invitation to get started.
           </p>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Link
+              href="/institute/register"
+              className="rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Register Institute
+            </Link>
+            <Link
+              href="/dashboard"
+              className="rounded-lg border px-6 py-2.5 text-sm font-semibold transition-colors hover:bg-muted"
+            >
+              Back to Dashboard
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -87,12 +101,20 @@ export default async function InstituteDashboard() {
             <span className="capitalize">{institute.plan}</span> plan
           </p>
         </div>
-        <Link
-          href="/trainer"
-          className="rounded-lg border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
-        >
-          Trainer View
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/institute/members"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            Manage Members
+          </Link>
+          <Link
+            href="/trainer"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            Trainer View
+          </Link>
+        </div>
       </div>
 
       {/* Stats */}

@@ -20,12 +20,25 @@ export default async function OrganizationDashboard() {
   if (!ctx.orgId) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
-        <div className="text-center">
+        <div className="text-center max-w-md">
           <h1 className="text-2xl font-bold">No Organization Assigned</h1>
           <p className="mt-2 text-muted-foreground">
-            You are not a member of any organization. Contact an admin to get
-            started.
+            You are not a member of any organization. Register a new organization or accept an invitation to get started.
           </p>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Link
+              href="/organization/register"
+              className="rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Register Organization
+            </Link>
+            <Link
+              href="/dashboard"
+              className="rounded-lg border px-6 py-2.5 text-sm font-semibold transition-colors hover:bg-muted"
+            >
+              Back to Dashboard
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -88,6 +101,12 @@ export default async function OrganizationDashboard() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link
+            href="/organization/members"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-semibold transition-colors hover:bg-muted"
+          >
+            Members
+          </Link>
           <Link
             href="/organization/analytics"
             className="rounded-lg border border-border px-4 py-2 text-sm font-semibold transition-colors hover:bg-muted"

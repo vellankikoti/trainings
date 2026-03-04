@@ -22,6 +22,7 @@ export async function GET() {
       const { data } = await supabase
         .from("organizations")
         .select("*")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
       return NextResponse.json(data ?? []);
     }
@@ -33,7 +34,8 @@ export async function GET() {
     const { data } = await supabase
       .from("organizations")
       .select("*")
-      .eq("id", ctx.orgId);
+      .eq("id", ctx.orgId)
+      .is("deleted_at", null);
     return NextResponse.json(data ?? []);
   } catch (err) {
     if (err instanceof AuthError) {
@@ -65,7 +67,8 @@ export async function POST(request: NextRequest) {
     const { count } = await supabase
       .from("organizations")
       .select("id", { count: "exact", head: true })
-      .eq("slug", validated.data.slug);
+      .eq("slug", validated.data.slug)
+      .is("deleted_at", null);
 
     if ((count ?? 0) > 0) {
       return NextResponse.json(
@@ -91,7 +94,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Failed to create organization" }, { status: 500 });
     }
 
     return NextResponse.json(data, { status: 201 });

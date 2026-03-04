@@ -24,6 +24,7 @@ export async function GET() {
       .from("profiles")
       .select("*")
       .eq("clerk_id", clerkId)
+      .is("deleted_at", null)
       .single();
 
     if (profileError || !profile) {

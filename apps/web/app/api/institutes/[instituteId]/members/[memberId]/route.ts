@@ -1,155 +1,182 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
-import { requireRole, AuthError } from "@/lib/auth";
+import { requireAuth, AuthError } from "@/lib/auth";
+import { memberRoleUpdateSchema, validateBody } from "@/lib/validations";
+import { logAudit } from "@/lib/audit";
 
 type Params = { params: Promise<{ instituteId: string; memberId: string }> };
 
 /**
- * PATCH /api/institutes/[instituteId]/members/[memberId] — update member role.
+ * PATCH /api/institutes/[instituteId]/members/[memberId] — Update member role.
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
   try {
     const { instituteId, memberId } = await params;
-    const ctx = await requireRole(
-      "institute_admin",
-      "admin",
-      "super_admin",
-    );
-
-    if (
-      ctx.role !== "admin" &&
-      ctx.role !== "super_admin" &&
-      ctx.instituteId !== instituteId
-    ) {
-      throw new AuthError("Forbidden", 403);
-    }
-
-    const body = await request.json();
-    const role = body.role;
-    if (role !== "trainer" && role !== "institute_admin") {
-      return NextResponse.json(
-        { error: "Role must be 'trainer' or 'institute_admin'" },
-        { status: 400 },
-      );
-    }
-
+    const ctx = await requireAuth();
     const supabase = createAdminClient();
 
-    const { data, error } = await supabase
+    // Verify caller is institute_admin of this institute or platform admin
+    const isAdmin = ctx.role === "admin" || ctx.role === "super_admin";
+    if (!isAdmin) {
+      const { data: callerMembership } = await supabase
+        .from("institute_members")
+        .select("role")
+        .eq("institute_id", instituteId)
+        .eq("user_id", ctx.profileId)
+        .is("deleted_at", null)
+        .single();
+
+      if (callerMembership?.role !== "institute_admin") {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const validated = validateBody(memberRoleUpdateSchema, body);
+    if (validated.error) {
+      return NextResponse.json({ error: validated.error }, { status: 422 });
+    }
+
+    // Ensure role is institute-scoped
+    const newRole = validated.data.role;
+    if (newRole !== "trainer" && newRole !== "institute_admin") {
+      return NextResponse.json(
+        { error: "Role must be 'trainer' or 'institute_admin' for institutes" },
+        { status: 422 }
+      );
+    }
+
+    // Fetch target membership
+    const { data: member } = await supabase
       .from("institute_members")
-      .update({ role })
-      .eq("id", memberId)
+      .select("id, user_id, role")
       .eq("institute_id", instituteId)
-      .select("*, profiles!institute_members_user_id_fkey(id)")
+      .eq("user_id", memberId)
+      .is("deleted_at", null)
       .single();
 
-    if (error || !data) {
-      return NextResponse.json(
-        { error: "Member not found" },
-        { status: 404 },
-      );
+    if (!member) {
+      return NextResponse.json({ error: "Member not found" }, { status: 404 });
     }
+
+    // Prevent demoting the last institute_admin
+    if (member.role === "institute_admin" && newRole !== "institute_admin") {
+      const { count } = await supabase
+        .from("institute_members")
+        .select("id", { count: "exact", head: true })
+        .eq("institute_id", instituteId)
+        .eq("role", "institute_admin")
+        .is("deleted_at", null);
+
+      if ((count ?? 0) <= 1) {
+        return NextResponse.json(
+          { error: "Cannot demote the last admin" },
+          { status: 409 }
+        );
+      }
+    }
+
+    const oldRole = member.role;
+    await supabase
+      .from("institute_members")
+      .update({ role: newRole, updated_at: new Date().toISOString() })
+      .eq("institute_id", instituteId)
+      .eq("user_id", memberId);
 
     // Update profile role to match
-    const profileRef = data.profiles as unknown as { id: string } | null;
-    if (profileRef) {
-      await supabase
-        .from("profiles")
-        .update({ role })
-        .eq("id", profileRef.id);
-    }
+    await supabase
+      .from("profiles")
+      .update({ role: newRole })
+      .eq("id", memberId);
 
-    return NextResponse.json({ member: data });
+    await logAudit({
+      actorId: ctx.profileId,
+      actorRole: ctx.role,
+      action: "member.role_changed",
+      resourceType: "membership",
+      resourceId: member.id,
+      entityType: "institute",
+      entityId: instituteId,
+      oldValues: { role: oldRole },
+      newValues: { role: newRole },
+    });
+
+    return NextResponse.json({
+      data: { member_id: memberId, institute_id: instituteId, role: newRole },
+    });
   } catch (err) {
     if (err instanceof AuthError) {
-      return NextResponse.json(
-        { error: err.message },
-        { status: err.statusCode },
-      );
+      return NextResponse.json({ error: err.message }, { status: err.statusCode });
     }
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
 /**
- * DELETE /api/institutes/[instituteId]/members/[memberId] — remove member.
+ * DELETE /api/institutes/[instituteId]/members/[memberId] — Remove a member.
  */
 export async function DELETE(_request: NextRequest, { params }: Params) {
   try {
     const { instituteId, memberId } = await params;
-    const ctx = await requireRole(
-      "institute_admin",
-      "admin",
-      "super_admin",
-    );
-
-    if (
-      ctx.role !== "admin" &&
-      ctx.role !== "super_admin" &&
-      ctx.instituteId !== instituteId
-    ) {
-      throw new AuthError("Forbidden", 403);
-    }
-
+    const ctx = await requireAuth();
     const supabase = createAdminClient();
 
-    // Get member info before deleting
-    const { data: member } = await supabase
-      .from("institute_members")
-      .select("user_id")
-      .eq("id", memberId)
-      .eq("institute_id", instituteId)
-      .single();
+    // Caller must be institute_admin, platform admin, or self-removing
+    const isSelf = ctx.profileId === memberId;
+    const isAdmin = ctx.role === "admin" || ctx.role === "super_admin";
 
-    if (!member) {
-      return NextResponse.json(
-        { error: "Member not found" },
-        { status: 404 },
-      );
+    if (!isSelf && !isAdmin) {
+      const { data: callerMembership } = await supabase
+        .from("institute_members")
+        .select("role")
+        .eq("institute_id", instituteId)
+        .eq("user_id", ctx.profileId)
+        .is("deleted_at", null)
+        .single();
+
+      if (callerMembership?.role !== "institute_admin") {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
     }
 
-    // Prevent self-removal
-    if (member.user_id === ctx.profileId) {
-      return NextResponse.json(
-        { error: "Cannot remove yourself from the institute" },
-        { status: 400 },
-      );
+    // Use atomic RPC to handle last-admin check and role reversion
+    const { error } = await supabase.rpc("remove_member", {
+      p_entity_type: "institute",
+      p_entity_id: instituteId,
+      p_user_id: memberId,
+      p_removed_by: ctx.profileId,
+    });
+
+    if (error) {
+      if (error.message.includes("not a member")) {
+        return NextResponse.json({ error: "Member not found" }, { status: 404 });
+      }
+      if (error.message.includes("last admin")) {
+        return NextResponse.json(
+          { error: "Cannot remove the last admin" },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json({ error: "Failed to remove member" }, { status: 500 });
     }
 
-    // Remove membership
-    await supabase
-      .from("institute_members")
-      .delete()
-      .eq("id", memberId)
-      .eq("institute_id", instituteId);
+    await logAudit({
+      actorId: ctx.profileId,
+      actorRole: ctx.role,
+      action: isSelf ? "member.left" : "member.removed",
+      resourceType: "membership",
+      entityType: "institute",
+      entityId: instituteId,
+      metadata: { removed_user_id: memberId },
+    });
 
-    // Reset user role to learner if they have no other memberships
-    const { count } = await supabase
-      .from("institute_members")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", member.user_id);
-
-    if ((count ?? 0) === 0) {
-      await supabase
-        .from("profiles")
-        .update({ role: "learner" })
-        .eq("id", member.user_id);
-    }
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      data: { member_id: memberId, institute_id: instituteId, status: "removed" },
+    });
   } catch (err) {
     if (err instanceof AuthError) {
-      return NextResponse.json(
-        { error: err.message },
-        { status: err.statusCode },
-      );
+      return NextResponse.json({ error: err.message }, { status: err.statusCode });
     }
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

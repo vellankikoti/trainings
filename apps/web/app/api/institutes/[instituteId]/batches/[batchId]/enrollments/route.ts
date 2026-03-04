@@ -123,103 +123,40 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const supabase = createAdminClient();
 
-    // Verify batch belongs to institute
-    const { data: batch } = await supabase
-      .from("batches")
-      .select("id, institute_id")
-      .eq("id", batchId)
-      .eq("institute_id", instituteId)
-      .single();
+    // Use atomic RPC that locks the institute row to prevent race conditions
+    // on max_students capacity check
+    const { data, error: rpcError } = await supabase.rpc("safe_batch_enroll", {
+      p_institute_id: instituteId,
+      p_batch_id: batchId,
+      p_usernames: validated.data.usernames,
+      p_enrolled_by: ctx.profileId,
+    });
 
-    if (!batch) {
-      return NextResponse.json(
-        { error: "Batch not found" },
-        { status: 404 },
-      );
+    if (rpcError) {
+      const msg = rpcError.message || "";
+      if (msg.includes("BATCH_NOT_FOUND")) {
+        return NextResponse.json({ error: "Batch not found" }, { status: 404 });
+      }
+      if (msg.includes("CAPACITY_EXCEEDED")) {
+        const remaining = msg.split(":")[1] || "0";
+        return NextResponse.json(
+          { error: `Cannot enroll students. Only ${remaining.trim()} slots remaining.` },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json({ error: "Failed to enroll students" }, { status: 500 });
     }
 
-    // Check institute student limit
-    const { data: institute } = await supabase
-      .from("institutes")
-      .select("max_students")
-      .eq("id", instituteId)
-      .single();
-
-    const { count: currentTotal } = await supabase
-      .from("batch_enrollments")
-      .select("id", { count: "exact", head: true })
-      .in(
-        "batch_id",
-        (
-          await supabase
-            .from("batches")
-            .select("id")
-            .eq("institute_id", instituteId)
-        ).data?.map((b) => b.id) ?? [],
-      )
-      .eq("status", "active");
-
-    const maxStudents = institute?.max_students ?? 50;
-    const remaining = maxStudents - (currentTotal ?? 0);
-
-    if (validated.data.usernames.length > remaining) {
-      return NextResponse.json(
-        {
-          error: `Cannot enroll ${validated.data.usernames.length} students. Only ${remaining} slots remaining (limit: ${maxStudents}).`,
-        },
-        { status: 400 },
-      );
-    }
-
-    // Resolve usernames to profile IDs
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, username")
-      .in("username", validated.data.usernames);
-
-    const foundUsernames = new Set(
-      (profiles ?? []).map((p) => p.username),
-    );
-    const notFound = validated.data.usernames.filter(
-      (u: string) => !foundUsernames.has(u),
-    );
-
-    // Get already enrolled users
-    const profileIds = (profiles ?? []).map((p) => p.id);
-    const { data: alreadyEnrolled } = await supabase
-      .from("batch_enrollments")
-      .select("user_id")
-      .eq("batch_id", batchId)
-      .in("user_id", profileIds);
-
-    const alreadyEnrolledIds = new Set(
-      (alreadyEnrolled ?? []).map((e) => e.user_id),
-    );
-
-    // Filter to new enrollments only
-    const toEnroll = (profiles ?? []).filter(
-      (p) => !alreadyEnrolledIds.has(p.id),
-    );
-
-    if (toEnroll.length > 0) {
-      const rows = toEnroll.map((p) => ({
-        batch_id: batchId,
-        user_id: p.id,
-        enrolled_by: ctx.profileId,
-        status: "active",
-      }));
-
-      const { error: enrollError } = await supabase
-        .from("batch_enrollments")
-        .insert(rows);
-
-      if (enrollError) throw enrollError;
-    }
+    const result = data as unknown as {
+      enrolled: number;
+      skipped: number;
+      not_found: string[];
+    };
 
     return NextResponse.json({
-      enrolled: toEnroll.length,
-      skipped: alreadyEnrolledIds.size,
-      notFound,
+      enrolled: result.enrolled,
+      skipped: result.skipped,
+      notFound: result.not_found,
     });
   } catch (err) {
     if (err instanceof AuthError) {
@@ -263,7 +200,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 
     const { error } = await supabase
       .from("batch_enrollments")
-      .update({ status: "removed" })
+      .update({ status: "dropped" })
       .eq("batch_id", batchId)
       .eq("user_id", userId);
 

@@ -37,6 +37,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
         "*, batch_enrollments(count)",
       )
       .eq("institute_id", instituteId)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
     if (error) throw error;

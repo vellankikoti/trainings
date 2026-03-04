@@ -29,6 +29,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .select("*, job_applications(count)")
       .eq("id", jobId)
       .eq("org_id", orgId)
+      .is("deleted_at", null)
       .single();
 
     if (!data) {
@@ -83,11 +84,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .update(validated.data)
       .eq("id", jobId)
       .eq("org_id", orgId)
+      .is("deleted_at", null)
       .select("id, title")
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Failed to update job posting" }, { status: 500 });
     }
 
     return NextResponse.json(data);
@@ -122,9 +124,10 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     // Soft delete — set is_active to false
     await supabase
       .from("job_postings")
-      .update({ is_active: false })
+      .update({ is_active: false, deleted_at: new Date().toISOString() })
       .eq("id", jobId)
-      .eq("org_id", orgId);
+      .eq("org_id", orgId)
+      .is("deleted_at", null);
 
     return NextResponse.json({ message: "Job deactivated" });
   } catch (err) {

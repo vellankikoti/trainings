@@ -24,6 +24,7 @@ export async function getAuthContext(): Promise<AuthContext | null> {
     .from("profiles")
     .select("id, role")
     .eq("clerk_id", userId)
+    .is("deleted_at", null)
     .single();
 
   if (!profile) return null;
@@ -35,13 +36,16 @@ export async function getAuthContext(): Promise<AuthContext | null> {
   };
 
   // For institute-scoped roles, attach the institute ID
+  // Order by joined_at ASC to deterministically pick the primary (earliest) membership
   if (ctx.role === "trainer" || ctx.role === "institute_admin") {
     const { data: membership } = await supabase
       .from("institute_members")
       .select("institute_id")
       .eq("user_id", profile.id)
+      .is("deleted_at", null)
+      .order("joined_at", { ascending: true })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (membership) {
       ctx.instituteId = membership.institute_id;
@@ -49,13 +53,16 @@ export async function getAuthContext(): Promise<AuthContext | null> {
   }
 
   // For org-scoped roles, attach the org ID
+  // Order by joined_at ASC to deterministically pick the primary (earliest) membership
   if (ctx.role === "recruiter" || ctx.role === "org_admin") {
     const { data: membership } = await supabase
       .from("org_members")
       .select("org_id")
       .eq("user_id", profile.id)
+      .is("deleted_at", null)
+      .order("joined_at", { ascending: true })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (membership) {
       ctx.orgId = membership.org_id;

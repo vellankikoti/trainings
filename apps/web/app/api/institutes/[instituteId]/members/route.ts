@@ -35,6 +35,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
         "id, role, joined_at, user_id, profiles!institute_members_user_id_fkey(id, display_name, username, avatar_url, email_notifications)",
       )
       .eq("institute_id", instituteId)
+      .is("deleted_at", null)
       .order("joined_at", { ascending: true });
 
     if (error) throw error;
@@ -100,6 +101,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .from("profiles")
       .select("id, role")
       .eq("username", username)
+      .is("deleted_at", null)
       .single();
 
     if (!profile) {
@@ -115,6 +117,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .select("id")
       .eq("institute_id", instituteId)
       .eq("user_id", profile.id)
+      .is("deleted_at", null)
       .single();
 
     if (existing) {

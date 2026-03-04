@@ -13,57 +13,57 @@ describe("Rate Limiter", () => {
     testId++;
   });
 
-  it("should allow requests within the limit", () => {
+  it("should allow requests within the limit", async () => {
     const id = `test-allow-${testId}`;
     const config = { limit: 5, windowSeconds: 60 };
 
-    const result = rateLimit(id, config);
+    const result = await rateLimit(id, config);
 
     expect(result.success).toBe(true);
     expect(result.remaining).toBe(4);
     expect(result.limit).toBe(5);
   });
 
-  it("should block requests exceeding the limit", () => {
+  it("should block requests exceeding the limit", async () => {
     const id = `test-block-${testId}`;
     const config = { limit: 3, windowSeconds: 60 };
 
     // Use up all tokens
-    rateLimit(id, config);
-    rateLimit(id, config);
-    rateLimit(id, config);
+    await rateLimit(id, config);
+    await rateLimit(id, config);
+    await rateLimit(id, config);
 
     // Fourth request should be blocked
-    const result = rateLimit(id, config);
+    const result = await rateLimit(id, config);
 
     expect(result.success).toBe(false);
     expect(result.remaining).toBe(0);
   });
 
-  it("should track remaining tokens correctly", () => {
+  it("should track remaining tokens correctly", async () => {
     const id = `test-remaining-${testId}`;
     const config = { limit: 5, windowSeconds: 60 };
 
-    const r1 = rateLimit(id, config);
-    const r2 = rateLimit(id, config);
-    const r3 = rateLimit(id, config);
+    const r1 = await rateLimit(id, config);
+    const r2 = await rateLimit(id, config);
+    const r3 = await rateLimit(id, config);
 
     expect(r1.remaining).toBe(4);
     expect(r2.remaining).toBe(3);
     expect(r3.remaining).toBe(2);
   });
 
-  it("should use different limits per identifier", () => {
+  it("should use different limits per identifier", async () => {
     const idA = `test-separate-a-${testId}`;
     const idB = `test-separate-b-${testId}`;
     const config = { limit: 2, windowSeconds: 60 };
 
-    rateLimit(idA, config);
-    rateLimit(idA, config);
+    await rateLimit(idA, config);
+    await rateLimit(idA, config);
 
     // A should be blocked, B should be allowed
-    const resultA = rateLimit(idA, config);
-    const resultB = rateLimit(idB, config);
+    const resultA = await rateLimit(idA, config);
+    const resultB = await rateLimit(idB, config);
 
     expect(resultA.success).toBe(false);
     expect(resultB.success).toBe(true);

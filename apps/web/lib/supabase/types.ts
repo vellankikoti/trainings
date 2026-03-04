@@ -560,6 +560,9 @@ export interface Database {
           website: string | null;
           location_city: string | null;
           location_country: string | null;
+          status: string;
+          owner_id: string | null;
+          deleted_at: string | null;
           plan: string;
           max_students: number;
           billing_email: string | null;
@@ -582,6 +585,9 @@ export interface Database {
           billing_email?: string | null;
           stripe_customer_id?: string | null;
           is_active?: boolean;
+          status?: string;
+          owner_id?: string | null;
+          deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -599,6 +605,9 @@ export interface Database {
           billing_email?: string | null;
           stripe_customer_id?: string | null;
           is_active?: boolean;
+          status?: string;
+          owner_id?: string | null;
+          deleted_at?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -613,6 +622,8 @@ export interface Database {
           role: string;
           invited_by: string | null;
           joined_at: string;
+          deleted_at: string | null;
+          updated_at: string;
         };
         Insert: {
           id?: string;
@@ -621,6 +632,8 @@ export interface Database {
           role: string;
           invited_by?: string | null;
           joined_at?: string;
+          deleted_at?: string | null;
+          updated_at?: string;
         };
         Update: {
           id?: string;
@@ -629,6 +642,8 @@ export interface Database {
           role?: string;
           invited_by?: string | null;
           joined_at?: string;
+          deleted_at?: string | null;
+          updated_at?: string;
         };
         Relationships: [
           {
@@ -760,6 +775,9 @@ export interface Database {
           plan: string;
           max_seats: number;
           profile_views_remaining: number;
+          status: string;
+          owner_id: string | null;
+          deleted_at: string | null;
           contacts_remaining: number;
           billing_email: string | null;
           stripe_customer_id: string | null;
@@ -787,6 +805,9 @@ export interface Database {
           stripe_customer_id?: string | null;
           is_verified?: boolean;
           is_active?: boolean;
+          status?: string;
+          owner_id?: string | null;
+          deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -809,6 +830,9 @@ export interface Database {
           stripe_customer_id?: string | null;
           is_verified?: boolean;
           is_active?: boolean;
+          status?: string;
+          owner_id?: string | null;
+          deleted_at?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -823,6 +847,8 @@ export interface Database {
           role: string;
           invited_by: string | null;
           joined_at: string;
+          deleted_at: string | null;
+          updated_at: string;
         };
         Insert: {
           id?: string;
@@ -831,6 +857,8 @@ export interface Database {
           role: string;
           invited_by?: string | null;
           joined_at?: string;
+          deleted_at?: string | null;
+          updated_at?: string;
         };
         Update: {
           id?: string;
@@ -839,6 +867,8 @@ export interface Database {
           role?: string;
           invited_by?: string | null;
           joined_at?: string;
+          deleted_at?: string | null;
+          updated_at?: string;
         };
         Relationships: [
           {
@@ -1677,6 +1707,196 @@ export interface Database {
           },
         ];
       };
+
+      // ===== INVITATIONS =====
+      invitations: {
+        Row: {
+          id: string;
+          email: string;
+          token_hash: string;
+          entity_type: string;
+          entity_id: string;
+          role: string;
+          invited_by: string;
+          status: string;
+          message: string | null;
+          expires_at: string;
+          accepted_at: string | null;
+          declined_at: string | null;
+          revoked_at: string | null;
+          resend_count: number;
+          last_resent_at: string | null;
+          deleted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          email: string;
+          token_hash: string;
+          entity_type: string;
+          entity_id: string;
+          role: string;
+          invited_by: string;
+          status?: string;
+          message?: string | null;
+          expires_at: string;
+          accepted_at?: string | null;
+          declined_at?: string | null;
+          revoked_at?: string | null;
+          resend_count?: number;
+          last_resent_at?: string | null;
+          deleted_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          email?: string;
+          token_hash?: string;
+          entity_type?: string;
+          entity_id?: string;
+          role?: string;
+          invited_by?: string;
+          status?: string;
+          message?: string | null;
+          expires_at?: string;
+          accepted_at?: string | null;
+          declined_at?: string | null;
+          revoked_at?: string | null;
+          resend_count?: number;
+          last_resent_at?: string | null;
+          deleted_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      // ===== APPROVAL REQUESTS =====
+      approval_requests: {
+        Row: {
+          id: string;
+          entity_type: string;
+          entity_id: string;
+          requested_by: string;
+          status: string;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          review_notes: string | null;
+          escalated: boolean;
+          deleted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          entity_type: string;
+          entity_id: string;
+          requested_by: string;
+          status?: string;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          review_notes?: string | null;
+          escalated?: boolean;
+          deleted_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          entity_type?: string;
+          entity_id?: string;
+          requested_by?: string;
+          status?: string;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          review_notes?: string | null;
+          escalated?: boolean;
+          deleted_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      // ===== AUDIT LOG =====
+      audit_log: {
+        Row: {
+          id: string;
+          actor_id: string;
+          actor_role: string;
+          action: string;
+          resource_type: string;
+          resource_id: string | null;
+          entity_type: string | null;
+          entity_id: string | null;
+          old_values: Json | null;
+          new_values: Json | null;
+          metadata: Json | null;
+          ip_address: string | null;
+          user_agent: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          actor_id: string;
+          actor_role: string;
+          action: string;
+          resource_type: string;
+          resource_id?: string | null;
+          entity_type?: string | null;
+          entity_id?: string | null;
+          old_values?: Json | null;
+          new_values?: Json | null;
+          metadata?: Json | null;
+          ip_address?: string | null;
+          user_agent?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          actor_id?: string;
+          actor_role?: string;
+          action?: string;
+          resource_type?: string;
+          resource_id?: string | null;
+          entity_type?: string | null;
+          entity_id?: string | null;
+          old_values?: Json | null;
+          new_values?: Json | null;
+          metadata?: Json | null;
+          ip_address?: string | null;
+          user_agent?: string | null;
+        };
+        Relationships: [];
+      };
+
+      // ===== SYSTEM SETTINGS =====
+      system_settings: {
+        Row: {
+          key: string;
+          value: Json;
+          description: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          key: string;
+          value: Json;
+          description?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          key?: string;
+          value?: Json;
+          description?: string | null;
+          updated_by?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -1693,6 +1913,62 @@ export interface Database {
           new_total: number;
           old_level: number;
         }[];
+      };
+      accept_invitation: {
+        Args: {
+          p_invitation_id: string;
+          p_user_id: string;
+        };
+        Returns: Json;
+      };
+      register_organization: {
+        Args: {
+          p_user_id: string;
+          p_name: string;
+          p_slug: string;
+          p_description: string;
+          p_website: string;
+          p_company_size: string;
+          p_location_city: string;
+          p_location_country: string;
+          p_billing_email: string;
+          p_requires_approval: boolean;
+        };
+        Returns: Json;
+      };
+      register_institute: {
+        Args: {
+          p_user_id: string;
+          p_name: string;
+          p_slug: string;
+          p_description: string;
+          p_website: string;
+          p_billing_email: string;
+          p_requires_approval: boolean;
+        };
+        Returns: Json;
+      };
+      remove_member: {
+        Args: {
+          p_entity_type: string;
+          p_entity_id: string;
+          p_user_id: string;
+          p_removed_by: string;
+        };
+        Returns: undefined;
+      };
+      expire_stale_invitations: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      safe_batch_enroll: {
+        Args: {
+          p_institute_id: string;
+          p_batch_id: string;
+          p_usernames: string[];
+          p_enrolled_by: string;
+        };
+        Returns: Json;
       };
     };
     Enums: Record<string, never>;

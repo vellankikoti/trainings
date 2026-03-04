@@ -29,6 +29,7 @@ export async function POST(_request: Request, { params }: Params) {
     .select("id, title")
     .eq("id", jobId)
     .eq("is_active", true)
+    .is("deleted_at", null)
     .single();
 
   if (!job) {

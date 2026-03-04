@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { withLogging } from "@/lib/api-helpers";
 
+/** Strip PostgREST filter metacharacters to prevent filter injection */
+function sanitizeFilterValue(value: string): string {
+  return value.replace(/[,()\\]/g, "");
+}
+
 /**
  * GET /api/jobs?skills=linux,docker&location=remote&type=full_time&page=1&limit=20
  *
@@ -27,7 +32,8 @@ export const GET = withLogging(async (request: Request) => {
   let query = supabase
     .from("job_postings")
     .select("*", { count: "exact" })
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .is("deleted_at", null);
 
   // Filter expired jobs
   query = query.or(
@@ -35,8 +41,9 @@ export const GET = withLogging(async (request: Request) => {
   );
 
   if (search) {
+    const s = sanitizeFilterValue(search);
     query = query.or(
-      `title.ilike.%${search}%,company_name.ilike.%${search}%,description.ilike.%${search}%`,
+      `title.ilike.%${s}%,company_name.ilike.%${s}%,description.ilike.%${s}%`,
     );
   }
 
@@ -49,8 +56,9 @@ export const GET = withLogging(async (request: Request) => {
   }
 
   if (location) {
+    const loc = sanitizeFilterValue(location);
     query = query.or(
-      `location_city.ilike.%${location}%,location_country.ilike.%${location}%`,
+      `location_city.ilike.%${loc}%,location_country.ilike.%${loc}%`,
     );
   }
 

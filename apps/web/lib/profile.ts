@@ -31,6 +31,7 @@ export async function getProfileByClerkId(
     .from("profiles")
     .select("*")
     .eq("clerk_id", clerkId)
+    .is("deleted_at", null)
     .single();
 
   if (error || !data) return null;
@@ -48,6 +49,7 @@ export async function getPublicProfile(
     )
     .eq("username", username)
     .eq("public_profile", true)
+    .is("deleted_at", null)
     .single();
 
   if (error || !data) return null;
@@ -73,6 +75,7 @@ export async function updateProfile(
     .from("profiles")
     .update(safeUpdates as ProfileUpdate)
     .eq("clerk_id", clerkId)
+    .is("deleted_at", null)
     .select()
     .single();
 

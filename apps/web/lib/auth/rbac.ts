@@ -33,7 +33,10 @@ export type Resource =
   | "report"
   | "content"
   | "system"
-  | "event";
+  | "event"
+  | "invitation"
+  | "membership"
+  | "approval";
 
 export type Action = "create" | "read" | "update" | "delete" | "export";
 
@@ -108,6 +111,11 @@ const ROLE_OWN_PERMISSIONS: Record<Role, Permission[]> = {
     { resource: "batch", action: "delete", scope: "institute" },
     { resource: "report", action: "read", scope: "institute" },
     { resource: "report", action: "export", scope: "institute" },
+    { resource: "invitation", action: "create", scope: "institute" },
+    { resource: "invitation", action: "read", scope: "institute" },
+    { resource: "invitation", action: "delete", scope: "institute" },
+    { resource: "membership", action: "update", scope: "institute" },
+    { resource: "membership", action: "delete", scope: "institute" },
   ],
 
   recruiter: [
@@ -124,6 +132,11 @@ const ROLE_OWN_PERMISSIONS: Record<Role, Permission[]> = {
     { resource: "job_posting", action: "delete", scope: "organization" },
     { resource: "candidate", action: "read", scope: "organization" },
     { resource: "report", action: "read", scope: "organization" },
+    { resource: "invitation", action: "create", scope: "organization" },
+    { resource: "invitation", action: "read", scope: "organization" },
+    { resource: "invitation", action: "delete", scope: "organization" },
+    { resource: "membership", action: "update", scope: "organization" },
+    { resource: "membership", action: "delete", scope: "organization" },
   ],
 
   admin: [
@@ -138,6 +151,13 @@ const ROLE_OWN_PERMISSIONS: Record<Role, Permission[]> = {
     { resource: "institute", action: "read", scope: "platform" },
     { resource: "organization", action: "read", scope: "platform" },
     { resource: "system", action: "read", scope: "platform" },
+    { resource: "approval", action: "read", scope: "platform" },
+    { resource: "approval", action: "create", scope: "platform" },
+    { resource: "invitation", action: "read", scope: "platform" },
+    { resource: "invitation", action: "create", scope: "platform" },
+    { resource: "invitation", action: "delete", scope: "platform" },
+    { resource: "membership", action: "update", scope: "platform" },
+    { resource: "membership", action: "delete", scope: "platform" },
   ],
 
   super_admin: [

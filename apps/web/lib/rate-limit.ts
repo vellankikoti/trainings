@@ -185,6 +185,8 @@ export const RATE_LIMITS = {
   checkout: { limit: 5, windowSeconds: 3600 },            // 5 req/hr
   general: { limit: 60, windowSeconds: 60 },              // 60 req/min
   gdprExport: { limit: 5, windowSeconds: 600 },           // 5 req/10min
+  invitation: { limit: 20, windowSeconds: 3600 },         // 20 invitations/hr
+  registration: { limit: 3, windowSeconds: 3600 },        // 3 registrations/hr
 } as const;
 
 // ── Helper to create a 429 response ──────────────────────────────────────────

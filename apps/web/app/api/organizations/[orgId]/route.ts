@@ -28,6 +28,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .from("organizations")
       .select("*")
       .eq("id", orgId)
+      .is("deleted_at", null)
       .single();
 
     if (!data) {
@@ -76,11 +77,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .from("organizations")
       .update(validated.data)
       .eq("id", orgId)
+      .is("deleted_at", null)
       .select("id, name, slug")
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Failed to update organization" }, { status: 500 });
     }
 
     return NextResponse.json(data);

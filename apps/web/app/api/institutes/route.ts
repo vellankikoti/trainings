@@ -21,6 +21,7 @@ export async function GET() {
       const { data, error } = await supabase
         .from("institutes")
         .select("*")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -36,6 +37,7 @@ export async function GET() {
       .from("institutes")
       .select("*")
       .eq("id", ctx.instituteId)
+      .is("deleted_at", null)
       .single();
 
     if (error) throw error;
@@ -74,6 +76,7 @@ export async function POST(request: Request) {
       .from("institutes")
       .select("id")
       .eq("slug", validated.data.slug)
+      .is("deleted_at", null)
       .single();
 
     if (existing) {

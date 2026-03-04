@@ -37,6 +37,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .from("institutes")
       .select("*")
       .eq("id", instituteId)
+      .is("deleted_at", null)
       .single();
 
     if (error || !data) {
@@ -105,6 +106,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .from("institutes")
       .update(updates)
       .eq("id", instituteId)
+      .is("deleted_at", null)
       .select()
       .single();
 

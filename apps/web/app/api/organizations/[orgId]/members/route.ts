@@ -30,6 +30,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
         "id, role, joined_at, profiles!org_members_user_id_fkey(id, display_name, username, avatar_url)",
       )
       .eq("org_id", orgId)
+      .is("deleted_at", null)
       .order("joined_at", { ascending: true });
 
     return NextResponse.json(data ?? []);
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .from("profiles")
       .select("id, role")
       .eq("username", username)
+      .is("deleted_at", null)
       .single();
 
     if (!profile) {
@@ -88,7 +90,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       .from("org_members")
       .select("id", { count: "exact", head: true })
       .eq("org_id", orgId)
-      .eq("user_id", profile.id);
+      .eq("user_id", profile.id)
+      .is("deleted_at", null);
 
     if ((count ?? 0) > 0) {
       return NextResponse.json(

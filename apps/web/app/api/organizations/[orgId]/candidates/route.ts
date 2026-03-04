@@ -51,7 +51,8 @@ export async function GET(request: NextRequest, { params }: Params) {
         { count: "exact" },
       )
       .eq("is_discoverable", true)
-      .eq("public_profile", true);
+      .eq("public_profile", true)
+      .is("deleted_at", null);
 
     if (availability) {
       query = query.eq("availability", availability);
