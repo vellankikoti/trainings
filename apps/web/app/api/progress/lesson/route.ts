@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   }
 
   // Rate limit: 30 requests/minute per user
-  const rl = rateLimit(`progress:${clerkId}`, RATE_LIMITS.progress);
+  const rl = await rateLimit(`progress:${clerkId}`, RATE_LIMITS.progress);
   if (!rl.success) {
     return rateLimitResponse(rl);
   }

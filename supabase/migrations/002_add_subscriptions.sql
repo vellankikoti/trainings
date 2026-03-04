@@ -1,6 +1,7 @@
 -- 002_add_subscriptions.sql
 -- Description: Add subscription tracking for Stripe payment integration
 -- Rollback: DROP TABLE IF EXISTS subscriptions;
+-- Idempotent: safe to re-run.
 
 CREATE TABLE IF NOT EXISTS subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 -- Row Level Security
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own subscription" ON subscriptions;
 CREATE POLICY "Users can view own subscription"
   ON subscriptions FOR SELECT
   USING (user_id IN (
@@ -39,6 +41,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_subscription_updated_at ON subscriptions;
 CREATE TRIGGER trigger_subscription_updated_at
   BEFORE UPDATE ON subscriptions
   FOR EACH ROW

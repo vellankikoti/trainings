@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/server";
+import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import type { Json } from "@/lib/supabase/types";
 
 /**
@@ -29,6 +30,12 @@ export async function POST(req: Request) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Rate limit: 60 requests/minute per user
+  const rl = await rateLimit(`events:${userId}`, RATE_LIMITS.general);
+  if (!rl.success) {
+    return rateLimitResponse(rl);
   }
 
   let body: unknown;

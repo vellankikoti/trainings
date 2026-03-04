@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/server";
-import { awardXP } from "@/lib/progress";
+import { awardXPWithLog } from "@/lib/xp-rewards";
 import achievementsData from "@/data/achievements.json";
 
 export interface Achievement {
@@ -52,8 +52,14 @@ export async function checkAchievements(
       achievement_id: achievement.id,
     });
 
-    // Award XP for the achievement
-    await awardXP(userId, achievement.xpReward, `achievement_${achievement.id}`);
+    // Award XP for the achievement (with dedup to prevent double-awarding)
+    await awardXPWithLog({
+      userId,
+      amount: achievement.xpReward,
+      source: "achievement",
+      sourceId: achievement.id,
+      dedupKey: `achievement:${achievement.id}`,
+    });
     newlyUnlocked.push(achievement);
   }
 

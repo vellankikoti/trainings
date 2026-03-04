@@ -14,6 +14,8 @@ interface LessonSidebarProps {
   moduleTitle: string;
   lessons: LessonRef[];
   currentLessonSlug: string;
+  /** Slugs of lessons that have been completed (from DB) */
+  completedSlugs?: string[];
 }
 
 export function LessonSidebar({
@@ -22,9 +24,13 @@ export function LessonSidebar({
   moduleTitle,
   lessons,
   currentLessonSlug,
+  completedSlugs = [],
 }: LessonSidebarProps) {
-  const currentIndex = lessons.findIndex((l) => l.slug === currentLessonSlug);
-  const progressPercent = lessons.length > 0 ? Math.round(((currentIndex + 1) / lessons.length) * 100) : 0;
+  const completedSet = new Set(completedSlugs);
+
+  // Progress based on actual completions, not position
+  const completedCount = lessons.filter((l) => completedSet.has(l.slug)).length;
+  const progressPercent = lessons.length > 0 ? Math.round((completedCount / lessons.length) * 100) : 0;
 
   return (
     <nav className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
@@ -48,7 +54,7 @@ export function LessonSidebar({
             />
           </div>
           <span className="text-[11px] font-bold text-foreground/50 tabular-nums">
-            {progressPercent}%
+            {completedCount}/{lessons.length}
           </span>
         </div>
       </div>
@@ -57,7 +63,7 @@ export function LessonSidebar({
       <div className="p-2 max-h-[calc(100vh-16rem)] overflow-y-auto">
         {lessons.map((lesson, i) => {
           const isCurrent = lesson.slug === currentLessonSlug;
-          const isPast = i < currentIndex;
+          const isCompleted = completedSet.has(lesson.slug);
 
           return (
             <Link
@@ -73,12 +79,12 @@ export function LessonSidebar({
                 className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${
                   isCurrent
                     ? "bg-primary text-white shadow-sm"
-                    : isPast
+                    : isCompleted
                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                       : "bg-muted text-foreground/50"
                 }`}
               >
-                {isPast ? (
+                {isCompleted ? (
                   <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
@@ -89,7 +95,7 @@ export function LessonSidebar({
               <span className={`truncate leading-tight ${
                 isCurrent
                   ? "text-primary"
-                  : isPast
+                  : isCompleted
                     ? "text-foreground/70 group-hover:text-foreground"
                     : "text-foreground/80 group-hover:text-foreground"
               }`}>

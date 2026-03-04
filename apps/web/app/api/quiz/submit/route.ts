@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   }
 
   // Rate limit: 10 requests/minute per user
-  const rl = rateLimit(`quiz-submit:${clerkId}`, RATE_LIMITS.quizSubmit);
+  const rl = await rateLimit(`quiz-submit:${clerkId}`, RATE_LIMITS.quizSubmit);
   if (!rl.success) {
     return rateLimitResponse(rl);
   }
@@ -93,27 +93,30 @@ export async function POST(request: Request) {
     await supabase.from("quiz_responses").insert(responses);
   }
 
-  // Award XP with logging and dedup
+  // Award XP with logging and dedup — use quiz-level dedup key (not attempt-level)
+  // so retries improve score but don't grant additional XP
   let leveledUp = false;
   if (xpEarned > 0) {
     const source = scoring.score === 100 ? "quiz_perfect" : "quiz_pass";
-    const attemptNum = (previousAttempts ?? 0) + 1;
     const result = await awardXPWithLog({
       userId: profileId,
       amount: xpEarned,
       source,
       sourceId: quizId,
-      dedupKey: `${source}:${quizId}:attempt${attemptNum}`,
+      dedupKey: `quiz_xp:${quizId}`,
       metadata: { score: scoring.score, passed: scoring.passed },
     });
     leveledUp = result.leveledUp;
   }
 
-  // Update streak and daily activity
+  // Update streak and daily activity — await to ensure data is persisted
+  // before the client can fetch dashboard data
   if (xpEarned > 0) {
-    updateStreak(profileId, "quiz", xpEarned).catch((err) =>
-      console.error("Streak update failed:", err),
-    );
+    try {
+      await updateStreak(profileId, "quiz", xpEarned);
+    } catch (err) {
+      console.error("Streak update failed:", err);
+    }
   }
 
   // Trigger skill score recalculation + badge evaluation

@@ -1681,6 +1681,16 @@ export interface Database {
         Args: Record<string, never>;
         Returns: string;
       };
+      increment_xp: {
+        Args: {
+          p_user_id: string;
+          p_amount: number;
+        };
+        Returns: {
+          new_total: number;
+          old_level: number;
+        }[];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

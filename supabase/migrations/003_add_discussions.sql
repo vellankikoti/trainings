@@ -1,6 +1,7 @@
 -- 003_add_discussions.sql
 -- Description: Add discussion/comment system for lesson-level discussions
 -- Rollback: DROP TABLE IF EXISTS discussion_votes; DROP TABLE IF EXISTS discussions;
+-- Idempotent: safe to re-run.
 
 CREATE TABLE IF NOT EXISTS discussions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -27,32 +28,38 @@ CREATE TABLE IF NOT EXISTS discussion_votes (
 ALTER TABLE discussions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE discussion_votes ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Anyone can view non-deleted discussions" ON discussions;
 CREATE POLICY "Anyone can view non-deleted discussions"
   ON discussions FOR SELECT
   USING (is_deleted = FALSE);
 
+DROP POLICY IF EXISTS "Users can create discussions" ON discussions;
 CREATE POLICY "Users can create discussions"
   ON discussions FOR INSERT
   WITH CHECK (user_id IN (
     SELECT id FROM profiles WHERE clerk_id = auth.uid()::text
   ));
 
+DROP POLICY IF EXISTS "Users can edit own discussions" ON discussions;
 CREATE POLICY "Users can edit own discussions"
   ON discussions FOR UPDATE
   USING (user_id IN (
     SELECT id FROM profiles WHERE clerk_id = auth.uid()::text
   ));
 
+DROP POLICY IF EXISTS "Anyone can view votes" ON discussion_votes;
 CREATE POLICY "Anyone can view votes"
   ON discussion_votes FOR SELECT
   USING (true);
 
+DROP POLICY IF EXISTS "Users can vote" ON discussion_votes;
 CREATE POLICY "Users can vote"
   ON discussion_votes FOR INSERT
   WITH CHECK (user_id IN (
     SELECT id FROM profiles WHERE clerk_id = auth.uid()::text
   ));
 
+DROP POLICY IF EXISTS "Users can change own votes" ON discussion_votes;
 CREATE POLICY "Users can change own votes"
   ON discussion_votes FOR DELETE
   USING (user_id IN (
@@ -74,6 +81,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_discussion_updated_at ON discussions;
 CREATE TRIGGER trigger_discussion_updated_at
   BEFORE UPDATE ON discussions
   FOR EACH ROW

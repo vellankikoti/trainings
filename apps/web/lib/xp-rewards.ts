@@ -118,14 +118,46 @@ export async function awardXPWithLog(
     }
   }
 
-  // Get current profile
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("total_xp, current_level")
-    .eq("id", userId)
-    .single();
+  // Write XP log entry first (dedup unique index prevents duplicates at DB level)
+  try {
+    await supabase.from("xp_log").insert({
+      user_id: userId,
+      amount,
+      source,
+      source_id: sourceId ?? null,
+      dedup_key: dedupKey ?? null,
+      metadata: (metadata ?? {}) as Json,
+    });
+  } catch (insertErr: unknown) {
+    // If unique constraint violation on dedup_key, this is a concurrent duplicate
+    const err = insertErr as { code?: string };
+    if (err?.code === "23505" && dedupKey) {
+      const { data: currentProfile } = await supabase
+        .from("profiles")
+        .select("total_xp, current_level")
+        .eq("id", userId)
+        .single();
+      return {
+        awarded: false,
+        amount: 0,
+        newTotal: currentProfile?.total_xp ?? 0,
+        leveledUp: false,
+        newLevel: currentProfile?.current_level ?? 0,
+        reason: `Duplicate (concurrent): ${dedupKey}`,
+      };
+    }
+    throw insertErr;
+  }
 
-  if (!profile) {
+  // Atomic XP increment — prevents race condition where two concurrent
+  // requests both read the same total_xp and overwrite each other.
+  const { data: incrementResult } = await supabase.rpc("increment_xp", {
+    p_user_id: userId,
+    p_amount: amount,
+  });
+
+  const row = Array.isArray(incrementResult) ? incrementResult[0] : incrementResult;
+  if (!row) {
     return {
       awarded: false,
       amount: 0,
@@ -136,28 +168,17 @@ export async function awardXPWithLog(
     };
   }
 
-  const oldLevel = profile.current_level;
-  const newTotal = profile.total_xp + amount;
+  const newTotal = row.new_total;
+  const oldLevel = row.old_level;
   const newLevelObj = calculateLevel(newTotal);
 
-  // Write XP log entry
-  await supabase.from("xp_log").insert({
-    user_id: userId,
-    amount,
-    source,
-    source_id: sourceId ?? null,
-    dedup_key: dedupKey ?? null,
-    metadata: (metadata ?? {}) as Json,
-  });
-
-  // Update profile
-  await supabase
-    .from("profiles")
-    .update({
-      total_xp: newTotal,
-      current_level: newLevelObj.level,
-    })
-    .eq("id", userId);
+  // Update level if it changed (separate update since RPC only increments XP)
+  if (newLevelObj.level !== oldLevel) {
+    await supabase
+      .from("profiles")
+      .update({ current_level: newLevelObj.level })
+      .eq("id", userId);
+  }
 
   // Notify on level up
   if (newLevelObj.level > oldLevel) {

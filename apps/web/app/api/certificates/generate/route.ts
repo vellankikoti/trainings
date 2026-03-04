@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   }
 
   // Rate limit: 3 requests/hour per user
-  const rl = rateLimit(`cert-generate:${clerkId}`, RATE_LIMITS.certificateGenerate);
+  const rl = await rateLimit(`cert-generate:${clerkId}`, RATE_LIMITS.certificateGenerate);
   if (!rl.success) {
     return rateLimitResponse(rl);
   }

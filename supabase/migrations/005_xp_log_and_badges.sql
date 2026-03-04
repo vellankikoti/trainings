@@ -1,6 +1,7 @@
 -- =============================================
 -- Migration 005: XP History Log & Badge System
 -- =============================================
+-- Idempotent: safe to re-run.
 
 -- XP log — every XP award is recorded with source, amount, dedup key
 CREATE TABLE IF NOT EXISTS xp_log (
@@ -55,14 +56,17 @@ ALTER TABLE xp_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE badge_definitions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_badges ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own XP log" ON xp_log;
 CREATE POLICY "Users can view own XP log"
     ON xp_log FOR SELECT
     USING (user_id = get_current_profile_id());
 
+DROP POLICY IF EXISTS "Badge definitions readable by all" ON badge_definitions;
 CREATE POLICY "Badge definitions readable by all"
     ON badge_definitions FOR SELECT
     USING (is_active = true);
 
+DROP POLICY IF EXISTS "Users can view own badges" ON user_badges;
 CREATE POLICY "Users can view own badges"
     ON user_badges FOR SELECT
     USING (user_id = get_current_profile_id());

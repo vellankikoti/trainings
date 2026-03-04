@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   }
 
   // Rate limit: 5 requests/hour
-  const rl = rateLimit(`lab-session:${clerkId}`, RATE_LIMITS.labSession);
+  const rl = await rateLimit(`lab-session:${clerkId}`, RATE_LIMITS.labSession);
   if (!rl.success) {
     return rateLimitResponse(rl);
   }

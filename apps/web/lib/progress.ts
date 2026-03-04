@@ -2,7 +2,6 @@ import { currentUser } from "@clerk/nextjs/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getModulesForPath } from "@/lib/content";
 import { XP_REWARDS } from "@/lib/xp";
-import { calculateLevel } from "@/lib/levels";
 import { recalculateSkillScores } from "@/lib/skills/score-calculator";
 import { evaluateBadges } from "@/lib/badges";
 import { awardLessonXP, awardExerciseXP, awardModuleXP, awardPathXP } from "@/lib/xp-rewards";
@@ -80,43 +79,9 @@ export async function ensureProfile(clerkId: string): Promise<string | null> {
   }
 }
 
-/**
- * Award XP to a user and handle level-up detection.
- */
-export async function awardXP(
-  userId: string,
-  amount: number,
-  source: string,
-): Promise<{ newTotal: number; leveledUp: boolean; newLevel: number }> {
-  const supabase = createAdminClient();
-
-  // Get current XP
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("total_xp, current_level")
-    .eq("id", userId)
-    .single();
-
-  if (!profile) throw new Error("Profile not found");
-
-  const oldLevel = profile.current_level;
-  const newTotal = profile.total_xp + amount;
-  const newLevelObj = calculateLevel(newTotal);
-
-  await supabase
-    .from("profiles")
-    .update({
-      total_xp: newTotal,
-      current_level: newLevelObj.level,
-    })
-    .eq("id", userId);
-
-  return {
-    newTotal,
-    leveledUp: newLevelObj.level > oldLevel,
-    newLevel: newLevelObj.level,
-  };
-}
+// NOTE: Legacy awardXP() was removed — all XP awards now go through
+// awardXPWithLog() in lib/xp-rewards.ts which provides dedup, logging,
+// and atomic Postgres increment.
 
 /**
  * Mark a lesson as started or completed.
@@ -400,40 +365,89 @@ async function recalculatePathProgress(
     .eq("path_slug", pathSlug);
 
   const completed = modules?.filter((m) => m.percentage === 100).length ?? 0;
-  const total = totalFromContent > 0 ? totalFromContent : (modules?.length ?? 0);
+
+  // SAFETY: Never use module_progress count as the total.
+  // If content metadata is unavailable, track progress but never auto-complete.
+  if (totalFromContent === 0) {
+    console.warn(
+      `[progress] Path ${pathSlug}: content metadata unavailable, cannot determine total modules. Storing partial progress only.`,
+    );
+    const startedCount = modules?.length ?? 0;
+    const safePercentage = startedCount > 0
+      ? Math.min(Math.round((completed / startedCount) * 100), 99) // cap at 99%
+      : 0;
+
+    const { data: existing } = await supabase
+      .from("path_progress")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("path_slug", pathSlug)
+      .single();
+
+    const updates = {
+      modules_total: 0, // unknown
+      modules_completed: completed,
+      percentage: safePercentage,
+    };
+
+    if (existing) {
+      await supabase.from("path_progress").update(updates).eq("id", existing.id);
+    } else {
+      await supabase.from("path_progress").insert({
+        user_id: userId,
+        path_slug: pathSlug,
+        started_at: new Date().toISOString(),
+        ...updates,
+      });
+    }
+    return; // Never auto-complete when content metadata is missing
+  }
+
+  const total = totalFromContent;
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const isReallyComplete = completed >= total && total > 0;
 
   const { data: existing } = await supabase
     .from("path_progress")
-    .select("id")
+    .select("id, completed_at")
     .eq("user_id", userId)
     .eq("path_slug", pathSlug)
     .single();
 
-  const updates = {
-    modules_total: total,
-    modules_completed: completed,
-    percentage,
-    ...(percentage === 100
-      ? { completed_at: new Date().toISOString() }
-      : {}),
-  };
+  // Determine completed_at value
+  let completedAt: string | null | undefined;
+  if (isReallyComplete && !existing?.completed_at) {
+    completedAt = new Date().toISOString();
+  } else if (!isReallyComplete && existing?.completed_at) {
+    completedAt = null; // Clear false completion (data repair)
+  }
 
   if (existing) {
+    const updateData: Record<string, unknown> = {
+      modules_total: total,
+      modules_completed: completed,
+      percentage,
+    };
+    if (completedAt !== undefined) {
+      updateData.completed_at = completedAt;
+    }
     await supabase
       .from("path_progress")
-      .update(updates)
+      .update(updateData)
       .eq("id", existing.id);
   } else {
     await supabase.from("path_progress").insert({
       user_id: userId,
       path_slug: pathSlug,
+      modules_total: total,
+      modules_completed: completed,
+      percentage,
       started_at: new Date().toISOString(),
-      ...updates,
+      ...(completedAt ? { completed_at: completedAt } : {}),
     });
   }
 
-  if (percentage === 100) {
+  if (isReallyComplete) {
     await awardPathXP(userId, pathSlug);
   }
 }

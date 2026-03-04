@@ -4,26 +4,34 @@
 -- DE-002: Materialized views for analytics
 -- DE-003: Skill percentile calculation
 -- =============================================
+-- Idempotent: safe to re-run.
+-- Defensive: checks for table existence before operating.
 
 -- ─── DE-001: Events Table Optimization ────────────────────────────────────────
 
 -- Better indexes for event analytics queries
-CREATE INDEX IF NOT EXISTS idx_events_type_created
-    ON events(event_type, created_at DESC);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'events') THEN
+    CREATE INDEX IF NOT EXISTS idx_events_type_created
+        ON events(event_type, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_events_user_type_created
-    ON events(user_id, event_type, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_user_type_created
+        ON events(user_id, event_type, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_events_session
-    ON events(session_id, created_at DESC)
-    WHERE session_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_events_session
+        ON events(session_id, created_at DESC)
+        WHERE session_id IS NOT NULL;
+  END IF;
 
--- Active time log indexes
-CREATE INDEX IF NOT EXISTS idx_active_time_user_entity
-    ON active_time_log(user_id, entity_type, entity_id);
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'active_time_log') THEN
+    CREATE INDEX IF NOT EXISTS idx_active_time_user_entity
+        ON active_time_log(user_id, entity_type, entity_id);
 
-CREATE INDEX IF NOT EXISTS idx_active_time_user_created
-    ON active_time_log(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_active_time_user_created
+        ON active_time_log(user_id, created_at DESC);
+  END IF;
+END $$;
 
 -- Events retention cleanup function (removes raw events older than retention period)
 CREATE OR REPLACE FUNCTION cleanup_old_events(retention_days INTEGER DEFAULT 365)

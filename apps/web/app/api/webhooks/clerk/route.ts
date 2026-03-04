@@ -65,16 +65,22 @@ export async function POST(req: Request) {
         (acc) => acc.provider === "oauth_github",
       );
 
-      const { error } = await supabase.from("profiles").insert({
-        clerk_id: id,
-        display_name: displayName,
-        avatar_url: image_url,
-        username: username,
-        github_username: githubAccount?.username || null,
-      });
+      // Use upsert to handle Clerk webhook retries gracefully.
+      // If the webhook is delivered twice, the second delivery will update
+      // instead of failing with a unique constraint violation.
+      const { error } = await supabase.from("profiles").upsert(
+        {
+          clerk_id: id,
+          display_name: displayName,
+          avatar_url: image_url,
+          username: username,
+          github_username: githubAccount?.username || null,
+        },
+        { onConflict: "clerk_id" },
+      );
 
       if (error) {
-        console.error("Failed to create profile:", error);
+        console.error("Failed to create/update profile:", error);
         return new Response("Failed to create profile", { status: 500 });
       }
 

@@ -3,13 +3,14 @@
 -- =============================================
 -- This migration creates all core tables for the learning platform.
 -- Auth is handled by Clerk; Supabase is used for data storage only.
+-- Idempotent: safe to re-run.
 -- =============================================
 
 -- =============================================
 -- USER PROFILES
 -- =============================================
 
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   clerk_id TEXT UNIQUE NOT NULL,
   username TEXT UNIQUE,
@@ -37,7 +38,7 @@ CREATE TABLE profiles (
 -- PROGRESS TRACKING
 -- =============================================
 
-CREATE TABLE lesson_progress (
+CREATE TABLE IF NOT EXISTS lesson_progress (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   lesson_slug TEXT NOT NULL,
@@ -51,7 +52,7 @@ CREATE TABLE lesson_progress (
   UNIQUE(user_id, lesson_slug)
 );
 
-CREATE TABLE exercise_progress (
+CREATE TABLE IF NOT EXISTS exercise_progress (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   lesson_slug TEXT NOT NULL,
@@ -62,7 +63,7 @@ CREATE TABLE exercise_progress (
   UNIQUE(user_id, lesson_slug, exercise_id)
 );
 
-CREATE TABLE module_progress (
+CREATE TABLE IF NOT EXISTS module_progress (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   path_slug TEXT NOT NULL,
@@ -75,7 +76,7 @@ CREATE TABLE module_progress (
   UNIQUE(user_id, path_slug, module_slug)
 );
 
-CREATE TABLE path_progress (
+CREATE TABLE IF NOT EXISTS path_progress (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   path_slug TEXT NOT NULL,
@@ -91,7 +92,7 @@ CREATE TABLE path_progress (
 -- QUIZ SYSTEM
 -- =============================================
 
-CREATE TABLE quiz_attempts (
+CREATE TABLE IF NOT EXISTS quiz_attempts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   quiz_id TEXT NOT NULL,
@@ -106,7 +107,7 @@ CREATE TABLE quiz_attempts (
   attempted_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE TABLE quiz_responses (
+CREATE TABLE IF NOT EXISTS quiz_responses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   attempt_id UUID REFERENCES quiz_attempts(id) ON DELETE CASCADE,
   question_id TEXT NOT NULL,
@@ -119,7 +120,7 @@ CREATE TABLE quiz_responses (
 -- PROJECTS
 -- =============================================
 
-CREATE TABLE project_progress (
+CREATE TABLE IF NOT EXISTS project_progress (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   project_slug TEXT NOT NULL,
@@ -136,7 +137,7 @@ CREATE TABLE project_progress (
 -- CERTIFICATES
 -- =============================================
 
-CREATE TABLE certificates (
+CREATE TABLE IF NOT EXISTS certificates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   certificate_type TEXT NOT NULL,
@@ -153,7 +154,7 @@ CREATE TABLE certificates (
 -- ACHIEVEMENTS
 -- =============================================
 
-CREATE TABLE user_achievements (
+CREATE TABLE IF NOT EXISTS user_achievements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   achievement_id TEXT NOT NULL,
@@ -165,7 +166,7 @@ CREATE TABLE user_achievements (
 -- DAILY ACTIVITY / STREAKS
 -- =============================================
 
-CREATE TABLE daily_activity (
+CREATE TABLE IF NOT EXISTS daily_activity (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   activity_date DATE NOT NULL,
@@ -181,18 +182,18 @@ CREATE TABLE daily_activity (
 -- INDEXES
 -- =============================================
 
-CREATE INDEX idx_lesson_progress_user ON lesson_progress(user_id);
-CREATE INDEX idx_lesson_progress_lesson ON lesson_progress(lesson_slug);
-CREATE INDEX idx_exercise_progress_user ON exercise_progress(user_id);
-CREATE INDEX idx_module_progress_user ON module_progress(user_id);
-CREATE INDEX idx_path_progress_user ON path_progress(user_id);
-CREATE INDEX idx_quiz_attempts_user ON quiz_attempts(user_id);
-CREATE INDEX idx_quiz_responses_attempt ON quiz_responses(attempt_id);
-CREATE INDEX idx_project_progress_user ON project_progress(user_id);
-CREATE INDEX idx_certificates_user ON certificates(user_id);
-CREATE INDEX idx_certificates_verification ON certificates(verification_code);
-CREATE INDEX idx_user_achievements_user ON user_achievements(user_id);
-CREATE INDEX idx_daily_activity_user_date ON daily_activity(user_id, activity_date);
+CREATE INDEX IF NOT EXISTS idx_lesson_progress_user ON lesson_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_lesson_progress_lesson ON lesson_progress(lesson_slug);
+CREATE INDEX IF NOT EXISTS idx_exercise_progress_user ON exercise_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_module_progress_user ON module_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_path_progress_user ON path_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user ON quiz_attempts(user_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_responses_attempt ON quiz_responses(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_project_progress_user ON project_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_certificates_user ON certificates(user_id);
+CREATE INDEX IF NOT EXISTS idx_certificates_verification ON certificates(verification_code);
+CREATE INDEX IF NOT EXISTS idx_user_achievements_user ON user_achievements(user_id);
+CREATE INDEX IF NOT EXISTS idx_daily_activity_user_date ON daily_activity(user_id, activity_date);
 
 -- =============================================
 -- ROW LEVEL SECURITY
@@ -211,18 +212,21 @@ ALTER TABLE user_achievements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_activity ENABLE ROW LEVEL SECURITY;
 
 -- =============================================
--- RLS POLICIES
+-- RLS POLICIES (idempotent with DROP IF EXISTS)
 -- =============================================
 
 -- Profiles: users can read/update their own, public profiles visible to all
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
 CREATE POLICY "Users can view own profile"
   ON profiles FOR SELECT
   USING (clerk_id = auth.jwt()->>'sub');
 
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 CREATE POLICY "Users can update own profile"
   ON profiles FOR UPDATE
   USING (clerk_id = auth.jwt()->>'sub');
 
+DROP POLICY IF EXISTS "Public profiles are viewable" ON profiles;
 CREATE POLICY "Public profiles are viewable"
   ON profiles FOR SELECT
   USING (public_profile = true);
@@ -234,31 +238,37 @@ RETURNS UUID AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- Lesson progress: private to user
+DROP POLICY IF EXISTS "Users can manage own lesson progress" ON lesson_progress;
 CREATE POLICY "Users can manage own lesson progress"
   ON lesson_progress FOR ALL
   USING (user_id = get_current_profile_id());
 
 -- Exercise progress: private to user
+DROP POLICY IF EXISTS "Users can manage own exercise progress" ON exercise_progress;
 CREATE POLICY "Users can manage own exercise progress"
   ON exercise_progress FOR ALL
   USING (user_id = get_current_profile_id());
 
 -- Module progress: private to user
+DROP POLICY IF EXISTS "Users can manage own module progress" ON module_progress;
 CREATE POLICY "Users can manage own module progress"
   ON module_progress FOR ALL
   USING (user_id = get_current_profile_id());
 
 -- Path progress: private to user
+DROP POLICY IF EXISTS "Users can manage own path progress" ON path_progress;
 CREATE POLICY "Users can manage own path progress"
   ON path_progress FOR ALL
   USING (user_id = get_current_profile_id());
 
 -- Quiz attempts: private to user
+DROP POLICY IF EXISTS "Users can manage own quiz attempts" ON quiz_attempts;
 CREATE POLICY "Users can manage own quiz attempts"
   ON quiz_attempts FOR ALL
   USING (user_id = get_current_profile_id());
 
 -- Quiz responses: private (through attempt ownership)
+DROP POLICY IF EXISTS "Users can manage own quiz responses" ON quiz_responses;
 CREATE POLICY "Users can manage own quiz responses"
   ON quiz_responses FOR ALL
   USING (attempt_id IN (
@@ -266,25 +276,30 @@ CREATE POLICY "Users can manage own quiz responses"
   ));
 
 -- Project progress: private to user
+DROP POLICY IF EXISTS "Users can manage own project progress" ON project_progress;
 CREATE POLICY "Users can manage own project progress"
   ON project_progress FOR ALL
   USING (user_id = get_current_profile_id());
 
 -- Certificates: viewable by owner, public verification by code
+DROP POLICY IF EXISTS "Users can view own certificates" ON certificates;
 CREATE POLICY "Users can view own certificates"
   ON certificates FOR SELECT
   USING (user_id = get_current_profile_id());
 
+DROP POLICY IF EXISTS "Certificates verifiable by code" ON certificates;
 CREATE POLICY "Certificates verifiable by code"
   ON certificates FOR SELECT
   USING (verification_code IS NOT NULL);
 
 -- Achievements: private to user
+DROP POLICY IF EXISTS "Users can view own achievements" ON user_achievements;
 CREATE POLICY "Users can view own achievements"
   ON user_achievements FOR SELECT
   USING (user_id = get_current_profile_id());
 
 -- Daily activity: private to user
+DROP POLICY IF EXISTS "Users can manage own daily activity" ON daily_activity;
 CREATE POLICY "Users can manage own daily activity"
   ON daily_activity FOR ALL
   USING (user_id = get_current_profile_id());
@@ -301,6 +316,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS profiles_updated_at ON profiles;
 CREATE TRIGGER profiles_updated_at
   BEFORE UPDATE ON profiles
   FOR EACH ROW

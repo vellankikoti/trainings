@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   }
 
   // Rate limit: 5 requests/hour
-  const rl = rateLimit(`checkout:${userId}`, RATE_LIMITS.checkout);
+  const rl = await rateLimit(`checkout:${userId}`, RATE_LIMITS.checkout);
   if (!rl.success) {
     return rateLimitResponse(rl);
   }

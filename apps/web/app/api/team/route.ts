@@ -15,7 +15,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const rl = rateLimit(`team:${clerkId}`, RATE_LIMITS.general);
+  const rl = await rateLimit(`team:${clerkId}`, RATE_LIMITS.general);
   if (!rl.success) {
     return rateLimitResponse(rl);
   }

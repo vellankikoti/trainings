@@ -1,6 +1,7 @@
 -- =============================================
 -- Migration 006: In-App Notification System
 -- =============================================
+-- Idempotent: safe to re-run.
 
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -26,10 +27,12 @@ CREATE INDEX IF NOT EXISTS idx_notifications_unread
 -- RLS
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own notifications" ON notifications;
 CREATE POLICY "Users can view own notifications"
     ON notifications FOR SELECT
     USING (user_id = get_current_profile_id());
 
+DROP POLICY IF EXISTS "Users can update own notifications" ON notifications;
 CREATE POLICY "Users can update own notifications"
     ON notifications FOR UPDATE
     USING (user_id = get_current_profile_id());

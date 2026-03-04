@@ -1,44 +1,18 @@
 /**
- * In-memory rate limiter for API routes.
+ * Rate limiter for API routes — uses Upstash Redis in production,
+ * falls back to in-memory for development.
  *
- * For production at scale, replace with Upstash Redis (@upstash/ratelimit)
- * which works at the edge and persists across serverless invocations.
+ * Production: Uses @upstash/ratelimit with sliding window via Upstash Redis.
+ * Development: Uses in-memory Map (single process only).
  *
- * This in-memory implementation is suitable for single-server deployments
- * and development. Entries are automatically cleaned up to prevent memory leaks.
+ * IMPORTANT: This function is ASYNC (returns a Promise).
+ * All callers must use `await rateLimit(...)`.
  */
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
 
-const store = new Map<string, RateLimitEntry>();
-
-// Clean up expired entries every 60 seconds
-const CLEANUP_INTERVAL = 60_000;
-let cleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-function ensureCleanup() {
-  if (cleanupTimer) return;
-  cleanupTimer = setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of store) {
-      if (now > entry.resetAt) {
-        store.delete(key);
-      }
-    }
-    // Stop cleanup timer if store is empty
-    if (store.size === 0 && cleanupTimer) {
-      clearInterval(cleanupTimer);
-      cleanupTimer = null;
-    }
-  }, CLEANUP_INTERVAL);
-  // Allow process to exit even if timer is active
-  if (cleanupTimer && typeof cleanupTimer === "object" && "unref" in cleanupTimer) {
-    cleanupTimer.unref();
-  }
-}
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface RateLimitConfig {
   /** Maximum number of requests allowed in the window */
@@ -54,23 +28,88 @@ interface RateLimitResult {
   resetAt: number;
 }
 
-/**
- * Check and consume a rate limit token for the given identifier.
- */
-export function rateLimit(
+// ── Redis client (singleton) ─────────────────────────────────────────────────
+
+let redis: Redis | null = null;
+
+function getRedis(): Redis | null {
+  if (redis) return redis;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (!url || !token) return null;
+
+  redis = new Redis({ url, token });
+  return redis;
+}
+
+// ── Upstash rate limiter instances (cached per config key) ───────────────────
+
+const limiters = new Map<string, Ratelimit>();
+
+function getOrCreateLimiter(config: RateLimitConfig): Ratelimit | null {
+  const redisClient = getRedis();
+  if (!redisClient) return null;
+
+  const key = `${config.limit}:${config.windowSeconds}`;
+  if (limiters.has(key)) return limiters.get(key)!;
+
+  const limiter = new Ratelimit({
+    redis: redisClient,
+    limiter: Ratelimit.slidingWindow(config.limit, `${config.windowSeconds} s`),
+    analytics: true,
+    prefix: "ratelimit:api",
+  });
+
+  limiters.set(key, limiter);
+  return limiter;
+}
+
+// ── In-memory fallback (development only) ────────────────────────────────────
+
+interface InMemoryEntry {
+  count: number;
+  resetAt: number;
+}
+
+const inMemoryStore = new Map<string, InMemoryEntry>();
+
+// Clean up expired entries every 60 seconds
+const CLEANUP_INTERVAL = 60_000;
+let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensureCleanup() {
+  if (cleanupTimer) return;
+  cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of inMemoryStore) {
+      if (now > entry.resetAt) {
+        inMemoryStore.delete(key);
+      }
+    }
+    if (inMemoryStore.size === 0 && cleanupTimer) {
+      clearInterval(cleanupTimer);
+      cleanupTimer = null;
+    }
+  }, CLEANUP_INTERVAL);
+  if (cleanupTimer && typeof cleanupTimer === "object" && "unref" in cleanupTimer) {
+    (cleanupTimer as NodeJS.Timeout).unref();
+  }
+}
+
+function inMemoryRateLimit(
   identifier: string,
   config: RateLimitConfig,
 ): RateLimitResult {
   ensureCleanup();
 
   const now = Date.now();
-  const key = identifier;
-  const entry = store.get(key);
+  const entry = inMemoryStore.get(identifier);
 
-  // If no entry or window expired, start fresh
   if (!entry || now > entry.resetAt) {
     const resetAt = now + config.windowSeconds * 1000;
-    store.set(key, { count: 1, resetAt });
+    inMemoryStore.set(identifier, { count: 1, resetAt });
     return {
       success: true,
       limit: config.limit,
@@ -79,7 +118,6 @@ export function rateLimit(
     };
   }
 
-  // Within window — check limit
   if (entry.count >= config.limit) {
     return {
       success: false,
@@ -89,7 +127,6 @@ export function rateLimit(
     };
   }
 
-  // Increment
   entry.count++;
   return {
     success: true,
@@ -99,9 +136,47 @@ export function rateLimit(
   };
 }
 
+// ── Main rate limit function ─────────────────────────────────────────────────
+
 /**
- * Pre-configured rate limits per endpoint category.
+ * Check and consume a rate limit token for the given identifier.
+ *
+ * Uses Upstash Redis in production (shared across all serverless isolates).
+ * Falls back to in-memory for development when Redis is not configured.
  */
+export async function rateLimit(
+  identifier: string,
+  config: RateLimitConfig,
+): Promise<RateLimitResult> {
+  const limiter = getOrCreateLimiter(config);
+
+  if (limiter) {
+    try {
+      const result = await limiter.limit(identifier);
+      return {
+        success: result.success,
+        limit: result.limit,
+        remaining: result.remaining,
+        resetAt: Math.ceil(result.reset / 1000) * 1000, // normalize to ms
+      };
+    } catch (error) {
+      // Redis failure — fail open (allow the request, log warning)
+      console.warn("[rate-limit] Redis failed, allowing request:", error);
+      return {
+        success: true,
+        limit: config.limit,
+        remaining: config.limit,
+        resetAt: Date.now() + config.windowSeconds * 1000,
+      };
+    }
+  }
+
+  // In-memory fallback (dev only)
+  return inMemoryRateLimit(identifier, config);
+}
+
+// ── Pre-configured rate limits per endpoint category ─────────────────────────
+
 export const RATE_LIMITS = {
   quizSubmit: { limit: 10, windowSeconds: 60 },         // 10 req/min
   progress: { limit: 30, windowSeconds: 60 },            // 30 req/min
@@ -109,7 +184,10 @@ export const RATE_LIMITS = {
   certificateGenerate: { limit: 3, windowSeconds: 3600 }, // 3 req/hr
   checkout: { limit: 5, windowSeconds: 3600 },            // 5 req/hr
   general: { limit: 60, windowSeconds: 60 },              // 60 req/min
+  gdprExport: { limit: 5, windowSeconds: 600 },           // 5 req/10min
 } as const;
+
+// ── Helper to create a 429 response ──────────────────────────────────────────
 
 /**
  * Helper to create a 429 response with appropriate headers.
@@ -120,13 +198,13 @@ export function rateLimitResponse(result: RateLimitResult): Response {
   return new Response(
     JSON.stringify({
       error: "Too Many Requests",
-      retryAfter,
+      retryAfter: Math.max(1, retryAfter),
     }),
     {
       status: 429,
       headers: {
         "Content-Type": "application/json",
-        "Retry-After": String(retryAfter),
+        "Retry-After": String(Math.max(1, retryAfter)),
         "X-RateLimit-Limit": String(result.limit),
         "X-RateLimit-Remaining": String(result.remaining),
         "X-RateLimit-Reset": String(result.resetAt),

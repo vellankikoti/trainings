@@ -12,6 +12,7 @@
 -- - Event store (append-only)
 -- - Active time tracking
 -- - Job postings & applications
+-- Idempotent: safe to re-run.
 -- =============================================
 
 -- =============================================
@@ -413,13 +414,14 @@ ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE active_time_log ENABLE ROW LEVEL SECURITY;
 
 -- =============================================
--- 13. RLS POLICIES
+-- 13. RLS POLICIES (idempotent with DROP IF EXISTS)
 -- =============================================
 
 -- Note: API routes use the admin client (service role key) which bypasses RLS.
 -- These policies are for direct client access and defense-in-depth.
 
 -- Institutes: viewable by members, admins can manage
+DROP POLICY IF EXISTS "Institute members can view their institute" ON institutes;
 CREATE POLICY "Institute members can view their institute"
     ON institutes FOR SELECT
     USING (id IN (
@@ -427,6 +429,7 @@ CREATE POLICY "Institute members can view their institute"
         WHERE user_id = get_current_profile_id()
     ));
 
+DROP POLICY IF EXISTS "Admins can manage institutes" ON institutes;
 CREATE POLICY "Admins can manage institutes"
     ON institutes FOR ALL
     USING (EXISTS (
@@ -436,6 +439,7 @@ CREATE POLICY "Admins can manage institutes"
     ));
 
 -- Institute members: visible to fellow members
+DROP POLICY IF EXISTS "Institute members can view fellow members" ON institute_members;
 CREATE POLICY "Institute members can view fellow members"
     ON institute_members FOR SELECT
     USING (institute_id IN (
@@ -444,6 +448,7 @@ CREATE POLICY "Institute members can view fellow members"
     ));
 
 -- Batches: visible to institute members
+DROP POLICY IF EXISTS "Institute members can view batches" ON batches;
 CREATE POLICY "Institute members can view batches"
     ON batches FOR SELECT
     USING (institute_id IN (
@@ -452,10 +457,12 @@ CREATE POLICY "Institute members can view batches"
     ));
 
 -- Batch enrollments: students see own, trainers see batch
+DROP POLICY IF EXISTS "Users can view own enrollment" ON batch_enrollments;
 CREATE POLICY "Users can view own enrollment"
     ON batch_enrollments FOR SELECT
     USING (user_id = get_current_profile_id());
 
+DROP POLICY IF EXISTS "Institute members can view batch enrollments" ON batch_enrollments;
 CREATE POLICY "Institute members can view batch enrollments"
     ON batch_enrollments FOR SELECT
     USING (batch_id IN (
@@ -465,6 +472,7 @@ CREATE POLICY "Institute members can view batch enrollments"
     ));
 
 -- Organizations: viewable by members
+DROP POLICY IF EXISTS "Org members can view their organization" ON organizations;
 CREATE POLICY "Org members can view their organization"
     ON organizations FOR SELECT
     USING (id IN (
@@ -473,6 +481,7 @@ CREATE POLICY "Org members can view their organization"
     ));
 
 -- Org members: visible to fellow members
+DROP POLICY IF EXISTS "Org members can view fellow members" ON org_members;
 CREATE POLICY "Org members can view fellow members"
     ON org_members FOR SELECT
     USING (org_id IN (
@@ -481,11 +490,13 @@ CREATE POLICY "Org members can view fellow members"
     ));
 
 -- Lab sessions: own sessions only
+DROP POLICY IF EXISTS "Users can manage own lab sessions" ON lab_sessions;
 CREATE POLICY "Users can manage own lab sessions"
     ON lab_sessions FOR ALL
     USING (user_id = get_current_profile_id());
 
 -- Lab commands: through session ownership
+DROP POLICY IF EXISTS "Users can view own lab commands" ON lab_commands;
 CREATE POLICY "Users can view own lab commands"
     ON lab_commands FOR SELECT
     USING (session_id IN (
@@ -494,20 +505,24 @@ CREATE POLICY "Users can view own lab commands"
     ));
 
 -- Simulation definitions: readable by all authenticated users
+DROP POLICY IF EXISTS "Authenticated users can view simulations" ON simulation_definitions;
 CREATE POLICY "Authenticated users can view simulations"
     ON simulation_definitions FOR SELECT
     USING (is_active = true);
 
 -- Simulation attempts: own attempts only
+DROP POLICY IF EXISTS "Users can manage own simulation attempts" ON simulation_attempts;
 CREATE POLICY "Users can manage own simulation attempts"
     ON simulation_attempts FOR ALL
     USING (user_id = get_current_profile_id());
 
 -- Skill scores: own scores readable, discoverable profiles visible to orgs
+DROP POLICY IF EXISTS "Users can view own skill scores" ON skill_scores;
 CREATE POLICY "Users can view own skill scores"
     ON skill_scores FOR SELECT
     USING (user_id = get_current_profile_id());
 
+DROP POLICY IF EXISTS "Discoverable skill scores visible to org members" ON skill_scores;
 CREATE POLICY "Discoverable skill scores visible to org members"
     ON skill_scores FOR SELECT
     USING (user_id IN (
@@ -517,10 +532,12 @@ CREATE POLICY "Discoverable skill scores visible to org members"
     ));
 
 -- Job postings: readable by all authenticated users when active
+DROP POLICY IF EXISTS "Active job postings are readable" ON job_postings;
 CREATE POLICY "Active job postings are readable"
     ON job_postings FOR SELECT
     USING (is_active = true);
 
+DROP POLICY IF EXISTS "Org members can manage their job postings" ON job_postings;
 CREATE POLICY "Org members can manage their job postings"
     ON job_postings FOR ALL
     USING (org_id IN (
@@ -529,11 +546,13 @@ CREATE POLICY "Org members can manage their job postings"
     ));
 
 -- Job applications: own applications only
+DROP POLICY IF EXISTS "Users can manage own job applications" ON job_applications;
 CREATE POLICY "Users can manage own job applications"
     ON job_applications FOR ALL
     USING (user_id = get_current_profile_id());
 
 -- Candidate interactions: org-scoped
+DROP POLICY IF EXISTS "Org members can manage candidate interactions" ON candidate_interactions;
 CREATE POLICY "Org members can manage candidate interactions"
     ON candidate_interactions FOR ALL
     USING (org_id IN (
@@ -542,11 +561,13 @@ CREATE POLICY "Org members can manage candidate interactions"
     ));
 
 -- Events: own events only (insert via API with admin client)
+DROP POLICY IF EXISTS "Users can view own events" ON events;
 CREATE POLICY "Users can view own events"
     ON events FOR SELECT
     USING (user_id = get_current_profile_id());
 
 -- Active time log: own data only
+DROP POLICY IF EXISTS "Users can manage own active time" ON active_time_log;
 CREATE POLICY "Users can manage own active time"
     ON active_time_log FOR ALL
     USING (user_id = get_current_profile_id());
@@ -555,26 +576,31 @@ CREATE POLICY "Users can manage own active time"
 -- 14. UPDATED_AT TRIGGERS FOR NEW TABLES
 -- =============================================
 
+DROP TRIGGER IF EXISTS institutes_updated_at ON institutes;
 CREATE TRIGGER institutes_updated_at
     BEFORE UPDATE ON institutes
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS batches_updated_at ON batches;
 CREATE TRIGGER batches_updated_at
     BEFORE UPDATE ON batches
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS organizations_updated_at ON organizations;
 CREATE TRIGGER organizations_updated_at
     BEFORE UPDATE ON organizations
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS simulation_definitions_updated_at ON simulation_definitions;
 CREATE TRIGGER simulation_definitions_updated_at
     BEFORE UPDATE ON simulation_definitions
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS job_applications_updated_at ON job_applications;
 CREATE TRIGGER job_applications_updated_at
     BEFORE UPDATE ON job_applications
     FOR EACH ROW

@@ -1,6 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/server";
-import { XP_REWARDS } from "@/lib/xp";
-import { awardXP } from "@/lib/progress";
+import { awardStreakXP, awardMilestoneXP } from "@/lib/xp-rewards";
 
 /**
  * Streak milestones that trigger special XP bonuses and badge evaluation.
@@ -79,31 +78,53 @@ export async function updateStreak(
       newStreak = 1;
     }
 
-    // Award daily streak XP
-    await awardXP(userId, XP_REWARDS.DAILY_STREAK, "daily_streak");
-    streakXPAwarded = true;
+    // Award daily streak XP (with dedup via xp-rewards system)
+    const streakXPResult = await awardStreakXP(userId);
+    streakXPAwarded = streakXPResult.awarded;
 
     // Check milestone
     milestone = checkMilestone(newStreak);
     if (milestone) {
       const milestoneXP = STREAK_MILESTONE_XP[milestone] ?? 0;
       if (milestoneXP > 0) {
-        await awardXP(userId, milestoneXP, `streak_milestone_${milestone}`);
+        await awardMilestoneXP(userId, milestone, milestoneXP);
       }
     }
   }
 
   const longestStreak = Math.max(newStreak, profile.longest_streak);
 
-  // Update profile streak info
-  await supabase
-    .from("profiles")
-    .update({
-      current_streak: newStreak,
-      longest_streak: longestStreak,
-      last_activity_date: today,
-    })
-    .eq("id", userId);
+  // Update profile streak info — use conditional update to guard against
+  // concurrent requests both detecting "new day" and both incrementing.
+  // The .neq("last_activity_date", today) ensures only the first request
+  // for a given day actually updates the streak counter.
+  if (profile.last_activity_date !== today) {
+    const { data: updateResult } = await supabase
+      .from("profiles")
+      .update({
+        current_streak: newStreak,
+        longest_streak: longestStreak,
+        last_activity_date: today,
+      })
+      .eq("id", userId)
+      .neq("last_activity_date", today)
+      .select("current_streak");
+
+    // If no rows updated, another concurrent request already processed today
+    if (!updateResult || updateResult.length === 0) {
+      return { streak: profile.current_streak, streakXPAwarded: false, milestone: null };
+    }
+  } else {
+    // Already active today — just ensure longest_streak is up to date
+    await supabase
+      .from("profiles")
+      .update({
+        current_streak: newStreak,
+        longest_streak: longestStreak,
+        last_activity_date: today,
+      })
+      .eq("id", userId);
+  }
 
   // Update daily activity
   await upsertDailyActivity(supabase, userId, today, activityType, xpEarned);

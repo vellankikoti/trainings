@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   }
 
   // Rate limit: general rate
-  const rl = rateLimit(`discussions:${clerkId}`, RATE_LIMITS.general);
+  const rl = await rateLimit(`discussions:${clerkId}`, RATE_LIMITS.general);
   if (!rl.success) {
     return rateLimitResponse(rl);
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 interface ExerciseProps {
   number?: number;
@@ -11,6 +11,12 @@ interface ExerciseProps {
   objectives?: string[];
   hints?: string[];
   validationCriteria?: string[];
+  /** Lesson slug for persisting exercise progress */
+  lessonSlug?: string;
+  /** Unique exercise ID within the lesson */
+  exerciseId?: string;
+  /** Whether the exercise was already completed (from DB) */
+  initialCompleted?: boolean;
   children: React.ReactNode;
 }
 
@@ -20,19 +26,53 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   advanced: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20",
 };
 
-export function Exercise({ number, title, difficulty, xpReward, estimatedMinutes, children }: ExerciseProps) {
-  const [completed, setCompleted] = useState(false);
+export function Exercise({
+  number,
+  title,
+  difficulty,
+  xpReward,
+  estimatedMinutes,
+  lessonSlug,
+  exerciseId,
+  initialCompleted = false,
+  children,
+}: ExerciseProps) {
+  const [completed, setCompleted] = useState(initialCompleted);
+  const [saving, setSaving] = useState(false);
+
+  const handleToggleComplete = useCallback(async () => {
+    const newState = !completed;
+    setCompleted(newState);
+
+    // Persist to server if we have the necessary identifiers and marking as complete
+    if (newState && lessonSlug && exerciseId) {
+      setSaving(true);
+      try {
+        await fetch("/api/progress/exercise", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lessonSlug, exerciseId }),
+        });
+      } catch (err) {
+        console.error("Failed to save exercise progress:", err);
+        // Don't revert UI — best-effort persistence
+      } finally {
+        setSaving(false);
+      }
+    }
+  }, [completed, lessonSlug, exerciseId]);
 
   return (
     <div className={`not-prose my-8 overflow-hidden rounded-xl border-l-4 ${completed ? "border-l-emerald-500" : "border-l-primary"} border border-border/60 bg-card shadow-sm transition-all`}>
       <div className="flex items-start gap-4 p-5 pb-4">
         <button
-          onClick={() => setCompleted(!completed)}
+          onClick={handleToggleComplete}
+          disabled={saving}
           className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 transition-all duration-200 ${
             completed
               ? "border-emerald-500 bg-emerald-500 text-white scale-110"
               : "border-muted-foreground/30 hover:border-primary"
-          }`}
+          } ${saving ? "opacity-50 cursor-wait" : ""}`}
           aria-label={completed ? "Mark as incomplete" : "Mark as complete"}
         >
           {completed && (
