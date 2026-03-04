@@ -24,8 +24,7 @@ export async function getAuthContext(): Promise<AuthContext | null> {
     .from("profiles")
     .select("id, role")
     .eq("clerk_id", userId)
-    .is("deleted_at", null)
-    .single();
+    .maybeSingle();
 
   if (!profile) return null;
 
@@ -35,14 +34,17 @@ export async function getAuthContext(): Promise<AuthContext | null> {
     role: (profile.role ?? "learner") as Role,
   };
 
-  // For institute-scoped roles, attach the institute ID
-  // Order by joined_at ASC to deterministically pick the primary (earliest) membership
-  if (ctx.role === "trainer" || ctx.role === "institute_admin") {
+  // Attach institute ID for roles that can access institute pages
+  if (
+    ctx.role === "trainer" ||
+    ctx.role === "institute_admin" ||
+    ctx.role === "admin" ||
+    ctx.role === "super_admin"
+  ) {
     const { data: membership } = await supabase
       .from("institute_members")
       .select("institute_id")
       .eq("user_id", profile.id)
-      .is("deleted_at", null)
       .order("joined_at", { ascending: true })
       .limit(1)
       .maybeSingle();
@@ -52,14 +54,17 @@ export async function getAuthContext(): Promise<AuthContext | null> {
     }
   }
 
-  // For org-scoped roles, attach the org ID
-  // Order by joined_at ASC to deterministically pick the primary (earliest) membership
-  if (ctx.role === "recruiter" || ctx.role === "org_admin") {
+  // Attach org ID for roles that can access org pages
+  if (
+    ctx.role === "recruiter" ||
+    ctx.role === "org_admin" ||
+    ctx.role === "admin" ||
+    ctx.role === "super_admin"
+  ) {
     const { data: membership } = await supabase
       .from("org_members")
       .select("org_id")
       .eq("user_id", profile.id)
-      .is("deleted_at", null)
       .order("joined_at", { ascending: true })
       .limit(1)
       .maybeSingle();
