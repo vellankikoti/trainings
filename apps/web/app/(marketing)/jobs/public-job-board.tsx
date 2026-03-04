@@ -593,9 +593,12 @@ export function PublicJobBoard() {
                     <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
                       Description
                     </h4>
-                    <div className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
-                      {selectedJob.description}
-                    </div>
+                    <div
+                      className="prose prose-sm max-h-[50vh] max-w-none overflow-y-auto text-foreground/80 prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-li:marker:text-muted-foreground/50"
+                      dangerouslySetInnerHTML={{
+                        __html: selectedJob.description,
+                      }}
+                    />
                   </div>
                 )}
 
