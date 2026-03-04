@@ -1,0 +1,27 @@
+{
+  "id": "aws-core",
+  "title": "AWS DevOps Essentials",
+  "slug": "aws-core",
+  "pathSlug": "iac-cloud",
+  "description": "Master AWS services essential for DevOps engineers. From VPC networking and EC2 to ECS, EKS, S3, IAM, and CloudFormation — build production infrastructure on AWS.",
+  "order": 2,
+  "estimatedHours": 55,
+  "lessonsCount": 15,
+  "lessons": [
+    { "slug": "aws-for-devops", "title": "AWS for DevOps Engineers — The Big Picture", "order": 1 },
+    { "slug": "iam-deep-dive", "title": "IAM Deep Dive — Users, Roles & Policies", "order": 2 },
+    { "slug": "vpc-networking", "title": "VPC Networking — Subnets, Routes & Security Groups", "order": 3 },
+    { "slug": "ec2-fundamentals", "title": "EC2 — Instances, AMIs & Launch Templates", "order": 4 },
+    { "slug": "s3-storage", "title": "S3 — Storage, Versioning & Lifecycle Policies", "order": 5 },
+    { "slug": "rds-databases", "title": "RDS & Aurora — Managed Databases", "order": 6 },
+    { "slug": "ecs-containers", "title": "ECS — Running Containers on AWS", "order": 7 },
+    { "slug": "eks-kubernetes", "title": "EKS — Managed Kubernetes on AWS", "order": 8 },
+    { "slug": "ecr-registry", "title": "ECR — Container Registry & Image Management", "order": 9 },
+    { "slug": "elb-load-balancing", "title": "ELB — Application & Network Load Balancers", "order": 10 },
+    { "slug": "route53-dns", "title": "Route 53 — DNS & Traffic Management", "order": 11 },
+    { "slug": "cloudwatch-monitoring", "title": "CloudWatch — Metrics, Logs & Alarms", "order": 12 },
+    { "slug": "codepipeline-cicd", "title": "CodePipeline & CodeBuild — AWS CI/CD", "order": 13 },
+    { "slug": "secrets-manager", "title": "Secrets Manager & Parameter Store", "order": 14 },
+    { "slug": "aws-well-architected", "title": "AWS Well-Architected Framework for DevOps", "order": 15 }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "kubernetes-advanced",
+  "title": "Kubernetes Advanced",
+  "slug": "kubernetes-advanced",
+  "pathSlug": "containerization",
+  "description": "Go beyond the basics. Master advanced Kubernetes patterns including custom resources, operators, service mesh, multi-cluster management, and production-grade security hardening.",
+  "order": 5,
+  "estimatedHours": 70,
+  "lessonsCount": 15,
+  "lessons": [
+    { "slug": "advanced-scheduling", "title": "Advanced Scheduling — Priority, Preemption & Topology", "order": 1 },
+    { "slug": "custom-resources", "title": "Custom Resource Definitions (CRDs)", "order": 2 },
+    { "slug": "operators", "title": "Building Kubernetes Operators", "order": 3 },
+    { "slug": "admission-controllers", "title": "Admission Controllers & Webhooks", "order": 4 },
+    { "slug": "service-mesh", "title": "Service Mesh with Istio", "order": 5 },
+    { "slug": "multi-cluster", "title": "Multi-Cluster Management", "order": 6 },
+    { "slug": "gitops-flux", "title": "GitOps with Flux & Kubernetes", "order": 7 },
+    { "slug": "security-hardening", "title": "Security Hardening — Pod Security Standards", "order": 8 },
+    { "slug": "secrets-management", "title": "Secrets Management with Vault & External Secrets", "order": 9 },
+    { "slug": "advanced-networking", "title": "Advanced Networking — CNI Plugins & eBPF", "order": 10 },
+    { "slug": "observability-stack", "title": "Production Observability Stack", "order": 11 },
+    { "slug": "cost-optimization", "title": "Cost Optimization & FinOps for Kubernetes", "order": 12 },
+    { "slug": "disaster-recovery", "title": "Backup, Restore & Disaster Recovery", "order": 13 },
+    { "slug": "performance-tuning", "title": "Performance Tuning & Capacity Planning", "order": 14 },
+    { "slug": "production-checklist", "title": "Production Readiness Checklist", "order": 15 }
+  ]
+}

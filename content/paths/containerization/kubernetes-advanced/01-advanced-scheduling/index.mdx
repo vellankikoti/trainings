@@ -1,0 +1,152 @@
+---
+title: "Advanced Scheduling — Priority, Preemption & Topology"
+description: "Master Kubernetes advanced scheduling mechanisms including pod priority classes, preemption strategies, topology spread constraints, and custom scheduler profiles."
+order: 1
+xpReward: 40
+estimatedMinutes: 45
+prerequisites: ["kubernetes-fundamentals"]
+objectives:
+  - Configure Pod Priority Classes and understand preemption behavior
+  - Implement Topology Spread Constraints for high availability
+  - Use pod affinity and anti-affinity rules effectively
+  - Create custom scheduler profiles for specialized workloads
+  - Design scheduling strategies for multi-tenant clusters
+tags:
+  - kubernetes
+  - scheduling
+  - advanced
+  - production
+---
+
+<Callout type="story" title="The Story">
+Your company runs a multi-tenant Kubernetes cluster hosting both production workloads and batch processing jobs. One Friday afternoon, a data science team submits a massive batch job that consumes every available node. When the production team tries to deploy a critical hotfix, there are no resources available — the batch jobs are squatting on all capacity. The incident takes 20 minutes to resolve manually. Your team lead asks you to design a scheduling strategy that ensures production workloads always get priority while still allowing batch jobs to use spare capacity. This is where advanced scheduling enters the picture.
+</Callout>
+
+## Beyond Basic Scheduling
+
+In Kubernetes Fundamentals, you learned about taints, tolerations, and node affinity. These are powerful tools, but production clusters demand more sophisticated scheduling strategies:
+
+- **Priority & Preemption** — Ensure critical workloads always get resources
+- **Topology Spread Constraints** — Distribute pods evenly across failure domains
+- **Custom Schedulers** — Tailor scheduling logic for specialized requirements
+
+Let's master each of these.
+
+## Pod Priority and Preemption
+
+### Priority Classes
+
+A `PriorityClass` defines the importance of a pod relative to other pods:
+
+```yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: production-critical
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "For production-critical workloads that must always run"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: batch-low
+value: 100
+globalDefault: false
+preemptionPolicy: Never
+description: "For batch jobs that can wait for resources"
+```
+
+**Key fields:**
+- `value` — Higher number = higher priority (range: -2 billion to 1 billion)
+- `preemptionPolicy` — `PreemptLowerPriority` (default) or `Never`
+- `globalDefault` — If true, applies to pods without an explicit priority class
+
+### Using Priority Classes
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+spec:
+  replicas: 3
+  template:
+    spec:
+      priorityClassName: production-critical
+      containers:
+        - name: payment
+          image: payment-service:v2.1
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+```
+
+### How Preemption Works
+
+When a high-priority pod cannot be scheduled:
+
+1. Scheduler identifies lower-priority pods that could be evicted
+2. It selects the **minimum set** of pods to evict
+3. Evicted pods receive a graceful termination period
+4. Once evicted, the high-priority pod is scheduled
+
+<Callout type="warning" title="Preemption is not instant">
+The scheduler waits for the graceful termination period of evicted pods. Set appropriate `terminationGracePeriodSeconds` on your pods to balance between graceful shutdown and preemption speed.
+</Callout>
+
+## Topology Spread Constraints
+
+Topology spread constraints let you distribute pods evenly across failure domains — zones, nodes, or custom topology keys:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-frontend
+spec:
+  replicas: 6
+  template:
+    metadata:
+      labels:
+        app: web-frontend
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: web-frontend
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: web-frontend
+      containers:
+        - name: web
+          image: web-frontend:v3.0
+```
+
+**What this achieves:**
+- Pods spread evenly across availability zones (hard requirement)
+- Pods spread evenly across nodes within each zone (soft preference)
+- If a zone goes down, remaining zones have enough capacity
+
+## Summary
+
+Advanced scheduling is about **control and reliability**:
+
+| Feature | Use Case |
+|---------|----------|
+| Priority Classes | Ensure critical workloads always get resources |
+| Preemption | Automatically evict lower-priority pods when needed |
+| Topology Spread | High availability across failure domains |
+| Custom Schedulers | Specialized scheduling for unique requirements |
+
+<Callout type="checkpoint" title="Checkpoint">
+You should now be able to design a multi-tier scheduling strategy for a production Kubernetes cluster with mixed workload priorities.
+</Callout>

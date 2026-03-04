@@ -1,0 +1,99 @@
+---
+title: "AWS for DevOps Engineers — The Big Picture"
+description: "Understand the AWS ecosystem through a DevOps lens. Learn which services matter most, how they connect, and the mental model for building production infrastructure on AWS."
+order: 1
+xpReward: 30
+estimatedMinutes: 40
+prerequisites: ["cloud-fundamentals"]
+objectives:
+  - Navigate the AWS console and understand service categories
+  - Identify the core AWS services every DevOps engineer must know
+  - Understand the AWS shared responsibility model
+  - Map on-premise concepts to their AWS equivalents
+  - Design a high-level architecture for a typical production workload
+tags:
+  - aws
+  - cloud
+  - devops
+  - fundamentals
+---
+
+<Callout type="story" title="The Story">
+Your startup has been running on a handful of servers in a data center. The servers are old, scaling means buying new hardware (a 6-week lead time), and your last outage was caused by a literal power failure in the building. The CEO announces: "We're moving to AWS." You open the AWS console and see over 200 services listed in the sidebar. EC2, ECS, EKS, ECR, EBS, EFS, ELB, ALB, NLB — the acronyms alone feel like an alphabet soup. Where do you even begin? This lesson cuts through the noise and gives you the DevOps engineer's map to AWS — the 15-20 services that matter most and how they fit together.
+</Callout>
+
+## The AWS Mental Model
+
+Think of AWS as a **virtual data center** that you control through APIs instead of physical hardware:
+
+| On-Premise | AWS Equivalent | Service |
+|------------|---------------|---------|
+| Physical servers | Virtual machines | **EC2** |
+| Network switches/routers | Software-defined networking | **VPC** |
+| SAN / NAS storage | Object & block storage | **S3 / EBS** |
+| Load balancers | Managed load balancers | **ALB / NLB** |
+| DNS servers | Managed DNS | **Route 53** |
+| Database servers | Managed databases | **RDS / Aurora** |
+| Container runtime | Managed containers | **ECS / EKS** |
+| Monitoring stack | Cloud-native monitoring | **CloudWatch** |
+| CI/CD servers | Managed pipelines | **CodePipeline** |
+
+The key difference: everything is **API-driven**, which means everything is **automatable**.
+
+## The DevOps Engineer's Core Services
+
+Out of 200+ AWS services, here are the ones you'll use daily:
+
+### Compute
+- **EC2** — Virtual machines (the foundation)
+- **ECS** — Run Docker containers without managing servers
+- **EKS** — Managed Kubernetes
+- **Lambda** — Serverless functions (event-driven automation)
+
+### Networking
+- **VPC** — Your private network in the cloud
+- **ALB/NLB** — Load balancing and traffic distribution
+- **Route 53** — DNS management and traffic routing
+
+### Storage & Databases
+- **S3** — Object storage (artifacts, backups, static assets)
+- **EBS** — Block storage (attached to EC2 instances)
+- **RDS** — Managed relational databases (PostgreSQL, MySQL)
+
+### Security & Identity
+- **IAM** — Users, roles, and permissions (the security backbone)
+- **Secrets Manager** — Secure credential storage
+- **KMS** — Encryption key management
+
+### DevOps Tooling
+- **ECR** — Container image registry
+- **CodePipeline / CodeBuild** — CI/CD pipelines
+- **CloudWatch** — Metrics, logs, and alarms
+- **CloudFormation** — Infrastructure as Code (AWS-native)
+
+## The Shared Responsibility Model
+
+AWS operates on a shared responsibility model:
+
+- **AWS is responsible for** security **of** the cloud — physical data centers, hardware, networking infrastructure
+- **You are responsible for** security **in** the cloud — OS patches, application code, IAM policies, network configuration, data encryption
+
+<Callout type="warning" title="Common mistake">
+Many teams assume AWS "handles security." AWS secures the infrastructure, but misconfigured IAM policies, open security groups, and unencrypted S3 buckets are your responsibility. Most AWS security incidents are caused by customer misconfiguration, not AWS vulnerabilities.
+</Callout>
+
+## Summary
+
+AWS gives DevOps engineers unprecedented power to build, deploy, and scale infrastructure through code. The key is focusing on the core services that matter:
+
+1. **Compute**: EC2, ECS/EKS for running workloads
+2. **Networking**: VPC, ALB for connectivity and traffic
+3. **Storage**: S3, RDS for data persistence
+4. **Security**: IAM for access control
+5. **Tooling**: CloudWatch, CodePipeline for operations
+
+In the following lessons, we'll deep-dive into each of these services with hands-on labs.
+
+<Callout type="checkpoint" title="Checkpoint">
+You should now be able to identify which AWS services map to on-premise equivalents and explain the shared responsibility model to your team.
+</Callout>

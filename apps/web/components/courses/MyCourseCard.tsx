@@ -18,7 +18,7 @@ interface MyCourseCardProps {
 
 /* ─── Icon Components ──────────────────────────────────────────────────────── */
 
-/** Primary white icon — large, crisp, high contrast on dark gradients */
+/** Primary colorful icon — displayed in a white container on gradient banners */
 function CourseIcon({ iconUrl, alt }: { iconUrl: string; alt: string }) {
   const [failed, setFailed] = useState(false);
 
@@ -26,11 +26,11 @@ function CourseIcon({ iconUrl, alt }: { iconUrl: string; alt: string }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        width="44"
-        height="44"
+        width="36"
+        height="36"
         viewBox="0 0 24 24"
         fill="none"
-        stroke="white"
+        stroke="#94a3b8"
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -46,9 +46,9 @@ function CourseIcon({ iconUrl, alt }: { iconUrl: string; alt: string }) {
     <img
       src={iconUrl}
       alt={alt}
-      width={44}
-      height={44}
-      className="h-11 w-11 shrink-0 object-contain brightness-0 invert drop-shadow-[0_2px_8px_rgba(255,255,255,0.25)]"
+      width={36}
+      height={36}
+      className="h-9 w-9 shrink-0 object-contain"
       loading="lazy"
       onError={() => setFailed(true)}
     />
@@ -108,8 +108,8 @@ export function MyCourseCard({ course, variant }: MyCourseCardProps) {
 
         {/* Top row: Icon + Difficulty */}
         <div className="relative z-10 flex items-start justify-between">
-          {/* Icon in frosted glass container */}
-          <div className="flex h-[72px] w-[72px] items-center justify-center rounded-2xl bg-white/[0.12] shadow-lg shadow-black/10 ring-1 ring-white/[0.2] backdrop-blur-xl">
+          {/* Colorful icon in white container */}
+          <div className="flex h-[64px] w-[64px] items-center justify-center rounded-2xl bg-white shadow-lg shadow-black/15">
             <CourseIcon iconUrl={visual.iconUrl} alt={course.title} />
           </div>
 

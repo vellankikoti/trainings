@@ -122,12 +122,14 @@ export async function getMyCoursesData(
       );
       const completedLessons = completedSlugs.size;
 
-      // Determine progress
+      // Determine progress — always compute from actual lesson data
+      // (more reliable than stored DB percentage which can be stale/incorrect)
       let progress = 0;
-      if (modProg) {
-        progress = modProg.percentage;
-      } else if (mod.lessonsCount > 0 && completedLessons > 0) {
+      if (mod.lessonsCount > 0 && completedLessons > 0) {
         progress = Math.round((completedLessons / mod.lessonsCount) * 100);
+      } else if (modProg) {
+        // Fallback to DB percentage only if we have no lesson data
+        progress = modProg.percentage;
       }
 
       // Find resume lesson (first incomplete)
