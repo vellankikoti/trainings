@@ -28,7 +28,7 @@ export const PUBLIC_NAV_ITEMS: NavItem[] = [
 export const SIDEBAR_ITEMS: NavItem[] = [
   // ── Main section ──
   { label: "Dashboard", href: "/dashboard", icon: "LayoutDashboard", section: "main" },
-  { label: "My Courses", href: "/paths", icon: "BookOpen", section: "main" },
+  { label: "My Courses", href: "/my-courses", icon: "BookOpen", section: "main" },
   { label: "Jobs", href: "/jobs", icon: "Briefcase", section: "main" },
 
   // ── Role-specific section ──
