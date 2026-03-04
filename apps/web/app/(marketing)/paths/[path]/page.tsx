@@ -178,7 +178,7 @@ export default function PathPage({ params }: PathPageProps) {
           <Button size="lg" asChild className="w-full bg-white text-blue-700 hover:bg-blue-50 sm:w-auto">
             <Link href={pathDashboardHref}>Get Started Free</Link>
           </Button>
-          <Button size="lg" variant="outline" asChild className="w-full border-white/30 text-white hover:bg-white/10 hover:text-white sm:w-auto">
+          <Button size="lg" variant="outline" asChild className="w-full border-white bg-white/10 text-white hover:bg-white/20 hover:text-white sm:w-auto">
             <Link href="/paths">Browse All Paths</Link>
           </Button>
         </div>

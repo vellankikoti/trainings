@@ -273,7 +273,7 @@ export default async function HomePage() {
               size="lg"
               variant="outline"
               asChild
-              className="w-full border-white/30 text-white hover:bg-white/10 hover:text-white sm:w-auto"
+              className="w-full border-white bg-white/10 text-white hover:bg-white/20 hover:text-white sm:w-auto"
             >
               <Link
                 href="https://github.com/vellankikoti/trainings"
