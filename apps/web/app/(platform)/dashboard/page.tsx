@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { createAdminClient } from "@/lib/supabase/server";
 import { getProfileId } from "@/lib/progress";
 import { getFullDashboardData } from "@/lib/dashboard";
 import { getUserBadges } from "@/lib/badges";
@@ -47,31 +45,6 @@ export default async function DashboardPage() {
         <p className="text-muted-foreground">Please sign in to view your dashboard.</p>
       </div>
     );
-  }
-
-  // Redirect non-learner roles to their correct dashboard
-  try {
-    const supabase = createAdminClient();
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("clerk_id", clerkId)
-      .maybeSingle();
-
-    if (profile?.role) {
-      const role = profile.role;
-      if (role === "trainer" || role === "institute_admin") {
-        redirect("/trainer");
-      } else if (role === "recruiter" || role === "org_admin") {
-        redirect("/organization");
-      } else if (role === "admin" || role === "super_admin") {
-        redirect("/admin");
-      }
-    }
-  } catch (e) {
-    // redirect() throws NEXT_REDIRECT, let it propagate
-    if (e && typeof e === "object" && "digest" in e) throw e;
-    // Other errors: fall through to student dashboard
   }
 
   const profileId = await getProfileId(clerkId);
