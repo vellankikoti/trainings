@@ -70,7 +70,7 @@ const nextConfig = {
             "default-src 'self'",
             "script-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev https://challenges.cloudflare.com https://va.vercel-scripts.com",
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-            "img-src 'self' data: blob: https://img.clerk.com https://*.supabase.co https://*.gravatar.com",
+            "img-src 'self' data: blob: https://img.clerk.com https://*.supabase.co https://*.gravatar.com https://cdn.jsdelivr.net",
             "font-src 'self' https://fonts.gstatic.com",
             "worker-src 'self' blob:",
             "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.clerk.accounts.dev https://api.clerk.dev https://vitals.vercel-insights.com wss://*.devopsengineer.com ws://localhost:*",
