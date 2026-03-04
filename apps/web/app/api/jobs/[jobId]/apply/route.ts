@@ -1,73 +1,70 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
-import { requireAuth, AuthError } from "@/lib/auth";
+import { getProfileId } from "@/lib/progress";
+import { apiErrors } from "@/lib/api-helpers";
 
 type Params = { params: Promise<{ jobId: string }> };
 
 /**
  * POST /api/jobs/[jobId]/apply — Apply to a job
  */
-export async function POST(_request: NextRequest, { params }: Params) {
-  try {
-    const { jobId } = await params;
-    const ctx = await requireAuth();
+export async function POST(_request: Request, { params }: Params) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
+    return apiErrors.unauthorized();
+  }
 
-    const supabase = createAdminClient();
+  const { jobId } = await params;
+  const profileId = await getProfileId(clerkId);
+  if (!profileId) {
+    return apiErrors.notFound("Profile");
+  }
 
-    // Verify job exists and is active
-    const { data: job } = await supabase
-      .from("job_postings")
-      .select("id, title")
-      .eq("id", jobId)
-      .eq("is_active", true)
-      .single();
+  const supabase = createAdminClient();
 
-    if (!job) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
+  // Verify job exists and is active
+  const { data: job } = await supabase
+    .from("job_postings")
+    .select("id, title")
+    .eq("id", jobId)
+    .eq("is_active", true)
+    .single();
 
-    // Check for duplicate application
-    const { count } = await supabase
-      .from("job_applications")
-      .select("id", { count: "exact", head: true })
-      .eq("job_id", jobId)
-      .eq("user_id", ctx.profileId);
+  if (!job) {
+    return apiErrors.notFound("Job");
+  }
 
-    if ((count ?? 0) > 0) {
-      return NextResponse.json(
-        { error: "Already applied to this job" },
-        { status: 409 },
-      );
-    }
+  // Check for duplicate application
+  const { count } = await supabase
+    .from("job_applications")
+    .select("id", { count: "exact", head: true })
+    .eq("job_id", jobId)
+    .eq("user_id", profileId);
 
-    const { data, error } = await supabase
-      .from("job_applications")
-      .insert({
-        user_id: ctx.profileId,
-        job_id: jobId,
-        status: "applied",
-      })
-      .select("id")
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
+  if ((count ?? 0) > 0) {
     return NextResponse.json(
-      { id: data.id, message: "Application submitted" },
-      { status: 201 },
-    );
-  } catch (err) {
-    if (err instanceof AuthError) {
-      return NextResponse.json(
-        { error: err.message },
-        { status: err.statusCode },
-      );
-    }
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
+      { error: "Already applied to this job" },
+      { status: 409 },
     );
   }
+
+  const { data, error } = await supabase
+    .from("job_applications")
+    .insert({
+      user_id: profileId,
+      job_id: jobId,
+      status: "applied",
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return apiErrors.internal();
+  }
+
+  return NextResponse.json(
+    { id: data.id, message: "Application submitted" },
+    { status: 201 },
+  );
 }
