@@ -7,17 +7,6 @@ import { ProgressBar } from "@/components/shared/ProgressBar";
 import { getCourseVisual } from "@/lib/course-icons";
 import type { MyCourse } from "@/lib/my-courses";
 
-/* ─── Difficulty badge styling ─────────────────────────────────────────────── */
-
-const DIFFICULTY_STYLES: Record<string, string> = {
-  Beginner:
-    "bg-white/20 text-white/90 backdrop-blur-sm",
-  Intermediate:
-    "bg-white/20 text-white/90 backdrop-blur-sm",
-  Advanced:
-    "bg-white/20 text-white/90 backdrop-blur-sm",
-};
-
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 
 type CardVariant = "active" | "upcoming" | "completed" | "explore";
@@ -27,24 +16,28 @@ interface MyCourseCardProps {
   variant: CardVariant;
 }
 
-/* ─── Tech Icon with Fallback ──────────────────────────────────────────────── */
+/* ─── White Icon (CSS filtered to white for contrast on dark gradients) ───── */
 
-function TechIcon({
-  iconUrl,
-  fallbackEmoji,
-  alt,
-}: {
-  iconUrl: string;
-  fallbackEmoji: string;
-  alt: string;
-}) {
+function WhiteIcon({ iconUrl, alt }: { iconUrl: string; alt: string }) {
   const [failed, setFailed] = useState(false);
 
   if (failed) {
     return (
-      <span className="text-3xl leading-none drop-shadow-lg" role="img" aria-label={alt}>
-        {fallbackEmoji}
-      </span>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="40"
+        height="40"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="white"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="opacity-90"
+      >
+        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+      </svg>
     );
   }
 
@@ -53,21 +46,42 @@ function TechIcon({
     <img
       src={iconUrl}
       alt={alt}
-      width={48}
-      height={48}
-      className="h-12 w-12 object-contain drop-shadow-lg"
+      width={40}
+      height={40}
+      className="h-10 w-10 object-contain"
+      style={{ filter: "brightness(0) invert(1)" }}
       loading="lazy"
       onError={() => setFailed(true)}
     />
   );
 }
 
-/* ─── Component ────────────────────────────────────────────────────────────── */
+/* ─── Watermark Icon (large faded background decoration) ─────────────────── */
+
+function WatermarkIcon({ iconUrl }: { iconUrl: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={iconUrl}
+      alt=""
+      width={160}
+      height={160}
+      className="pointer-events-none absolute -bottom-6 -right-6 h-40 w-40 object-contain select-none"
+      style={{ filter: "brightness(0) invert(1)", opacity: 0.06 }}
+      loading="lazy"
+      aria-hidden="true"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/* ─── Main Component ───────────────────────────────────────────────────────── */
 
 export function MyCourseCard({ course, variant }: MyCourseCardProps) {
   const visual = getCourseVisual(course.slug);
-  const difficultyStyle =
-    DIFFICULTY_STYLES[course.difficulty] ?? DIFFICULTY_STYLES.Beginner;
 
   const courseHref =
     variant === "active" && course.resumeLessonSlug
@@ -78,90 +92,86 @@ export function MyCourseCard({ course, variant }: MyCourseCardProps) {
     <div
       className={cn(
         "group relative flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-300",
-        "hover:shadow-lg hover:-translate-y-0.5",
-        variant === "active" && "border-border/60",
+        "hover:shadow-xl hover:-translate-y-1",
+        variant === "active" && "border-border/50 ring-1 ring-primary/10",
         variant === "upcoming" && "border-primary/20",
         variant === "completed" && "border-border/40",
         variant === "explore" && "border-border/40",
       )}
     >
-      {/* ─── Gradient Banner with Tech Icon ───────────────────────────── */}
+      {/* ─── Gradient Banner ──────────────────────────────────────────── */}
       <div
         className={cn(
-          "relative flex h-32 items-center justify-between overflow-hidden bg-gradient-to-br px-5 sm:h-36 sm:px-6",
+          "relative flex h-[140px] items-end overflow-hidden bg-gradient-to-br p-5",
           visual.gradient,
         )}
       >
-        {/* Decorative circles */}
-        <div className="absolute -right-6 -top-6 h-28 w-28 rounded-full bg-white/[0.07]" />
-        <div className="absolute -bottom-4 -left-4 h-20 w-20 rounded-full bg-white/[0.05]" />
+        {/* Watermark: large faded icon in background */}
+        <WatermarkIcon iconUrl={visual.iconUrl} />
 
-        {/* Icon */}
-        <div className="relative z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 p-2 backdrop-blur-sm ring-1 ring-white/20">
-          <TechIcon
-            iconUrl={visual.iconUrl}
-            fallbackEmoji={visual.fallbackEmoji}
-            alt={course.title}
-          />
+        {/* Top-left: Icon in clean circle */}
+        <div className="absolute left-5 top-5 flex h-14 w-14 items-center justify-center rounded-xl bg-white/[0.12] backdrop-blur-md ring-1 ring-white/[0.15]">
+          <WhiteIcon iconUrl={visual.iconUrl} alt={course.title} />
         </div>
 
-        {/* Banner metadata */}
-        <div className="relative z-10 flex flex-col items-end gap-1.5">
-          <span
-            className={cn(
-              "rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-              difficultyStyle,
-            )}
-          >
-            {course.difficulty}
-          </span>
-          <span className="text-xs font-medium text-white/70">
-            {course.estimatedHours}h · {course.lessonsCount} lessons
-          </span>
-        </div>
-
-        {/* Completed overlay badge */}
+        {/* Completed ribbon */}
         {variant === "completed" && (
-          <div className="absolute left-0 top-0 z-20 flex items-center gap-1.5 rounded-br-xl bg-emerald-500 px-3 py-1.5 shadow-md">
+          <div className="absolute right-0 top-4 flex items-center gap-1.5 rounded-l-full bg-emerald-500 py-1 pl-3 pr-4 shadow-lg">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="12"
               height="12"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="currentColor"
+              stroke="white"
               strokeWidth="3"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="text-white"
             >
               <path d="M20 6 9 17l-5-5" />
             </svg>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-white">
-              Completed
+            <span className="text-[11px] font-bold uppercase tracking-wider text-white">
+              Done
             </span>
           </div>
         )}
+
+        {/* Bottom of banner: metadata row */}
+        <div className="relative z-10 flex w-full items-end justify-between">
+          <span className="rounded-md bg-black/25 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-white/90 backdrop-blur-sm">
+            {course.difficulty}
+          </span>
+          <div className="flex items-center gap-3 text-[12px] font-medium text-white/75">
+            <span className="flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              {course.estimatedHours}h
+            </span>
+            <span className="flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              {course.lessonsCount}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* ─── Card Body ────────────────────────────────────────────────── */}
-      <div className="flex flex-1 flex-col p-5 sm:p-6">
+      <div className="flex flex-1 flex-col p-5">
         {/* Path label */}
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-primary/60">
           {course.pathTitle}
         </p>
 
         {/* Title */}
-        <h3 className="mt-1.5 text-base font-bold leading-snug text-foreground transition-colors group-hover:text-primary sm:text-lg">
+        <h3 className="mt-1.5 text-[15px] font-bold leading-snug text-foreground transition-colors group-hover:text-primary">
           {course.title}
         </h3>
 
         {/* Description */}
-        <p className="mt-2 flex-1 text-sm leading-relaxed text-muted-foreground line-clamp-2">
+        <p className="mt-1.5 flex-1 text-[13px] leading-relaxed text-muted-foreground line-clamp-2">
           {course.description}
         </p>
 
-        {/* Progress section — only for active courses */}
+        {/* Progress — active only */}
         {variant === "active" && (
           <div className="mt-4">
             <ProgressBar
@@ -188,8 +198,8 @@ export function MyCourseCard({ course, variant }: MyCourseCardProps) {
           </p>
         )}
 
-        {/* CTA */}
-        <div className="mt-5">
+        {/* CTA Button */}
+        <div className="mt-4">
           <Link
             href={courseHref}
             className={cn(
@@ -197,30 +207,17 @@ export function MyCourseCard({ course, variant }: MyCourseCardProps) {
               variant === "active" &&
                 "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md",
               variant === "upcoming" &&
-                "border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10",
+                "border border-primary/25 bg-primary/5 text-primary hover:bg-primary/10",
               variant === "completed" &&
-                "border border-border/60 bg-card text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                "border border-border/50 text-muted-foreground hover:bg-muted/50 hover:text-foreground",
               variant === "explore" &&
-                "border border-border/60 bg-card text-foreground hover:bg-muted/50",
+                "border border-border/50 text-foreground hover:bg-muted/50",
             )}
           >
             {variant === "active" && (
               <>
                 Continue Learning
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M5 12h14" />
-                  <path d="m12 5 7 7-7 7" />
-                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
               </>
             )}
             {variant === "upcoming" && "Begin Course"}

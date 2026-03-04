@@ -1,176 +1,139 @@
 /**
- * Course icon + gradient mapping for premium card visuals.
- * Uses Devicon CDN (cdn.jsdelivr.net/gh/devicons/devicon) for
- * high-quality technology SVG icons.
+ * Course visual configuration — gradient + icon for premium card banners.
+ *
+ * Uses Devicon `-plain` variants (single-color SVGs) which render cleanly
+ * when filtered to white via CSS `brightness(0) invert(1)`.
  */
 
 export interface CourseVisual {
-  /** Devicon CDN URL for the technology icon */
+  /** Devicon CDN URL — prefer `-plain` for white-filter compatibility */
   iconUrl: string;
   /** Tailwind gradient classes for the card banner */
   gradient: string;
-  /** Fallback emoji if image fails to load */
-  fallbackEmoji: string;
 }
 
-const DEVICON_BASE =
-  "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons";
+const D = "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons";
 
-/**
- * Map module slugs → visual config.
- * Every course gets a unique gradient + technology icon.
- */
 const COURSE_VISUALS: Record<string, CourseVisual> = {
   // ─── Foundations ────────────────────────────────────────────────────────
   linux: {
-    iconUrl: `${DEVICON_BASE}/linux/linux-original.svg`,
-    gradient: "from-slate-800 to-slate-950",
-    fallbackEmoji: "🐧",
+    iconUrl: `${D}/linux/linux-plain.svg`,
+    gradient: "from-[#1a1a2e] via-[#16213e] to-[#0f3460]",
   },
   "linux-admin": {
-    iconUrl: `${DEVICON_BASE}/linux/linux-original.svg`,
-    gradient: "from-slate-700 to-indigo-900",
-    fallbackEmoji: "🖥️",
+    iconUrl: `${D}/linux/linux-plain.svg`,
+    gradient: "from-[#2d3436] via-[#353b48] to-[#485460]",
   },
   "shell-scripting": {
-    iconUrl: `${DEVICON_BASE}/bash/bash-original.svg`,
-    gradient: "from-emerald-700 to-emerald-900",
-    fallbackEmoji: "📟",
+    iconUrl: `${D}/bash/bash-plain.svg`,
+    gradient: "from-[#0d4b3c] via-[#116466] to-[#1a936f]",
   },
   networking: {
-    iconUrl: `${DEVICON_BASE}/networkx/networkx-original.svg`,
-    gradient: "from-cyan-600 to-blue-800",
-    fallbackEmoji: "🌐",
+    iconUrl: `${D}/networkx/networkx-original.svg`,
+    gradient: "from-[#0c2461] via-[#1e3799] to-[#4a69bd]",
   },
   git: {
-    iconUrl: `${DEVICON_BASE}/git/git-original.svg`,
-    gradient: "from-orange-500 to-red-700",
-    fallbackEmoji: "🔀",
+    iconUrl: `${D}/git/git-plain.svg`,
+    gradient: "from-[#c0392b] via-[#e55039] to-[#f39c12]",
   },
   "python-automation": {
-    iconUrl: `${DEVICON_BASE}/python/python-original.svg`,
-    gradient: "from-blue-500 to-yellow-500",
-    fallbackEmoji: "🐍",
+    iconUrl: `${D}/python/python-plain.svg`,
+    gradient: "from-[#2c3e50] via-[#2980b9] to-[#f1c40f]",
   },
 
   // ─── Containerization & Orchestration ──────────────────────────────────
   "docker-fundamentals": {
-    iconUrl: `${DEVICON_BASE}/docker/docker-original.svg`,
-    gradient: "from-blue-500 to-blue-700",
-    fallbackEmoji: "🐳",
+    iconUrl: `${D}/docker/docker-plain.svg`,
+    gradient: "from-[#0072c6] via-[#00a8e8] to-[#00d4ff]",
   },
   "docker-advanced": {
-    iconUrl: `${DEVICON_BASE}/docker/docker-original.svg`,
-    gradient: "from-blue-600 to-indigo-800",
-    fallbackEmoji: "🐳",
+    iconUrl: `${D}/docker/docker-plain.svg`,
+    gradient: "from-[#1a1a6e] via-[#2541b2] to-[#0072c6]",
   },
   "kubernetes-fundamentals": {
-    iconUrl: `${DEVICON_BASE}/kubernetes/kubernetes-original.svg`,
-    gradient: "from-blue-600 to-violet-700",
-    fallbackEmoji: "☸️",
+    iconUrl: `${D}/kubernetes/kubernetes-plain.svg`,
+    gradient: "from-[#1a237e] via-[#283593] to-[#5c6bc0]",
   },
   helm: {
-    iconUrl: `${DEVICON_BASE}/helm/helm-original.svg`,
-    gradient: "from-blue-400 to-sky-700",
-    fallbackEmoji: "⎈",
+    iconUrl: `${D}/helm/helm-original.svg`,
+    gradient: "from-[#0c2461] via-[#1e3799] to-[#3c6382]",
   },
   kustomize: {
-    iconUrl: `${DEVICON_BASE}/kubernetes/kubernetes-original.svg`,
-    gradient: "from-sky-500 to-indigo-700",
-    fallbackEmoji: "🔧",
+    iconUrl: `${D}/kubernetes/kubernetes-plain.svg`,
+    gradient: "from-[#1b1464] via-[#3b3b98] to-[#6c5ce7]",
   },
 
   // ─── CI/CD & GitOps ───────────────────────────────────────────────────
   "cicd-fundamentals": {
-    iconUrl: `${DEVICON_BASE}/githubactions/githubactions-original.svg`,
-    gradient: "from-rose-500 to-red-700",
-    fallbackEmoji: "🔄",
+    iconUrl: `${D}/githubactions/githubactions-original.svg`,
+    gradient: "from-[#6f1d1b] via-[#99582a] to-[#bb3e03]",
   },
   "github-actions": {
-    iconUrl: `${DEVICON_BASE}/githubactions/githubactions-original.svg`,
-    gradient: "from-slate-700 to-slate-900",
-    fallbackEmoji: "⚡",
+    iconUrl: `${D}/githubactions/githubactions-original.svg`,
+    gradient: "from-[#161b22] via-[#21262d] to-[#30363d]",
   },
   jenkins: {
-    iconUrl: `${DEVICON_BASE}/jenkins/jenkins-original.svg`,
-    gradient: "from-red-600 to-red-900",
-    fallbackEmoji: "🏗️",
+    iconUrl: `${D}/jenkins/jenkins-plain.svg`,
+    gradient: "from-[#6f1d1b] via-[#a4133c] to-[#c9184a]",
   },
   "argocd-gitops": {
-    iconUrl: `${DEVICON_BASE}/argocd/argocd-original.svg`,
-    gradient: "from-orange-400 to-rose-600",
-    fallbackEmoji: "🔁",
+    iconUrl: `${D}/argocd/argocd-original.svg`,
+    gradient: "from-[#e85d04] via-[#f48c06] to-[#faa307]",
   },
 
   // ─── IaC & Cloud ──────────────────────────────────────────────────────
   "terraform-fundamentals": {
-    iconUrl: `${DEVICON_BASE}/terraform/terraform-original.svg`,
-    gradient: "from-violet-600 to-purple-800",
-    fallbackEmoji: "🏗️",
+    iconUrl: `${D}/terraform/terraform-plain.svg`,
+    gradient: "from-[#3c1874] via-[#5b2c8e] to-[#7b4baa]",
   },
   ansible: {
-    iconUrl: `${DEVICON_BASE}/ansible/ansible-original.svg`,
-    gradient: "from-slate-700 to-red-900",
-    fallbackEmoji: "📦",
+    iconUrl: `${D}/ansible/ansible-plain.svg`,
+    gradient: "from-[#1a1a1a] via-[#2d2d2d] to-[#4a4a4a]",
   },
   "cloud-fundamentals": {
-    iconUrl: `${DEVICON_BASE}/amazonwebservices/amazonwebservices-original-wordmark.svg`,
-    gradient: "from-amber-500 to-orange-700",
-    fallbackEmoji: "☁️",
+    iconUrl: `${D}/amazonwebservices/amazonwebservices-original-wordmark.svg`,
+    gradient: "from-[#ff6f00] via-[#ff8f00] to-[#ffa000]",
   },
 
   // ─── Observability & Reliability ──────────────────────────────────────
   "observability-fundamentals": {
-    iconUrl: `${DEVICON_BASE}/grafana/grafana-original.svg`,
-    gradient: "from-amber-500 to-yellow-700",
-    fallbackEmoji: "📊",
+    iconUrl: `${D}/grafana/grafana-original.svg`,
+    gradient: "from-[#e65100] via-[#f57c00] to-[#ffb300]",
   },
   prometheus: {
-    iconUrl: `${DEVICON_BASE}/prometheus/prometheus-original.svg`,
-    gradient: "from-orange-500 to-red-600",
-    fallbackEmoji: "🔥",
+    iconUrl: `${D}/prometheus/prometheus-original.svg`,
+    gradient: "from-[#b71c1c] via-[#d32f2f] to-[#e57373]",
   },
   grafana: {
-    iconUrl: `${DEVICON_BASE}/grafana/grafana-original.svg`,
-    gradient: "from-amber-500 to-orange-600",
-    fallbackEmoji: "📈",
+    iconUrl: `${D}/grafana/grafana-original.svg`,
+    gradient: "from-[#e65100] via-[#ef6c00] to-[#f9a825]",
   },
   "sre-principles": {
-    iconUrl: `${DEVICON_BASE}/google/google-original.svg`,
-    gradient: "from-blue-500 to-green-600",
-    fallbackEmoji: "🛡️",
+    iconUrl: `${D}/google/google-original.svg`,
+    gradient: "from-[#1565c0] via-[#1e88e5] to-[#42a5f5]",
   },
 
   // ─── Platform Engineering & Advanced ──────────────────────────────────
   "platform-principles": {
-    iconUrl: `${DEVICON_BASE}/kubernetes/kubernetes-original.svg`,
-    gradient: "from-purple-600 to-indigo-800",
-    fallbackEmoji: "🏛️",
+    iconUrl: `${D}/kubernetes/kubernetes-plain.svg`,
+    gradient: "from-[#311b92] via-[#4527a0] to-[#7c4dff]",
   },
   "security-devsecops": {
-    iconUrl: `${DEVICON_BASE}/vault/vault-original.svg`,
-    gradient: "from-slate-700 to-slate-900",
-    fallbackEmoji: "🔒",
+    iconUrl: `${D}/vault/vault-original.svg`,
+    gradient: "from-[#1a1a2e] via-[#16213e] to-[#533483]",
   },
   "career-development": {
-    iconUrl: `${DEVICON_BASE}/linkedin/linkedin-original.svg`,
-    gradient: "from-blue-500 to-blue-700",
-    fallbackEmoji: "🚀",
+    iconUrl: `${D}/linkedin/linkedin-original.svg`,
+    gradient: "from-[#0a66c2] via-[#0077b5] to-[#00a0dc]",
   },
 };
 
-/**
- * Default visual for unmapped modules.
- */
 const DEFAULT_VISUAL: CourseVisual = {
-  iconUrl: `${DEVICON_BASE}/devicon/devicon-original.svg`,
-  gradient: "from-slate-600 to-slate-800",
-  fallbackEmoji: "📚",
+  iconUrl: `${D}/devicon/devicon-original.svg`,
+  gradient: "from-[#2d3436] via-[#636e72] to-[#b2bec3]",
 };
 
-/**
- * Get the visual configuration for a course by its module slug.
- */
+/** Get visual config for a course by module slug. */
 export function getCourseVisual(moduleSlug: string): CourseVisual {
   return COURSE_VISUALS[moduleSlug] ?? DEFAULT_VISUAL;
 }
