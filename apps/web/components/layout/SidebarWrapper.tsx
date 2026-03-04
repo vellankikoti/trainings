@@ -19,7 +19,7 @@ export async function SidebarWrapper() {
         .from("profiles")
         .select("role")
         .eq("clerk_id", userId)
-        .single();
+        .maybeSingle();
 
       const role = (profile?.role ?? "learner") as Role;
       items = getSidebarItemsForRole(role);

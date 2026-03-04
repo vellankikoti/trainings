@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
+import { createAdminClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -111,12 +112,32 @@ const STEPS = [
 
 export default async function HomePage() {
   /* ── Auth-aware redirect ──
-   * Logged-in users are taken straight to their personalized Dashboard.
+   * Logged-in users are routed to their role-specific dashboard.
    * The marketing homepage is only for acquisition / logged-out visitors.
    */
   const { userId } = await auth();
   if (userId) {
-    redirect("/dashboard");
+    let dest = "/dashboard";
+    try {
+      const supabase = createAdminClient();
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("clerk_id", userId)
+        .maybeSingle();
+
+      const role = profile?.role;
+      if (role === "trainer" || role === "institute_admin") {
+        dest = "/trainer";
+      } else if (role === "recruiter" || role === "org_admin") {
+        dest = "/organization";
+      } else if (role === "admin" || role === "super_admin") {
+        dest = "/admin";
+      }
+    } catch {
+      // Fall back to learner dashboard
+    }
+    redirect(dest);
   }
 
   return (
