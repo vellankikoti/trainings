@@ -28,5 +28,9 @@ export async function GET(request: Request, { params }: RouteParams) {
   }
 
   const result = await getModuleProgress(profileId, pathSlug, params.slug);
-  return NextResponse.json(result);
+  return NextResponse.json(result, {
+    headers: {
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+    },
+  });
 }

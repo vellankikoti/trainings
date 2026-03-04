@@ -17,6 +17,42 @@ interface ProgressData {
   resumeHref: string | null;
 }
 
+/**
+ * Shared cache for path-summary data.
+ * Both PathProgressOverlay and useCompletedLessons read from here
+ * so only ONE fetch is made per pathSlug per mount cycle.
+ */
+const fetchCache = new Map<
+  string,
+  { promise: Promise<ProgressData | null>; data: ProgressData | null }
+>();
+
+function fetchPathSummary(pathSlug: string): Promise<ProgressData | null> {
+  const existing = fetchCache.get(pathSlug);
+  if (existing) return existing.promise;
+
+  const promise = fetch(
+    `/api/progress/path-summary?path=${encodeURIComponent(pathSlug)}`,
+  )
+    .then((res) => {
+      if (!res.ok) return null;
+      return res.json() as Promise<ProgressData>;
+    })
+    .then((json) => {
+      const entry = fetchCache.get(pathSlug);
+      if (entry) entry.data = json;
+      return json;
+    })
+    .catch(() => null);
+
+  fetchCache.set(pathSlug, { promise, data: null });
+
+  // Auto-expire cache entry after 30 seconds to allow refetch on re-navigation
+  setTimeout(() => fetchCache.delete(pathSlug), 30_000);
+
+  return promise;
+}
+
 export function PathProgressOverlay({
   pathSlug,
   firstLessonHref,
@@ -24,17 +60,9 @@ export function PathProgressOverlay({
   const [data, setData] = useState<ProgressData | null>(null);
 
   useEffect(() => {
-    fetch(`/api/progress/path-summary?path=${encodeURIComponent(pathSlug)}`)
-      .then((res) => {
-        if (!res.ok) return null;
-        return res.json();
-      })
-      .then((json) => {
-        if (json) setData(json);
-      })
-      .catch(() => {
-        // Silent failure — overlay is non-critical
-      });
+    fetchPathSummary(pathSlug).then((json) => {
+      if (json) setData(json);
+    });
   }, [pathSlug]);
 
   if (!data || data.percentage === 0) return null;
@@ -73,23 +101,17 @@ export function PathProgressOverlay({
 
 /**
  * Provides completed lesson slugs to the parent via context/callback.
- * Used to overlay checkmarks on lesson lists.
+ * Uses the same shared fetch cache as PathProgressOverlay — no duplicate request.
  */
 export function useCompletedLessons(pathSlug: string): Set<string> {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch(`/api/progress/path-summary?path=${encodeURIComponent(pathSlug)}`)
-      .then((res) => {
-        if (!res.ok) return null;
-        return res.json();
-      })
-      .then((json) => {
-        if (json?.completedLessons) {
-          setCompleted(new Set(json.completedLessons));
-        }
-      })
-      .catch(() => {});
+    fetchPathSummary(pathSlug).then((json) => {
+      if (json?.completedLessons) {
+        setCompleted(new Set(json.completedLessons));
+      }
+    });
   }, [pathSlug]);
 
   return completed;

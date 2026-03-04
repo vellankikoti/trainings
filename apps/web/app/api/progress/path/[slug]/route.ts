@@ -18,5 +18,9 @@ export async function GET(_request: Request, { params }: RouteParams) {
   }
 
   const result = await getPathProgress(profileId, params.slug);
-  return NextResponse.json(result);
+  return NextResponse.json(result, {
+    headers: {
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+    },
+  });
 }

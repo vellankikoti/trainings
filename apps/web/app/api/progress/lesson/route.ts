@@ -9,11 +9,12 @@ import {
   checkAndSendStreakMilestone,
   sendModuleCompletionEmail,
 } from "@/lib/email-automation";
+import { apiErrors, withLogging } from "@/lib/api-helpers";
 
-export async function POST(request: Request) {
+export const POST = withLogging(async (request: Request) => {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   // Rate limit: 30 requests/minute per user
@@ -25,14 +26,14 @@ export async function POST(request: Request) {
   const body = await request.json();
   const validated = validateBody(lessonProgressSchema, body);
   if (validated.error) {
-    return NextResponse.json({ error: validated.error }, { status: 400 });
+    return apiErrors.badRequest(validated.error);
   }
 
   const { pathSlug, moduleSlug, lessonSlug, status } = validated.data;
 
   const profileId = await ensureProfile(clerkId);
   if (!profileId) {
-    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    return apiErrors.notFound("Profile");
   }
 
   const result = await updateLessonProgress(
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
     ...result,
     streak: streakResult,
   });
-}
+});
 
 /**
  * Trigger email notifications for streak milestones and module completions.

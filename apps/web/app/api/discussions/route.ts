@@ -14,8 +14,14 @@ const createSchema = z.object({
 
 /**
  * GET /api/discussions?lessonSlug=xxx — Get discussions for a lesson.
+ * Requires authentication — lesson content is for enrolled users only.
  */
 export async function GET(request: Request) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const lessonSlug = searchParams.get("lessonSlug");
 
@@ -27,7 +33,11 @@ export async function GET(request: Request) {
   }
 
   const discussions = await getDiscussions(lessonSlug);
-  return NextResponse.json({ discussions });
+  return NextResponse.json({ discussions }, {
+    headers: {
+      "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+    },
+  });
 }
 
 /**

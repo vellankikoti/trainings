@@ -23,7 +23,11 @@ export async function GET() {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }
 
-  return NextResponse.json(profile);
+  return NextResponse.json(profile, {
+    headers: {
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+    },
+  });
 }
 
 export async function PATCH(req: Request) {

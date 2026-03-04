@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/server";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import type { Json } from "@/lib/supabase/types";
+import { apiErrors, withLogging } from "@/lib/api-helpers";
 
 /**
  * POST /api/events/batch
@@ -26,10 +27,10 @@ const batchSchema = z.object({
   sessionId: z.string().max(100).optional(),
 });
 
-export async function POST(req: Request) {
+export const POST = withLogging(async (req: Request) => {
   const { userId } = await auth();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   // Rate limit: 60 requests/minute per user
@@ -42,15 +43,12 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return apiErrors.badRequest("Invalid JSON");
   }
 
   const parsed = batchSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid payload", details: parsed.error.issues },
-      { status: 400 }
-    );
+    return apiErrors.badRequest("Invalid payload", parsed.error.issues);
   }
 
   const { events, sessionId } = parsed.data;
@@ -65,7 +63,7 @@ export async function POST(req: Request) {
     .single();
 
   if (!profile) {
-    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    return apiErrors.notFound("Profile");
   }
 
   // Hash the IP for fraud detection (use forwarded header if behind proxy)
@@ -74,26 +72,33 @@ export async function POST(req: Request) {
   const ipHash = await hashIP(ip);
 
   // Transform client events into database rows
-  const rows = events.map((event) => ({
-    user_id: profile.id,
-    event_type: event.type,
-    entity_type: event.entityType ?? null,
-    entity_id: event.entityId ?? null,
-    data: (event.data ?? {}) as Json,
-    session_id: sessionId ?? null,
-    ip_hash: ipHash,
-    created_at: new Date(event.timestamp).toISOString(),
-  }));
+  // Clamp timestamps to prevent unreasonable drift (max 5 min in future, max 24h in past)
+  const serverNow = Date.now();
+  const MAX_FUTURE_DRIFT_MS = 5 * 60 * 1000;      // 5 minutes
+  const MAX_PAST_DRIFT_MS = 24 * 60 * 60 * 1000;   // 24 hours
+
+  const rows = events.map((event) => {
+    let ts = event.timestamp;
+    if (ts > serverNow + MAX_FUTURE_DRIFT_MS) ts = serverNow;
+    if (ts < serverNow - MAX_PAST_DRIFT_MS) ts = serverNow;
+    return {
+      user_id: profile.id,
+      event_type: event.type,
+      entity_type: event.entityType ?? null,
+      entity_id: event.entityId ?? null,
+      data: (event.data ?? {}) as Json,
+      session_id: sessionId ?? null,
+      ip_hash: ipHash,
+      created_at: new Date(ts).toISOString(),
+    };
+  });
 
   // Batch insert
   const { error } = await supabase.from("events").insert(rows);
 
   if (error) {
     console.error("[events/batch] Insert failed:", error.message);
-    return NextResponse.json(
-      { error: "Failed to store events" },
-      { status: 500 }
-    );
+    return apiErrors.internal();
   }
 
   // Process time.heartbeat events — aggregate into active_time_log
@@ -109,7 +114,7 @@ export async function POST(req: Request) {
     success: true,
     count: rows.length,
   });
-}
+});
 
 async function processHeartbeats(
   supabase: ReturnType<typeof createAdminClient>,

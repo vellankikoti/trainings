@@ -9,11 +9,12 @@ import { evaluateBadges } from "@/lib/badges";
 import { createAdminClient } from "@/lib/supabase/server";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import { quizSubmitSchema, validateBody } from "@/lib/validations";
+import { apiErrors, withLogging } from "@/lib/api-helpers";
 
-export async function POST(request: Request) {
+export const POST = withLogging(async (request: Request) => {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   // Rate limit: 10 requests/minute per user
@@ -25,19 +26,19 @@ export async function POST(request: Request) {
   const body = await request.json();
   const validated = validateBody(quizSubmitSchema, body);
   if (validated.error) {
-    return NextResponse.json({ error: validated.error }, { status: 400 });
+    return apiErrors.badRequest(validated.error);
   }
 
   const { quizId, answers, timeSpentSeconds } = validated.data;
 
   const quiz = getQuizById(quizId);
   if (!quiz) {
-    return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
+    return apiErrors.notFound("Quiz");
   }
 
   const profileId = await getProfileId(clerkId);
   if (!profileId) {
-    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    return apiErrors.notFound("Profile");
   }
 
   // Score the quiz
@@ -143,4 +144,4 @@ export async function POST(request: Request) {
     newBadges,
     results: scoring.results,
   });
-}
+});

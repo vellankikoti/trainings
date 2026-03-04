@@ -24,5 +24,9 @@ export async function GET() {
     getUnreadCount(profileId),
   ]);
 
-  return NextResponse.json({ notifications, unreadCount });
+  return NextResponse.json({ notifications, unreadCount }, {
+    headers: {
+      "Cache-Control": "private, no-cache",
+    },
+  });
 }

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getProfileId } from "@/lib/progress";
 import { markAsRead, markAllAsRead } from "@/lib/notifications";
 import { notificationReadSchema, validateBody } from "@/lib/validations";
+import { apiErrors, withLogging } from "@/lib/api-helpers";
 
 /**
  * POST /api/notifications/read
@@ -10,21 +11,21 @@ import { notificationReadSchema, validateBody } from "@/lib/validations";
  * Mark notification(s) as read.
  * Body: { notificationId: string } or { all: true }
  */
-export async function POST(request: Request) {
+export const POST = withLogging(async (request: Request) => {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   const profileId = await getProfileId(clerkId);
   if (!profileId) {
-    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    return apiErrors.notFound("Profile");
   }
 
   const body = await request.json();
   const { data: validated, error } = validateBody(notificationReadSchema, body);
   if (error) {
-    return NextResponse.json({ error }, { status: 400 });
+    return apiErrors.badRequest(error);
   }
 
   if (validated.all === true) {
@@ -34,4 +35,4 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ success: true });
-}
+});

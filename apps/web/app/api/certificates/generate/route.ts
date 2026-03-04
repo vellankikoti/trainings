@@ -4,11 +4,12 @@ import { getProfileId } from "@/lib/progress";
 import { generateCertificate } from "@/lib/certificates";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import { certificateGenerateSchema, validateBody } from "@/lib/validations";
+import { apiErrors, withLogging } from "@/lib/api-helpers";
 
-export async function POST(request: Request) {
+export const POST = withLogging(async (request: Request) => {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   // Rate limit: 3 requests/hour per user
@@ -19,13 +20,13 @@ export async function POST(request: Request) {
 
   const profileId = await getProfileId(clerkId);
   if (!profileId) {
-    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    return apiErrors.notFound("Profile");
   }
 
   const body = await request.json();
   const validated = validateBody(certificateGenerateSchema, body);
   if (validated.error) {
-    return NextResponse.json({ error: validated.error }, { status: 400 });
+    return apiErrors.badRequest(validated.error);
   }
 
   const { type, title, pathSlug, moduleSlug, description } = validated.data as any;
@@ -38,9 +39,8 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate certificate" },
-      { status: 400 },
+    return apiErrors.badRequest(
+      err instanceof Error ? err.message : "Failed to generate certificate",
     );
   }
-}
+});

@@ -21,5 +21,9 @@ export async function GET() {
   return NextResponse.json({
     achievements: allAchievements,
     newlyUnlocked,
+  }, {
+    headers: {
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+    },
   });
 }

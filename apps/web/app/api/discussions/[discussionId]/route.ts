@@ -11,6 +11,7 @@ import {
 import { getAuthContext } from "@/lib/auth";
 import { z } from "zod";
 import { validateBody } from "@/lib/validations";
+import { apiErrors, withLogging } from "@/lib/api-helpers";
 
 interface RouteParams {
   params: Promise<{ discussionId: string }>;
@@ -33,19 +34,19 @@ const actionSchema = z.object({
 export async function PATCH(request: Request, { params }: RouteParams) {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   const { discussionId } = await params;
   const profileId = await getProfileId(clerkId);
   if (!profileId) {
-    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    return apiErrors.notFound("Profile");
   }
 
   const body = await request.json();
   const validated = validateBody(actionSchema, body);
   if (validated.error) {
-    return NextResponse.json({ error: validated.error }, { status: 400 });
+    return apiErrors.badRequest(validated.error);
   }
 
   const { action, voteType } = validated.data;
@@ -58,7 +59,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   if (action === "vote" && voteType) {
     const voteValidated = validateBody(voteSchema, { voteType });
     if (voteValidated.error) {
-      return NextResponse.json({ error: voteValidated.error }, { status: 400 });
+      return apiErrors.badRequest(voteValidated.error);
     }
     const success = await voteDiscussion(discussionId, profileId, voteType);
     return NextResponse.json({ success });
@@ -69,16 +70,10 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     try {
       const ctx = await getAuthContext();
       if (!ctx || !MODERATOR_ROLES.includes(ctx.role)) {
-        return NextResponse.json(
-          { error: "Moderator role required" },
-          { status: 403 },
-        );
+        return apiErrors.forbidden();
       }
     } catch {
-      return NextResponse.json(
-        { error: "Moderator role required" },
-        { status: 403 },
-      );
+      return apiErrors.forbidden();
     }
 
     const success =
@@ -88,7 +83,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return NextResponse.json({ success });
   }
 
-  return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  return apiErrors.badRequest("Invalid action");
 }
 
 /**
@@ -97,13 +92,13 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 export async function DELETE(_request: Request, { params }: RouteParams) {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   const { discussionId } = await params;
   const profileId = await getProfileId(clerkId);
   if (!profileId) {
-    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    return apiErrors.notFound("Profile");
   }
 
   const success = await deleteDiscussion(discussionId, profileId);

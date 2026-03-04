@@ -4,11 +4,12 @@ import { ensureProfile, updateExerciseProgress } from "@/lib/progress";
 import { updateStreak } from "@/lib/streaks";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import { exerciseProgressSchema, validateBody } from "@/lib/validations";
+import { apiErrors, withLogging } from "@/lib/api-helpers";
 
-export async function POST(request: Request) {
+export const POST = withLogging(async (request: Request) => {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   // Rate limit: 30 requests/minute per user
@@ -20,14 +21,14 @@ export async function POST(request: Request) {
   const body = await request.json();
   const validated = validateBody(exerciseProgressSchema, body);
   if (validated.error) {
-    return NextResponse.json({ error: validated.error }, { status: 400 });
+    return apiErrors.badRequest(validated.error);
   }
 
   const { lessonSlug, exerciseId } = validated.data;
 
   const profileId = await ensureProfile(clerkId);
   if (!profileId) {
-    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    return apiErrors.notFound("Profile");
   }
 
   const result = await updateExerciseProgress(profileId, lessonSlug, exerciseId);
@@ -40,4 +41,4 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json(result);
-}
+});

@@ -62,5 +62,9 @@ export async function GET(request: NextRequest) {
     modulesTotal: pathProgress?.modules_total ?? modules.length,
     completedLessons,
     resumeHref,
+  }, {
+    headers: {
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+    },
   });
 }

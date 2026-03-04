@@ -4,6 +4,7 @@ import { createCheckoutSession, PLANS } from "@/lib/stripe";
 import { rateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit";
 import { z } from "zod";
 import { validateBody } from "@/lib/validations";
+import { apiErrors, withLogging } from "@/lib/api-helpers";
 
 const checkoutSchema = z.object({
   plan: z.enum(["premium", "team"]),
@@ -13,10 +14,10 @@ const checkoutSchema = z.object({
 /**
  * POST /api/checkout — Create a Stripe checkout session.
  */
-export async function POST(request: Request) {
+export const POST = withLogging(async (request: Request) => {
   const { userId } = await auth();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrors.unauthorized();
   }
 
   // Rate limit: 5 requests/hour
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   const body = await request.json();
   const validated = validateBody(checkoutSchema, body);
   if (validated.error) {
-    return NextResponse.json({ error: validated.error }, { status: 400 });
+    return apiErrors.badRequest(validated.error);
   }
 
   const { plan, interval } = validated.data;
@@ -41,19 +42,13 @@ export async function POST(request: Request) {
       : planConfig.stripePriceIdAnnual;
 
   if (!priceId) {
-    return NextResponse.json(
-      { error: "Payment not configured for this plan" },
-      { status: 400 },
-    );
+    return apiErrors.badRequest("Payment not configured for this plan");
   }
 
   // Get user email from Clerk
   const user = await currentUser();
   if (!user?.emailAddresses?.[0]?.emailAddress) {
-    return NextResponse.json(
-      { error: "No email address found" },
-      { status: 400 },
-    );
+    return apiErrors.badRequest("No email address found");
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -70,9 +65,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ url: session.url });
   } catch (err) {
     console.error("Stripe checkout error:", err);
-    return NextResponse.json(
-      { error: "Failed to create checkout session" },
-      { status: 500 },
-    );
+    return apiErrors.internal();
   }
-}
+});

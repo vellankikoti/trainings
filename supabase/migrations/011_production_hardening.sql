@@ -244,3 +244,32 @@ BEGIN
       AND completed_at IS NOT NULL;
   END IF;
 END $$;
+
+-- ============================================================================
+-- 7. Add timezone column to profiles (MEDIUM-20: timezone-aware streaks)
+-- ============================================================================
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS timezone TEXT;
+
+-- ============================================================================
+-- 8. Widen lesson_progress UNIQUE to include path/module context (MEDIUM-37)
+-- ============================================================================
+-- The original constraint (user_id, lesson_slug) is too narrow — the same
+-- lesson slug can appear in different paths/modules. Widen to include context.
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'lesson_progress') THEN
+    -- Drop old narrow constraint if it exists
+    IF EXISTS (
+      SELECT 1 FROM information_schema.table_constraints
+      WHERE constraint_name = 'lesson_progress_user_id_lesson_slug_key'
+        AND table_name = 'lesson_progress'
+    ) THEN
+      ALTER TABLE lesson_progress DROP CONSTRAINT lesson_progress_user_id_lesson_slug_key;
+    END IF;
+
+    -- Create wider unique index (path + module + lesson)
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_lesson_progress_user_path_module_lesson
+      ON lesson_progress(user_id, path_slug, module_slug, lesson_slug);
+  END IF;
+END $$;
