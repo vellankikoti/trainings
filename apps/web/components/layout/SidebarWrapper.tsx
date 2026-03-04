@@ -9,7 +9,8 @@ import type { Role } from "@/lib/auth/rbac";
  * the appropriate sidebar items to the client Sidebar.
  */
 export async function SidebarWrapper() {
-  let items = getSidebarItemsForRole("learner");
+  let role: Role = "learner";
+  let items = getSidebarItemsForRole(role);
 
   try {
     const { userId } = await auth();
@@ -21,12 +22,12 @@ export async function SidebarWrapper() {
         .eq("clerk_id", userId)
         .maybeSingle();
 
-      const role = (profile?.role ?? "learner") as Role;
+      role = (profile?.role ?? "learner") as Role;
       items = getSidebarItemsForRole(role);
     }
   } catch {
     // Fall back to learner items
   }
 
-  return <Sidebar items={items} />;
+  return <Sidebar items={items} role={role} />;
 }
