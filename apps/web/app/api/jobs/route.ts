@@ -1,19 +1,14 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
-import { apiErrors, withLogging } from "@/lib/api-helpers";
+import { withLogging } from "@/lib/api-helpers";
 
 /**
  * GET /api/jobs?skills=linux,docker&location=remote&type=full_time&page=1&limit=20
  *
- * Job search API for authenticated learners. Only shows active, non-expired postings.
+ * Public job search API. No authentication required.
+ * Only shows active, non-expired postings.
  */
 export const GET = withLogging(async (request: Request) => {
-  const { userId } = await auth();
-  if (!userId) {
-    return apiErrors.unauthorized();
-  }
-
   const url = new URL(request.url);
   const skills = url.searchParams.get("skills")?.split(",").filter(Boolean);
   const location = url.searchParams.get("location");
@@ -78,7 +73,7 @@ export const GET = withLogging(async (request: Request) => {
     },
     {
       headers: {
-        "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+        "Cache-Control": "public, max-age=60, stale-while-revalidate=120",
       },
     },
   );

@@ -7,19 +7,11 @@ import { apiErrors } from "@/lib/api-helpers";
 type Params = { params: Promise<{ jobId: string }> };
 
 /**
- * GET /api/jobs/[jobId] — Get job details (authenticated)
+ * GET /api/jobs/[jobId] — Get job details (public, no auth required)
+ * If user is logged in, also includes `hasApplied` flag.
  */
 export async function GET(_request: Request, { params }: Params) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
-    return apiErrors.unauthorized();
-  }
-
   const { jobId } = await params;
-  const profileId = await getProfileId(clerkId);
-  if (!profileId) {
-    return apiErrors.notFound("Profile");
-  }
 
   const supabase = createAdminClient();
   const { data: job } = await supabase
@@ -33,15 +25,27 @@ export async function GET(_request: Request, { params }: Params) {
     return apiErrors.notFound("Job");
   }
 
-  // Check if user has already applied
-  const { count: applicationCount } = await supabase
-    .from("job_applications")
-    .select("id", { count: "exact", head: true })
-    .eq("job_id", jobId)
-    .eq("user_id", profileId);
+  // If user is logged in, check if they already applied
+  let hasApplied = false;
+  try {
+    const { userId: clerkId } = await auth();
+    if (clerkId) {
+      const profileId = await getProfileId(clerkId);
+      if (profileId) {
+        const { count } = await supabase
+          .from("job_applications")
+          .select("id", { count: "exact", head: true })
+          .eq("job_id", jobId)
+          .eq("user_id", profileId);
+        hasApplied = (count ?? 0) > 0;
+      }
+    }
+  } catch {
+    // Auth check failed — treat as unauthenticated
+  }
 
   return NextResponse.json({
     ...job,
-    hasApplied: (applicationCount ?? 0) > 0,
+    hasApplied,
   });
 }
