@@ -16,24 +16,24 @@ interface MyCourseCardProps {
   variant: CardVariant;
 }
 
-/* ─── White Icon (CSS filtered to white for contrast on dark gradients) ───── */
+/* ─── Icon Components ──────────────────────────────────────────────────────── */
 
-function WhiteIcon({ iconUrl, alt }: { iconUrl: string; alt: string }) {
+/** Primary white icon — large, crisp, high contrast on dark gradients */
+function CourseIcon({ iconUrl, alt }: { iconUrl: string; alt: string }) {
   const [failed, setFailed] = useState(false);
 
   if (failed) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        width="40"
-        height="40"
+        width="44"
+        height="44"
         viewBox="0 0 24 24"
         fill="none"
         stroke="white"
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="opacity-90"
       >
         <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
         <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
@@ -46,18 +46,16 @@ function WhiteIcon({ iconUrl, alt }: { iconUrl: string; alt: string }) {
     <img
       src={iconUrl}
       alt={alt}
-      width={40}
-      height={40}
-      className="h-10 w-10 object-contain"
-      style={{ filter: "brightness(0) invert(1)" }}
+      width={44}
+      height={44}
+      className="h-11 w-11 shrink-0 object-contain brightness-0 invert drop-shadow-[0_2px_8px_rgba(255,255,255,0.25)]"
       loading="lazy"
       onError={() => setFailed(true)}
     />
   );
 }
 
-/* ─── Watermark Icon (large faded background decoration) ─────────────────── */
-
+/** Background watermark icon — large, subtle, adds depth */
 function WatermarkIcon({ iconUrl }: { iconUrl: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
@@ -67,10 +65,9 @@ function WatermarkIcon({ iconUrl }: { iconUrl: string }) {
     <img
       src={iconUrl}
       alt=""
-      width={160}
-      height={160}
-      className="pointer-events-none absolute -bottom-6 -right-6 h-40 w-40 object-contain select-none"
-      style={{ filter: "brightness(0) invert(1)", opacity: 0.06 }}
+      width={200}
+      height={200}
+      className="pointer-events-none absolute -bottom-8 -right-8 h-[200px] w-[200px] select-none object-contain brightness-0 invert opacity-[0.07]"
       loading="lazy"
       aria-hidden="true"
       onError={() => setFailed(true)}
@@ -102,56 +99,48 @@ export function MyCourseCard({ course, variant }: MyCourseCardProps) {
       {/* ─── Gradient Banner ──────────────────────────────────────────── */}
       <div
         className={cn(
-          "relative flex h-[140px] items-end overflow-hidden bg-gradient-to-br p-5",
+          "relative flex h-[160px] flex-col justify-between overflow-hidden bg-gradient-to-br p-5",
           visual.gradient,
         )}
       >
-        {/* Watermark: large faded icon in background */}
+        {/* Large watermark icon */}
         <WatermarkIcon iconUrl={visual.iconUrl} />
 
-        {/* Top-left: Icon in clean circle */}
-        <div className="absolute left-5 top-5 flex h-14 w-14 items-center justify-center rounded-xl bg-white/[0.12] backdrop-blur-md ring-1 ring-white/[0.15]">
-          <WhiteIcon iconUrl={visual.iconUrl} alt={course.title} />
+        {/* Top row: Icon + Difficulty */}
+        <div className="relative z-10 flex items-start justify-between">
+          {/* Icon in frosted glass container */}
+          <div className="flex h-[72px] w-[72px] items-center justify-center rounded-2xl bg-white/[0.12] shadow-lg shadow-black/10 ring-1 ring-white/[0.2] backdrop-blur-xl">
+            <CourseIcon iconUrl={visual.iconUrl} alt={course.title} />
+          </div>
+
+          {/* Difficulty badge */}
+          <span className="rounded-lg bg-black/30 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white backdrop-blur-sm">
+            {course.difficulty}
+          </span>
+        </div>
+
+        {/* Bottom row: Stats */}
+        <div className="relative z-10 flex items-center gap-4 text-[13px] font-medium text-white/80">
+          <span className="flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            {course.estimatedHours} hours
+          </span>
+          <span className="h-3.5 w-px bg-white/30" />
+          <span className="flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            {course.lessonsCount} lessons
+          </span>
         </div>
 
         {/* Completed ribbon */}
         {variant === "completed" && (
-          <div className="absolute right-0 top-4 flex items-center gap-1.5 rounded-l-full bg-emerald-500 py-1 pl-3 pr-4 shadow-lg">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
+          <div className="absolute right-0 top-5 z-20 flex items-center gap-1.5 rounded-l-full bg-emerald-500 py-1.5 pl-3 pr-4 shadow-lg">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
             <span className="text-[11px] font-bold uppercase tracking-wider text-white">
-              Done
+              Completed
             </span>
           </div>
         )}
-
-        {/* Bottom of banner: metadata row */}
-        <div className="relative z-10 flex w-full items-end justify-between">
-          <span className="rounded-md bg-black/25 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-white/90 backdrop-blur-sm">
-            {course.difficulty}
-          </span>
-          <div className="flex items-center gap-3 text-[12px] font-medium text-white/75">
-            <span className="flex items-center gap-1">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              {course.estimatedHours}h
-            </span>
-            <span className="flex items-center gap-1">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-              {course.lessonsCount}
-            </span>
-          </div>
-        </div>
       </div>
 
       {/* ─── Card Body ────────────────────────────────────────────────── */}
