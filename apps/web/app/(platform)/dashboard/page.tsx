@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { getProfileId } from "@/lib/progress";
+import { ensureProfile } from "@/lib/progress";
 import { getFullDashboardData } from "@/lib/dashboard";
 import { getUserBadges } from "@/lib/badges";
 import { getXPHistory } from "@/lib/xp-rewards";
@@ -47,9 +47,10 @@ export default async function DashboardPage() {
     );
   }
 
-  const profileId = await getProfileId(clerkId);
+  // Ensure profile exists (auto-creates from Clerk data if missing)
+  const profileId = await ensureProfile(clerkId);
 
-  // New user — no profile yet
+  // Profile creation failed — shouldn't happen but handle gracefully
   if (!profileId) {
     return (
       <div className="space-y-8">

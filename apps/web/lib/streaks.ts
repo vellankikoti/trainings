@@ -75,17 +75,28 @@ export async function updateStreak(
 ): Promise<{ streak: number; streakXPAwarded: boolean; milestone: number | null }> {
   const supabase = createAdminClient();
 
-  // Get current profile (including timezone for user-local date calculation)
+  // Get current profile — query timezone separately to avoid breaking
+  // when migration 011 (which adds the timezone column) hasn't been applied.
   const { data: profile } = await supabase
     .from("profiles")
-    .select("current_streak, longest_streak, last_activity_date, timezone")
+    .select("current_streak, longest_streak, last_activity_date")
     .eq("id", userId)
     .single();
 
   if (!profile) throw new Error("Profile not found");
 
-  // Use user's timezone for date calculations (falls back to UTC)
-  const userTz = profile.timezone;
+  // Try to read timezone (may not exist if migration 011 not applied)
+  let userTz: string | null = null;
+  try {
+    const { data: tzRow } = await supabase
+      .from("profiles")
+      .select("timezone")
+      .eq("id", userId)
+      .single();
+    userTz = tzRow?.timezone ?? null;
+  } catch {
+    // timezone column doesn't exist — fall back to UTC
+  }
   const today = getUserToday(userTz);
   const yesterdayStr = getYesterday(userTz);
 

@@ -21,7 +21,7 @@ export async function getProfileId(clerkId: string): Promise<string | null> {
     .from("profiles")
     .select("id")
     .eq("clerk_id", clerkId)
-    .single();
+    .maybeSingle();
   return data?.id ?? null;
 }
 
