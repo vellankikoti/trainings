@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,12 @@ interface CompletionReflectionModalProps {
   xpReward: number;
   /** Called when the user confirms completion inside the modal */
   onConfirm: () => Promise<void>;
+  /** URL to the next lesson (if available) */
+  nextLessonHref?: string | null;
+  /** Title of the next lesson (for display) */
+  nextLessonTitle?: string | null;
+  /** URL to course overview (shown when on last lesson) */
+  courseOverviewHref?: string | null;
 }
 
 type ModalState = "reflecting" | "confirming" | "completed";
@@ -35,7 +42,11 @@ export function CompletionReflectionModal({
   reflectionPrompt,
   xpReward,
   onConfirm,
+  nextLessonHref,
+  nextLessonTitle,
+  courseOverviewHref,
 }: CompletionReflectionModalProps) {
+  const router = useRouter();
   const [state, setState] = useState<ModalState>("reflecting");
   const [error, setError] = useState<string | null>(null);
 
@@ -118,13 +129,73 @@ export function CompletionReflectionModal({
               </span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleClose(false)}
-              className="mt-6 rounded-xl bg-foreground px-6 py-3 text-sm font-bold text-background transition-all hover:opacity-90 active:scale-[0.98]"
-            >
-              Continue Learning
-            </button>
+            {/* Next lesson preview */}
+            {nextLessonTitle && (
+              <p className="mt-4 text-xs text-muted-foreground">
+                Up next:{" "}
+                <span className="font-semibold text-foreground">
+                  {nextLessonTitle}
+                </span>
+              </p>
+            )}
+
+            {nextLessonHref ? (
+              <button
+                type="button"
+                onClick={() => {
+                  handleClose(false);
+                  router.push(nextLessonHref);
+                }}
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
+              >
+                Next Lesson
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+            ) : courseOverviewHref ? (
+              <button
+                type="button"
+                onClick={() => {
+                  handleClose(false);
+                  router.push(courseOverviewHref);
+                }}
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md active:scale-[0.98]"
+              >
+                Course Complete
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleClose(false)}
+                className="mt-4 rounded-xl bg-foreground px-6 py-3 text-sm font-bold text-background transition-all hover:opacity-90 active:scale-[0.98]"
+              >
+                Continue Learning
+              </button>
+            )}
           </div>
         ) : (
           /* ─── Reflection state ─── */

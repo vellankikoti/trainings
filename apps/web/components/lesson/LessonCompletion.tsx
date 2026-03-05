@@ -17,6 +17,7 @@ interface LessonCompletionProps {
   initialCompleted?: boolean;
   keyTakeaways?: string[];
   reflectionPrompt?: string;
+  nextLesson?: { slug: string; title: string } | null;
 }
 
 type CompletionState = "idle" | "completed";
@@ -32,6 +33,7 @@ function LessonCompletion({
   initialCompleted = false,
   keyTakeaways,
   reflectionPrompt,
+  nextLesson,
 }: LessonCompletionProps) {
   const router = useRouter();
   const [state, setState] = useState<CompletionState>(
@@ -138,6 +140,15 @@ function LessonCompletion({
         reflectionPrompt={reflectionPrompt}
         xpReward={xpReward}
         onConfirm={handleConfirmCompletion}
+        nextLessonHref={
+          nextLesson
+            ? `/learn/${pathSlug}/${moduleSlug}/${nextLesson.slug}`
+            : null
+        }
+        nextLessonTitle={nextLesson?.title ?? null}
+        courseOverviewHref={
+          !nextLesson ? `/learn/${pathSlug}/${moduleSlug}` : null
+        }
       />
     </div>
   );
@@ -180,6 +191,7 @@ export function LessonCompletionSection({
         initialCompleted={initialCompleted}
         keyTakeaways={keyTakeaways}
         reflectionPrompt={reflectionPrompt}
+        nextLesson={nextLesson}
       />
 
       {/* Prev / Next navigation */}
