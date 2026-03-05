@@ -34,7 +34,7 @@ export default async function CertificatePage({
   const profile = cert.profiles as any;
   const name = profile?.display_name || profile?.username || "Learner";
 
-  const certUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://vellanki.in"}/certificates/${cert.verification_code}`;
+  const certUrl = `${(process.env.NEXT_PUBLIC_APP_URL || "https://devopsengineers.in").replace(/[\r\n]+$/, "")}/certificates/${cert.verification_code}`;
   const linkedInShareUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(certUrl)}`;
   const twitterShareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(`I just earned the "${cert.title}" certificate on DEVOPS ENGINEERS!`)}&url=${encodeURIComponent(certUrl)}`;
 
