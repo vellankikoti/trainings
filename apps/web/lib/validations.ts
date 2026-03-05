@@ -44,6 +44,16 @@ export const certificateGenerateSchema = z.object({
   description: z.string().max(500).optional(),
 });
 
+export const progressResetSchema = z
+  .object({
+    scope: z.enum(["module", "path"]),
+    pathSlug: slug,
+    moduleSlug: slug.optional(),
+  })
+  .refine((d) => d.scope === "path" || d.moduleSlug, {
+    message: "moduleSlug required for module reset",
+  });
+
 export const profileUpdateSchema = z.object({
   display_name: z.string().min(1).max(100).optional(),
   username: z

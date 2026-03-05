@@ -6,6 +6,7 @@ import { getPath, getModule, getModulesForPath } from "@/lib/content";
 import { getProfileId } from "@/lib/progress";
 import { createAdminClient } from "@/lib/supabase/server";
 import { ProgressBar } from "@/components/shared/ProgressBar";
+import { CourseActions } from "@/components/courses/CourseActions";
 
 interface CoursePageProps {
   params: Promise<{ path: string; module: string }>;
@@ -14,21 +15,31 @@ interface CoursePageProps {
 async function getCourseCompletionData(
   pathSlug: string,
   moduleSlug: string,
-): Promise<{ completedSlugs: Set<string>; totalXpEarned: number }> {
+): Promise<{ completedSlugs: Set<string>; totalXpEarned: number; certificateCode: string | null }> {
   try {
     const { userId: clerkId } = await auth();
-    if (!clerkId) return { completedSlugs: new Set(), totalXpEarned: 0 };
+    if (!clerkId) return { completedSlugs: new Set(), totalXpEarned: 0, certificateCode: null };
 
     const profileId = await getProfileId(clerkId);
-    if (!profileId) return { completedSlugs: new Set(), totalXpEarned: 0 };
+    if (!profileId) return { completedSlugs: new Set(), totalXpEarned: 0, certificateCode: null };
 
     const supabase = createAdminClient();
-    const { data } = await supabase
-      .from("lesson_progress")
-      .select("lesson_slug, status, xp_earned")
-      .eq("user_id", profileId)
-      .eq("path_slug", pathSlug)
-      .eq("module_slug", moduleSlug);
+    const [{ data }, { data: certData }] = await Promise.all([
+      supabase
+        .from("lesson_progress")
+        .select("lesson_slug, status, xp_earned")
+        .eq("user_id", profileId)
+        .eq("path_slug", pathSlug)
+        .eq("module_slug", moduleSlug),
+      supabase
+        .from("certificates")
+        .select("verification_code")
+        .eq("user_id", profileId)
+        .eq("path_slug", pathSlug)
+        .eq("module_slug", moduleSlug)
+        .eq("certificate_type", "module")
+        .maybeSingle(),
+    ]);
 
     const completed = new Set<string>();
     let xp = 0;
@@ -38,9 +49,13 @@ async function getCourseCompletionData(
         xp += row.xp_earned ?? 0;
       }
     }
-    return { completedSlugs: completed, totalXpEarned: xp };
+    return {
+      completedSlugs: completed,
+      totalXpEarned: xp,
+      certificateCode: certData?.verification_code ?? null,
+    };
   } catch {
-    return { completedSlugs: new Set(), totalXpEarned: 0 };
+    return { completedSlugs: new Set(), totalXpEarned: 0, certificateCode: null };
   }
 }
 
@@ -72,7 +87,7 @@ export default async function CourseOverviewPage({ params }: CoursePageProps) {
     ? allModules[moduleIndex + 1]
     : null;
 
-  const { completedSlugs, totalXpEarned } = await getCourseCompletionData(
+  const { completedSlugs, totalXpEarned, certificateCode } = await getCourseCompletionData(
     pathSlug,
     moduleSlug,
   );
@@ -164,6 +179,17 @@ export default async function CourseOverviewPage({ params }: CoursePageProps) {
                   <BookIcon /> {totalLessons} lessons
                 </span>
               </div>
+
+              {/* Certificate + Reset actions */}
+              <div className="mt-4">
+                <CourseActions
+                  pathSlug={pathSlug}
+                  moduleSlug={moduleSlug}
+                  courseTitle={moduleMeta.title}
+                  isComplete={isComplete}
+                  certificateCode={certificateCode}
+                />
+              </div>
             </div>
           </div>
 
@@ -203,6 +229,18 @@ export default async function CourseOverviewPage({ params }: CoursePageProps) {
               </Link>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Reset Progress — for in-progress courses (not yet complete) */}
+      {isStarted && !isComplete && (
+        <div className="mt-4">
+          <CourseActions
+            pathSlug={pathSlug}
+            moduleSlug={moduleSlug}
+            courseTitle={moduleMeta.title}
+            isComplete={false}
+          />
         </div>
       )}
 

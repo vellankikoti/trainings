@@ -1914,6 +1914,16 @@ export interface Database {
           old_level: number;
         }[];
       };
+      decrement_xp: {
+        Args: {
+          p_user_id: string;
+          p_amount: number;
+        };
+        Returns: {
+          new_total: number;
+          old_level: number;
+        }[];
+      };
       accept_invitation: {
         Args: {
           p_invitation_id: string;

@@ -277,6 +277,8 @@ export default async function LessonPage({ params }: LessonPageProps) {
             reflectionPrompt={lesson.frontmatter.reflection_prompt}
             prevLesson={prevLesson}
             nextLesson={nextLesson}
+            courseTitle={moduleMeta.title}
+            pathTitle={pathMeta.title}
           />
         </div>
 

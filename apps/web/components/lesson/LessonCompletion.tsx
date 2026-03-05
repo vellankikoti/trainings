@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { CompletionReflectionModal } from "./CompletionReflectionModal";
+import { CourseCompletionModal } from "@/components/certificates/CourseCompletionModal";
 
 /* ─── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -18,6 +19,10 @@ interface LessonCompletionProps {
   keyTakeaways?: string[];
   reflectionPrompt?: string;
   nextLesson?: { slug: string; title: string } | null;
+  /** Title of the course (module) — used for certificate modal */
+  courseTitle?: string;
+  /** Title of the learning path — used for certificate modal */
+  pathTitle?: string;
 }
 
 type CompletionState = "idle" | "completed";
@@ -34,12 +39,16 @@ function LessonCompletion({
   keyTakeaways,
   reflectionPrompt,
   nextLesson,
+  courseTitle,
+  pathTitle,
 }: LessonCompletionProps) {
   const router = useRouter();
   const [state, setState] = useState<CompletionState>(
     initialCompleted ? "completed" : "idle",
   );
   const [modalOpen, setModalOpen] = useState(false);
+  const [certModalOpen, setCertModalOpen] = useState(false);
+  const [moduleXpEarned, setModuleXpEarned] = useState(0);
 
   const handleOpenModal = useCallback(() => {
     if (state !== "idle") return;
@@ -63,12 +72,23 @@ function LessonCompletion({
       throw new Error(data?.error || "Failed to mark lesson as complete");
     }
 
+    const data = await res.json();
+
     setState("completed");
 
     // Re-fetch server component data so the sidebar, progress bar,
     // and lesson checkmarks update without a full page reload
     router.refresh();
-  }, [pathSlug, moduleSlug, lessonSlug, router]);
+
+    // Check if module was just completed — trigger certificate modal
+    if (data.moduleProgress?.completed === true && courseTitle && pathTitle) {
+      setModuleXpEarned(data.xpAwarded || xpReward);
+      // Small delay to let the reflection modal close smoothly
+      setTimeout(() => {
+        setCertModalOpen(true);
+      }, 600);
+    }
+  }, [pathSlug, moduleSlug, lessonSlug, router, courseTitle, pathTitle, xpReward]);
 
   return (
     <div className="w-full">
@@ -150,6 +170,19 @@ function LessonCompletion({
           !nextLesson ? `/learn/${pathSlug}/${moduleSlug}` : null
         }
       />
+
+      {/* Certificate Modal — shown when module is completed */}
+      {courseTitle && pathTitle && (
+        <CourseCompletionModal
+          open={certModalOpen}
+          onOpenChange={setCertModalOpen}
+          courseTitle={courseTitle}
+          pathSlug={pathSlug}
+          moduleSlug={moduleSlug}
+          pathTitle={pathTitle}
+          xpEarned={moduleXpEarned}
+        />
+      )}
     </div>
   );
 }
@@ -173,6 +206,8 @@ export function LessonCompletionSection({
   reflectionPrompt,
   prevLesson,
   nextLesson,
+  courseTitle,
+  pathTitle,
 }: LessonCompletionSectionProps) {
   return (
     <div className="mt-12 border-t border-border/60 pt-8">
@@ -192,6 +227,8 @@ export function LessonCompletionSection({
         keyTakeaways={keyTakeaways}
         reflectionPrompt={reflectionPrompt}
         nextLesson={nextLesson}
+        courseTitle={courseTitle}
+        pathTitle={pathTitle}
       />
 
       {/* Prev / Next navigation */}

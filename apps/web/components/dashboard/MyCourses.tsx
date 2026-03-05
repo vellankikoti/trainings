@@ -5,6 +5,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { ActiveCourse, CompletedCourse } from "@/lib/dashboard";
 import { ProgressBar } from "@/components/shared/ProgressBar";
+import { ResetProgressDialog } from "@/components/progress/ResetProgressDialog";
 
 type Tab = "active" | "completed";
 
@@ -14,6 +15,8 @@ interface MyCoursesProps {
 }
 
 function ActiveCourseCard({ course }: { course: ActiveCourse }) {
+  const [resetOpen, setResetOpen] = useState(false);
+
   const courseHref = course.resumeLessonSlug
     ? `/learn/${course.pathSlug}/${course.moduleSlug}/${course.resumeLessonSlug}`
     : `/paths/${course.pathSlug}`;
@@ -45,18 +48,39 @@ function ActiveCourseCard({ course }: { course: ActiveCourse }) {
         <p className="text-[11px] text-muted-foreground">
           {course.completedLessons}/{course.totalLessons} lessons
         </p>
-        <Link
-          href={courseHref}
-          className="text-xs font-semibold text-primary transition-colors hover:text-primary/80 group-hover:underline"
-        >
-          Continue →
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setResetOpen(true)}
+            className="text-[10px] font-medium text-muted-foreground transition-colors hover:text-destructive"
+            title="Reset Progress"
+          >
+            Reset
+          </button>
+          <Link
+            href={courseHref}
+            className="text-xs font-semibold text-primary transition-colors hover:text-primary/80 group-hover:underline"
+          >
+            Continue →
+          </Link>
+        </div>
       </div>
+
+      <ResetProgressDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        scope="module"
+        pathSlug={course.pathSlug}
+        moduleSlug={course.moduleSlug}
+        title={course.moduleTitle}
+      />
     </div>
   );
 }
 
 function CompletedCourseCard({ course }: { course: CompletedCourse }) {
+  const [resetOpen, setResetOpen] = useState(false);
+
   return (
     <div className="rounded-xl border border-border/60 bg-card p-5 shadow-[var(--shadow-sm)] transition-all duration-200 hover:shadow-[var(--shadow-md)]">
       <div className="flex items-start justify-between gap-2">
@@ -92,6 +116,90 @@ function CompletedCourseCard({ course }: { course: CompletedCourse }) {
           </svg>
         </span>
       </div>
+
+      {/* Actions row */}
+      <div className="mt-3 flex items-center gap-2 border-t border-border/40 pt-3">
+        {course.certificateCode && (
+          <a
+            href={`/certificates/${course.certificateCode}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary transition-colors hover:text-primary/80"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect width="18" height="14" x="3" y="5" rx="2" />
+              <path d="M3 10h18" />
+            </svg>
+            Certificate
+          </a>
+        )}
+        {course.certificateCode && (
+          <a
+            href={`/api/certificates/${course.certificateCode}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" x2="12" y1="15" y2="3" />
+            </svg>
+            PDF
+          </a>
+        )}
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setResetOpen(true)}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-destructive"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+          Reset
+        </button>
+      </div>
+
+      <ResetProgressDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        scope="module"
+        pathSlug={course.pathSlug}
+        moduleSlug={course.moduleSlug}
+        title={course.moduleTitle}
+      />
     </div>
   );
 }

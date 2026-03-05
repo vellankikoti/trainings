@@ -34,6 +34,7 @@ export interface CompletedCourse {
   moduleSlug: string;
   moduleTitle: string;
   completedAt: string | null;
+  certificateCode?: string | null;
 }
 
 export interface PathProgressSummary {
@@ -116,6 +117,7 @@ export async function getFullDashboardData(
     { data: skillScoresData },
     { data: activityData },
     { data: passedQuizzes },
+    { data: certificatesData },
   ] = await Promise.all([
     supabase
       .from("profiles")
@@ -153,6 +155,11 @@ export async function getFullDashboardData(
       .select("quiz_id, module_slug, passed")
       .eq("user_id", profileId)
       .eq("passed", true),
+    supabase
+      .from("certificates")
+      .select("verification_code, path_slug, module_slug")
+      .eq("user_id", profileId)
+      .eq("certificate_type", "module"),
   ]);
 
   const lessons = allLessonProgress ?? [];
@@ -217,6 +224,14 @@ export async function getFullDashboardData(
   const activeCourses: ActiveCourse[] = [];
   const completedCourses: CompletedCourse[] = [];
 
+  // Build a certificate lookup map
+  const certMap = new Map<string, string>();
+  for (const cert of certificatesData ?? []) {
+    if (cert.path_slug && cert.module_slug) {
+      certMap.set(`${cert.path_slug}/${cert.module_slug}`, cert.verification_code);
+    }
+  }
+
   for (const modProg of modulesProg) {
     const pathMeta = allPaths.find((p) => p.slug === modProg.path_slug);
     if (!pathMeta) continue;
@@ -231,6 +246,7 @@ export async function getFullDashboardData(
         moduleSlug: modProg.module_slug,
         moduleTitle: moduleMeta.title,
         completedAt: modProg.completed_at,
+        certificateCode: certMap.get(`${modProg.path_slug}/${modProg.module_slug}`) ?? null,
       });
     } else {
       // Find the most recent lesson activity for this module

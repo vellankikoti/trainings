@@ -183,6 +183,7 @@ export const RATE_LIMITS = {
   labSession: { limit: 5, windowSeconds: 3600 },         // 5 req/hr
   certificateGenerate: { limit: 3, windowSeconds: 3600 }, // 3 req/hr
   checkout: { limit: 5, windowSeconds: 3600 },            // 5 req/hr
+  progressReset: { limit: 5, windowSeconds: 3600 },        // 5 resets/hr
   general: { limit: 60, windowSeconds: 60 },              // 60 req/min
   gdprExport: { limit: 5, windowSeconds: 600 },           // 5 req/10min
   invitation: { limit: 20, windowSeconds: 3600 },         // 20 invitations/hr
