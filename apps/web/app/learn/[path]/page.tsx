@@ -6,6 +6,7 @@ import { getPath, getModulesForPath } from "@/lib/content";
 import { getProfileId } from "@/lib/progress";
 import { createAdminClient } from "@/lib/supabase/server";
 import { ProgressBar } from "@/components/shared/ProgressBar";
+import { CourseCard } from "@/components/courses/CourseCard";
 
 interface PathDashboardProps {
   params: Promise<{ path: string }>;
@@ -182,13 +183,12 @@ export default async function PathDashboardPage({
           <h2 className="text-lg font-bold text-foreground">
             Courses in This Path
           </h2>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {modules.map((mod, i) => {
+          <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {modules.map((mod) => {
               const completed = completedByModule.get(mod.slug)?.size ?? 0;
               const total = mod.lessonsCount;
               const progress =
                 total > 0 ? Math.round((completed / total) * 100) : 0;
-              const isStarted = completed > 0;
               const isComplete = completed === total && total > 0;
 
               // Find resume lesson
@@ -202,69 +202,19 @@ export default async function PathDashboardPage({
                 : `/learn/${pathSlug}/${mod.slug}`;
 
               return (
-                <Link
+                <CourseCard
                   key={mod.slug}
+                  slug={mod.slug}
+                  pathSlug={pathSlug}
+                  title={mod.title}
+                  description={mod.description}
+                  difficulty={pathMeta.difficulty}
+                  lessonsCount={total}
+                  estimatedHours={mod.estimatedHours}
+                  progress={completed > 0 ? progress : null}
+                  completedLessons={completed}
                   href={href}
-                  className="group flex flex-col rounded-2xl border border-border/60 bg-card shadow-sm transition-all hover:border-primary/30 hover:shadow-md"
-                >
-                  <div className="flex flex-1 flex-col p-5">
-                    {/* Order number */}
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-primary">
-                      Course {i + 1}
-                    </span>
-
-                    {/* Title */}
-                    <h3 className="mt-2 text-base font-bold text-foreground transition-colors group-hover:text-primary">
-                      {mod.title}
-                    </h3>
-
-                    {/* Description */}
-                    <p className="mt-2 flex-1 text-sm leading-relaxed text-muted-foreground line-clamp-2">
-                      {mod.description}
-                    </p>
-
-                    {/* Stats */}
-                    <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>{total} lessons</span>
-                      <span>{mod.estimatedHours}h</span>
-                    </div>
-                  </div>
-
-                  {/* Progress footer */}
-                  <div className="border-t border-border/40 px-5 py-3">
-                    {isComplete ? (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                          Completed
-                        </span>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
-                          <path d="M20 6 9 17l-5-5" />
-                        </svg>
-                      </div>
-                    ) : isStarted ? (
-                      <div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-medium text-foreground/60">
-                            {completed}/{total} lessons
-                          </span>
-                          <span className="font-semibold text-primary">
-                            Continue
-                          </span>
-                        </div>
-                        <div className="mt-1.5">
-                          <ProgressBar value={progress} size="sm" ariaLabel={`${mod.title} progress`} />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Not started</span>
-                        <span className="font-semibold text-primary opacity-0 transition-opacity group-hover:opacity-100">
-                          Start Course
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </Link>
+                />
               );
             })}
           </div>

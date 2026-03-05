@@ -5,6 +5,7 @@ import { getAllPaths, getPathWithModules } from "@/lib/content";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PathProgressOverlay } from "@/components/paths/PathProgressOverlay";
+import { CourseCard } from "@/components/courses/CourseCard";
 
 interface PathPageProps {
   params: { path: string };
@@ -42,7 +43,7 @@ export default function PathPage({ params }: PathPageProps) {
   const pathDashboardHref = `/learn/${data.slug}`;
 
   return (
-    <div className="container mx-auto max-w-4xl px-4 py-12 md:py-16">
+    <div className="container mx-auto max-w-6xl px-4 py-12 md:py-16">
       {/* Breadcrumb */}
       <nav className="mb-8 flex items-center gap-1.5 text-sm text-muted-foreground">
         <Link href="/" className="transition-colors hover:text-foreground">Home</Link>
@@ -94,53 +95,19 @@ export default function PathPage({ params }: PathPageProps) {
           Recommended order shown. Learn in any order you prefer.
         </p>
 
-        <div className="mt-8 space-y-4">
+        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {data.modulesData.map((mod) => (
-            <Link
+            <CourseCard
               key={mod.slug}
-              href={`/learn/${data.slug}/${mod.slug}`}
-              className="group flex items-start gap-5 rounded-2xl border border-border/60 bg-card p-5 shadow-sm transition-all hover:border-primary/30 hover:shadow-md md:p-6"
-            >
-              {/* Order number */}
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/[0.07] text-base font-bold text-primary transition-colors group-hover:bg-primary group-hover:text-white">
-                {mod.order}
-              </div>
-
-              {/* Content */}
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-base font-bold text-foreground transition-colors group-hover:text-primary md:text-lg">
-                    {mod.title}
-                  </h3>
-                </div>
-                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground line-clamp-2">
-                  {mod.description}
-                </p>
-                <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                    </svg>
-                    {mod.lessonsCount} lessons
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <polyline points="12 6 12 12 16 14" />
-                    </svg>
-                    {mod.estimatedHours}h
-                  </span>
-                </div>
-              </div>
-
-              {/* Arrow */}
-              <div className="hidden shrink-0 self-center sm:block">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/30 transition-all group-hover:translate-x-1 group-hover:text-primary">
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
-              </div>
-            </Link>
+              slug={mod.slug}
+              pathSlug={data.slug}
+              title={mod.title}
+              description={mod.description}
+              difficulty={data.difficulty}
+              lessonsCount={mod.lessonsCount}
+              estimatedHours={mod.estimatedHours}
+              pathTitle={data.title}
+            />
           ))}
         </div>
       </div>
